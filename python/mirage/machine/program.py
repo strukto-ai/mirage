@@ -107,7 +107,7 @@ async def _faketime_library() -> str | None:
 # Host folders a kernel mount in this process serves. A child started in
 # one, or from one, would wait inside its spawn on the loop that answers
 # for the folder, the very loop spawning it, so it starts outside and
-# EXEC_PRELUDE takes it in once the spawn has returned. Each name counts
+# exec.sh takes it in once the spawn has returned. Each name counts
 # the mounts recording it, so one going down leaves another at its path.
 SERVED: Counter[str] = Counter()
 
@@ -689,7 +689,7 @@ async def _spawn(
 ) -> tuple[asyncio.subprocess.Process, asyncio.SubprocessTransport]:
     """Start a child leading a process group of its own, keeping the
     transport that closes our ends of its pipes (``stop_tree``). One in
-    or from a ``SERVED`` folder starts through ``EXEC_PRELUDE``.
+    or from a ``SERVED`` folder starts through the packaged ``exec.sh``.
 
     Args:
         executable (str): the program.
@@ -707,7 +707,8 @@ async def _spawn(
         _served(executable) or (cwd is not None and _served(cwd))
     ):
         await asyncio.to_thread(_check_interpreter, executable, cwd)
-        args = ["-c", EXEC_PRELUDE, "sh", cwd or ".", executable, *args]
+        script = os.path.join(os.path.dirname(__file__), "exec.sh")
+        args = [script, cwd or ".", executable, *args]
         executable, cwd = "/bin/sh", None
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.subprocess_exec(
@@ -727,7 +728,7 @@ async def _spawn(
 def _check_interpreter(executable: str, cwd: str | None) -> None:
     """Raise as the spawn would for a program that is no regular file, or
     a script whose ``#!`` interpreter is missing or cannot run: through
-    ``EXEC_PRELUDE`` the shell's exec fails instead, with the shell's
+    ``exec.sh`` the shell's exec fails instead, with the shell's
     status and words. Opened without waiting, so a FIFO fails rather
     than hangs.
 

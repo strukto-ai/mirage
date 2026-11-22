@@ -20,6 +20,7 @@ import { access, open, stat } from 'node:fs/promises'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
+import { fileURLToPath } from 'node:url'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
 import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -94,7 +95,7 @@ async function faketimeLibrary(): Promise<string | null> {
  * Host folders a kernel mount in this process serves. A child started in
  * one, or from one, would wait inside its spawn on the loop that answers
  * for the folder, the very loop spawning it, so it starts outside and
- * EXEC_PRELUDE takes it in once the spawn has returned. Each name counts the
+ * exec.sh takes it in once the spawn has returned. Each name counts the
  * mounts recording it, so one going down leaves another at its path. Mirrors
  * Python's `SERVED`.
  */
@@ -194,7 +195,7 @@ async function untilInputCloses<T>(
 
 /**
  * Reject as spawn would for a program that is no regular file, or a script
- * whose `#!` interpreter is missing or cannot run: through `EXEC_PRELUDE` the
+ * whose `#!` interpreter is missing or cannot run: through `exec.sh` the
  * shell's exec fails instead, with the shell's status and words. Opened
  * without waiting, so a FIFO fails rather than hangs, and each path is kept as
  * spelled, as the host follows its links before its `..`. Mirrors Python's
@@ -264,7 +265,7 @@ async function checkInterpreter(executable: string, cwd: string | undefined): Pr
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
  * when the child exits is left to close on its own. One in or from a
- * `SERVED` folder starts through `EXEC_PRELUDE`. Mirrors Python's
+ * `SERVED` folder starts through `exec.sh`. Mirrors Python's
  * `run_program`.
  */
 export async function runProgram(
@@ -311,16 +312,19 @@ export async function runProgram(
     }
     if (signal?.aborted === true) throw makeAbortError(signal)
   }
-  const child = spawn(
-    prelude ? '/bin/sh' : executable,
-    prelude ? ['-c', EXEC_PRELUDE, 'sh', cwd ?? '.', executable, ...args] : args,
-    {
-      ...(cwd !== undefined && !prelude ? { cwd } : {}),
-      ...(options.env !== undefined ? { env: options.env } : {}),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    },
-  )
+  const spawnOptions = {
+    env: options.env,
+    stdio: 'pipe' as const,
+    detached: process.platform !== 'win32',
+    shell: false,
+  }
+  const child = prelude
+    ? spawn(
+        '/bin/sh',
+        [fileURLToPath(new URL('./exec.sh', import.meta.url)), cwd ?? '.', executable, ...args],
+        spawnOptions,
+      )
+    : spawn(executable, args, { ...spawnOptions, cwd })
   // What a direct program left running can hold its output open for as long
   // as it likes, and the program's own end is what a `wait` reports, so its
   // output gets a moment and no more, counting only time no sink was taking
