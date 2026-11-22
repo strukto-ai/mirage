@@ -42,8 +42,8 @@ such as `cd` included.
 | --- | --- |
 | `commands` | What the session can run: each command, subcommand or option allowed, refused or sent for approval. See [Command rules](#command-rules). |
 | `paths.hide` | Files and folders the session cannot see. |
-| `paths.show` | A path to reopen inside a hidden folder. |
-| `mounts` | A mount's access: `read`, `write` or `exec`. |
+| `paths.show` | A path to reopen inside a hidden folder, or to give a mode of its own. |
+| `mounts` | A mount's access, `read`, `write` or `exec`, and command rules for one mount, folder or file. See [In one folder](#in-one-folder). |
 | `cwd`, `env` | The starting folder and environment. `env` takes [credential pointers](/home/service-credentials#set-environment-variables). |
 | `vars.hide` | Variable names that read as unset. |
 | `processes` | Whose processes `ps` lists and `kill` stops, and the most it runs. |
@@ -120,9 +120,10 @@ commands:
 
 A refused line prints `rm: Permission denied` and exits 126. A line that
 waits for approval reads the same until a host
-[approves it](/home/policy/policies#asks). A path refused by
-[`paths`](#paths) fails as the command's own error instead, such as
-`rm: cannot remove '/data/keep/2024.csv': Permission denied`, exit 1.
+[approves it](/home/policy/policies#asks). A path that a mount's `mode` or
+[`paths.show`](#hide-and-show) makes read-only fails as the command's own
+error instead, such as
+`rm: cannot remove '/data/keep/2024.csv': Read-only file system`, exit 1.
 
 ### Keys
 
@@ -134,9 +135,9 @@ waits for approval reads the same until a host
 | `operands` | The next operand on the line. Each key under it is a word. |
 | `values`, under an option | The option's value. Each key under it is a word. |
 
-An entry's value is `allow`, `ask` or `deny`. Write
-`{decision, reason, paths}` to add a reason or to limit the decision to
-paths, or a list of those to give several decisions for one place.
+An entry's value is `allow`, `ask` or `deny`. Write `{decision, reason}` to
+add a reason. To make a tree apply in one folder only, see
+[In one folder](#in-one-folder).
 
 ### How a line is judged
 
@@ -322,68 +323,6 @@ commands:
 An option key under such a command is refused when the profile loads. To
 write rules on its options, [register it as a CLI](/home/setup/cli/new).
 
-### Paths
-
-A decision with `paths` speaks only for the paths it covers. For any other
-path, the decision above it applies.
-
-```yaml
-commands:
-  "*": deny
-  rm: {decision: allow, paths: ["/data/tmp/*"]}
-```
-
-| Line | Result |
-| --- | --- |
-| `rm /data/tmp/a.log` | Runs. |
-| `rm /etc/hosts` | Refused. |
-| `rm /data/tmp/a.log /etc/hosts` | Refused. Each path is judged, and the strictest result wins. |
-
-A list gives one place several decisions. Each applies on its own:
-
-```yaml
-commands:
-  rm:
-    - ask
-    - {decision: deny, paths: ["/data/keep/*"], reason: Kept for audit}
-```
-
-| Line | Result |
-| --- | --- |
-| `rm /data/notes.txt` | Waits for approval. |
-| `rm /data/keep/2024.csv` | Refused. |
-
-- A recursive command is judged for each file it reaches. With
-  `cp: {decision: deny, paths: ["/data/src/secret/*"]}`,
-  `cp -r /data/src /data/out` is refused when it reaches
-  `/data/src/secret/key.pem`.
-- Ask and deny leave the paths visible.
-
-### Lines, not file calls
-
-A tree judges the lines a session runs. A file call outside a line, such
-as the agent's `read` tool or `session.vfs.read`, is not
-judged by any tree. To close a path to every entry point, hide it.
-
-```yaml
-profiles:
-  sealed:
-    commands:
-      "*": {decision: deny, paths: [/vault/*], reason: sealed}
-  hidden:
-    commands:
-      "*": {decision: deny, paths: [/vault/*], reason: sealed}
-    paths:
-      hide: [/vault/*]
-```
-
-| Call | Under `sealed` | Under `hidden` |
-| --- | --- | --- |
-| `cat /vault/secret` | `cat: /vault/secret: Permission denied`, exit 1 | `cat: /vault/secret: No such file or directory`, exit 1 |
-| `sh -c 'cat /vault/secret'` | `cat: /vault/secret: Permission denied`, exit 1 | `cat: /vault/secret: No such file or directory`, exit 1 |
-| `session.vfs.read("/vault/secret")` | Returns the file. | Fails with `ENOENT`: `FileNotFoundError` in Python, an `Error` whose `code` is `ENOENT` in TypeScript. |
-| The `read` tool on `/vault/secret` | Returns the file. | `Error: file '/vault/secret' not found` |
-
 ### A CLI that reaches a service
 
 A hide stops file paths, and a CLI such as `gh` reaches its service
@@ -415,36 +354,141 @@ commands:
 | 3 | `rm b.log` | Runs. The approval covers that entry. |
 | 4 | `rm -r build` | Waits for approval again. `--recursive` is another entry. |
 
-Changing an entry's decision, reason or paths makes its lines ask again.
+Changing an entry's decision or reason makes its lines ask again.
 
-### In one mount
+### In one folder
 
-A mount can carry its own tree. It applies to a line that works inside the
-mount: its working directory or a path it names is under the mount.
+An entry under `mounts` gives one mount, folder or file a tree of its own.
+It applies to a line that names a path at or under its key, and to a line
+whose working directory is inside the key.
 
 ```yaml
 profiles:
   agent:
     commands:
       "*": allow
-      gh: deny
     mounts:
-      /data:
-        commands:
-          rm: ask
-          gh:
-            pr: {view: allow}
+      /data/keep:
+        commands: {rm: deny}
+      /repo/prod:
+        commands: {git: {commit: deny}}
 ```
 
 | Working directory | Line | Result |
 | --- | --- | --- |
-| `/` | `rm /data/report.md` | Waits for approval. |
-| `/data` | `rm report.md` | Waits for approval. |
-| `/` | `rm /tmp/scratch.md` | Runs. |
-| `/data` | `gh pr view 5` | Refused. |
+| `/` | `rm /data/keep/2024.csv` | Refused. |
+| `/` | `rm /data/tmp/a.log` | Runs. |
+| `/data/keep` | `rm /data/tmp/a.log` | Refused. The working directory is inside `/data/keep`. |
+| `/` | `cd /data/keep && rm /data/tmp/a.log` | Refused. |
+| `/` | `echo before; rm /data/keep/2024.csv` | Refused, and prints nothing. A refused command holds the whole line. |
+| `/` | `ls /data/keep` | Runs. The entry names only `rm`. |
+| `/repo/prod` | `git commit -m fix` | Refused. |
+| `/repo/dev` | `git commit -m fix` | Runs. |
+| `/repo/prod` | `git status` | Runs. |
 
-Mirage judges the profile's tree and the mount's tree separately, and the
-strictest result wins. A mount's tree can only tighten.
+A key is one of:
+
+- A mount, such as `/data`. The entry can hold the mount's mode as well:
+  `/data: {mode: write, commands: {rm: ask}}`.
+- A folder, such as `/data/keep`: the folder itself and everything under it.
+- A file, such as `/data/keep/2024.csv`: that file only. With
+  `/data/keep/2024.csv: {commands: {rm: deny}}`, `rm /data/keep/sub/notes.txt`
+  runs.
+
+`"*"` in an entry covers every command in the folder, the folder itself
+included, and a redirect with no command.
+
+```yaml
+profiles:
+  agent:
+    mounts:
+      /data/keep:
+        commands: {"*": deny, ls: allow}
+```
+
+| Line | Result |
+| --- | --- |
+| `cat /data/keep/2024.csv` | Refused. |
+| `cd /data/keep` | Refused. The entry covers the folder itself. |
+| `ls /data/keep` | Runs. Inside the entry, an allow reopens what its `"*"` refuses. |
+| `> /data/keep/new.txt` | `bash: line 1: /data/keep/new.txt: Permission denied`, exit 1. |
+| `{ cat; } < /data/keep/2024.csv` | `bash: line 1: /data/keep/2024.csv: Permission denied`, exit 1. |
+| `find /data` | Lists `/data` without going inside `/data/keep`, prints `find: '/data/keep': Permission denied` and exits 1. |
+| `grep -r audit /data` | Searches `/data` without going inside `/data/keep`, prints `grep: /data/keep: Permission denied` and exits 2. |
+| `du /data` | Counts `/data` without going inside `/data/keep`, prints `du: cannot read directory '/data/keep': Permission denied` and exits 1. |
+
+- A command that reads a parent folder recursively, such as `find`,
+  `grep -r`, `du`, `ls -R` or `tree`, runs and skips a folder its entry
+  refuses, with the command's own error and exit status.
+- A command that would remove or move the folder with its parent is refused
+  whole. With the entry on `/data/keep/sub`, `rm -r /data/keep` and
+  `mv /data/keep /data/old` are refused.
+- An `ask` entry waits for approval once per command, however many paths it
+  names in the folder. A recursive read over a parent folder does not ask:
+  with `grep: ask` on `/data/keep`, `grep -r audit /data` skips
+  `/data/keep`.
+- An entry cannot reopen what the top-level `commands` refuses. With
+  `commands: {rm: deny}`, an entry `/data/tmp: {commands: {rm: allow}}`
+  still leaves `rm /data/tmp/a.log` refused.
+
+To let a session change files in one folder only, give the mount a read-only
+mode and reopen that folder with `paths.show`:
+
+```yaml
+profiles:
+  agent:
+    mounts:
+      /data: {mode: read}
+    paths:
+      show: {/data/tmp: write}
+```
+
+| Line | Result |
+| --- | --- |
+| `rm /data/tmp/a.log` | Runs. |
+| `echo x > /data/tmp/b.log` | Runs. |
+| `rm /data/keep/2024.csv` | `rm: cannot remove '/data/keep/2024.csv': Read-only file system`, exit 1. |
+
+Mirage refuses an entry it cannot apply when it loads the profile:
+
+| Written, with a mount at `/data` | Refused because |
+| --- | --- |
+| `mounts: {/data/keep: read}` | A mode applies to a whole mount. Put it on `/data`, or give the folder a mode with `paths.show`. |
+| `mounts: {/data/*/sub: {commands: {rm: deny}}}` | A key is a literal path, not a glob. Write one key per folder. |
+
+<Note>
+A command rule with `paths`, such as
+`rm: {decision: deny, paths: [/data/keep/*]}`, does not load:
+`commands.rm: a rule takes no paths; scope it to a folder with mounts[/data/keep].commands.rm`.
+Move the rule into that entry. For a name pattern such as `*.pem`, the error
+points to `paths.hide`.
+</Note>
+
+### Lines, not file calls
+
+A tree judges the lines a session runs. It does not stop another way to the
+same file: a command the tree does not name, a program, or a file call
+outside a line, such as `session.vfs` or the agent's file tools. To keep a
+file from every way in, make it read-only with the mount's `mode` or
+`paths.show`, or hide it with `paths.hide`.
+
+```yaml
+profiles:
+  rule:
+    mounts:
+      /data/keep:
+        commands: {rm: deny}
+  read-only:
+    paths:
+      show: {/data/keep: read}
+```
+
+| Way in | Under `rule` | Under `read-only` |
+| --- | --- | --- |
+| `rm /data/keep/2024.csv` | `rm: Permission denied`, exit 126 | `rm: cannot remove '/data/keep/2024.csv': Read-only file system`, exit 1 |
+| `find /data/keep -name '*.csv' -delete` | Deletes the file. | `find: cannot delete '/data/keep/2024.csv': Read-only file system`, exit 1 |
+| `python3 -c "import os; os.remove('/data/keep/2024.csv')"` | Deletes the file. | `OSError: [Errno 30] Read-only file system: '/data/keep/2024.csv'`, exit 1 |
+| `session.vfs.unlink("/data/keep/2024.csv")` in Python | Deletes the file. | Raises `PermissionError`: `[Errno 30] Read-only file system`. |
 
 ### Names
 
@@ -477,12 +521,19 @@ matches.
   `git: {rm: {"*": deny, --cached: allow}}` still refuses
   `git rm --cached notes.txt`. Deny the options you do not want instead, as
   in [Only these options](#only-these-options).
-- **Keep a path from file calls.** A tree judges lines only. Use
+- **Allow a command in one folder only.** An entry cannot reopen what the
+  top-level `commands` refuses. Make the folder the only writable place
+  instead, as in [In one folder](#in-one-folder).
+- **Keep a file from other ways in.** A tree judges lines, not
+  `find -delete`, a program or a file call. Use a mode, `paths.show` or
   `paths.hide`, as in [Lines, not file calls](#lines-not-file-calls).
 
 ## Hide and show
 
 - `paths.hide` makes a path look absent. `paths.show` reopens a deeper path.
+- `paths.show` can also give a path its own mode: `{/data/keep: read}` makes
+  one folder read-only, and `{/data/tmp: write}` makes one folder writable
+  in a read-only mount.
 - `paths.hide` takes absolute paths or name patterns such as `*.pem`;
   `paths.show` takes absolute paths only. `*` can cross `/`.
 - A hidden path is gone everywhere: from command output and counts, from
