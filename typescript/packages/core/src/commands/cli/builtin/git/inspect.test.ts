@@ -201,6 +201,8 @@ it.each([
   ['﻿[user]\n\temail = old\n', '--unset user.email', '﻿\n'],
   ['', "a.b $'x\\r'", '[a]\n\tb = "x\r"\n'],
   ['[user.s]\n\temail = a\n', 'user.S.email x', '[user.s]\n\temail = a\n\temail = x\n'],
+  ['[a.b "c"]\n\tx = old\n', 'a.b.c.x new', '[a.b "c"]\n\tx = new\n'],
+  ['[a "b.c"]\n\tx = old\n', 'a.b.c.x new', '[a "b.c"]\n\tx = new\n'],
 ])('reads a config file as git does: %j %s', async (before, form, after) => {
   const fresh = await mountRepo(repoPath)
   await fresh.dispatch('write', '/repo/f', [new TextEncoder().encode(before)])
@@ -224,6 +226,7 @@ it.each([
     'fatal: bad config line 3 in file f\n',
   ],
   ['[user]\n\tname = a\\q\n', '-f f user.email x', 128, 'fatal: bad config line 2 in file f\n'],
+  ['[user]\n\tname = "a\\', '-f f user.email x', 128, 'fatal: bad config line 3 in file f\n'],
   [
     '',
     '-f missing/f a.b c',
@@ -236,8 +239,17 @@ it.each([
   const result = await fresh.shell(`git -C /repo config ${form}`)
   expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([code, err])
   expect(DEC.decode((await fresh.shell('cat /repo/f')).stdout)).toBe(before)
-  const left = await fresh.shell('ls /repo/f.lock /repo/missing')
-  expect(left.exitCode).toBe(2)
+  expect((await fresh.shell('ls /repo/f.lock')).exitCode).toBe(2)
+  expect((await fresh.shell('ls /repo/missing')).exitCode).toBe(2)
+  await fresh.close()
+})
+
+it('keeps a raw byte from config set to get', async () => {
+  const fresh = await mountRepo(repoPath)
+  const result = await fresh.shell(
+    "git -C /repo config -f f user.name $'a\\xffb'; git -C /repo config -f f --get user.name",
+  )
+  expect([result.exitCode, [...result.stdout]]).toEqual([0, [0x61, 0xff, 0x62, 0x0a]])
   await fresh.close()
 })
 
@@ -278,6 +290,9 @@ it.each([
     'fatal: --fixed-value only applies with --value=<pattern>\n',
   ],
   ["$'a.b\\nc.d' x", 1, 'error: invalid key (newline): a.b\nc.d\n'],
+  ['--default=fb user.name Ada', 129, 'error: --default is only applicable to --get\n'],
+  ['set --default=fb user.name Ada', 129, "error: unknown option `default=fb'\nusage: "],
+  ['--file - a.b c', 128, 'fatal: writing to stdin is not supported\n'],
 ])('refuses config write %s as git does', async (form, code, err) => {
   const [fresh, read] = await freshConfig()
   for (const line of ['user.email a@b', '--add user.email c@d'])

@@ -267,6 +267,8 @@ async def test_config_writes_lines_as_git_does(git_rw, repo_path):
             "user.S.email x",
             b"[user.s]\n\temail = a\n\temail = x\n",
         ),
+        (b'[a.b "c"]\n\tx = old\n', "a.b.c.x new", b'[a.b "c"]\n\tx = new\n'),
+        (b'[a "b.c"]\n\tx = old\n', "a.b.c.x new", b'[a "b.c"]\n\tx = new\n'),
     ],
 )
 async def test_config_reads_the_file_as_git_does(
@@ -307,6 +309,12 @@ async def test_config_reads_the_file_as_git_does(
             b"fatal: bad config line 2 in file f\n",
         ),
         (
+            b'[user]\n\tname = "a\\',
+            "-f f user.email x",
+            128,
+            b"fatal: bad config line 3 in file f\n",
+        ),
+        (
             b"",
             "-f missing/f a.b c",
             255,
@@ -324,6 +332,15 @@ async def test_config_write_refuses_a_file_as_git_does(
     assert (repo_path / "f").read_bytes() == before
     assert not (repo_path / "f.lock").exists()
     assert not (repo_path / "missing").exists()
+
+
+@pytest.mark.asyncio
+async def test_config_keeps_a_raw_byte_from_set_to_get(git_rw):
+    result = await git_rw.shell(
+        "git -C /repo config -f f user.name $'a\\xffb'; "
+        "git -C /repo config -f f --get user.name"
+    )
+    assert (result.exit_code, result.stdout) == (0, b"a\xffb\n")
 
 
 @pytest.mark.asyncio
@@ -385,6 +402,21 @@ async def test_config_write_waits_for_no_lock(git_rw, repo_path):
             "$'a.b\\nc.d' x",
             1,
             b"error: invalid key (newline): a.b\nc.d\n",
+        ),
+        (
+            "--default=fb user.name Ada",
+            129,
+            b"error: --default is only applicable to --get\n",
+        ),
+        (
+            "set --default=fb user.name Ada",
+            129,
+            b"error: unknown option `default=fb'\nusage: ",
+        ),
+        (
+            "--file - a.b c",
+            128,
+            b"fatal: writing to stdin is not supported\n",
         ),
     ],
 )

@@ -449,7 +449,7 @@ def _value_test(
     return matches
 
 
-_Block = tuple[bytes, bytes | None, bool]
+_Block = tuple[bytes, bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -460,9 +460,9 @@ class _ConfigLine:
         start (int): its first physical line.
         end (int): one past its last (a value continued by a backslash
             runs on).
-        header (_Block | None): a header's section (lowercased),
-            subsection and whether that compares without case (the
-            older ``[section.sub]`` spelling).
+        header (_Block | None): a header's name as a key's stem
+            (section lowercased, then the subsection) and whether that
+            is the older ``[section.sub]`` spelling, all lowercased.
         noted (bool): a header with a comment after it on its line.
         name (bytes | None): a variable's name, lowercased; beside a
             header when the variable shares its line.
@@ -515,8 +515,7 @@ def _header_at(text: bytes, at: int) -> tuple[_Block, int] | bytes:
     if text[end : end + 1] == b"]":
         if not name:
             return name
-        section, dot, sub = name.partition(b".")
-        return ((section, sub, True) if dot else (name, None, False)), end + 1
+        return (name, b"." in name), end + 1
     spaced = end
     while text[end : end + 1] in (b" ", b"\t"):
         end += 1
@@ -531,7 +530,7 @@ def _header_at(text: bytes, at: int) -> tuple[_Block, int] | bytes:
         end += 1
     if text[end + 1 : end + 2] != b"]":
         return name + b"." + sub
-    return (name, sub, False), end + 2
+    return (name + b"." + sub, False), end + 2
 
 
 def _value_end(raw: list[bytes], at: int, start: int) -> tuple[int, bool]:
@@ -548,8 +547,9 @@ def _value_end(raw: list[bytes], at: int, start: int) -> tuple[int, bool]:
         start (int): where it starts on that line.
 
     Returns:
-        tuple[int, bool]: one past the last line read, and whether git
-        reads the value.
+        tuple[int, bool]: one past the last line read (a quote a
+        backslash runs past the end of the file counts the line it ran
+        on to), and whether git reads the value.
     """
     quoted = False
     while True:
@@ -575,7 +575,7 @@ def _value_end(raw: list[bytes], at: int, start: int) -> tuple[int, bool]:
         if runs_on and ended and at + 1 < len(raw):
             at, start = at + 1, 0
             continue
-        return at + 1, not quoted or runs_on
+        return at + (2 if runs_on and quoted else 1), not quoted
 
 
 def _skipping(text: bytes, at: int, skipped: bytes) -> int:
@@ -668,30 +668,21 @@ def _config_lines_of(
     return out
 
 
-def _in_block(
-    block: _Block,
-    section: bytes,
-    subsection: bytes | None,
-    placing: bool = False,
-) -> bool:
+def _in_block(block: _Block, stem: bytes, placing: bool = False) -> bool:
     """Whether a header opens the block a name lives in.
 
-    A name matches the subsection exactly, the older spelling's
-    lowercased one included; placing a new name, that spelling compares
+    git compares the whole stem, so ``[a.b "c"]`` and ``[a "b.c"]`` both
+    hold ``a.b.c.x``. A name matches exactly, the older spelling's
+    lowercased stem included; placing a new name, that spelling compares
     without case (pinned against git 2.47.3).
 
     Args:
         block (_Block): the header's block.
-        section (bytes): the name's section, lowercased.
-        subsection (bytes | None): the name's subsection, as typed.
+        stem (bytes): the name without its variable, section lowercased.
         placing (bool): finding the block a new variable goes in.
     """
-    name, sub, caseless = block
-    if name != section or (sub is None) != (subsection is None):
-        return False
-    if sub is None or subsection is None:
-        return True
-    return sub == (subsection.lower() if caseless and placing else subsection)
+    name, caseless = block
+    return name == stem or (placing and caseless and name == stem.lower())
 
 
 def _config_edit(
@@ -719,7 +710,8 @@ def _config_edit(
     section, _, rest = key.partition(".")
     subsection, dot, variable = rest.rpartition(".")
     sub = encode_text(subsection) if dot else None
-    wanted = (section.lower().encode(), variable.lower().encode())
+    stem = section.lower().encode() + (b"." + sub if sub is not None else b"")
+    wanted = variable.lower().encode()
     raw = _physical_lines(data)
     lines = _config_lines_of(raw, shown)
     if isinstance(lines, IOResult):
@@ -730,12 +722,12 @@ def _config_edit(
     for index, line in enumerate(lines):
         if line.header is not None:
             block = line.header
-            if _in_block(block, wanted[0], sub, placing=True):
+            if _in_block(block, stem, placing=True):
                 owners.append(index)
         if (
-            line.name == wanted[1]
+            line.name == wanted
             and block is not None
-            and _in_block(block, wanted[0], sub)
+            and _in_block(block, stem)
         ):
             matches.append(index)
     if value is None:
@@ -886,10 +878,17 @@ async def _config_path(ctx: Context, fl: FlagView) -> tuple[PathSpec, str]:
         fl (FlagView): parsed flags.
 
     Raises:
-        GitError: no ``$HOME`` for ``--global``, or no repository for
-            the repository's own file.
+        GitError: ``--file -``, which names standard input; no
+            ``$HOME`` for ``--global``; or no repository for the
+            repository's own file.
     """
     named = fl.as_str("file")
+    if named == "-":
+        raise GitError(
+            "writing to stdin is not supported"
+            if await inside(ctx, fl) is not None
+            else "not in a git directory"
+        )
     if named is not None:
         return start_point(fl).join(named), named
     env = ctx.env or {}
@@ -988,18 +987,19 @@ def _one_file(fl: FlagView) -> None:
         raise ConfigUsageError("only one config file at a time")
 
 
-def _no_selector(ctx: Context, fl: FlagView) -> None:
-    """Refuse ``--all`` and ``--value`` on a write outside ``set`` and
-    ``unset``, whose options they are: git does not know them there.
+def _unknown_option(ctx: Context, given: list[str]) -> None:
+    """Refuse options git does not know on this form of write, naming
+    the first one on the line: ``--all`` and ``--value`` belong to
+    ``set`` and ``unset``, and the reading options to the reads.
 
     Args:
         ctx (Context): the line's context.
-        fl (FlagView): parsed flags.
+        given (list[str]): the long spellings the line carries.
 
     Raises:
-        UsageError: either is on the line.
+        UsageError: any is on the line.
     """
-    if not fl.as_bool("all") and fl.as_str("value") is None:
+    if not given:
         return
     argv = ctx.argv
     tail = argv[argv.index("config") + 1 :] if "config" in argv else argv
@@ -1007,9 +1007,11 @@ def _no_selector(ctx: Context, fl: FlagView) -> None:
         (
             text
             for text in tail
-            if text == "--all" or text.startswith("--value")
+            if any(
+                text == name or text.startswith(name + "=") for name in given
+            )
         ),
-        "--all",
+        given[0],
     )
     spec = ctx.spec or CommandSpec()
     raise UsageError(*git_option_refusal(word, spec.name, spec))
@@ -1047,6 +1049,18 @@ async def _config_write(
     if subcommand in ("list", "get"):
         return None
     if subcommand in ("set", "unset"):
+        _unknown_option(
+            ctx,
+            [
+                name
+                for name, on in (
+                    ("--default", fl.as_str("default") is not None),
+                    ("--name-only", fl.as_bool("name_only")),
+                    ("--show-origin", fl.as_bool("show_origin")),
+                )
+                if on
+            ],
+        )
         words = words[1:]
         count = 2 if subcommand == "set" else 1
         if len(words) != count:
@@ -1065,7 +1079,34 @@ async def _config_write(
     elif not writes and len(words) < 2:
         return None
     else:
-        _no_selector(ctx, fl)
+        _unknown_option(
+            ctx,
+            [
+                name
+                for name, on in (
+                    ("--all", fl.as_bool("all")),
+                    ("--value", fl.as_str("value") is not None),
+                )
+                if on
+            ],
+        )
+        for wrong, message in (
+            (
+                fl.as_str("default") is not None,
+                "--default is only applicable to --get",
+            ),
+            (
+                fl.as_bool("name_only"),
+                "--name-only is only applicable to --list or --get-regexp",
+            ),
+            (
+                fl.as_bool("show_origin"),
+                "--show-origin is only applicable to --get, --get-all, "
+                "--get-regexp, and --list",
+            ),
+        ):
+            if wrong:
+                raise ConfigUsageError(message)
         if writes == ["add"]:
             if len(words) != 2:
                 raise ConfigUsageError(_usage_of(2, 2))

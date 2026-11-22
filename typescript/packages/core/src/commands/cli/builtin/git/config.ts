@@ -94,7 +94,7 @@ export function configKey(key: string): string {
 }
 
 async function parsed(data: Uint8Array, scope: string, origin: string): Promise<Variable[]> {
-  return (await configLines(new TextDecoder().decode(data))).map((line) => ({
+  return (await configLines(decodeText(data))).map((line) => ({
     scope,
     origin,
     name: line.path,
@@ -307,9 +307,10 @@ function regexRefused(message: string): CommandFnResult {
   return [null, new IOResult({ exitCode: INVALID_REGEX_EXIT, stderr: encodeText(message) })]
 }
 
-/** A header's section (lowercased), subsection and whether that compares
- * without case (the older `[section.sub]` spelling). */
-type Block = readonly [string, string | null, boolean]
+/** A header's name as a key's stem (section lowercased, then the
+ * subsection) and whether that is the older `[section.sub]` spelling, all
+ * lowercased. */
+type Block = readonly [string, boolean]
 
 /**
  * One line of a config file, as the writer reads it: `end` is one past its
@@ -350,11 +351,7 @@ function headerAt(text: string, at: number): [Block, number] | string {
   const name = text.slice(at + 1, end).toLowerCase()
   if (text[end] === ']') {
     if (name === '') return name
-    const dot = name.indexOf('.')
-    return [
-      dot === -1 ? [name, null, false] : [name.slice(0, dot), name.slice(dot + 1), true],
-      end + 1,
-    ]
+    return [[name, name.includes('.')], end + 1]
   }
   const spaced = end
   while (text[end] === ' ' || text[end] === '\t') end += 1
@@ -367,12 +364,13 @@ function headerAt(text: string, at: number): [Block, number] | string {
     end += 1
   }
   if (text[end + 1] !== ']') return `${name}.${sub}`
-  return [[name, sub, false], end + 2]
+  return [[`${name}.${sub}`, false], end + 2]
 }
 
 /**
- * Where the value at `raw[at]` from `start` ends, one past the last line read,
- * and whether git reads it. A backslash ending a line runs the value on,
+ * Where the value at `raw[at]` from `start` ends, one past the last line read
+ * (a quote a backslash runs past the end of the file counts the line it ran on
+ * to), and whether git reads it. A backslash ending a line runs the value on,
  * unless a comment holds it; `\"`, `\\`, `\n`, `\t` and `\b` are the only other
  * escapes, and a quote must close on its line.
  */
@@ -404,7 +402,7 @@ function valueEnd(raw: readonly string[], at: number, start: number): [number, b
       start = 0
       continue
     }
-    return [at + 1, !quoted || runsOn]
+    return [at + (runsOn && quoted ? 2 : 1), !quoted]
   }
 }
 
@@ -476,22 +474,16 @@ function configLinesOf(raw: readonly string[], shown: string): ConfigLine[] | IO
 }
 
 /**
- * Whether a header opens the block a name lives in. A name matches the
- * subsection exactly, the older spelling's lowercased one included; placing a
- * new name, that spelling compares without case (pinned against git 2.47.3).
+ * Whether a header opens the block a name lives in. git compares the whole
+ * stem, so `[a.b "c"]` and `[a "b.c"]` both hold `a.b.c.x`. A name matches
+ * exactly, the older spelling's lowercased stem included; placing a new name,
+ * that spelling compares without case (pinned against git 2.47.3).
  */
-function inBlock(
-  block: Block,
-  section: string,
-  subsection: string | null,
-  placing = false,
-): boolean {
-  const [name, sub, caseless] = block
-  if (name !== section || (sub === null) !== (subsection === null)) return false
-  if (sub === null || subsection === null) return true
+function inBlock(block: Block, stem: string, placing = false): boolean {
+  const [name, caseless] = block
   return (
-    sub ===
-    (caseless && placing ? subsection.replace(/[A-Z]/g, (ch) => ch.toLowerCase()) : subsection)
+    name === stem ||
+    (placing && caseless && name === stem.replace(/[A-Z]/g, (ch) => ch.toLowerCase()))
   )
 }
 
@@ -517,7 +509,8 @@ function configEdit(
   const last = rest.lastIndexOf('.')
   const subsection = last < 0 ? null : rest.slice(0, last)
   const variable = rest.slice(last + 1)
-  const wanted = section.toLowerCase()
+  const stem =
+    subsection === null ? section.toLowerCase() : `${section.toLowerCase()}.${subsection}`
   const name = variable.toLowerCase()
   const raw = physicalLines(text)
   const lines = configLinesOf(raw, shown)
@@ -528,10 +521,9 @@ function configEdit(
   for (const [index, line] of lines.entries()) {
     if (line.header !== undefined) {
       block = line.header
-      if (inBlock(block, wanted, subsection, true)) owners.push(index)
+      if (inBlock(block, stem, true)) owners.push(index)
     }
-    if (line.name === name && block !== undefined && inBlock(block, wanted, subsection))
-      matches.push(index)
+    if (line.name === name && block !== undefined && inBlock(block, stem)) matches.push(index)
   }
   if (value === null) {
     if (matches.length === 0) return new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })
@@ -658,6 +650,12 @@ function localLabel(fl: FlagView, location: RepoLocation, path: PathSpec): strin
  */
 async function configPath(ctx: Context, fl: FlagView): Promise<[PathSpec, string]> {
   const named = fl.asStr('file')
+  if (named === '-')
+    throw new GitError(
+      (await inside(ctx, fl)) !== null
+        ? 'writing to stdin is not supported'
+        : 'not in a git directory',
+    )
   if (named !== undefined) return [startPoint(fl).join(named), named]
   const env = ctx.env ?? {}
   if (fl.asBool('global')) {
@@ -720,15 +718,20 @@ function oneFile(fl: FlagView): void {
     throw new ConfigUsageError('only one config file at a time')
 }
 
-/** Refuse `--all` and `--value` on a write outside `set` and `unset`, whose
- * options they are: git does not know them there. */
-function noSelector(ctx: Context, fl: FlagView): void {
-  if (!fl.asBool('all') && fl.asStr('value') === undefined) return
+/**
+ * Refuse options git does not know on this form of write, naming the first one
+ * on the line: `--all` and `--value` belong to `set` and `unset`, and the
+ * reading options to the reads.
+ */
+function unknownOption(ctx: Context, given: string[]): void {
+  if (given.length === 0) return
   const argv = ctx.argv ?? []
   const word =
     argv
       .slice(argv.indexOf('config') + 1)
-      .find((text) => text === '--all' || text.startsWith('--value')) ?? '--all'
+      .find((text) => given.some((name) => text === name || text.startsWith(`${name}=`))) ??
+    given[0] ??
+    ''
   const spec = ctx.spec ?? new CommandSpec({ name: '' })
   throw new UsageError(...gitOptionRefusal(word, spec.name, spec))
 }
@@ -760,6 +763,18 @@ async function configWrite(
   const adding = writes.length === 1 && writes[0] === 'add'
   let value: string | null
   if (subcommand === 'set' || subcommand === 'unset') {
+    unknownOption(
+      ctx,
+      (
+        [
+          ['--default', fl.asStr('default') !== undefined],
+          ['--name-only', fl.asBool('name_only')],
+          ['--show-origin', fl.asBool('show_origin')],
+        ] as const
+      )
+        .filter(([, on]) => on)
+        .map(([name]) => name),
+    )
     words = words.slice(1)
     const count = subcommand === 'set' ? 2 : 1
     if (words.length !== count) throw new ConfigUsageError(usageOf(count, count))
@@ -774,7 +789,26 @@ async function configWrite(
   } else if (subcommand !== undefined && WRITING_SUBCOMMANDS.includes(subcommand)) return readOnly()
   else if (writes.length === 0 && words.length < 2) return null
   else {
-    noSelector(ctx, fl)
+    unknownOption(
+      ctx,
+      (
+        [
+          ['--all', fl.asBool('all')],
+          ['--value', fl.asStr('value') !== undefined],
+        ] as const
+      )
+        .filter(([, on]) => on)
+        .map(([name]) => name),
+    )
+    for (const [wrong, message] of [
+      [fl.asStr('default') !== undefined, '--default is only applicable to --get'],
+      [fl.asBool('name_only'), '--name-only is only applicable to --list or --get-regexp'],
+      [
+        fl.asBool('show_origin'),
+        '--show-origin is only applicable to --get, --get-all, --get-regexp, and --list',
+      ],
+    ] as const)
+      if (wrong) throw new ConfigUsageError(message)
     if (adding) {
       if (words.length !== 2) throw new ConfigUsageError(usageOf(2, 2))
       value = words[1] ?? ''
