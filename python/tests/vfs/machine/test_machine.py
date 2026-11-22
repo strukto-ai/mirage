@@ -533,6 +533,17 @@ async def test_a_reader_that_moves_keeps_the_machine_its_writer_started_on():
 
 
 @pytest.mark.asyncio
+async def test_a_writer_named_from_its_folder_is_found_from_that_folder():
+    a = FakeFiles({"/tmp/other/tool": b"\x7fELF"})
+    b = FakeFiles({"/tmp/start/tool": b"\x7fELF"})
+    ws = two(a, b)
+    line = "cd /tmp/start && ./tool | (cd /tmp/other; tee /tmp/out)"
+    assert (await run(ws, line))[0] == 0
+    assert ("/tmp/out" in a.files, "/tmp/out" in b.files) == (False, True)
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_what_reads_a_path_named_program_s_pipe_writes_on_its_machine():
     a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
     ws = two(a, b)

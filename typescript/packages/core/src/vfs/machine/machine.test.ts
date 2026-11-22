@@ -531,6 +531,16 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it('finds a writer named from its folder from that folder', async () => {
+    const a = new FakeFiles({ '/tmp/other/tool': '\x7fELF' })
+    const b = new FakeFiles({ '/tmp/start/tool': '\x7fELF' })
+    const ws = two(a, b)
+    const line = 'cd /tmp/start && ./tool | (cd /tmp/other; tee /tmp/out)'
+    expect((await run(ws, line))[0]).toBe(0)
+    expect(['/tmp/out' in texts(a), '/tmp/out' in texts(b)]).toEqual([false, true])
+    await ws.close()
+  })
+
   it("writes on its machine what reads a path-named program's pipe", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
