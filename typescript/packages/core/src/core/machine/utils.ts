@@ -18,7 +18,7 @@ import { refusal } from '../posix/errors.ts'
 import { joinRoot } from '../posix/utils.ts'
 import { PathSpec } from '../../types.ts'
 import { norm, parent } from '../../utils/path.ts'
-import { rstripSlash } from '../../utils/slash.ts'
+import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 /**
  * The virtual path of the mount root `path` is under. Mirrors Python's
@@ -38,7 +38,7 @@ export function mountBase(path: PathSpec): string {
  * @param path a path on the mount.
  */
 export function folderOf(path: PathSpec): PathSpec {
-  const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+  const key = stripSlash(path.vfsPath)
   const virtual = key === '' ? mountBase(path) : parent(rstripSlash(path.virtual) || '/')
   const cut = key.lastIndexOf('/')
   return new PathSpec({
