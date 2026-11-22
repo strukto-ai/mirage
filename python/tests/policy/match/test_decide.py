@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
+
 from mirage.policy.match.decide import decide, redirect_ruling, source_of
 from mirage.policy.types import AdmissionRules, Outcome, Ruling
 from tests.fixtures.command_trees import line, path, trees
@@ -138,3 +140,15 @@ def test_a_redirect_meets_no_named_command_of_a_folder():
     rules = trees(mounts={"/d/keep": {"cat": "deny", "echo": "deny"}})
     ruling = redirect_ruling([path("/d/keep/f.txt")], rules)
     assert ruling.outcome is Outcome.ALLOW
+
+
+def test_a_walk_over_a_folder_leaves_it_to_its_entries():
+    rules = trees({"*": "allow"}, mounts={"/d/w/keep": {"*": "deny"}})
+    walk = line("grep", "-r", "x", "/d")
+    assert walk.walks and walk.walks_into == ()
+    assert decide(walk, rules).outcome is Outcome.ALLOW
+    into = dataclasses.replace(walk, walks_into=("/d/w",))
+    assert decide(into, rules).outcome is Outcome.DENY
+    inside = line("grep", "-r", "x", "/d/w/keep/a")
+    assert decide(inside, rules).outcome is Outcome.DENY
+    assert decide(line("rm", "-r", "/d"), rules).outcome is Outcome.DENY

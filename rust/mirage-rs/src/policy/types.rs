@@ -143,6 +143,8 @@ pub struct CommandFacts {
     pub paths: Vec<PathFact>,
     pub operands: Vec<PathFact>,
     pub walks: bool,
+    #[serde(default)]
+    pub walks_into: Vec<Text>,
     pub subtree: bool,
     pub moves: bool,
     pub move_target: Option<Text>,
@@ -158,6 +160,7 @@ impl Default for CommandFacts {
             paths: Vec::new(),
             operands: Vec::new(),
             walks: false,
+            walks_into: Vec::new(),
             subtree: false,
             moves: false,
             move_target: None,

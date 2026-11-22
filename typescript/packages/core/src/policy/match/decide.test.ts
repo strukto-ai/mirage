@@ -138,4 +138,14 @@ describe('decide', () => {
     const rules = trees(null, { '/d/keep': { cat: 'deny', echo: 'deny' } })
     expect(redirectRuling([resolvedPath('/d/keep/f.txt')], rules).outcome).toBe(Outcome.ALLOW)
   })
+
+  it('a walk over a folder leaves it to its entries', () => {
+    const rules = trees({ '*': 'allow' }, { '/d/w/keep': { '*': 'deny' } })
+    const walk = line(['grep', '-r', 'x', '/d'])
+    expect([walk.walks, walk.walksInto ?? []]).toEqual([true, []])
+    expect(decide(walk, rules).outcome).toBe(Outcome.ALLOW)
+    expect(decide({ ...walk, walksInto: ['/d/w'] }, rules).outcome).toBe(Outcome.DENY)
+    expect(decide(line(['grep', '-r', 'x', '/d/w/keep/a']), rules).outcome).toBe(Outcome.DENY)
+    expect(decide(line(['rm', '-r', '/d']), rules).outcome).toBe(Outcome.DENY)
+  })
 })

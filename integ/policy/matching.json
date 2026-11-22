@@ -503,6 +503,9 @@
           "/scratch"
         ],
         "walks": true,
+        "walks_into": [
+          "/scratch/child"
+        ],
         "subtree": false,
         "move_target": null
       },
@@ -511,6 +514,46 @@
         "at": "/*",
         "matched_path": null,
         "source": "mounts./scratch/child",
+        "asks": []
+      }
+    },
+    {
+      "name": "folder_ancestor",
+      "trees": [
+        {
+          "mount": "/scratch/child",
+          "commands": {
+            "*": {
+              "decision": "deny",
+              "reason": "mount"
+            }
+          }
+        }
+      ],
+      "facts": {
+        "command": "grep",
+        "tokens": [
+          "grep",
+          "/scratch"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/scratch"
+        ],
+        "operands": [
+          "/scratch"
+        ],
+        "walks": true,
+        "walks_into": [],
+        "subtree": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "allow",
+        "at": null,
+        "matched_path": null,
+        "source": "",
         "asks": []
       }
     },

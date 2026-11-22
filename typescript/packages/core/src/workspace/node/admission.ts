@@ -49,6 +49,7 @@ import type { Redirect, TSNodeLike } from '../../shell/types.ts'
 import { NodeType, RedirectKind } from '../../shell/types.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { Follow, PathSpec, type LineFacts, type PolicyDecision } from '../../types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { pathVisible } from '../../utils/hidden.ts'
@@ -206,6 +207,24 @@ export class Admitted implements EntryGate {
     if (this.rules === null) return null
     return ioRefusal(this.rules, this.named(), virtual, this.granted)
   }
+}
+
+/**
+ * The roots of the mounts below a walking command's paths, which its
+ * fan-out enters with no admission of its own; empty for a command that
+ * does not walk. Mirrors Python's `_walked_mounts`.
+ */
+function walkedMounts(
+  walks: boolean,
+  paths: readonly PathSpec[],
+  registry: MountRegistry,
+): string[] {
+  if (!walks) return []
+  const roots = new Set<string>()
+  for (const path of paths)
+    for (const entry of registry.descendantMounts(path.virtual))
+      roots.add(entry.prefix.replace(/\/+$/, ''))
+  return [...roots].sort(compareCodePoints)
 }
 
 /**
@@ -558,6 +577,7 @@ export async function gate(
     read: reading.read,
     tool,
     walks: facts.walks,
+    walksInto: walkedMounts(facts.walks, paths, registry),
     write,
     subtree: facts.subtree,
     moveTarget: facts.moveTarget,
@@ -587,6 +607,21 @@ export async function gate(
         ? defaultCwdOperand([named, ...classified], named, registry, session.cwd, stdin)
         : null
     const ownFacts = lineFacts(named, [named, ...classified], session.cwd)
+    const ownPaths = seen(
+      session,
+      linePaths(
+        named,
+        own,
+        // The path's program never reaches Mirage's own link resolution, so
+        // it follows links as the path does.
+        follows,
+        links,
+        session.cwd,
+        ownImplied,
+        redirects,
+      ),
+      unread,
+    )
     const programCtx: CommandContext = {
       ...ctx,
       command: named,
@@ -595,6 +630,7 @@ export async function gate(
       program: [...own.program],
       read: own.read,
       walks: ownFacts.walks,
+      walksInto: walkedMounts(ownFacts.walks, ownPaths, registry),
       write: writes(
         named,
         args,
@@ -608,21 +644,7 @@ export async function gate(
       ),
       subtree: ownFacts.subtree,
       moveTarget: ownFacts.moveTarget,
-      paths: seen(
-        session,
-        linePaths(
-          named,
-          own,
-          // The path's program never reaches Mirage's own link resolution, so
-          // it follows links as the path does.
-          follows,
-          links,
-          session.cwd,
-          ownImplied,
-          redirects,
-        ),
-        unread,
-      ),
+      paths: ownPaths,
       words: seenWords(session, contextWords(named, own, redirects), unread),
     }
     const byName = await registry.policies.answers('preCommand', programCtx, every, rulesOnly)

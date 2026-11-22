@@ -48,7 +48,7 @@
     {"op": "exec", "command": "mkdir -p /data/sec; echo k > /data/sec/k; echo o > /data/open", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "sealed"}}},
     {"op": "explain", "session": "agent", "command": "cat /data/open /data/sec/k", "expect": {"value": {"outcome": "deny", "reason": "sealed", "answers": [], "decision": "deny", "exit_code": 126, "stderr": "cat: Permission denied\n", "commands": [{"command": "cat", "outcome": "deny", "answers": [{"kind": "deny", "policy": "PermissionsPolicy", "reason": "sealed"}], "machine": ""}]}}},
-    {"op": "exec", "session": "agent", "command": "grep -r k /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "sealed"}}},
+    {"op": "exec", "session": "agent", "command": "grep -r k /data", "expect": {"value": {"exit_code": 2, "stdout": "", "stderr": "grep: /data/sec: Permission denied\n", "decision": "sealed"}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "expect": {"value": "awo="}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/sec/k"}, "explain": true, "expect": {"value": {"call": "read", "outcome": "allow", "reason": "", "answers": [], "decision": null, "error": ""}}},
     {"op": "tool", "session": "agent", "tool": "read", "arguments": {"path": "/data/sec/k"}, "expect": {"value": {"text_contains": "k", "is_error": false}}}
@@ -187,6 +187,34 @@
    ]
   },
   {
+   "id": "a_walk_over_a_folders_parent_runs_and_meets_the_folder_entry_by_entry",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "star", "profile": {"mounts": {"/data/w/hdir": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "session", "id": "named", "profile": {"mounts": {"/data/w/hdir": {"commands": {"find": {"decision": "deny", "reason": "kept"}, "grep": {"decision": "deny", "reason": "kept"}, "du": {"decision": "deny", "reason": "kept"}, "ls": {"decision": "deny", "reason": "kept"}, "tree": {"decision": "deny", "reason": "kept"}, "rm": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "session", "id": "asks", "profile": {"mounts": {"/data/w/hdir": {"commands": {"*": {"decision": "ask", "reason": "nod"}}}}}},
+    {"op": "exec", "command": "mkdir -p /data/w/hdir /data/w/open && echo TODO a > /data/w/hdir/s && echo TODO b > /data/w/open/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "star", "command": "find /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w\n/data/w/hdir\n/data/w/open\n/data/w/open/t\n", "stderr": "find: '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "grep -r TODO /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w/open/t:TODO b\n", "stderr": "grep: /data/w/hdir: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "du -a /data/w", "expect": {"value": {"exit_code": 1, "stdout": "4\t/data/w/hdir\n4\t/data/w/open/t\n8\t/data/w/open\n16\t/data/w\n", "stderr": "du: cannot read directory '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "ls -R /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w:\nhdir\nopen\n\n/data/w/open:\nt\n", "stderr": "ls: cannot open directory '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "tree /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w\n|-- hdir  [error opening dir]\n`-- open\n    `-- t\n\n3 directories, 1 file\n", "stderr": "", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "find /data/w -maxdepth 1", "expect": {"value": {"exit_code": 0, "stdout": "/data/w\n/data/w/hdir\n/data/w/open\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "star", "command": "rm -r /data/w", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "star", "command": "grep -r TODO /data/w/hdir", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "find /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w\n/data/w/hdir\n/data/w/open\n/data/w/open/t\n", "stderr": "find: '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "grep -r TODO /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w/open/t:TODO b\n", "stderr": "grep: /data/w/hdir: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "du -a /data/w", "expect": {"value": {"exit_code": 1, "stdout": "4\t/data/w/hdir\n4\t/data/w/open/t\n8\t/data/w/open\n16\t/data/w\n", "stderr": "du: cannot read directory '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "ls -R /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w:\nhdir\nopen\n\n/data/w/open:\nt\n", "stderr": "ls: cannot open directory '/data/w/hdir': Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "tree /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w\n|-- hdir  [error opening dir]\n`-- open\n    `-- t\n\n3 directories, 1 file\n", "stderr": "", "decision": "kept"}}},
+    {"op": "exec", "session": "named", "command": "rm -r /data/w", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "asks", "command": "grep -r TODO /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w/open/t:TODO b\n", "stderr": "grep: /data/w/hdir: Permission denied\n", "decision": "nod"}}},
+    {"op": "exec", "session": "asks", "command": "find /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w\n/data/w/hdir\n/data/w/open\n/data/w/open/t\n", "stderr": "find: '/data/w/hdir': Permission denied\n", "decision": "nod"}}},
+    {"op": "exec", "command": "cat /data/w/hdir/s", "expect": {"value": {"exit_code": 0, "stdout": "TODO a\n", "stderr": "", "decision": null}}},
+    {"op": "asks", "expect": {"value": []}}
+   ]
+  },
+  {
    "id": "a_mount_rule_holds_where_a_line_walks_into_its_mount",
    "settings": {"mode": "write", "mounts": {"/a": {"vfs": "ram", "config": {}}, "/a/b/c": {"vfs": "ram", "config": {}}, "/t": {"vfs": "ram", "config": {}}}},
    "steps": [
@@ -310,7 +338,7 @@
     {"op": "exec", "session": "keeper", "command": "cp -r /data/tree /data/copy", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot open '/data/tree/keep' for reading: Permission denied\n", "decision": "kept file"}}},
     {"op": "exec", "session": "keeper", "command": "find /data/copy | sort", "expect": {"value": {"exit_code": 0, "stdout": "/data/copy\n/data/copy/a\n/data/copy/sub\n/data/copy/sub/b\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "keeper", "command": "rm -r /data/tree", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "kept file"}}},
-    {"op": "exec", "session": "keeper", "command": "find /data/tree | sort", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "find: Permission denied\n", "decision": "kept file"}}}
+    {"op": "exec", "session": "keeper", "command": "find /data/tree | sort", "expect": {"value": {"exit_code": 0, "stdout": "/data/tree\n/data/tree/a\n/data/tree/keep\n/data/tree/sub\n/data/tree/sub/b\n", "stderr": "", "decision": null}}}
    ]
   },
   {
@@ -949,11 +977,11 @@
     {"op": "exec", "command": "mkdir -p /data/k /data/o && echo foo > /data/k/f && echo foo > /data/o/g", "expect": {"value": {"exit_code": 0}}},
     {"op": "session", "id": "a", "profile": {"mounts": {"/data/k": {"commands": {"grep": {"decision": "deny", "reason": "kept"}}}}}},
     {"op": "session", "id": "b", "profile": {"mounts": {"/data/k": {"commands": {"grep": {"decision": "deny", "reason": "kept"}}}}}},
-    {"op": "exec", "session": "a", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "a", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 2, "stdout": "/data/o/g:foo\n", "stderr": "grep: /data/k: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "a", "command": "cat /data/k/f", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "a", "command": "cat /data/k/f | grep foo", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": ""}}},
     {"op": "exec", "session": "b", "command": "cat /data/k/f", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "b", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "b", "command": "grep -r foo /data", "expect": {"value": {"exit_code": 2, "stdout": "/data/o/g:foo\n", "stderr": "grep: /data/k: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "b", "command": "cat /data/k/f | grep foo", "expect": {"value": {"exit_code": 0, "stdout": "foo\n", "stderr": ""}}}
    ]
   },

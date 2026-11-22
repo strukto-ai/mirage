@@ -425,6 +425,32 @@ async def test_admit_line_refuses_a_walk_or_a_glob_under_a_path_rule():
 
 
 @pytest.mark.asyncio
+async def test_admit_line_refuses_a_walk_over_a_folder_entry():
+    # A walk over a folder's parent runs entry by entry in Mirage, but a
+    # line executor reads past the entry gate, so it is refused whole.
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {"mounts": {"/data/keep": {"commands": {"*": "deny"}}}}
+        },
+    )
+    try:
+        session = ws._session_mgr.get(ws._session_mgr.default_id)
+        decision = await admit_line(
+            parse("grep -r x /data"), session, ws._registry, ws._namespace
+        )
+        assert decision is not None
+        assert (decision.exit_code, _voiced(decision)) == (
+            126,
+            "grep: Permission denied\n"
+            "policy denied: walks a tree the gate cannot follow\n",
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
     # The shell opens a redirect target on its own fds, outside the
     # admitted command's gate window, so the gate judges it with the

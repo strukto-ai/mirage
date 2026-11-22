@@ -62,6 +62,7 @@ const corpus = z
           paths: z.array(z.string()),
           operands: z.array(z.string()),
           walks: z.boolean(),
+          walks_into: z.array(z.string()).default([]),
           subtree: z.boolean(),
         }),
         expected: z.object({
@@ -125,6 +126,7 @@ describe('shared policy compatibility cases', () => {
         tool: facts.tool,
         paths,
         walks: facts.walks,
+        walksInto: facts.walks_into,
         subtree: facts.subtree,
         words: operands.map((p) => new CommandWord(p.virtual, WordKind.OPERAND, null, p)),
       },

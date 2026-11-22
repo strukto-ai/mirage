@@ -94,8 +94,9 @@ export function lineWords(ctx: CommandContext): Record<string, util.JSONType> {
 /**
  * What a line's trees are judged on, in the stream's wire shape: its
  * words (`lineWords`) and paths, and the host's word on its command:
- * whether it moves or removes whole subtrees (`CommandContext.subtree`)
- * and whether it is a move whose last operand is the destination.
+ * the mounts a walk enters (`CommandContext.walksInto`), whether it moves
+ * or removes whole subtrees (`CommandContext.subtree`) and whether it is a
+ * move whose last operand is the destination.
  * Mirrors Python's command_facts.
  */
 export function commandFacts(ctx: CommandContext): Record<string, util.JSONType> {
@@ -107,6 +108,7 @@ export function commandFacts(ctx: CommandContext): Record<string, util.JSONType>
     paths: ctx.paths.map(pathFact),
     operands: operandPaths(ctx).map(pathFact),
     walks: ctx.walks ?? false,
+    walks_into: (ctx.walksInto ?? []).map(units),
     subtree: ctx.subtree ?? false,
     moves,
     move_target: target === null ? null : units(target),

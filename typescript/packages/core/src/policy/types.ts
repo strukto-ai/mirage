@@ -791,6 +791,13 @@ export interface CommandContext {
    */
   walks?: boolean
   /**
+   * The roots of the mounts below the paths a walking command enters,
+   * empty for any other. A mount entry at or under one judges the line
+   * whole; one over a folder its walk stays in judges each entry it
+   * reaches. Absent reads as empty.
+   */
+  walksInto?: readonly string[]
+  /**
    * Whether the handler this command resolves to declares that it may
    * change state (`CLIHandler.write`, `Command.write`): an installed CLI's
    * or a mount tree's leaf as the walk names it, a mount command as the

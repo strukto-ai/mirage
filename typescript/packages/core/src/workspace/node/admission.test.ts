@@ -334,6 +334,24 @@ describe('admission', () => {
     expect(await line('python3 open.py')).toBeNull()
   })
 
+  it('admitLine refuses a walk over a folder entry', async () => {
+    // A walk over a folder's parent runs entry by entry in Mirage, but a
+    // line executor reads past the entry gate, so it is refused whole.
+    const w = ws(SessionProfile({ mounts: { '/data/keep': { commands: { '*': 'deny' } } } }))
+    const session = w.sessionManager.get(w.sessionManager.defaultId)
+    const decision = await admitLine(
+      parse('grep -r x /data'),
+      session,
+      w.registry,
+      w.namespace,
+      (t) => parse(t),
+    )
+    expect(decision === null ? null : [decision.exitCode, voicedStderr(decision)]).toEqual([
+      126,
+      'grep: Permission denied\npolicy denied: walks a tree the gate cannot follow\n',
+    ])
+  })
+
   it('admitLine refuses a walk or a glob under a path rule', async () => {
     // Every line executor acts outside the entry gate (a sandbox's own
     // disk), so a command a path rule reads must not reach it with a

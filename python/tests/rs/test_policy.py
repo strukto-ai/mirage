@@ -115,6 +115,7 @@ def test_shared_matching_corpus():
             tokens=tuple(facts["tokens"]),
             tool=facts["tool"],
             walks=facts["walks"],
+            walks_into=tuple(facts.get("walks_into", ())),
             subtree=facts["subtree"],
             words=tuple(
                 CommandWord(kind=WordKind.OPERAND, path=_path(v), text=v)

@@ -59,7 +59,9 @@ describe('command trees over paths', () => {
 
   it('a walking command touches the mounts under its operands', () => {
     const rules = trees(null, { '/scratch/child': { grep: 'deny' } })
-    expect(verdict(rules, line(['grep', '-r', 'x', '/scratch']))[0]).toBe(Outcome.DENY)
+    const walk = line(['grep', '-r', 'x', '/scratch'])
+    expect(verdict(rules, { ...walk, walksInto: ['/scratch/child'] })[0]).toBe(Outcome.DENY)
+    expect(verdict(rules, walk)[0]).toBe(Outcome.ALLOW)
     expect(verdict(rules, line(['grep', 'x', '/scratch']))[0]).toBe(Outcome.ALLOW)
     expect(verdict(rules, line(['grep', '-r', 'x', '/scratch/f']))[0]).toBe(Outcome.ALLOW)
   })

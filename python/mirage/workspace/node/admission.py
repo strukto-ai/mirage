@@ -237,6 +237,32 @@ class Admitted:
         return io_refusal(self.rules, self.named(), virtual, self.granted)
 
 
+def _walked_mounts(
+    walks: bool, paths: Sequence[PathSpec], registry: MountRegistry
+) -> tuple[str, ...]:
+    """The roots of the mounts below a walking command's paths, which
+    its fan-out enters with no admission of its own; empty for a command
+    that does not walk.
+
+    Args:
+        walks (bool): whether the command descends its directory
+            operands (``LineFacts.walks``).
+        paths (Sequence[PathSpec]): the paths the gate judges.
+        registry (MountRegistry): registry holding the mount table.
+    """
+    if not walks:
+        return ()
+    return tuple(
+        sorted(
+            {
+                entry.prefix.rstrip("/")
+                for path in paths
+                for entry in registry.descendant_mounts(path.virtual)
+            }
+        )
+    )
+
+
 def _seen(
     session: SessionState,
     specs: list[PathSpec],
@@ -646,6 +672,7 @@ async def gate(
         read=reading.read,
         tool=tool,
         walks=facts.walks,
+        walks_into=_walked_mounts(facts.walks, paths, registry),
         write=write,
         subtree=facts.subtree,
         move_target=facts.move_target,
@@ -674,6 +701,21 @@ async def gate(
             else None
         )
         own_facts = line_facts(named, [named, *classified[1:]], session.cwd)
+        own_paths = _seen(
+            session,
+            line_paths(
+                named,
+                own,
+                # The path's program never reaches Mirage's own link
+                # resolution, so it follows links as the path does.
+                follows,
+                links,
+                session.cwd,
+                own_implied,
+                redirects,
+            ),
+            unread,
+        )
         program_ctx = dataclasses.replace(
             ctx,
             command=named,
@@ -682,6 +724,7 @@ async def gate(
             program=own.program,
             read=own.read,
             walks=own_facts.walks,
+            walks_into=_walked_mounts(own_facts.walks, own_paths, registry),
             write=_writes(
                 named,
                 args,
@@ -695,21 +738,7 @@ async def gate(
             ),
             subtree=own_facts.subtree,
             move_target=own_facts.move_target,
-            paths=_seen(
-                session,
-                line_paths(
-                    named,
-                    own,
-                    # The path's program never reaches Mirage's own link
-                    # resolution, so it follows links as the path does.
-                    follows,
-                    links,
-                    session.cwd,
-                    own_implied,
-                    redirects,
-                ),
-                unread,
-            ),
+            paths=own_paths,
             words=_seen_words(
                 session, context_words(named, own, redirects), unread
             ),

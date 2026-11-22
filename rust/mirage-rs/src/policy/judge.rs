@@ -458,12 +458,18 @@ fn basename(path: &[u32]) -> &[u32] {
     value.rsplit(|&unit| unit == 47).next().unwrap_or_default()
 }
 
+/// Whether a mount entry's tree judges the line: one working inside
+/// it, or a walk into the mount root it lies at or under
+/// (`walks_into`), whose fan-out admits nothing again. A walk over a
+/// folder in the same mount reaches it entry by entry (`io_refusal`),
+/// as a path rule's scope is reached, and moving or removing an
+/// ancestor takes the folder whole.
 pub(crate) fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
     if under(&facts.cwd, mount) || facts.paths.iter().any(|p| under(&p.virtual_path, mount)) {
         return true;
     }
     if facts.walks {
-        return facts.paths.iter().any(|p| under(mount, &p.virtual_path));
+        return facts.walks_into.iter().any(|root| under(mount, root));
     }
     if !facts.subtree {
         return false;
@@ -568,6 +574,7 @@ mod tests {
                     .map(|p| path_of(p))
                     .collect(),
                 walks: facts["walks"].as_bool().unwrap(),
+                walks_into: strings(&facts["walks_into"]),
                 subtree: facts["subtree"].as_bool().unwrap(),
                 moves: facts["command"] == "mv",
                 ..CommandFacts::default()
@@ -644,6 +651,35 @@ mod tests {
         for (cwd, words, paths, want) in rows {
             assert_eq!(outcome(&m, cwd, &words, &paths), want, "{cwd} {words:?}");
         }
+    }
+
+    #[test]
+    fn a_walk_over_a_folder_leaves_it_to_its_entries_and_a_walk_into_a_mount_does_not() {
+        let walk = |into: &[&str]| CommandFacts {
+            walks: true,
+            walks_into: into.iter().map(|root| text(root)).collect(),
+            ..facts("/", &["grep", "-r", "x", "/d"], &["/d"])
+        };
+        let folder = text("/d/w/keep");
+        assert!(!touches(&folder, &walk(&[])));
+        assert!(!touches(&folder, &walk(&["/d/other"])));
+        assert!(touches(&folder, &walk(&["/d/w"])));
+        assert!(touches(&text("/d/w"), &walk(&["/d/w"])));
+        assert!(touches(
+            &folder,
+            &facts("/d/w/keep", &["grep", "-r", "x", "."], &["/d/w/keep"])
+        ));
+        let removal = CommandFacts {
+            subtree: true,
+            ..facts("/", &["rm", "-r", "/d"], &["/d"])
+        };
+        assert!(touches(&folder, &removal));
+        let m = matcher(
+            json!({"*": "allow"}),
+            &[("/d/w/keep", json!({"*": "deny"}))],
+        );
+        assert_eq!(m.decide(&walk(&[])).outcome, Allow);
+        assert_eq!(m.decide(&walk(&["/d/w"])).outcome, Deny);
     }
 
     #[test]

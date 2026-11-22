@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import random
 from typing import Any
 
@@ -65,9 +66,10 @@ def test_a_mount_tree_reaches_a_line_by_its_cwd_or_its_paths():
 
 def test_a_walking_command_touches_the_mounts_under_its_operands():
     rules = trees(mounts={"/scratch/child": {"grep": "deny"}})
-    assert _verdict(rules, line("grep", "-r", "x", "/scratch"))[0] is (
-        Outcome.DENY
-    )
+    walk = line("grep", "-r", "x", "/scratch")
+    into = dataclasses.replace(walk, walks_into=("/scratch/child",))
+    assert _verdict(rules, into)[0] is Outcome.DENY
+    assert _verdict(rules, walk)[0] is Outcome.ALLOW
     assert _verdict(rules, line("grep", "x", "/scratch"))[0] is Outcome.ALLOW
     assert _verdict(rules, line("grep", "-r", "x", "/scratch/f"))[0] is (
         Outcome.ALLOW

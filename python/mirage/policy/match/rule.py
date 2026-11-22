@@ -124,7 +124,8 @@ def line_words(ctx: CommandContext) -> dict[str, Any]:
 def command_facts(ctx: CommandContext) -> dict[str, Any]:
     """What a line's trees are judged on, in the stream's wire shape:
     its words (``line_words``) and paths, and the host's word on its
-    command: whether it moves or removes whole subtrees
+    command: the mounts a walk enters (``CommandContext.walks_into``),
+    whether it moves or removes whole subtrees
     (``CommandContext.subtree``) and whether it is a move whose last
     operand is the destination.
 
@@ -139,6 +140,7 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
         "paths": [_path_fact(path) for path in ctx.paths],
         "operands": [_path_fact(path) for path in operand_paths(ctx)],
         "walks": ctx.walks,
+        "walks_into": [units(v) for v in ctx.walks_into],
         "subtree": ctx.subtree,
         "moves": moves,
         "move_target": None if target is None else units(target),
