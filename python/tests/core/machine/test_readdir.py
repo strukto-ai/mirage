@@ -138,7 +138,7 @@ async def test_tree_merges_every_machine_and_leaves_a_failure_to_the_walk():
     found = await tree(accessor, ["a", "b"], spec("/d"))
     assert found is not None
     assert sorted(found) == ["s/both", "x", "y"]
-    assert (found["s/both"].machine, found["s/both"].written) == ("b", 9000)
+    assert (found["s/both"].machine, found["s/both"].written_ms) == ("b", 9000)
     gone = ScriptedMachine("gone", lambda line, data: failed(b"find: lost\n"))
     assert await tree(bound(a, gone), ["a", "gone"], spec("/d")) is None
 

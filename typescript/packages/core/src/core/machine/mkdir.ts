@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Make a directory on a machine.
@@ -32,5 +32,10 @@ export async function mkdir(
   parents: boolean,
 ): Promise<void> {
   const flag = parents ? ' -p' : ''
-  await checked(accessor, machine, `mkdir${flag} -- ${singleQuote(remote(accessor, path))}`, path)
+  await runChecked(
+    accessor,
+    machine,
+    `mkdir${flag} -- ${singleQuote(machinePath(accessor, path))}`,
+    path,
+  )
 }

@@ -873,7 +873,7 @@ class BaseVFS:
         """
         return None
 
-    def acts_on(self) -> str | None:
+    def call_machine(self) -> str | None:
         """The machine whose files a call on this mount acts on, as far
         as the mount tells before the call runs; None for a mount that is
         no machine's files. A mount of one machine's files names it; one

@@ -1194,7 +1194,7 @@ export class Dispatcher {
           this.decisions,
           this.access,
           this.caller ?? undefined,
-          owner.vfs.actsOn() ?? undefined,
+          owner.vfs.callMachine() ?? undefined,
         )
       : this.boundary(owner)
     if (owner !== null) {
@@ -3446,7 +3446,7 @@ export class Dispatcher {
       this.decisions,
       this.access,
       this.caller ?? undefined,
-      mount?.vfs.actsOn() ?? undefined,
+      mount?.vfs.callMachine() ?? undefined,
     )
   }
 
@@ -3486,7 +3486,7 @@ export class Dispatcher {
       this.decisions,
       this.access,
       this.caller ?? undefined,
-      vfs.actsOn() ?? undefined,
+      vfs.callMachine() ?? undefined,
     )
     if (mark !== null && write) {
       // The same pre-vfs admission a dispatched op answers, with the

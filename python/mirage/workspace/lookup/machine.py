@@ -63,7 +63,7 @@ from mirage.workspace.session import SessionState, env_snapshot
 logger = logging.getLogger(__name__)
 
 
-def _local_mount(
+def _machine_mount(
     registry: MountRegistry, links: NamespaceReader, path: str, writes: bool
 ) -> MountEntry | None:
     """The machine mount showing ``path`` at the same path on its
@@ -73,6 +73,9 @@ def _local_mount(
     does not have. A name the ``/usr/bin`` view leaves to the mount
     beneath it is read from that mount, so ``/usr/bin/python3`` is the
     machine's own file where the machine's disk lies under the view.
+
+    The link table is walked last: a path that is no machine's needs no
+    look at it, and a folder of many links costs a walk of them all.
 
     Args:
         registry (MountRegistry): the workspace's mounts.
@@ -100,8 +103,6 @@ def _local_mount(
         for m in registry.mounts()
     ):
         return None
-    # The link table is walked last: a path that is no machine's needs no
-    # look at it, and a folder of many links costs a walk of them all.
     try:
         if norm(links.follow(norm(path))) != norm(path) or (
             links.link_stats_below(norm(path))
@@ -113,7 +114,7 @@ def _local_mount(
     return entry
 
 
-def _piped(stdin: ByteSource | None) -> bool:
+def _is_piped(stdin: ByteSource | None) -> bool:
     """Whether anything is piped in: the empty input ``xargs`` gives a
     command, as GNU's gives it ``/dev/null``, is none.
 
@@ -123,7 +124,7 @@ def _piped(stdin: ByteSource | None) -> bool:
     return stdin is not None and stdin != b""
 
 
-def _ruled(
+def _rules_restrict(
     session: SessionState, registry: MountRegistry, entries: list[MountEntry]
 ) -> bool:
     prefixes = [m.prefix for m in registry.mounts()]
@@ -131,7 +132,7 @@ def _ruled(
     return any(norm(e.prefix) in restricted for e in entries)
 
 
-def _held_mounts(
+def _machine_mounts(
     scopes: list[tuple[str, bool]],
     session: SessionState,
     registry: MountRegistry,
@@ -149,17 +150,17 @@ def _held_mounts(
         links (NamespaceReader): the session's link table.
     """
     entries = [
-        _local_mount(registry, links, p, writes) for p, writes in scopes
+        _machine_mount(registry, links, p, writes) for p, writes in scopes
     ]
     if not scopes or None in entries:
         return None
     mounts = [e for e in entries if e is not None]
-    if _ruled(session, registry, mounts):
+    if _rules_restrict(session, registry, mounts):
         return None
     return mounts
 
 
-def _runtime_of(
+def _only_machine(
     machines: Sequence[str], registry: MountRegistry
 ) -> RemoteRuntime | None:
     """The runtime that runs programs on the one machine named; None for
@@ -182,7 +183,7 @@ def _runtime_of(
     )
 
 
-def _shown_machines(entry: MountEntry, registry: MountRegistry) -> list[str]:
+def _mount_machines(entry: MountEntry, registry: MountRegistry) -> list[str]:
     """The machines a machine mount shows, by its config: the ones it
     names, else every machine the workspace runs programs on.
 
@@ -203,7 +204,7 @@ def _shown_machines(entry: MountEntry, registry: MountRegistry) -> list[str]:
     )
 
 
-async def _machine_holding(
+async def _machine_holding_all(
     scopes: list[tuple[str, bool]],
     session: SessionState,
     registry: MountRegistry,
@@ -230,7 +231,7 @@ async def _machine_holding(
             must hold too; None for one that runs from ``/``.
     """
     stood = [] if folder is None else [(folder, False)]
-    mounts = _held_mounts([*scopes, *stood], session, registry, links)
+    mounts = _machine_mounts([*scopes, *stood], session, registry, links)
     if mounts is None or (
         await registry.policies.wants_for("pre_vfs", session.session_id)
     ):
@@ -242,7 +243,7 @@ async def _machine_holding(
             one.machine
             for one in await holders(
                 entry.vfs.accessor,
-                _on_mount(entry, path),
+                _path_on_mount(entry, path),
             )
         ]
         if len(held) > 1 and at < len(scopes):
@@ -252,10 +253,10 @@ async def _machine_holding(
             if candidates is None
             else [m for m in candidates if m in held]
         )
-    runtime = _runtime_of(candidates or [], registry)
+    runtime = _only_machine(candidates or [], registry)
     if runtime is None:
         return None
-    if _piped(stdin) and not runtime.handle().takes_input:
+    if _is_piped(stdin) and not runtime.handle().takes_input:
         return None
     return runtime
 
@@ -370,7 +371,7 @@ def _folder_machines(folder: str, registry: MountRegistry) -> list[str]:
     entry = registry.try_mount_for(folder)
     if entry is None or not isinstance(entry.vfs, MachineVFS):
         return []
-    return _shown_machines(entry, registry)
+    return _mount_machines(entry, registry)
 
 
 def several_machines(registry: MountRegistry) -> bool:
@@ -510,12 +511,12 @@ async def operand_machine(
         links (NamespaceReader): the session's link table.
         stdin (ByteSource | None): what is piped into it.
     """
-    if _piped(stdin):
+    if _is_piped(stdin):
         return None
     paths, relative = _named_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
     cwd = norm(session.cwd)
-    runtime = await _machine_holding(
+    runtime = await _machine_holding_all(
         scopes, session, registry, links, None, None if cwd == "/" else cwd
     )
     runs_from: str | None = None
@@ -525,7 +526,7 @@ async def operand_machine(
         and cwd != "/"
         and argv.name in FOLDER_FREE
     ):
-        runtime = await _machine_holding(
+        runtime = await _machine_holding_all(
             scopes, session, registry, links, None
         )
         runs_from = "/"
@@ -583,12 +584,12 @@ def stated_machine(
     if not relative and here != "/" and name in FOLDER_FREE:
         tries.append(scopes)
     for scoped in tries:
-        mounts = _held_mounts(scoped, session, registry, links)
+        mounts = _machine_mounts(scoped, session, registry, links)
         if mounts is None:
             continue
         machines: list[str] | None = None
         for at, entry in enumerate(mounts):
-            shown = _shown_machines(entry, registry)
+            shown = _mount_machines(entry, registry)
             # Only the run finds who holds a name several machines show.
             if len(shown) > 1 and at < len(scopes):
                 machines = []
@@ -598,7 +599,7 @@ def stated_machine(
                 if machines is None
                 else [m for m in machines if m in shown]
             )
-        runtime = _runtime_of(machines or [], registry)
+        runtime = _only_machine(machines or [], registry)
         if runtime is not None:
             return runtime
     return None
@@ -629,14 +630,14 @@ async def program_machine(
         stdin (ByteSource | None): what is piped into it.
     """
     spec = PathSpec.from_str_path(path, cwd=session.cwd)
-    if _local_mount(registry, links, spec.virtual, False) is None:
+    if _machine_mount(registry, links, spec.virtual, False) is None:
         return None
     try:
         await dispatch("stat", spec)
     except FS_ERRORS:
         logger.debug("%s: not run on its machine", path, exc_info=True)
         return None
-    return await _machine_holding(
+    return await _machine_holding_all(
         [(spec.virtual, False)], session, registry, links, stdin
     )
 
@@ -650,7 +651,7 @@ async def link_machine(
     absolute: bool,
 ) -> ExternalTarget | None:
     """The machine an ``ln`` runs on whole, when one machine can make
-    every link (``_link_runtime``): the machine makes the link, so its
+    every link (``_linking_machine``): the machine makes the link, so its
     programs follow it, where Mirage's link table holds links only
     Mirage sees.
 
@@ -671,7 +672,7 @@ async def link_machine(
     """
     if not made:
         return None
-    runtime = await _link_runtime(made, symbolic, session, registry, links)
+    runtime = await _linking_machine(made, symbolic, session, registry, links)
     if runtime is None or not await runtime.handle().has_program("ln"):
         return None
     cwd = norm(session.cwd)
@@ -682,7 +683,7 @@ async def link_machine(
     return ExternalTarget(runtime, "/") if absolute else None
 
 
-def _on_mount(entry: MountEntry, path: str) -> PathSpec:
+def _path_on_mount(entry: MountEntry, path: str) -> PathSpec:
     """A virtual path as its mount addresses it, the mount's own root
     included.
 
@@ -712,29 +713,29 @@ async def _holds_folder(
         registry (MountRegistry): the workspace's mounts and machines.
         links (NamespaceReader): the session's link table.
     """
-    mounts = _held_mounts([(folder, False)], session, registry, links)
+    mounts = _machine_mounts([(folder, False)], session, registry, links)
     if mounts is None:
         return False
     entry = mounts[0]
     assert isinstance(entry.vfs, MachineVFS)
-    held = await holders(entry.vfs.accessor, _on_mount(entry, folder))
+    held = await holders(entry.vfs.accessor, _path_on_mount(entry, folder))
     return any(
-        one.machine == runtime.default_machine and _folder_there(one)
+        one.machine == runtime.default_machine and _may_be_folder(one)
         for one in held
     )
 
 
-def _folder_there(one: Holder) -> bool:
+def _may_be_folder(one: Holder) -> bool:
     """Whether a machine holds a folder at a name as far as is known: a
     mount on one machine asks nothing, so its machine answers for itself.
 
     Args:
         one (Holder): the machine and what it reports for the name.
     """
-    return one.folder or one.entry is None
+    return one.is_folder or one.entry is None
 
 
-async def _link_runtime(
+async def _linking_machine(
     made: Sequence[tuple[str, str]],
     symbolic: bool,
     session: SessionState,
@@ -766,7 +767,7 @@ async def _link_runtime(
         *((parent(link), True) for link, _ in made),
         *((target, False) for _, target in made),
     ]
-    mounts = _held_mounts(scopes, session, registry, links)
+    mounts = _machine_mounts(scopes, session, registry, links)
     if mounts is None or (
         await registry.policies.wants_for("pre_vfs", session.session_id)
     ):
@@ -776,8 +777,8 @@ async def _link_runtime(
         folder, aimed = mounts[at], mounts[len(made) + at]
         assert isinstance(folder.vfs, MachineVFS)
         assert isinstance(aimed.vfs, MachineVFS)
-        spec = _on_mount(folder, link)
-        held = await holders(aimed.vfs.accessor, _on_mount(aimed, target))
+        spec = _path_on_mount(folder, link)
+        held = await holders(aimed.vfs.accessor, _path_on_mount(aimed, target))
         if held:
             machine = chosen(aimed.vfs.accessor, held).machine
         elif symbolic:
@@ -789,10 +790,10 @@ async def _link_runtime(
         else:
             return None
         above = await holders(folder.vfs.accessor, folder_of(spec))
-        if not above or not _folder_there(chosen(folder.vfs.accessor, above)):
+        if not above or not _may_be_folder(chosen(folder.vfs.accessor, above)):
             return None
         if not any(
-            one.machine == machine and _folder_there(one) for one in above
+            one.machine == machine and _may_be_folder(one) for one in above
         ):
             return None
         if len(above) > 1 and any(
@@ -801,7 +802,7 @@ async def _link_runtime(
         ):
             return None
         machines.add(machine)
-    return _runtime_of(sorted(machines), registry)
+    return _only_machine(sorted(machines), registry)
 
 
 def lookup_machine(
@@ -961,7 +962,7 @@ async def _answer(
     for line in decode_text(done.stdout).splitlines():
         path = _path_in(line, name, kind)
         if path is not None:
-            held = await _machine_holding(
+            held = await _machine_holding_all(
                 [(path, False)], session, registry, links, None
             )
             if held is None or held.default_machine != runtime.default_machine:

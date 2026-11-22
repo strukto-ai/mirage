@@ -20,7 +20,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * The line that writes what it is fed to a file: in place, at its end, or
@@ -71,8 +71,8 @@ export async function write(
     }
   }
   try {
-    const command = writeCommand(remote(accessor, path), append, atomic)
-    await checked(accessor, machine, command, path, counted())
+    const command = writeCommand(machinePath(accessor, path), append, atomic)
+    await runChecked(accessor, machine, command, path, counted())
   } finally {
     await closeQuietly(data)
   }

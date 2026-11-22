@@ -31,13 +31,13 @@ class Holder:
     entry: PosixEntry | None = None
 
     @property
-    def folder(self) -> bool:
+    def is_folder(self) -> bool:
         """Whether the machine holds a directory at the name; False when
         it was not asked."""
         return self.entry is not None and self.entry.kind == "d"
 
     @property
-    def written(self) -> int:
+    def written_ms(self) -> int:
         """When the machine's copy was last written, in epoch
         milliseconds by its own clock; 0 when it was not asked."""
         return self.entry.mtime_ms if self.entry is not None else 0

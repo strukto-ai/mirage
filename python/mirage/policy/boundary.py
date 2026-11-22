@@ -37,7 +37,7 @@ class Boundary:
         caller (Caller): who makes the operation; its session's grants
             govern it.
         machine (str | None): the machine the owning mount says the
-            operation acts on (``BaseVFS.acts_on``).
+            operation acts on (``BaseVFS.call_machine``).
     """
 
     policies: Policies

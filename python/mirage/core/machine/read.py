@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.core.posix.read import line_count as posix_line_count
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -47,10 +47,10 @@ async def read(
     size: int | None = None,
 ) -> bytes:
     timer = start_op()
-    data = await checked(
+    data = await run_checked(
         accessor,
         machine,
-        read_command(remote(accessor, path), offset, size),
+        read_command(machine_path(accessor, path), offset, size),
         path,
         bounded=True,
     )
@@ -61,8 +61,8 @@ async def read(
 async def first_lines(
     accessor: MachineAccessor, machine: str, path: PathSpec, n: int
 ) -> bytes:
-    target = single_quote(remote(accessor, path))
-    return await checked(
+    target = single_quote(machine_path(accessor, path))
+    return await run_checked(
         accessor, machine, f"head -n {n} -- {target}", path, bounded=True
     )
 
@@ -70,8 +70,8 @@ async def first_lines(
 async def last_lines(
     accessor: MachineAccessor, machine: str, path: PathSpec, n: int
 ) -> bytes:
-    target = single_quote(remote(accessor, path))
-    return await checked(
+    target = single_quote(machine_path(accessor, path))
+    return await run_checked(
         accessor, machine, f"tail -n {n} -- {target}", path, bounded=True
     )
 
@@ -80,5 +80,5 @@ async def line_count(
     accessor: MachineAccessor, machine: str, path: PathSpec
 ) -> int | None:
     return await posix_line_count(
-        accessor.runner(machine), remote(accessor, path)
+        accessor.runner(machine), machine_path(accessor, path)
     )

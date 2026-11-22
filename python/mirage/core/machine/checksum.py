@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import remote
+from mirage.core.machine.utils import machine_path
 from mirage.core.posix.checksum import checksum as posix_checksum
 from mirage.types import PathSpec
 
@@ -22,5 +22,5 @@ async def checksum(
     accessor: MachineAccessor, machine: str, path: PathSpec, algorithm: str
 ) -> str | None:
     return await posix_checksum(
-        accessor.runner(machine), remote(accessor, path), algorithm
+        accessor.runner(machine), machine_path(accessor, path), algorithm
     )

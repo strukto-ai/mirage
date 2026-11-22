@@ -15,7 +15,7 @@
 from datetime import datetime
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -86,8 +86,8 @@ async def set_attrs(
         dict[str, int | str]: the fields the file does not hold, none.
     """
     command = attrs_command(
-        remote(accessor, path), mode, uid, gid, atime, mtime
+        machine_path(accessor, path), mode, uid, gid, atime, mtime
     )
     if command is not None:
-        await checked(accessor, machine, command, path)
+        await run_checked(accessor, machine, command, path)
     return {}

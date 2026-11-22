@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.errors.fs import enotsup
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly
@@ -80,8 +80,8 @@ async def write(
             yield part
 
     try:
-        command = write_command(remote(accessor, path), append, atomic)
-        await checked(accessor, machine, command, path, counted())
+        command = write_command(machine_path(accessor, path), append, atomic)
+        await run_checked(accessor, machine, command, path, counted())
     finally:
         await close_quietly(data)
     record(

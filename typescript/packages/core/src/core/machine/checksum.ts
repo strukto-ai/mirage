@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { checksum as posixChecksum } from '../posix/checksum.ts'
-import { remote } from './utils.ts'
+import { machinePath } from './utils.ts'
 
 /**
  * A file's digest, by the matching coreutils sum on its machine.
@@ -31,5 +31,5 @@ export function checksum(
   path: PathSpec,
   algorithm: string,
 ): Promise<string | null> {
-  return posixChecksum(accessor.runner(machine), remote(accessor, path), algorithm)
+  return posixChecksum(accessor.runner(machine), machinePath(accessor, path), algorithm)
 }

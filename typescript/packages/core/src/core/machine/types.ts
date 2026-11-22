@@ -30,7 +30,7 @@ export class Holder {
    * Whether the machine holds a directory at the name; false when it was
    * not asked.
    */
-  get folder(): boolean {
+  get isFolder(): boolean {
     return this.entry?.kind === 'd'
   }
 
@@ -38,7 +38,7 @@ export class Holder {
    * When the machine's copy was last written, in epoch milliseconds by its
    * own clock; 0 when it was not asked.
    */
-  get written(): number {
+  get writtenMs(): number {
     return this.entry?.mtimeMs ?? 0
   }
 }

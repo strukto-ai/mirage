@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec, SetAttrFields } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * An owner or group as the machine's chown reads it: a number takes a `+`,
@@ -70,7 +70,7 @@ export async function setAttrs(
   path: PathSpec,
   fields: SetAttrFields,
 ): Promise<Record<string, number | string>> {
-  const command = attrsCommand(remote(accessor, path), fields)
-  if (command !== null) await checked(accessor, machine, command, path)
+  const command = attrsCommand(machinePath(accessor, path), fields)
+  if (command !== null) await runChecked(accessor, machine, command, path)
   return {}
 }

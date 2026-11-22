@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Make an empty file, leaving an existing one as it is.
@@ -29,5 +29,5 @@ export async function create(
   machine: string,
   path: PathSpec,
 ): Promise<void> {
-  await checked(accessor, machine, `: >> ${singleQuote(remote(accessor, path))}`, path)
+  await runChecked(accessor, machine, `: >> ${singleQuote(machinePath(accessor, path))}`, path)
 }

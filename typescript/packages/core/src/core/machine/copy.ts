@@ -18,7 +18,7 @@ import { singleQuote } from '../../utils/quote.ts'
 import { COPIED } from '../posix/constants.ts'
 import { copyTreeCommand } from '../posix/copy.ts'
 import { refusal } from '../posix/errors.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * A copy's line, the new name's folder made first when asked.
@@ -51,10 +51,10 @@ export async function copy(
   dst: PathSpec,
   makeParent = false,
 ): Promise<void> {
-  const old = singleQuote(remote(accessor, src))
-  const fresh = remote(accessor, dst)
+  const old = singleQuote(machinePath(accessor, src))
+  const fresh = machinePath(accessor, dst)
   const line = inFolder(`cp -T -- ${old} ${singleQuote(fresh)}`, fresh, makeParent)
-  await checked(accessor, machine, line, dst)
+  await runChecked(accessor, machine, line, dst)
 }
 
 /**
@@ -75,8 +75,8 @@ export async function dirCopy(
   dst: PathSpec,
   makeParent = false,
 ): Promise<void> {
-  const fresh = remote(accessor, dst)
-  const line = inFolder(copyTreeCommand(remote(accessor, src), fresh), fresh, makeParent)
+  const fresh = machinePath(accessor, dst)
+  const line = inFolder(copyTreeCommand(machinePath(accessor, src), fresh), fresh, makeParent)
   const [status, out, err] = await accessor.run(machine, line)
   if (status !== 0 || new TextDecoder().decode(out) !== COPIED) throw refusal(dst, err)
 }

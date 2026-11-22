@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Remove a directory and everything in it on a machine.
@@ -29,5 +29,5 @@ export async function rmR(
   machine: string,
   path: PathSpec,
 ): Promise<void> {
-  await checked(accessor, machine, `rm -r -- ${singleQuote(remote(accessor, path))}`, path)
+  await runChecked(accessor, machine, `rm -r -- ${singleQuote(machinePath(accessor, path))}`, path)
 }

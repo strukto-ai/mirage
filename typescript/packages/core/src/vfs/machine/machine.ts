@@ -19,11 +19,14 @@ import { copy as machineCopy, dirCopy as machineDirCopy } from '../../core/machi
 import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
 import {
-  asked,
+  askedMachines,
   chosen,
   commandMachine,
-  holder,
+  existingHolders,
   holders,
+  holdingMachine,
+  machinesLackingFolder,
+  refuseHidden,
   writeMachine,
 } from '../../core/machine/place.ts'
 import { pwrite as machinePwrite } from '../../core/machine/pwrite.ts'
@@ -39,11 +42,10 @@ import { rmR as machineRmR } from '../../core/machine/rm.ts'
 import { rmdir as machineRmdir } from '../../core/machine/rmdir.ts'
 import { filesContaining as machineFilesContaining } from '../../core/machine/search.ts'
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
-import { hiddenOn, holderStat, restricted, stat as machineStat } from '../../core/machine/stat.ts'
+import { hasHides, holderStat, stat as machineStat } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
-import type { Holder } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
-import { folderOf, leaf } from '../../core/machine/utils.ts'
+import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
 import { eisdir, enoent, enotdir, enotempty, enotsup } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
@@ -119,12 +121,12 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async readdir(path: PathSpec): Promise<FileStat[]> {
-    const machines = await asked(this.accessor, path)
+    const machines = await askedMachines(this.accessor, path)
     if (machines.length === 0) throw enoent(path)
     return machineReaddir(this.accessor, machines, path)
   }
 
-  override actsOn(): string | null {
+  override callMachine(): string | null {
     if (!this.accessor.bound) return null
     if (!this.accessor.several) return this.accessor.defaultMachine
     return commandMachine(this.accessor)
@@ -132,12 +134,12 @@ export class MachineVFS extends BaseVFS {
 
   override filesystem(): string {
     if (!this.accessor.bound) return this.name
-    const machine = this.actsOn() ?? this.accessor.defaultMachine
+    const machine = this.callMachine() ?? this.accessor.defaultMachine
     return `${machine}:${rstripSlash(this.config.root ?? '/') || '/'}`
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    const one = chosen(this.accessor, await this.everywhere(path))
+    const one = chosen(this.accessor, await existingHolders(this.accessor, path))
     if (one.entry === null) return machineStat(this.accessor, one.machine, path)
     return holderStat(leaf(path), one)
   }
@@ -148,28 +150,33 @@ export class MachineVFS extends BaseVFS {
     offset = 0,
     size: number | null = null,
   ): Promise<ByteSource> {
-    return machineRead(this.accessor, await holder(this.accessor, path), path, offset, size)
+    return machineRead(this.accessor, await holdingMachine(this.accessor, path), path, offset, size)
   }
 
   override async firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
-    return machineFirstLines(this.accessor, await holder(this.accessor, path), path, n)
+    return machineFirstLines(this.accessor, await holdingMachine(this.accessor, path), path, n)
   }
 
   override async lastLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
-    return machineLastLines(this.accessor, await holder(this.accessor, path), path, n)
+    return machineLastLines(this.accessor, await holdingMachine(this.accessor, path), path, n)
   }
 
   override async lineCount(path: PathSpec): Promise<number | null> {
-    return machineLineCount(this.accessor, await holder(this.accessor, path), path)
+    return machineLineCount(this.accessor, await holdingMachine(this.accessor, path), path)
   }
 
   override async checksum(path: PathSpec, algorithm: string): Promise<string | null> {
-    return machineChecksum(this.accessor, await holder(this.accessor, path), path, algorithm)
+    return machineChecksum(
+      this.accessor,
+      await holdingMachine(this.accessor, path),
+      path,
+      algorithm,
+    )
   }
 
   override async readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    if (restricted(path)) return null
-    const held = await this.everywhere(path)
+    if (hasHides(path)) return null
+    const held = await existingHolders(this.accessor, path)
     const shown = await machineTree(
       this.accessor,
       held.map((one) => one.machine),
@@ -186,7 +193,7 @@ export class MachineVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (restricted(path)) return null
+    if (hasHides(path)) return null
     const held = await holders(this.accessor, path)
     return machineFilesContaining(
       this.accessor,
@@ -230,62 +237,76 @@ export class MachineVFS extends BaseVFS {
     await machineMkdir(this.accessor, machine, path, parents)
   }
 
+  /**
+   * Remove a file from every machine holding it, or an older copy would
+   * show again; a folder another machine holds at the name is left alone.
+   *
+   * @param path the file.
+   */
   override async unlink(path: PathSpec): Promise<void> {
-    // Every machine's copy goes, or an older one would show again; a folder
-    // another machine holds at the name is left alone.
-    const held = await this.everywhere(path)
+    const held = await existingHolders(this.accessor, path)
     const shown = chosen(this.accessor, held)
     await machineUnlink(this.accessor, shown.machine, path)
     for (const one of held) {
-      if (one !== shown && !one.folder) await machineUnlink(this.accessor, one.machine, path)
+      if (one !== shown && !one.isFolder) await machineUnlink(this.accessor, one.machine, path)
     }
   }
 
+  /**
+   * Remove an empty folder from every machine holding it. Every machine is
+   * asked before any removes its copy, so a folder one of them still fills
+   * is left whole on all of them.
+   *
+   * @param path the folder.
+   */
   override async rmdir(path: PathSpec): Promise<void> {
-    const held = await this.everywhere(path)
+    const held = await existingHolders(this.accessor, path)
     const shown = chosen(this.accessor, held)
-    const folders = held.filter((one) => one.folder).map((one) => one.machine)
-    // Asked of every machine before any removes its copy, so a folder one
-    // of them still fills is left whole on all of them.
+    const folders = held.filter((one) => one.isFolder).map((one) => one.machine)
     if (
-      shown.folder &&
+      shown.isFolder &&
       folders.length > 1 &&
       (await machineReaddir(this.accessor, folders, path)).length > 0
     )
       throw enotempty(path)
     await machineRmdir(this.accessor, shown.machine, path)
     for (const one of held) {
-      if (one !== shown && one.folder) await machineRmdir(this.accessor, one.machine, path)
+      if (one !== shown && one.isFolder) await machineRmdir(this.accessor, one.machine, path)
     }
   }
 
   override async rmR(path: PathSpec): Promise<void> {
-    for (const one of await this.everywhere(path)) {
+    for (const one of await existingHolders(this.accessor, path)) {
       await machineRmR(this.accessor, one.machine, path)
     }
   }
 
+  /**
+   * Rename a name where it is. A folder is renamed on every machine holding
+   * it, each keeping its own entries; a file on the machine whose copy is
+   * shown, the other machines' copies of the old name going with it. Every
+   * machine's copy of the new name is judged before any machine moves, so a
+   * refusal leaves the folder under one name.
+   *
+   * @param src the name as it is.
+   * @param dst the new name.
+   */
   override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    const held = await this.everywhere(src)
+    const held = await existingHolders(this.accessor, src)
     const moved = chosen(this.accessor, held)
-    const folder = moved.folder
-    // A folder is renamed on every machine holding it, each keeping its own
-    // entries; a file on the machine whose copy it is, the other machines'
-    // copies of the old name going with it.
+    const folder = moved.isFolder
     const movers = folder
-      ? held.filter((one) => one.folder).map((one) => one.machine)
+      ? held.filter((one) => one.isFolder).map((one) => one.machine)
       : [moved.machine]
     const several = this.accessor.several
     const there = several ? await holders(this.accessor, dst) : []
     const replaced = there.filter((one) => !movers.includes(one.machine))
-    // Every machine's copy of the new name is judged before any machine
-    // moves, so a refusal leaves the folder under one name.
     for (const one of there) {
-      if (one.folder !== folder) throw folder ? enotdir(dst) : eisdir(dst)
+      if (one.isFolder !== folder) throw folder ? enotdir(dst) : eisdir(dst)
       if (folder && (await machineReaddir(this.accessor, [one.machine], dst)).length > 0)
         throw enotempty(dst)
     }
-    const lacking = await this.lackingFolder(movers, dst)
+    const lacking = await machinesLackingFolder(this.accessor, movers, dst)
     for (const machine of movers) {
       await machineRename(this.accessor, machine, src, dst, lacking.includes(machine))
     }
@@ -294,55 +315,60 @@ export class MachineVFS extends BaseVFS {
       else await machineUnlink(this.accessor, one.machine, dst)
     }
     for (const one of held) {
-      if (!movers.includes(one.machine) && !one.folder)
+      if (!movers.includes(one.machine) && !one.isFolder)
         await machineUnlink(this.accessor, one.machine, src)
     }
   }
 
+  /**
+   * Copy a file on the machine holding it: a copy never crosses, and is
+   * then the newest copy of its name. It replaces the name, so another
+   * machine's copy of it goes: one kept would show again once the new copy
+   * takes its source's older time (`cp -p`).
+   *
+   * @param src the file.
+   * @param dst the copy's name.
+   */
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    // A copy never crosses: it is made where the source is, and is then the
-    // newest copy of its name.
-    const machine = await holder(this.accessor, src)
-    await this.refuseHidden(machine, dst)
-    const lacking = await this.lackingFolder([machine], dst)
+    const machine = await holdingMachine(this.accessor, src)
+    await refuseHidden(this.accessor, machine, dst)
+    const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
     await machineCopy(this.accessor, machine, src, dst, lacking.length > 0)
     if (!this.accessor.several) return
-    // The copy replaces the name, so another machine's copy of it goes: one
-    // kept would show again once the new copy takes its source's older
-    // time (`cp -p`).
     for (const one of await holders(this.accessor, dst)) {
-      if (one.machine !== machine && !one.folder)
+      if (one.machine !== machine && !one.isFolder)
         await machineUnlink(this.accessor, one.machine, dst)
     }
   }
 
+  /**
+   * Copy a folder one machine holds, on that machine. A folder several
+   * machines hold is refused, so each name under it is copied where it is,
+   * one by one, and stays the copy it was.
+   *
+   * @param src the folder.
+   * @param dst the copy's name.
+   */
   override async dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    const held = await this.everywhere(src)
+    const held = await existingHolders(this.accessor, src)
     const [only] = held
-    // Each name under a folder several machines hold is copied where it is,
-    // one by one, so each stays the copy it was.
     if (held.length > 1 || only === undefined) throw enotsup(this.name, 'dir_copy', src)
-    await this.refuseHidden(only.machine, dst)
-    await machineDirCopy(
-      this.accessor,
-      only.machine,
-      src,
-      dst,
-      (await this.lackingFolder([only.machine], dst)).length > 0,
-    )
+    await refuseHidden(this.accessor, only.machine, dst)
+    const lacking = await machinesLackingFolder(this.accessor, [only.machine], dst)
+    await machineDirCopy(this.accessor, only.machine, src, dst, lacking.length > 0)
   }
 
   override async setattr(
     path: PathSpec,
     fields: SetAttrFields,
   ): Promise<Record<string, number | string>> {
-    return machineSetAttrs(this.accessor, await holder(this.accessor, path), path, fields)
+    return machineSetAttrs(this.accessor, await holdingMachine(this.accessor, path), path, fields)
   }
 
   override capacity(): Promise<CapacityResult> {
     return machineCapacity(
       this.accessor,
-      this.actsOn() ?? this.accessor.defaultMachine,
+      this.callMachine() ?? this.accessor.defaultMachine,
       PathSpec.fromStrPath(this.config.root ?? '/'),
     )
   }
@@ -357,48 +383,5 @@ export class MachineVFS extends BaseVFS {
   // eslint-disable-next-line @typescript-eslint/require-await
   override async getState(): Promise<ConfigState<RedactedSchema<typeof MachineVFSConfig>>> {
     return this.configState(MachineVFSConfig, this.config)
-  }
-
-  /**
-   * The machines holding a name, every one of which a removal or a rename
-   * reaches.
-   *
-   * @param path the name.
-   * @throws ENOENT when no machine holds it.
-   */
-  private async everywhere(path: PathSpec): Promise<Holder[]> {
-    const held = await holders(this.accessor, path)
-    if (held.length === 0) throw enoent(path)
-    return held
-  }
-
-  /**
-   * Refuse a name a machine's own links lead to one the session hides,
-   * before a program of the machine's writes through them.
-   *
-   * @param machine the machine the write runs on.
-   * @param path the name written.
-   * @throws ENOENT when the name leads to a hidden one there.
-   */
-  private async refuseHidden(machine: string, path: PathSpec): Promise<void> {
-    if ((await hiddenOn(this.accessor, path)).includes(machine)) throw enoent(path)
-  }
-
-  /**
-   * The machines a new name lands on that must make its folder first,
-   * since only other machines hold it; none where no machine holds the
-   * folder, whose lack the op reports.
-   *
-   * @param machines the machines the name lands on.
-   * @param path the new name.
-   * @throws ENOTDIR when the copy shown of the folder is a file, whatever
-   *   an older folder on another machine is.
-   */
-  private async lackingFolder(machines: string[], path: PathSpec): Promise<string[]> {
-    if (!this.accessor.several) return []
-    const held = await holders(this.accessor, folderOf(path))
-    if (held.length > 0 && !chosen(this.accessor, held).folder) throw enotdir(path)
-    const folders = held.filter((one) => one.folder).map((one) => one.machine)
-    return machines.filter((m) => folders.length > 0 && !folders.includes(m))
   }
 }

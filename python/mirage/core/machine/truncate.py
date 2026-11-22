@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -25,8 +25,8 @@ async def truncate(
     length: int,
     no_create: bool = False,
 ) -> None:
-    target = single_quote(remote(accessor, path))
+    target = single_quote(machine_path(accessor, path))
     keep = " -c" if no_create else ""
-    await checked(
+    await run_checked(
         accessor, machine, f"truncate{keep} -s {length} -- {target}", path
     )

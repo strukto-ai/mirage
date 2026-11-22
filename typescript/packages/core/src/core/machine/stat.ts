@@ -21,7 +21,7 @@ import { parseEntries, treeCommand } from '../posix/stat.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
 import type { Holder } from './types.ts'
-import { checked, leaf, mountBase, remote, virtualOf } from './utils.ts'
+import { runChecked, leaf, mountPrefix, machinePath, virtualPath } from './utils.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../utils/hidden.ts'
 import { norm } from '../../utils/path.ts'
@@ -82,7 +82,12 @@ export async function entries(
   path: PathSpec,
   depth: number | null,
 ): Promise<PosixEntry[]> {
-  const out = await checked(accessor, machine, treeCommand(remote(accessor, path), depth), path)
+  const out = await runChecked(
+    accessor,
+    machine,
+    treeCommand(machinePath(accessor, path), depth),
+    path,
+  )
   const found = parseEntries(out)
   if (found?.[0]?.rel !== '') throw refusal(path, new Uint8Array())
   return found
@@ -123,12 +128,12 @@ export async function stat(
 /**
  * Whether the running session hides anything in the mount `path` is on,
  * where a machine's own links may lead to a hidden name. Mirrors Python's
- * `restricted`.
+ * `hasHides`.
  *
  * @param path a path on the mount.
  */
-export function restricted(path: PathSpec): boolean {
-  return hiddenUnder(currentCaller().session?.visibility ?? null, mountBase(path))
+export function hasHides(path: PathSpec): boolean {
+  return hiddenUnder(currentCaller().session?.visibility ?? null, mountPrefix(path))
 }
 
 /**
@@ -137,21 +142,21 @@ export function restricted(path: PathSpec): boolean {
  * `/tmp/secret` reads the secret on the machine, where Mirage checks only its
  * own link table. Each machine answers for itself, so another machine's
  * visible files at the path stay; none is asked for a session that hides
- * nothing in the mount. Mirrors Python's `hidden_on`.
+ * nothing in the mount. Mirrors Python's `hidden_machines`.
  *
  * @param accessor the mount's machines.
  * @param path the path an op names.
  */
-export async function hiddenOn(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
+export async function hiddenMachines(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
   const vis = currentCaller().session?.visibility ?? null
-  if (!hiddenUnder(vis, mountBase(path))) return []
-  const q = singleQuote(remote(accessor, path))
+  if (!hiddenUnder(vis, mountPrefix(path))) return []
+  const q = singleQuote(machinePath(accessor, path))
   const hidden: string[] = []
   for (const machine of accessor.names()) {
     const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
     if (status !== 0) continue
     const real = new TextDecoder().decode(out).replace(/\n$/, '')
-    const seen = virtualOf(accessor, path, real)
+    const seen = virtualPath(accessor, path, real)
     if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen))
       hidden.push(machine)
   }

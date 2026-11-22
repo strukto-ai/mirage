@@ -22,9 +22,9 @@ from mirage.context.session_context import (
 from mirage.core.machine.place import (
     chosen,
     command_machine,
-    holder,
     holders,
-    kernel_view,
+    holding_machine,
+    kernel_view_machine,
     new_name_machine,
     running_machine,
     write_machine,
@@ -68,20 +68,20 @@ async def test_a_name_is_read_where_it_is():
     a = ScriptedMachine("a", holding())
     b = ScriptedMachine("b", holding("/tmp/out.csv"))
     accessor = bound(a, b)
-    assert await holder(accessor, spec("/out.csv")) == "b"
+    assert await holding_machine(accessor, spec("/out.csv")) == "b"
     with pytest.raises(FileNotFoundError):
-        await holder(accessor, spec("/none"))
+        await holding_machine(accessor, spec("/none"))
 
 
 @pytest.mark.asyncio
 async def test_a_name_on_two_machines_is_the_copy_written_last():
     old = ScriptedMachine("old", holding("/tmp/x", written=1700000000))
     new = ScriptedMachine("new", holding("/tmp/x", written=1700000009))
-    assert await holder(bound(old, new), spec("/x")) == "new"
-    assert await holder(bound(new, old), spec("/x")) == "new"
+    assert await holding_machine(bound(old, new), spec("/x")) == "new"
+    assert await holding_machine(bound(new, old), spec("/x")) == "new"
     held = await holders(bound(old, new), spec("/x"))
     assert [one.machine for one in held] == ["old", "new"]
-    assert [one.written for one in held] == [1700000000000, 1700000009000]
+    assert [one.written_ms for one in held] == [1700000000000, 1700000009000]
 
 
 @pytest.mark.asyncio
@@ -91,7 +91,7 @@ async def test_a_newer_copy_wins_over_the_command_s_machine():
     accessor = bound(old, new)
     token = running_on("old")
     try:
-        assert await holder(accessor, spec("/x")) == "new"
+        assert await holding_machine(accessor, spec("/x")) == "new"
     finally:
         reset_caller(token)
 
@@ -101,19 +101,19 @@ async def test_copies_written_together_go_to_the_command_s_machine():
     a = ScriptedMachine("a", holding("/tmp/x"))
     b = ScriptedMachine("b", holding("/tmp/x"))
     accessor = bound(a, b)
-    assert await holder(accessor, spec("/x")) == "a"
+    assert await holding_machine(accessor, spec("/x")) == "a"
     token = running_on("b")
     try:
         assert running_machine(accessor) == "b"
         assert command_machine(accessor) == "b"
-        assert await holder(accessor, spec("/x")) == "b"
+        assert await holding_machine(accessor, spec("/x")) == "b"
     finally:
         reset_caller(token)
     token = preferring("b")
     try:
         assert running_machine(accessor) is None
         assert command_machine(accessor) == "b"
-        assert await holder(accessor, spec("/x")) == "b"
+        assert await holding_machine(accessor, spec("/x")) == "b"
     finally:
         reset_caller(token)
 
@@ -155,16 +155,16 @@ async def test_a_kernel_s_view_answers_for_the_command_s_machine():
     b = ScriptedMachine("b", holding("/proc/cpuinfo", written=1700000009))
     accessor = bound(a, b, root="/")
     path = spec("/proc/cpuinfo", prefix="")
-    assert kernel_view(accessor, path) == "a"
-    assert await holder(accessor, path) == "a"
+    assert kernel_view_machine(accessor, path) == "a"
+    assert await holding_machine(accessor, path) == "a"
     assert b.lines == []
     token = preferring("b")
     try:
-        assert await holder(accessor, path) == "b"
+        assert await holding_machine(accessor, path) == "b"
     finally:
         reset_caller(token)
-    assert kernel_view(accessor, spec("/tmp/x", prefix="")) is None
-    assert kernel_view(bound(a, root="/"), path) is None
+    assert kernel_view_machine(accessor, spec("/tmp/x", prefix="")) is None
+    assert kernel_view_machine(bound(a, root="/"), path) is None
 
 
 def test_chosen_takes_the_only_holder_unasked():

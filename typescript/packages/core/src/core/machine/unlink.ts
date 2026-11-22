@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Remove a file on a machine.
@@ -29,5 +29,5 @@ export async function unlink(
   machine: string,
   path: PathSpec,
 ): Promise<void> {
-  await checked(accessor, machine, `rm -- ${singleQuote(remote(accessor, path))}`, path)
+  await runChecked(accessor, machine, `rm -- ${singleQuote(machinePath(accessor, path))}`, path)
 }

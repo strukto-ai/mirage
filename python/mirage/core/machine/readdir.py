@@ -16,7 +16,7 @@ import asyncio
 import logging
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.place import chosen, kernel_view
+from mirage.core.machine.place import chosen, kernel_view_machine
 from mirage.core.machine.stat import entries, holder_stat
 from mirage.core.machine.types import Holder
 from mirage.core.posix.types import PosixEntry
@@ -26,7 +26,7 @@ from mirage.types import FileStat, PathSpec
 logger = logging.getLogger(__name__)
 
 
-def _merged(
+def _chosen_by_name(
     accessor: MachineAccessor,
     machines: list[str],
     listed: list[list[PosixEntry]],
@@ -35,7 +35,7 @@ def _merged(
     """Every machine's entries below one directory as one listing, each
     name once: the copy every look at the name goes to (``chosen``). A
     kernel's view of its machine is the one machine's it answers for
-    (``kernel_view``), and nothing is listed below a name whose copy
+    (``kernel_view_machine``), and nothing is listed below a name whose copy
     shown is a file, whatever an older folder there holds.
 
     Args:
@@ -53,13 +53,13 @@ def _merged(
     merged: dict[str, Holder] = {}
     over: set[str] = set()
     for rel, copies in held.items():
-        own = kernel_view(accessor, scope, rel) if several else None
+        own = kernel_view_machine(accessor, scope, rel) if several else None
         if own is not None:
             copies = [one for one in copies if one.machine == own]
             if not copies:
                 continue
         merged[rel] = chosen(accessor, copies)
-        if not merged[rel].folder and any(one.folder for one in copies):
+        if not merged[rel].is_folder and any(one.is_folder for one in copies):
             over.add(rel)
     if not over:
         return merged
@@ -115,9 +115,9 @@ async def readdir(
     if not listing:
         assert failure is not None
         raise failure
-    if not chosen(accessor, tops).folder:
+    if not chosen(accessor, tops).is_folder:
         raise enotdir(scope)
-    merged = _merged(accessor, listing, listed, scope)
+    merged = _chosen_by_name(accessor, listing, listed, scope)
     return [holder_stat(name, merged[name]) for name in sorted(merged)]
 
 
@@ -153,4 +153,4 @@ async def tree(
         if result[0].kind != "d":
             return None
         listed.append(result[1:])
-    return _merged(accessor, machines, listed, path)
+    return _chosen_by_name(accessor, machines, listed, path)

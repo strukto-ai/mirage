@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Cut or extend a file to `length` bytes.
@@ -33,7 +33,7 @@ export async function truncate(
   length: number,
   noCreate = false,
 ): Promise<void> {
-  const target = singleQuote(remote(accessor, path))
+  const target = singleQuote(machinePath(accessor, path))
   const keep = noCreate ? ' -c' : ''
-  await checked(accessor, machine, `truncate${keep} -s ${String(length)} -- ${target}`, path)
+  await runChecked(accessor, machine, `truncate${keep} -s ${String(length)} -- ${target}`, path)
 }

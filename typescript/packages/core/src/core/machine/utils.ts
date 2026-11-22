@@ -22,11 +22,11 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 /**
  * The virtual path of the mount root `path` is under. Mirrors Python's
- * `mount_base`.
+ * `mount_prefix`.
  *
  * @param path a path on the mount.
  */
-export function mountBase(path: PathSpec): string {
+export function mountPrefix(path: PathSpec): string {
   const virtual = rstripSlash(path.virtual)
   return norm(virtual.slice(0, virtual.length - path.vfsPath.length) || '/')
 }
@@ -39,7 +39,7 @@ export function mountBase(path: PathSpec): string {
  */
 export function folderOf(path: PathSpec): PathSpec {
   const key = stripSlash(path.vfsPath)
-  const virtual = key === '' ? mountBase(path) : parent(rstripSlash(path.virtual) || '/')
+  const virtual = key === '' ? mountPrefix(path) : parent(rstripSlash(path.virtual) || '/')
   const cut = key.lastIndexOf('/')
   return new PathSpec({
     virtual,
@@ -60,16 +60,20 @@ export function leaf(path: PathSpec): string {
 
 /**
  * The virtual name a path on the machines has on the mount `path` is on;
- * null for one outside the mount's root. Mirrors Python's `virtual_of`.
+ * null for one outside the mount's root. Mirrors Python's `virtual_path`.
  *
  * @param accessor the mount's machines.
  * @param path a path on the mount.
  * @param real an absolute path on the machines.
  */
-export function virtualOf(accessor: MachineAccessor, path: PathSpec, real: string): string | null {
+export function virtualPath(
+  accessor: MachineAccessor,
+  path: PathSpec,
+  real: string,
+): string | null {
   const root = rstripSlash(accessor.root)
   if (root !== '' && real !== root && !real.startsWith(`${root}/`)) return null
-  return norm(`${mountBase(path)}/${real.slice(root.length).replace(/^\/+/, '')}`)
+  return norm(`${mountPrefix(path)}/${real.slice(root.length).replace(/^\/+/, '')}`)
 }
 
 /**
@@ -78,7 +82,7 @@ export function virtualOf(accessor: MachineAccessor, path: PathSpec, real: strin
  * @param accessor the mount's machines.
  * @param path the path on the mount.
  */
-export function remote(accessor: MachineAccessor, path: PathSpec): string {
+export function machinePath(accessor: MachineAccessor, path: PathSpec): string {
   return joinRoot(accessor.root, path.mountPath)
 }
 
@@ -94,7 +98,7 @@ export function remote(accessor: MachineAccessor, path: PathSpec): string {
  * @param bounded hold its output to the workspace's memory room, for a line
  *   that reads a file's content.
  */
-export async function checked(
+export async function runChecked(
   accessor: MachineAccessor,
   machine: string,
   command: string,

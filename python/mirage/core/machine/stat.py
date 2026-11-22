@@ -17,11 +17,11 @@ from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
 from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import (
-    checked,
     leaf,
-    mount_base,
-    remote,
-    virtual_of,
+    machine_path,
+    mount_prefix,
+    run_checked,
+    virtual_path,
 )
 from mirage.core.posix.errors import refusal
 from mirage.core.posix.stat import parse_entries, tree_command
@@ -89,8 +89,11 @@ async def entries(
         depth (int | None): 0 for the path alone, 1 for its children,
             None for everything below.
     """
-    out = await checked(
-        accessor, machine, tree_command(remote(accessor, path), depth), path
+    out = await run_checked(
+        accessor,
+        machine,
+        tree_command(machine_path(accessor, path), depth),
+        path,
     )
     found = parse_entries(out)
     if not found or found[0].rel:
@@ -117,17 +120,19 @@ async def stat(
     return entry_stat(leaf(path), await stat_entry(accessor, machine, path))
 
 
-def restricted(path: PathSpec) -> bool:
+def has_hides(path: PathSpec) -> bool:
     """Whether the running session hides anything in the mount ``path``
     is on, where a machine's own links may lead to a hidden name.
 
     Args:
         path (PathSpec): a path on the mount.
     """
-    return hidden_under(current_caller().visibility, mount_base(path))
+    return hidden_under(current_caller().visibility, mount_prefix(path))
 
 
-async def hidden_on(accessor: MachineAccessor, path: PathSpec) -> list[str]:
+async def hidden_machines(
+    accessor: MachineAccessor, path: PathSpec
+) -> list[str]:
     """The machines on which ``path`` resolves, through the machine's own
     links, to a name the running session hides: ``/tmp/public`` linked to
     a hidden ``/tmp/secret`` reads the secret on the machine, where Mirage
@@ -140,16 +145,16 @@ async def hidden_on(accessor: MachineAccessor, path: PathSpec) -> list[str]:
         path (PathSpec): the path an op names.
     """
     vis = current_caller().visibility
-    if not hidden_under(vis, mount_base(path)):
+    if not hidden_under(vis, mount_prefix(path)):
         return []
-    q = single_quote(remote(accessor, path))
+    q = single_quote(machine_path(accessor, path))
     hidden: list[str] = []
     for machine in accessor.names():
         status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
         if status != 0:
             continue
         real = out.decode(errors="surrogateescape").rstrip("\n")
-        seen = virtual_of(accessor, path, real)
+        seen = virtual_path(accessor, path, real)
         if (
             seen is not None
             and seen != norm(path.virtual)

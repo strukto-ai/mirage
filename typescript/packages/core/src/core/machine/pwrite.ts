@@ -17,7 +17,7 @@ import { enotsup } from '../../errors/fs.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * Write bytes at an offset, as pwrite(2): the rest of the file stays, a gap
@@ -40,7 +40,7 @@ export async function pwrite(
   if (!accessor.handle(machine).takesInput) throw enotsup('machine', 'pwrite', path)
   const timer = startOp()
   const seek = `seek=${String(offset)} oflag=seek_bytes conv=notrunc status=none`
-  const target = singleQuote(remote(accessor, path))
-  await checked(accessor, machine, `dd of=${target} ${seek}`, path, data)
+  const target = singleQuote(machinePath(accessor, path))
+  await runChecked(accessor, machine, `dd of=${target} ${seek}`, path, data)
   record('pwrite', path.virtual, VFSName.MACHINE, data.byteLength, timer)
 }
