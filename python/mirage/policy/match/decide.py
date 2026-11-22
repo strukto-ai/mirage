@@ -131,9 +131,11 @@ def redirect_ruling(
     """The profile's answer about the files a redirect opens that no
     command owns: a compound statement's (``{ cat; } < f``, a loop, a
     subshell) or a bare one (``> f``). Only a root leaf scoped to a path
-    the redirect opens speaks; a leaf with no paths is about commands,
-    so under ``{"*": deny, ls: allow}`` the group ``{ ls; } > out``
-    meets the same answer as ``ls > out``.
+    the redirect opens speaks: one with paths, or a mount entry's, whose
+    scope is its folder, so ``mounts: {/keep: {commands: {"*": deny}}}``
+    refuses ``> /keep/f``. A top-level leaf with no paths is about
+    commands, so under ``{"*": deny, ls: allow}`` the group
+    ``{ ls; } > out`` meets the same answer as ``ls > out``.
 
     Args:
         paths (Sequence[PathSpec]): the redirect's targets, links
