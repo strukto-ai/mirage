@@ -105,6 +105,19 @@ it('carries the file server a machine mounts, with ssh2 in it', () => {
   expect(script).toContain('ssh2/lib/protocol/SFTP.js')
 })
 
+it('ships no engine a Worker did not import through its clis/ entry', () => {
+  const into = mkdtempSync(join(tmpdir(), 'mirage-cloudflare-bundle-bare-'))
+  try {
+    const names = [...dryRun(into, './bundle_bare.toml', []).keys()]
+    for (const module of ['mirage_ast_grep.wasm', 'mirage_gh.wasm', 'mirage_pdf.wasm']) {
+      expect(names.some((name) => name.endsWith(module))).toBe(false)
+    }
+    expect(names.some((name) => name.endsWith('mirage_rs.wasm'))).toBe(true)
+  } finally {
+    rmSync(into, { recursive: true, force: true })
+  }
+}, 120_000)
+
 it('ships no QuickJS', () => {
   expect([...files.keys()].some((name) => name.includes('qjs'))).toBe(false)
 })

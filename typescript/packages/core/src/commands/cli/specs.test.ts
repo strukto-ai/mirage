@@ -26,7 +26,7 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-const BUNDLED = ['airtable', 'discord', 'gh', 'git', 'gws', 'linear', 'ntn', 'slack']
+const BUNDLED = ['airtable', 'discord', 'git', 'gws', 'linear', 'ntn', 'slack']
 
 function tree(name: string): CLI {
   return new CLI({
@@ -36,6 +36,14 @@ function tree(name: string): CLI {
 }
 
 describe('cli spec registry', () => {
+  it('installs a CLI carrying an engine only once its clis entry is imported', async () => {
+    expect(() => cliSpecFor('gh')).toThrow(
+      "unknown cli 'gh'; import '@struktoai/mirage-core/clis/gh' to install it",
+    )
+    const { GH } = await import('../../clis/gh.ts')
+    expect(cliSpecFor('gh')).toBe(GH)
+  })
+
   it('registers, resolves, and unregisters', () => {
     const spec = tree('spectest')
     registerCliSpec(spec)

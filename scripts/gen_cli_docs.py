@@ -301,6 +301,7 @@ GROUPS = (
 )
 CORE_BARREL = ROOT / "typescript/packages/core/src/index.ts"
 CORE_SPECS = ROOT / "typescript/packages/core/src/commands/cli/specs.ts"
+CORE_CLIS = ROOT / "typescript/packages/core/src/clis"
 IMG_STYLE = (
     "{{ display: 'inline', width: '1em', height: '1em', "
     "margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }}"
@@ -454,17 +455,34 @@ def exported(source: Path, pattern: str) -> frozenset[str]:
     )
 
 
+def installed_clis() -> frozenset[str]:
+    """Name the CLIs a host installs through core's ``clis/`` entries.
+
+    The browser and Cloudflare packages re-export each entry, so a page or
+    a Worker that imports one carries that CLI.
+    """
+    return frozenset().union(
+        *(
+            exported(entry, r"^export \{([^}]*)\}$")
+            for entry in sorted(CORE_CLIS.glob("*.ts"))
+        )
+    )
+
+
 def browser_clis() -> frozenset[str]:
     """Name the CLIs core's barrel exports, which the browser package re-exports."""
-    return exported(CORE_BARREL, r"^export \{([^}]*)\} from")
+    return (
+        exported(CORE_BARREL, r"^export \{([^}]*)\} from") | installed_clis()
+    )
 
 
 def cloudflare_clis() -> frozenset[str]:
     """Name the CLIs in core's spec table, which a Workers app builds."""
-    return exported(
+    seeded = exported(
         CORE_SPECS,
         r"^const CLI_SPECS = new Map<string, CLI>\(\s*\[([^\]]*)\]",
     )
+    return seeded | installed_clis()
 
 
 def catalog(language: str) -> str:

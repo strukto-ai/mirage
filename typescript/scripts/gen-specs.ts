@@ -17,6 +17,10 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import * as Browser from '@struktoai/mirage-browser'
+import * as BrowserAstGrep from '@struktoai/mirage-browser/clis/ast_grep'
+import * as BrowserGh from '@struktoai/mirage-browser/clis/gh'
+import * as BrowserOffice from '@struktoai/mirage-browser/clis/office'
+import * as BrowserPdf from '@struktoai/mirage-browser/clis/pdf'
 import * as Node from '@struktoai/mirage-node'
 
 import {
@@ -536,10 +540,13 @@ async function main(): Promise<void> {
   emitHttpRoutes()
   const core = await coreCommandGroups()
   emitVariant('node', ['core', 'node'], [core, Node as unknown as ModuleBag], Node.knownVfsNames())
+  // A page installs a CLI that carries an engine through its `clis/`
+  // entry, so the browser's programs are its entry point's and those.
+  const browser = { ...Browser, ...BrowserAstGrep, ...BrowserGh, ...BrowserOffice, ...BrowserPdf }
   emitVariant(
     'browser',
     ['core', 'browser'],
-    [core, Browser as unknown as ModuleBag],
+    [core, browser as unknown as ModuleBag],
     Browser.knownVfsNames(),
   )
 }

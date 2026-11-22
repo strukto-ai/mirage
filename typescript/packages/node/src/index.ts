@@ -13,6 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export * from '@struktoai/mirage-core'
+// Node bundles nothing, so it installs every CLI that carries an engine;
+// a browser or Workers host imports only the `clis/` entries it wants.
+export { AST_GREP } from '@struktoai/mirage-core/clis/ast_grep'
+export { GH } from '@struktoai/mirage-core/clis/gh'
+export { OFFICE } from '@struktoai/mirage-core/clis/office'
+export { PDFINFO, PDFTOTEXT } from '@struktoai/mirage-core/clis/pdf'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { MountCore, type MountCoreOptions } from '@struktoai/mirage-core/mount/core'
 export { isMacosMetadata } from '@struktoai/mirage-core/mount/platform/macos'

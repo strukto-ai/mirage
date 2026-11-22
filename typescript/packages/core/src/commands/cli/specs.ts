@@ -14,17 +14,13 @@
 
 import type { CLI } from './types.ts'
 import { AIRTABLE } from './builtin/airtable/index.ts'
-import { AST_GREP } from './builtin/ast_grep/index.ts'
 import { DISCORD } from './builtin/discord/index.ts'
-import { GH } from './builtin/gh/index.ts'
 import { GIT } from './builtin/git/index.ts'
 import { GWS } from './builtin/gws/index.ts'
 import { HF } from './builtin/hf/index.ts'
 import { HIMALAYA } from './builtin/himalaya/index.ts'
 import { LINEAR } from './builtin/linear/index.ts'
 import { NTN } from './builtin/ntn/index.ts'
-import { OFFICE } from './builtin/office/index.ts'
-import { PDFINFO, PDFTOTEXT } from './builtin/pdf/index.ts'
 import { SEARCH } from './builtin/search/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
 import { TRELLO } from './builtin/trello/index.ts'
@@ -32,31 +28,20 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import { NAME as MCP_CLI } from './mcp/constants.ts'
 
 // Named CLI trees the YAML `clis:` section resolves against
-// (`cli: slack` looks up "slack" here). The bundled programs are seeded
+// (`cli: slack` looks up "slack" here). The light programs are seeded
 // here rather than self-registering from their own modules: a side
 // effect only fires if something imported that module, so which CLIs
-// existed depended on what the caller happened to pull in. Runtime
-// packages add theirs through registerCliSpec from their entry point,
-// and user programs do the same before the workspace loads.
+// existed depended on what the caller happened to pull in. The ones
+// carrying an engine (ast-grep, gh, office, pdfinfo and pdftotext) are
+// not: a host installs each by importing its `clis/` entry, so a bundle
+// holds only the engines its host asked for. Runtime packages add theirs
+// through registerCliSpec from their entry point, and user programs do
+// the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [
-    AIRTABLE,
-    AST_GREP,
-    DISCORD,
-    GH,
-    GIT,
-    GWS,
-    HF,
-    HIMALAYA,
-    LINEAR,
-    NTN,
-    OFFICE,
-    PDFINFO,
-    PDFTOTEXT,
-    SEARCH,
-    SLACK,
-    TRELLO,
-  ].map((spec) => [spec.spec.name, spec]),
+  [AIRTABLE, DISCORD, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, SEARCH, SLACK, TRELLO].map((spec) => [
+    spec.spec.name,
+    spec,
+  ]),
 )
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */
@@ -91,7 +76,19 @@ export function cliSpecFor(name: string): CLI {
   const spec = CLI_SPECS.get(name)
   if (spec === undefined) {
     const known = [...CLI_SPECS.keys()].sort(compareCodePoints).join(', ') || 'none registered'
-    throw new Error(`unknown cli '${name}' (known: ${known})`)
+    // The CLIs a host installs by importing their `clis/` entry, so a
+    // config naming one the host left out says which import it needs.
+    const entries: Readonly<Record<string, string>> = {
+      'ast-grep': 'ast_grep',
+      gh: 'gh',
+      office: 'office',
+      pdfinfo: 'pdf',
+      pdftotext: 'pdf',
+    }
+    const entry = entries[name]
+    const hint =
+      entry === undefined ? '' : `; import '@struktoai/mirage-core/clis/${entry}' to install it`
+    throw new Error(`unknown cli '${name}'${hint} (known: ${known})`)
   }
   return spec
 }
