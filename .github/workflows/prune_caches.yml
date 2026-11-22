@@ -7,6 +7,7 @@ name: Prune caches
 
 permissions:
   actions: write
+  pull-requests: read
 
 concurrency:
   group: prune-caches
@@ -45,24 +46,31 @@ jobs:
                 gh cache delete "$id"
               done
 
-  pnpm-store:
+  superseded:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # setup-node-pnpm saves a store per lockfile, about 1 GB, and seeds it
-      # from the newest one, so the newest holds every package the older
-      # ones do and they are only weight once the lockfile moves on. Only
-      # main's are pruned: a pull request's entry is all that branch reads.
-      - name: Keep the newest pnpm store per runner and Node version
+      # Every other entry is keyed on hashes of what built it (a lockfile, the
+      # rust/ tree, a run) and restored by its exact key or the newest under
+      # its prefix, so once a newer one is saved on a branch the older ones
+      # are only weight: one rust/ change left 1.2 GB of mirage._rs builds
+      # behind, and each lockfile a 1 GB pnpm store. Left to the cache's own
+      # eviction they pushed out the entries every run restores. A family is
+      # the key without its hex runs; a closed pull request keeps nothing.
+      - name: Keep the newest entry of each cache per branch
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh cache list --key pnpm-store- --ref refs/heads/main \
-            --sort created_at --order desc --limit 100 --json id,key \
-            --jq '.[] | [.id, (.key | sub("-[0-9a-f]{64}$"; ""))] | @tsv' \
-            | awk -F'\t' '++seen[$2] > 1 { print $1 }' \
+          gh pr list --state open --limit 1000 --json number \
+            --jq '.[] | "refs/pull/\(.number)/merge"' > "$RUNNER_TEMP/open"
+          gh cache list --sort created_at --order desc --limit 1000 --json id,key,ref \
+            --jq '.[] | [.id, .ref, (if (.key | startswith("codeql-")) then "" else (.key | gsub("-[0-9a-f]{7,}"; "")) end)] | @tsv' \
+            | awk -F'\t' '
+                FILENAME == ARGV[1] { open[$1]; next }
+                ($2 ~ /^refs\/pull\// && !($2 in open)) || ($3 != "" && ++seen[$2 FS $3] > 1) { print $1 }
+              ' "$RUNNER_TEMP/open" - \
             | while read -r id; do
                 echo "deleting cache $id"
                 gh cache delete "$id"

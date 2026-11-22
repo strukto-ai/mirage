@@ -24,10 +24,12 @@ runs:
     # uv builds mirage-rs and the TypeScript build embeds its wasm, both
     # with cargo, so every job that sets up either language gets Rust too.
     # Building the wasm is the only use these jobs make of rust/target, so
-    # they share one entry, not one each: 32 entries had held 2.8 GB.
+    # they share one entry, not one each: 32 entries had held 2.8 GB. Only a
+    # job that compiles the modules saves it (below).
     - uses: ./.github/actions/setup-rust
       with:
         shared-key: mirage-rs
+        save: "false"
 
     - name: Install pnpm
       uses: pnpm/action-setup@v6.0.10
@@ -57,8 +59,21 @@ runs:
     # recompiled it, which sends node-gyp to nodejs.org for the headers.
     # The restore was an exact key hit, so nothing ever re-saved and the Node
     # 24 build was never kept: every Node 24 job re-fetched, every run.
+    # Only main saves one. A pull request that moves the lockfile restores
+    # main's newest store and fetches what it adds; the store it saved of
+    # its own, about 1 GB, pushed main's entries out of the 10 GB.
     - name: Cache the pnpm store
+      if: github.ref == 'refs/heads/main'
       uses: actions/cache@v6
+      with:
+        path: ${{ steps.store.outputs.dir }}
+        key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('typescript/pnpm-lock.yaml') }}
+        restore-keys: |
+          pnpm-store-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-
+
+    - name: Restore the pnpm store
+      if: github.ref != 'refs/heads/main'
+      uses: actions/cache/restore@v6
       with:
         path: ${{ steps.store.outputs.dir }}
         key: pnpm-store-${{ runner.os }}-${{ runner.arch }}-node${{ inputs.node-version }}-${{ hashFiles('typescript/pnpm-lock.yaml') }}
@@ -97,10 +112,21 @@ runs:
 
     - name: Cache the wasm modules
       if: inputs.wasm-cache == 'true'
+      id: kept
       uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/embed-rs
         key: ${{ steps.wasm.outputs.key }}
+
+    # A job that takes the modules from the cache never compiles, so on main
+    # it would save the Rust entry empty, and the entry, keyed on the
+    # lockfiles alone, would stay empty until Cargo.lock moved. One that
+    # compiles them leaves their dependencies in rust/target, so the next
+    # change under rust/ compiles only the workspace's own crates.
+    - name: Save the Rust entry from a job that compiles the modules
+      if: github.ref == 'refs/heads/main' && steps.kept.outputs.cache-hit != 'true'
+      shell: bash
+      run: echo "MIRAGE_RUST_SAVE=true" >> "$GITHUB_ENV"
 
     # wasm-opt shrinking the Monty and 1Password SDK modules was ten and a
     # half of the twelve minutes the build took in pre-commit. Kept beside
@@ -108,9 +134,14 @@ runs:
     # tree had built Cloudflare, so nearly every run shrank them again. Their
     # bytes come from the lockfile and the scripts that strip and shrink them,
     # never from rust/, so they keep an entry of their own under those three.
+    # optimize-wasm names each file by the bytes it shrank, so a lockfile
+    # change that leaves both SDKs alone starts from the newest entry and
+    # finds them there: adding pako alone shrank them again for nine minutes.
     - name: Cache the shrunk SDK modules
       if: inputs.wasm-cache == 'true'
       uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/wasm-opt
         key: wasm-opt-${{ runner.os }}-${{ hashFiles('typescript/pnpm-lock.yaml', 'typescript/packages/cloudflare/scripts/optimize-wasm.mjs', 'typescript/packages/core/scripts/strip-custom-sections.mjs') }}
+        restore-keys: |
+          wasm-opt-${{ runner.os }}-

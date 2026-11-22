@@ -13,9 +13,10 @@ inputs:
     default: ""
   save:
     description: >-
-      Save the entry when the job ends on main. A job that never builds in
-      rust/target passes false, so the entry it shares holds what the jobs
-      that do build there need.
+      Save the entry when the job ends on main. A job that does not always
+      build in rust/target passes false, so the entry it shares holds what
+      the jobs that do build there need; one that builds later in the job
+      sets MIRAGE_RUST_SAVE=true itself.
     default: "true"
 runs:
   using: composite
@@ -34,16 +35,30 @@ runs:
         rustup toolchain install
         rustup default "$(rustup show active-toolchain | cut -d' ' -f1)"
 
+    # An entry is 70 to 270 MB, so PRs saving their own would push the uv
+    # and pnpm caches out of the repository's 10 GB. A PR restores main's
+    # entries instead, which every branch can read. rust-cache reads save-if
+    # again in its post step, where this action run inside another composite
+    # no longer sees its inputs: the expression came out false on main, and
+    # the entry setup-node-pnpm shares was never written. The job's
+    # environment is still there then.
+    - name: Decide whether the job saves the entry
+      if: env.MIRAGE_RUST_READY != 'true' && github.ref == 'refs/heads/main' && inputs.save == 'true'
+      shell: bash
+      run: echo "MIRAGE_RUST_SAVE=true" >> "$GITHUB_ENV"
+
     - name: Cache cargo and rust/target
       if: env.MIRAGE_RUST_READY != 'true'
       uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         workspaces: rust
         shared-key: ${{ inputs.shared-key }}
-        # An entry is 70 to 270 MB, so PRs saving their own would push the
-        # uv and pnpm caches out of the repository's 10 GB. A PR restores
-        # main's entries instead, which every branch can read.
-        save-if: ${{ github.ref == 'refs/heads/main' && inputs.save == 'true' }}
+        # The key already hashes rust-toolchain.toml, the compiler every
+        # build here uses. The environment hash adds each toolchain the
+        # runner image ships, so an image rolling out a new stable left
+        # every entry unreachable.
+        add-rust-environment-hash-key: false
+        save-if: ${{ env.MIRAGE_RUST_SAVE == 'true' }}
 
     - name: Mark Rust as set up
       shell: bash
