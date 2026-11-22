@@ -19,19 +19,18 @@ from mirage.utils.quote import single_quote
 
 
 async def capacity(
-    accessor: MachineAccessor, path: PathSpec
+    accessor: MachineAccessor, machine: str, path: PathSpec
 ) -> CapacityResult:
-    """The space of the filesystem the root sits on, on the default
-    machine, from its ``df -Pk``; UNKNOWN when it cannot say.
+    """The space of the filesystem the root sits on, on one machine,
+    from its ``df -Pk``; UNKNOWN when it cannot say.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine asked.
         path (PathSpec): the mount root, for an error.
     """
     target = single_quote(accessor.root)
-    out = await checked(
-        accessor, accessor.default_machine, f"df -Pk -- {target}", path
-    )
+    out = await checked(accessor, machine, f"df -Pk -- {target}", path)
     lines = out.decode(errors="replace").strip().split("\n")
     fields = lines[-1].split() if len(lines) > 1 else []
     if len(fields) < 4 or not all(f.isdigit() for f in fields[1:4]):

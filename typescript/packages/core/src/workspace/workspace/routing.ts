@@ -292,7 +292,7 @@ export class Router {
    */
   private overlaid(decision: RouteDecision<Runtime>, route: Route): RouteDecision<Runtime> {
     try {
-      return routed(this.runtimes.entries, decision.bindings, route.machine)
+      return routed(this.runtimes.entries, decision.bindings, route.machine, decision.machine)
     } catch (caught) {
       throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
         cause: caught,
@@ -483,6 +483,7 @@ export class Router {
           overlay,
         ),
         fallback: catchAll(this.runtimes.entries),
+        machine,
       },
       machine,
     )

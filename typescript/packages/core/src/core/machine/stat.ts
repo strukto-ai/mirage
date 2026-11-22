@@ -17,8 +17,8 @@ import { FileStat, FileType, type PathSpec } from '../../types.ts'
 import { msToRfc3339 } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { refusal } from '../posix/errors.ts'
-import { parseTree, treeCommand } from '../posix/stat.ts'
-import type { TreeRow } from '../posix/types.ts'
+import { parseEntries, treeCommand } from '../posix/stat.ts'
+import type { PosixEntry } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
 import { checked, mountBase, remote, virtualOf } from './utils.ts'
 import { currentCaller } from '../../context/session_context.ts'
@@ -32,31 +32,41 @@ import { rstripSlash } from '../../utils/slash.ts'
  * as the machine has them.
  *
  * @param name the entry's name.
- * @param row what find printed for it.
+ * @param entry what find printed for it.
  */
-export function rowStat(name: string, row: TreeRow): FileStat {
-  const kind = KINDS[row.kind] ?? FileType.FILE
-  const modified = msToRfc3339(row.mtimeMs)
+export function entryStat(name: string, entry: PosixEntry): FileStat {
+  const kind = KINDS[entry.kind] ?? FileType.FILE
+  const modified = msToRfc3339(entry.mtimeMs)
   const regular = kind === FileType.FILE
   return new FileStat({
     name,
-    size: regular ? row.size : null,
+    size: regular ? entry.size : null,
     modified,
     fingerprint: modified,
     type: kind,
     ...(regular ? { content: contentTypeForPath(name) } : {}),
-    mode: row.mode,
-    uid: row.uid,
-    gid: row.gid,
-    atime: msToRfc3339(row.atimeMs),
-    nlink: row.nlink,
-    blocks: row.blocks,
+    mode: entry.mode,
+    uid: entry.uid,
+    gid: entry.gid,
+    atime: msToRfc3339(entry.atimeMs),
+    nlink: entry.nlink,
+    blocks: entry.blocks,
   })
 }
 
 /**
+ * The last name of a path on the mount, `/` for its root.
+ *
+ * @param path the path.
+ */
+export function leaf(path: PathSpec): string {
+  const last = rstripSlash(path.mountPath).split('/').pop() ?? ''
+  return last === '' ? '/' : last
+}
+
+/**
  * What find on a machine prints for a path and what is below it, the
- * path's own row first.
+ * path's own entry first.
  *
  * @param accessor the mount's machines.
  * @param machine the machine's name.
@@ -64,33 +74,33 @@ export function rowStat(name: string, row: TreeRow): FileStat {
  * @param depth 0 for the path alone, 1 for its children, null for
  *   everything below.
  */
-export async function rows(
+export async function entries(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
   depth: number | null,
-): Promise<TreeRow[]> {
+): Promise<PosixEntry[]> {
   const out = await checked(accessor, machine, treeCommand(remote(accessor, path), depth), path)
-  const found = parseTree(out)
+  const found = parseEntries(out)
   if (found?.[0]?.rel !== '') throw refusal(path, new Uint8Array())
   return found
 }
 
 /**
- * A path's row on one machine.
+ * A path's entry on one machine.
  *
  * @param accessor the mount's machines.
  * @param machine the machine's name.
  * @param path the path.
  */
-export async function statRow(
+export async function statEntry(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
-): Promise<TreeRow> {
-  const [row] = await rows(accessor, machine, path, 0)
-  if (row === undefined) throw refusal(path, new Uint8Array())
-  return row
+): Promise<PosixEntry> {
+  const [entry] = await entries(accessor, machine, path, 0)
+  if (entry === undefined) throw refusal(path, new Uint8Array())
+  return entry
 }
 
 /**
@@ -105,41 +115,7 @@ export async function stat(
   machine: string,
   path: PathSpec,
 ): Promise<FileStat> {
-  const last = rstripSlash(path.mountPath).split('/').pop() ?? ''
-  const name = last === '' ? '/' : last
-  return rowStat(name, await statRow(accessor, machine, path))
-}
-
-/**
- * Every entry under a directory on the machines that hold it, merged by
- * path, from one find on each, where a walk sends a listing per directory.
- * A machine whose find fails leaves the walk to readdir, which reports it.
- *
- * @param accessor the mount's machines.
- * @param machines the machines holding the directory.
- * @param path the directory.
- */
-export async function tree(
-  accessor: MachineAccessor,
-  machines: string[],
-  path: PathSpec,
-): Promise<Map<string, FileStat> | null> {
-  const found = await Promise.allSettled(machines.map((m) => rows(accessor, m, path, null)))
-  const merged = new Map<string, FileStat>()
-  for (const listed of found) {
-    if (listed.status === 'rejected') {
-      if (!(listed.reason instanceof Error) || !('code' in listed.reason)) throw listed.reason
-      console.debug(`${path.virtual}: one find failed; walking it instead:`, listed.reason)
-      return null
-    }
-    const [top, ...below] = listed.value
-    if (top?.kind !== 'd') return null
-    for (const row of below) {
-      if (!merged.has(row.rel))
-        merged.set(row.rel, rowStat(row.rel.split('/').pop() ?? row.rel, row))
-    }
-  }
-  return merged
+  return entryStat(leaf(path), await statEntry(accessor, machine, path))
 }
 
 /**

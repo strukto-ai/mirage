@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseTree, treeCommand } from './stat.ts'
+import { parseEntries, treeCommand } from './stat.ts'
 
 const ENC = new TextEncoder()
 
@@ -31,12 +31,12 @@ describe('treeCommand', () => {
   })
 })
 
-describe('parseTree', () => {
+describe('parseEntries', () => {
   it('reads each record', () => {
     const out = ENC.encode(
       'd 755 4096 1700000000.5 1700000001.0 0 0 2 8 \0f 644 3 1 2 1000 50 1 8 x y\0',
     )
-    expect(parseTree(out)).toEqual([
+    expect(parseEntries(out)).toEqual([
       {
         kind: 'd',
         mode: 0o755,
@@ -75,20 +75,20 @@ describe('parseTree', () => {
     ['1.', 1000],
     ['-1.5000000000', -1500],
   ])('keeps %s to the millisecond', (stamp, want) => {
-    const rows = parseTree(ENC.encode(`f 644 0 ${stamp} ${stamp} 0 0 1 0 x\0`))
-    expect(rows?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
+    const entries = parseEntries(ENC.encode(`f 644 0 ${stamp} ${stamp} 0 0 1 0 x\0`))
+    expect(entries?.map((r) => [r.mtimeMs, r.atimeMs])).toEqual([[want, want]])
   })
 
   // The whole seconds stay those SFTP reports, never rounded across a second
   // as the milliseconds are.
   it("keeps SFTP's whole seconds", () => {
-    const rows = parseTree(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 0 0 1 0 x\0'))
-    expect(rows?.map((r) => [r.mtime, r.mtimeMs])).toEqual([[1700000000, 1700000001000]])
+    const entries = parseEntries(ENC.encode('f 644 0 1700000000.9996 1700000000.9996 0 0 1 0 x\0'))
+    expect(entries?.map((r) => [r.mtime, r.mtimeMs])).toEqual([[1700000000, 1700000001000]])
   })
 
   it('refuses a cut record', () => {
-    expect(parseTree(ENC.encode('f 644 3 1 2 0 0 1 0 x'))).toBeNull()
-    expect(parseTree(ENC.encode('f 64z 3 1 2 0 0 1 0 x\0'))).toBeNull()
-    expect(parseTree(ENC.encode('f 644 3 1 2 root root 1 0 x\0'))).toBeNull()
+    expect(parseEntries(ENC.encode('f 644 3 1 2 0 0 1 0 x'))).toBeNull()
+    expect(parseEntries(ENC.encode('f 64z 3 1 2 0 0 1 0 x\0'))).toBeNull()
+    expect(parseEntries(ENC.encode('f 644 3 1 2 root root 1 0 x\0'))).toBeNull()
   })
 })

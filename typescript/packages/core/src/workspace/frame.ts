@@ -46,6 +46,11 @@ export class ExecutionFrame {
   // The pipe a pipeline stage reads, which a program the stage starts reads
   // too while its standard input is still that pipe.
   stdin: ByteSource | null = null
+  // The word naming the one program that writes that pipe (`gen | tee log`),
+  // null when the stage before is anything else, and in a pipeline with no
+  // process table: what the stage writes is about the machine that program
+  // runs on.
+  stdinProgram: string | null = null
   // The id of the command a job runs as a whole, whose redirects its shell
   // never puts back: it ends with the command, so bash keeps no copy of what
   // they replace.

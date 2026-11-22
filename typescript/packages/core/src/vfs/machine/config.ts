@@ -30,7 +30,7 @@ export const MachineVFSConfig = z.object({
     .string()
     .optional()
     .describe(
-      'Where a new name lands when the command writing it runs no program on a machine; unset is the machine that runs the programs nothing in Mirage resolves, else the first.',
+      'Where a new name lands when nothing says which machine its command is about; unset is the machine that runs the programs nothing in Mirage resolves, else the first.',
     ),
 })
 

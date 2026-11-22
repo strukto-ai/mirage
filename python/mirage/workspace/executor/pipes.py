@@ -60,6 +60,7 @@ from mirage.workspace.executor.background import (
     handle_background,
     one_program,
     program_text,
+    program_word,
     pump,
     report_reaped,
     run_program,
@@ -192,8 +193,14 @@ async def handle_pipe(
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
         input_stream = stdin if i == 0 else pipes[i - 1].stream()
+        fed_by = child_evaluation.frame.stdin_program
         if i > 0:
             child_evaluation.frame.stdin = input_stream
+            child_evaluation.frame.stdin_program = (
+                program_word(commands[i - 1], session)
+                if processes is not None
+                else None
+            )
         io = IOResult()
         child_exec = ExecutionNode()
         stage_stack = (
@@ -299,6 +306,7 @@ async def handle_pipe(
             child_nodes[i] = child_exec
             reset_caller(token)
             if in_parent:
+                child_evaluation.frame.stdin_program = fed_by
                 left = session.open_inputs()
                 (
                     session.exec_stdin,

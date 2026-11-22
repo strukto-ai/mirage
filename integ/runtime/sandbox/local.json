@@ -344,7 +344,7 @@
     },
     {
       "id": "tmp_on_two_machines",
-      "note": "Over two machines /tmp lists both, refuses a name on both as ambiguous, renames on the source's machine, and moves a copy onto the other machine through Mirage. A new name a machine's program writes lands on that machine; one no program decides lands on the first.",
+      "note": "Over two machines /tmp shows one tree. A name both hold reads as the copy written last, rm takes it off every machine, mv renames where the file is, and cp stays on the source's machine. A new name a machine's program writes lands on that machine; one Mirage makes lands where its folder is, else on the first.",
       "runtimes": [
         "docker"
       ],
@@ -406,9 +406,35 @@
         {
           "command": "cat $d/same.txt",
           "expect": {
-            "exit": 1,
+            "exit": 0,
+            "stdout": "s1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo s3 > \"$1/same.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
             "stdout": "",
-            "stderr_contains": "on several machines: docker, second"
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat $d/same.txt && stat -c %s $d/same.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "s3\n3\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo more >> $d/same.txt && dash -c 'cat \"$1/same.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "s3\nmore\n",
+            "stderr": ""
           }
         },
         {
@@ -429,10 +455,27 @@
           }
         },
         {
-          "command": "cp $d/c.txt $d/d.txt && dash -c 'cat \"$1/d.txt\"' dash $d",
+          "command": "cp $d/c.txt $d/d.txt && cat $d/d.txt",
           "expect": {
             "exit": 0,
             "stdout": "b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/d.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/d.txt\" || echo not-here' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "not-here\n",
             "stderr": ""
           }
         },
@@ -454,7 +497,200 @@
           }
         },
         {
+          "command": "dash -c 'mkdir \"$1/only\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo x > $d/only/f.txt && mkdir -p $d/only/sub/deep && ls $d/only",
+          "expect": {
+            "exit": 0,
+            "stdout": "f.txt\nsub\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/only/f.txt\" && test -d \"$1/only/sub/deep\" && echo there' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "x\nthere\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/only\" || echo not-here' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "not-here\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm $d/same.txt && ls $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "a.txt\nby.txt\nc.txt\nd.txt\nonly\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/same.txt\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'test -e \"$1/same.txt\" || echo gone' dash $d",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        },
+        {
           "command": "rm -r $d && dash -c 'test -e \"$1\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_hidden_name_on_two_machines",
+      "note": "A name the session hides stays hidden when both machines hold it: reads and removals say it is not there, a write is refused, neither copy changes, and lifting the hide shows the copy written last.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "dash"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "dash"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'rm -rf /tmp/mirage-two-hidden && mkdir /tmp/mirage-two-hidden && echo h2 > /tmp/mirage-two-hidden/secret.txt && echo p2 > /tmp/mirage-two-hidden/plain.txt'",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf /tmp/mirage-two-hidden && mkdir /tmp/mirage-two-hidden && echo h1 > /tmp/mirage-two-hidden/secret.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/tmp/mirage-two-hidden/secret.txt"
+              ]
+            }
+          }
+        },
+        {
+          "command": "ls /tmp/mirage-two-hidden",
+          "expect": {
+            "exit": 0,
+            "stdout": "plain.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /tmp/mirage-two-hidden/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: /tmp/mirage-two-hidden/secret.txt: No such file or directory\n"
+          }
+        },
+        {
+          "command": "stat /tmp/mirage-two-hidden/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "No such file or directory"
+          }
+        },
+        {
+          "command": "echo x > /tmp/mirage-two-hidden/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
+          }
+        },
+        {
+          "command": "rm /tmp/mirage-two-hidden/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "No such file or directory"
+          }
+        },
+        {
+          "command": "cat /tmp/mirage-two-hidden/plain.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "p2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "profile": {}
+        },
+        {
+          "command": "cat /tmp/mirage-two-hidden/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "h1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat /tmp/mirage-two-hidden/secret.txt'",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "h2\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r /tmp/mirage-two-hidden && dash -c 'test -e /tmp/mirage-two-hidden || echo gone'",
           "machine": "second",
           "expect": {
             "exit": 0,

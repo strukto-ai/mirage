@@ -35,6 +35,8 @@ async def test_tree_ops_run_one_line_each():
     await rename(accessor, "box", spec("/a"), spec("/b/c"), make_parent=True)
     await copy(accessor, "box", spec("/a"), spec("/b"))
     await dir_copy(accessor, "box", spec("/s"), spec("/t"))
+    await copy(accessor, "box", spec("/a"), spec("/n/b"), make_parent=True)
+    await dir_copy(accessor, "box", spec("/s"), spec("/n/t"), make_parent=True)
     assert box.lines == [
         "mkdir -p -- '/tmp/d'",
         "rm -- '/tmp/f'",
@@ -43,6 +45,9 @@ async def test_tree_ops_run_one_line_each():
         "mkdir -p -- '/tmp/b' && mv -T -- '/tmp/a' '/tmp/b/c'",
         "cp -T -- '/tmp/a' '/tmp/b'",
         "env LC_ALL=C cp -RL -- '/tmp/s' '/tmp/t' && echo copied",
+        "mkdir -p -- '/tmp/n' && cp -T -- '/tmp/a' '/tmp/n/b'",
+        "mkdir -p -- '/tmp/n' && env LC_ALL=C cp -RL -- '/tmp/s' '/tmp/n/t'"
+        " && echo copied",
     ]
 
 

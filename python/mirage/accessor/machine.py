@@ -68,6 +68,11 @@ class MachineAccessor(Accessor):
             )
         self._default = chosen or (default if default in names else names[0])
 
+    @property
+    def bound(self) -> bool:
+        """Whether the mount is in a workspace that has machines."""
+        return self._machines is not None and bool(self._machines.names())
+
     def names(self) -> list[str]:
         """The machines the mount shows, in the order ``machines:`` lists
         them.

@@ -18,7 +18,14 @@ import { checksum as machineChecksum } from '../../core/machine/checksum.ts'
 import { copy as machineCopy, dirCopy as machineDirCopy } from '../../core/machine/copy.ts'
 import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
-import { holder, holders, lands, stage } from '../../core/machine/place.ts'
+import {
+  chosen,
+  commandMachine,
+  holder,
+  holders,
+  kernelView,
+  writeMachine,
+} from '../../core/machine/place.ts'
 import { pwrite as machinePwrite } from '../../core/machine/pwrite.ts'
 import {
   firstLines as machineFirstLines,
@@ -26,26 +33,28 @@ import {
   lineCount as machineLineCount,
   read as machineRead,
 } from '../../core/machine/read.ts'
-import { readdir as machineReaddir } from '../../core/machine/readdir.ts'
+import { readdir as machineReaddir, tree as machineTree } from '../../core/machine/readdir.ts'
 import { rename as machineRename } from '../../core/machine/rename.ts'
 import { rmR as machineRmR } from '../../core/machine/rm.ts'
 import { rmdir as machineRmdir } from '../../core/machine/rmdir.ts'
 import { filesContaining as machineFilesContaining } from '../../core/machine/search.ts'
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
 import {
+  entryStat,
   hiddenOn,
+  leaf,
   restricted,
   stat as machineStat,
-  tree as machineTree,
 } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
+import type { Holder } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
+import { folderOf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import { eisdir, enoent, enotdir, enotempty, exdev } from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty, enotsup } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
-  FileType,
   PathSpec,
   VFSName,
   type CapacityResult,
@@ -65,12 +74,16 @@ import { MachineVFSConfig } from './config.ts'
  * already holds for the machine: what its programs read and write, without
  * serving or copying anything.
  *
- * On several machines each op picks where it acts: a name is read, removed
- * or renamed on the machine holding it, a new name lands on the machine
- * running the command's program, else on `defaultMachine`, and a directory
- * lists every machine's entries once. `"@<machine>"` in a mount table is
- * this VFS over that machine at the same path, so Mirage and the machine's
- * programs name a file the same way. Mirrors Python's `MachineVFS`.
+ * Over several machines the mount shows one tree, as one machine would hold
+ * it. A name several machines hold is the copy written last, for every look
+ * at it and every change to it; a removal or a rename takes the name off
+ * every machine; a new name lands where its folder is, on the machine the
+ * command is about when that machine holds the folder; and a directory
+ * lists every machine's entries once. No file is copied between machines to
+ * keep them alike: a program opens its own machine's disk, whatever another
+ * machine holds. `"@<machine>"` in a mount table is this VFS over that
+ * machine at the same path, so Mirage and the machine's programs name a
+ * file the same way. Mirrors Python's `MachineVFS`.
  */
 export class MachineVFS extends BaseVFS {
   override readonly name = VFSName.MACHINE
@@ -113,21 +126,34 @@ export class MachineVFS extends BaseVFS {
 
   override async readdir(path: PathSpec): Promise<FileStat[]> {
     const hidden = await hiddenOn(this.accessor, path)
-    const machines = this.accessor.names().filter((m) => !hidden.includes(m))
+    const own = kernelView(this.accessor, path)
+    const machines = this.accessor
+      .names()
+      .filter((m) => !hidden.includes(m) && (own === null || own === m))
     if (machines.length === 0) throw enoent(path)
     return machineReaddir(this.accessor, machines, path)
   }
 
+  override actsOn(): string | null {
+    if (!this.accessor.bound) return null
+    const names = this.accessor.names()
+    const [only] = names
+    if (names.length === 1 && only !== undefined) return only
+    return commandMachine(this.accessor)
+  }
+
+  override filesystem(): string {
+    if (!this.accessor.bound) return this.name
+    const machine = this.actsOn() ?? this.accessor.defaultMachine
+    return `${machine}:${rstripSlash(this.config.root ?? '/') || '/'}`
+  }
+
   override async stat(path: PathSpec): Promise<FileStat> {
     const held = await holders(this.accessor, path)
-    const [first] = held
-    if (first === undefined) throw enoent(path)
-    const running = stage(this.accessor)
-    return machineStat(
-      this.accessor,
-      running !== null && held.includes(running) ? running : first,
-      path,
-    )
+    if (held.length === 0) throw enoent(path)
+    const one = chosen(this.accessor, held)
+    if (one.entry === null) return machineStat(this.accessor, one.machine, path)
+    return entryStat(leaf(path), one.entry)
   }
 
   override async read(
@@ -157,7 +183,12 @@ export class MachineVFS extends BaseVFS {
 
   override async readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     if (restricted(path)) return null
-    return machineTree(this.accessor, await this.everywhere(path), path)
+    const held = await this.everywhere(path)
+    return machineTree(
+      this.accessor,
+      held.map((one) => one.machine),
+      path,
+    )
   }
 
   override async filesContaining(
@@ -167,7 +198,13 @@ export class MachineVFS extends BaseVFS {
   ): Promise<PathSpec[] | null> {
     if (restricted(path)) return null
     const held = await holders(this.accessor, path)
-    return machineFilesContaining(this.accessor, held, path, text, opts.ignoreCase)
+    return machineFilesContaining(
+      this.accessor,
+      held.map((one) => one.machine),
+      path,
+      text,
+      opts.ignoreCase,
+    )
   }
 
   override async write(
@@ -177,81 +214,118 @@ export class MachineVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    await machineWrite(this.accessor, await lands(this.accessor, path), path, data, false, atomic)
+    const machine = await writeMachine(this.accessor, path, { replaces: true })
+    await machineWrite(this.accessor, machine, path, data, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    await machineWrite(this.accessor, await lands(this.accessor, path), path, data, true)
+    await machineWrite(this.accessor, await writeMachine(this.accessor, path), path, data, true)
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    await machinePwrite(this.accessor, await lands(this.accessor, path), path, data, offset)
+    await machinePwrite(this.accessor, await writeMachine(this.accessor, path), path, data, offset)
   }
 
   override async create(path: PathSpec): Promise<void> {
-    await machineCreate(this.accessor, await lands(this.accessor, path), path)
+    await machineCreate(this.accessor, await writeMachine(this.accessor, path), path)
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    await machineTruncate(this.accessor, await lands(this.accessor, path), path, length, noCreate)
+    const machine = await writeMachine(this.accessor, path)
+    await machineTruncate(this.accessor, machine, path, length, noCreate)
   }
 
   override async mkdir(path: PathSpec, parents = false): Promise<void> {
-    await machineMkdir(this.accessor, await lands(this.accessor, path), path, parents)
+    const machine = await writeMachine(this.accessor, path, { parents })
+    await machineMkdir(this.accessor, machine, path, parents)
   }
 
   override async unlink(path: PathSpec): Promise<void> {
-    await machineUnlink(this.accessor, await holder(this.accessor, path), path)
+    // Every machine's copy goes, or an older one would show again; a folder
+    // another machine holds at the name is left alone.
+    const held = await this.everywhere(path)
+    const shown = chosen(this.accessor, held)
+    await machineUnlink(this.accessor, shown.machine, path)
+    for (const one of held) {
+      if (one !== shown && !one.folder) await machineUnlink(this.accessor, one.machine, path)
+    }
   }
 
   override async rmdir(path: PathSpec): Promise<void> {
-    for (const machine of await this.everywhere(path)) {
-      await machineRmdir(this.accessor, machine, path)
+    const held = await this.everywhere(path)
+    const shown = chosen(this.accessor, held)
+    await machineRmdir(this.accessor, shown.machine, path)
+    for (const one of held) {
+      if (one !== shown && one.folder) await machineRmdir(this.accessor, one.machine, path)
     }
   }
 
   override async rmR(path: PathSpec): Promise<void> {
-    for (const machine of await this.everywhere(path)) {
-      await machineRmR(this.accessor, machine, path)
+    for (const one of await this.everywhere(path)) {
+      await machineRmR(this.accessor, one.machine, path)
     }
   }
 
   override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    const machine = await holder(this.accessor, src)
+    const held = await this.everywhere(src)
+    const moved = chosen(this.accessor, held)
+    const folder = moved.folder
+    // A folder is renamed on every machine holding it, each keeping its own
+    // entries; a file on the machine whose copy it is, the other machines'
+    // copies of the old name going with it.
+    const movers = folder
+      ? held.filter((one) => one.folder).map((one) => one.machine)
+      : [moved.machine]
     const several = this.accessor.names().length > 1
-    const held = several ? await holders(this.accessor, dst) : []
-    const others = held.filter((m) => m !== machine)
-    let folder = false
-    if (others.length > 0) {
-      folder = (await machineStat(this.accessor, machine, src)).type === FileType.DIRECTORY
-      for (const other of others) {
-        const there = await machineStat(this.accessor, other, dst)
-        if ((there.type === FileType.DIRECTORY) !== folder)
-          throw folder ? enotdir(dst) : eisdir(dst)
-        if (folder && (await machineReaddir(this.accessor, [other], dst)).length > 0)
-          throw enotempty(dst)
-      }
+    const there = several ? await holders(this.accessor, dst) : []
+    const replaced = there.filter((one) => !movers.includes(one.machine))
+    for (const one of replaced) {
+      if (one.folder !== folder) throw folder ? enotdir(dst) : eisdir(dst)
+      if (folder && (await machineReaddir(this.accessor, [one.machine], dst)).length > 0)
+        throw enotempty(dst)
     }
-    const parents = several ? await holders(this.accessor, dst.dir) : []
-    await machineRename(
-      this.accessor,
-      machine,
-      src,
-      dst,
-      parents.length > 0 && !parents.includes(machine),
-    )
-    for (const other of others) {
-      if (folder) await machineRmdir(this.accessor, other, dst)
-      else await machineUnlink(this.accessor, other, dst)
+    const parents = several
+      ? (await holders(this.accessor, folderOf(dst))).map((one) => one.machine)
+      : []
+    for (const machine of movers) {
+      await machineRename(
+        this.accessor,
+        machine,
+        src,
+        dst,
+        parents.length > 0 && !parents.includes(machine),
+      )
+    }
+    for (const one of replaced) {
+      if (folder) await machineRmdir(this.accessor, one.machine, dst)
+      else await machineUnlink(this.accessor, one.machine, dst)
+    }
+    for (const one of held) {
+      if (!movers.includes(one.machine) && !one.folder)
+        await machineUnlink(this.accessor, one.machine, src)
     }
   }
 
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await machineCopy(this.accessor, await this.sameMachine(src, dst), src, dst)
+    // A copy never crosses: it is made where the source is, and is then the
+    // newest copy of its name.
+    const machine = await holder(this.accessor, src)
+    await machineCopy(this.accessor, machine, src, dst, await this.lacksFolder(machine, dst))
   }
 
   override async dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    await machineDirCopy(this.accessor, await this.sameMachine(src, dst), src, dst)
+    const held = await this.everywhere(src)
+    const [only] = held
+    // Each name under a folder several machines hold is copied where it is,
+    // one by one, so each stays the copy it was.
+    if (held.length > 1 || only === undefined) throw enotsup(this.name, 'dir_copy', src)
+    await machineDirCopy(
+      this.accessor,
+      only.machine,
+      src,
+      dst,
+      await this.lacksFolder(only.machine, dst),
+    )
   }
 
   override async setattr(
@@ -262,7 +336,11 @@ export class MachineVFS extends BaseVFS {
   }
 
   override capacity(): Promise<CapacityResult> {
-    return machineCapacity(this.accessor, PathSpec.fromStrPath(this.config.root ?? '/'))
+    return machineCapacity(
+      this.accessor,
+      this.actsOn() ?? this.accessor.defaultMachine,
+      PathSpec.fromStrPath(this.config.root ?? '/'),
+    )
   }
 
   override storageLocation(): string {
@@ -277,21 +355,31 @@ export class MachineVFS extends BaseVFS {
     return this.configState(MachineVFSConfig, this.config)
   }
 
-  /** The machines holding a directory, every one of which a removal reaches. */
-  private async everywhere(path: PathSpec): Promise<string[]> {
+  /**
+   * The machines holding a name, every one of which a removal or a rename
+   * reaches.
+   *
+   * @param path the name.
+   * @throws ENOENT when no machine holds it.
+   */
+  private async everywhere(path: PathSpec): Promise<Holder[]> {
     const held = await holders(this.accessor, path)
     if (held.length === 0) throw enoent(path)
     return held
   }
 
   /**
-   * The machine a copy runs on: the source's, when the copy lands there
-   * too; EXDEV otherwise, so the bytes move through Mirage as between two
-   * mounts.
+   * Whether a new name's folder is on other machines only, so the machine
+   * the name lands on makes the folder first.
+   *
+   * @param machine the machine the name lands on.
+   * @param path the new name.
    */
-  private async sameMachine(src: PathSpec, dst: PathSpec): Promise<string> {
-    const machine = await holder(this.accessor, src)
-    if ((await lands(this.accessor, dst)) !== machine) throw exdev(dst)
-    return machine
+  private async lacksFolder(machine: string, path: PathSpec): Promise<boolean> {
+    if (this.accessor.names().length === 1) return false
+    const folders = (await holders(this.accessor, folderOf(path)))
+      .filter((one) => one.folder)
+      .map((one) => one.machine)
+    return folders.length > 0 && !folders.includes(machine)
   }
 }

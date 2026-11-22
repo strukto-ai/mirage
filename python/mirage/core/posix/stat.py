@@ -14,8 +14,8 @@
 
 import logging
 
-from mirage.core.posix.constants import FIND, TREE_FORMAT
-from mirage.core.posix.types import TreeRow
+from mirage.core.posix.constants import ENTRY_FORMAT, FIND
+from mirage.core.posix.types import PosixEntry
 from mirage.utils.quote import single_quote
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def tree_command(scope: str, depth: int | None = None) -> str:
     """The find that lists ``scope`` and what is below it, links
-    followed, one ``TREE_FORMAT`` record per entry.
+    followed, one ``ENTRY_FORMAT`` record per entry.
 
     Args:
         scope (str): the path where the files are.
@@ -33,7 +33,7 @@ def tree_command(scope: str, depth: int | None = None) -> str:
     bound = "" if depth is None else f" -maxdepth {depth}"
     return (
         f"{FIND} {single_quote(scope)}{bound} "
-        f"-printf {single_quote(TREE_FORMAT)}"
+        f"-printf {single_quote(ENTRY_FORMAT)}"
     )
 
 
@@ -58,7 +58,7 @@ def _milliseconds(stamp: str) -> int:
     return (nanoseconds + 500_000) // 1_000_000
 
 
-def parse_tree(out: bytes) -> list[TreeRow] | None:
+def parse_entries(out: bytes) -> list[PosixEntry] | None:
     """The records a ``tree_command`` printed, None when the output is not
     whole records.
 
@@ -67,14 +67,14 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
     """
     if not out.endswith(b"\0"):
         return None
-    rows: list[TreeRow] = []
+    entries: list[PosixEntry] = []
     for record in out.split(b"\0")[:-1]:
         try:
             kind, mode, size, mtime, atime, uid, gid, nlink, blocks, rel = (
                 record.decode().split(" ", 9)
             )
-            rows.append(
-                TreeRow(
+            entries.append(
+                PosixEntry(
                     kind=kind,
                     mode=int(mode, 8),
                     size=int(size),
@@ -92,4 +92,4 @@ def parse_tree(out: bytes) -> list[TreeRow] | None:
         except (UnicodeDecodeError, ValueError) as exc:
             logger.debug("find record unread: %s", exc)
             return None
-    return rows
+    return entries

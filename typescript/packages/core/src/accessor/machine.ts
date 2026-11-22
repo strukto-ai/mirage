@@ -78,6 +78,11 @@ export class MachineAccessor extends Accessor {
     return this.chosen ?? names[0] ?? ''
   }
 
+  /** Whether the mount is in a workspace that has machines. */
+  get bound(): boolean {
+    return this.machines !== null && this.machines.names().length > 0
+  }
+
   /**
    * The handle of one of the mount's machines.
    *

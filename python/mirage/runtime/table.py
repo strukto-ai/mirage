@@ -557,6 +557,7 @@ def routed(
     entries: list[Runtime[Any]],
     bindings: Mapping[str, RuntimeIdentity | None],
     machine: str | None,
+    named: str | None = None,
 ) -> RouteDecision[RuntimeIdentity]:
     """The decision a policy's route places a line or a command on.
 
@@ -571,6 +572,8 @@ def routed(
             the route overlays: the static ones for a line, the line's
             own for a command.
         machine (str | None): the machine the route names.
+        named (str | None): the machine the placement it overlays
+            names, kept when the route names none.
 
     Raises:
         ValueError: no entry is the machine.
@@ -582,9 +585,13 @@ def routed(
             command: None for entry in entries for command in entry.captures
         }
         placed.update(bind_commands(kept))
+        named = None
     elif machine is not None:
         placed.update(machine_bindings_for(entries, machine))
-    return RouteDecision(bindings=placed, fallback=catch_all(entries))
+        named = machine
+    return RouteDecision(
+        bindings=placed, fallback=catch_all(entries), machine=named
+    )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

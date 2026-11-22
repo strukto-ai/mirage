@@ -3445,6 +3445,7 @@ export class Dispatcher {
       this.decisions,
       this.access,
       this.caller ?? undefined,
+      mount?.vfs.actsOn() ?? undefined,
     )
   }
 

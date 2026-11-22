@@ -14,10 +14,10 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { PathSpec } from '../../types.ts'
 import { refusal } from '../posix/errors.ts'
 import { joinRoot } from '../posix/utils.ts'
-import { norm } from '../../utils/path.ts'
+import { PathSpec } from '../../types.ts'
+import { norm, parent } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 
 /**
@@ -29,6 +29,23 @@ import { rstripSlash } from '../../utils/slash.ts'
 export function mountBase(path: PathSpec): string {
   const virtual = rstripSlash(path.virtual)
   return norm(virtual.slice(0, virtual.length - path.vfsPath.length) || '/')
+}
+
+/**
+ * The folder a name is in, on the same mount; the mount's root for a name
+ * at the root, and for the root itself.
+ *
+ * @param path a path on the mount.
+ */
+export function folderOf(path: PathSpec): PathSpec {
+  const key = path.vfsPath.replace(/^\/+|\/+$/g, '')
+  const virtual = key === '' ? mountBase(path) : parent(rstripSlash(path.virtual) || '/')
+  const cut = key.lastIndexOf('/')
+  return new PathSpec({
+    virtual,
+    directory: parent(virtual),
+    vfsPath: cut === -1 ? '' : key.slice(0, cut),
+  })
 }
 
 /**

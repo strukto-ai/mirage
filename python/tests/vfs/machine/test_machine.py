@@ -15,10 +15,12 @@
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy.base import Policy
+from mirage.runtime.types import RunAnswer
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.machine import ScriptedMachine
+from tests.fixtures.machine import ScriptedMachine, failed
 from tests.fixtures.machine_files import FakeFiles
 
 
@@ -71,11 +73,64 @@ async def test_a_listing_merges_both_machines():
 
 
 @pytest.mark.asyncio
-async def test_a_name_on_both_machines_is_refused_as_ambiguous():
-    ws = two(FakeFiles({"/tmp/x": b"a"}), FakeFiles({"/tmp/x": b"b"}))
+async def test_a_name_on_both_machines_is_the_copy_written_last():
+    a, b = FakeFiles({"/tmp/x": b"a"}), FakeFiles({"/tmp/x": b"b"})
+    ws = two(a, b)
+    assert await run(ws, "cat /tmp/x") == (0, "a", "")
+    b.answer("cat > /tmp/x", b"later")
+    assert await run(ws, "cat /tmp/x") == (0, "later", "")
+    assert await run(ws, "wc -c < /tmp/x") == (0, "5\n", "")
+    assert await run(ws, "stat -c %s /tmp/x") == (0, "5\n", "")
+    assert await run(ws, "ls -l /tmp | grep -c ' 5 '") == (0, "1\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_write_goes_to_the_copy_written_last():
+    a, b = FakeFiles({"/tmp/x": b"a"}), FakeFiles({"/tmp/x": b"b"})
+    ws = two(a, b)
+    b.answer("cat > /tmp/x", b"later")
+    assert (await run(ws, "echo more >> /tmp/x"))[0] == 0
+    assert (a.files["/tmp/x"], b.files["/tmp/x"]) == (b"a", b"latermore\n")
+    assert (await run(ws, "echo new > /tmp/x"))[0] == 0
+    assert (a.files["/tmp/x"], b.files["/tmp/x"]) == (b"a", b"new\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_rm_takes_the_name_off_every_machine():
+    a, b = FakeFiles({"/tmp/x": b"a"}), FakeFiles({"/tmp/x": b"b"})
+    ws = two(a, b)
+    assert await run(ws, "rm /tmp/x") == (0, "", "")
+    assert (a.files, b.files) == ({}, {})
     code, _, err = await run(ws, "cat /tmp/x")
-    assert code == 1
-    assert "on several machines: a, b" in err
+    assert (code, "No such file or directory" in err) == (1, True)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_mv_takes_the_old_name_off_every_machine():
+    a, b = FakeFiles({"/tmp/x": b"a"}), FakeFiles({"/tmp/x": b"b"})
+    ws = two(a, b)
+    b.answer("cat > /tmp/x", b"later")
+    assert (await run(ws, "mv /tmp/x /tmp/y"))[0] == 0
+    assert (a.files, b.files) == ({}, {"/tmp/y": b"later"})
+    assert await run(ws, "ls /tmp") == (0, "y\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_new_name_lands_where_its_folder_is():
+    a, b = FakeFiles(), FakeFiles({"/tmp/d/kept": b"k"})
+    ws = two(a, b)
+    assert (await run(ws, "echo hi > /tmp/d/new"))[0] == 0
+    assert (await run(ws, "mkdir -p /tmp/d/sub/deep"))[0] == 0
+    assert (await run(ws, "touch /tmp/top"))[0] == 0
+    assert (a.files, b.files) == (
+        {"/tmp/top": b""},
+        {"/tmp/d/kept": b"k", "/tmp/d/new": b"hi\n"},
+    )
+    assert ("/tmp/d" in a.dirs, "/tmp/d/sub/deep" in b.dirs) == (False, True)
     await ws.close()
 
 
@@ -102,7 +157,20 @@ async def test_mv_onto_another_machine_s_name_replaces_it():
 async def test_a_failed_mv_keeps_another_machine_s_folder():
     a, b = FakeFiles({"/tmp/src/f": b"x"}), FakeFiles()
     b.dirs.add("/tmp/dst")
-    ws = two(a, b)
+
+    def refusing(line, data):
+        if line.startswith("mv "):
+            return failed(b"mv: cannot move '/tmp/src': Permission denied\n")
+        return a.answer(line, data)
+
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", refusing),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
     assert (await run(ws, "mv -T /tmp/src /tmp/dst"))[0] == 1
     assert "/tmp/dst" in b.dirs
     await ws.close()
@@ -154,12 +222,32 @@ async def test_a_program_s_output_lands_on_the_machine_running_it():
 
 
 @pytest.mark.asyncio
-async def test_cp_onto_another_machine_moves_the_bytes_through_mirage():
+async def test_cp_stays_on_the_source_s_machine():
     a, b = FakeFiles(), FakeFiles({"/tmp/src": b"payload"})
     ws = two(a, b)
     assert (await run(ws, "cp /tmp/src /tmp/dst"))[0] == 0
-    assert a.files == {"/tmp/dst": b"payload"}
-    assert b.files == {"/tmp/src": b"payload"}
+    assert a.files == {}
+    assert b.files == {"/tmp/src": b"payload", "/tmp/dst": b"payload"}
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cp_onto_another_machine_s_name_makes_the_newest_copy():
+    a, b = FakeFiles({"/tmp/dst": b"old"}), FakeFiles({"/tmp/src": b"new"})
+    ws = two(a, b)
+    assert (await run(ws, "cp /tmp/src /tmp/dst"))[0] == 0
+    assert (a.files["/tmp/dst"], b.files["/tmp/dst"]) == (b"old", b"new")
+    assert await run(ws, "cat /tmp/dst") == (0, "new", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cp_into_a_folder_only_another_machine_holds_makes_it_there():
+    a, b = FakeFiles({"/tmp/d/kept": b"k"}), FakeFiles({"/tmp/src": b"s"})
+    ws = two(a, b)
+    assert (await run(ws, "cp /tmp/src /tmp/d/copy"))[0] == 0
+    assert b.files["/tmp/d/copy"] == b"s"
+    assert await run(ws, "ls /tmp/d") == (0, "copy\nkept\n", "")
     await ws.close()
 
 
@@ -243,4 +331,152 @@ async def test_machine_listing_and_removal_still_work_at_the_memory_cap():
     assert await run(ws, "ls /tmp") == (0, "old.log\n", "")
     assert await run(ws, "rm /tmp/old.log") == (0, "", "")
     assert "/tmp/old.log" not in a.files
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_named_machine_takes_the_new_names_mirage_makes():
+    a, b = FakeFiles(), FakeFiles()
+    ws = two(a, b)
+    assert (await ws.shell("touch /tmp/here")).exit_code == 0
+    assert (await ws.shell("touch /tmp/there", machine="b")).exit_code == 0
+    assert (await ws.shell("mkdir /tmp/d", machine="b")).exit_code == 0
+    assert (a.files, b.files) == ({"/tmp/here": b""}, {"/tmp/there": b""})
+    assert ("/tmp/d" in a.dirs, "/tmp/d" in b.dirs) == (False, True)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_one_machine_shows_takes_the_new_names_made_from_it():
+    a, b = FakeFiles(), FakeFiles({"/srv/kept": b"k"})
+    ws = two(a, b, mounts={"/srv": "@b"})
+    assert (await run(ws, "cd /srv && touch /tmp/from-b"))[0] == 0
+    assert (await run(ws, "cd /tmp && touch /tmp/from-tmp"))[0] == 0
+    assert (a.files, sorted(b.files)) == (
+        {"/tmp/from-tmp": b""},
+        ["/srv/kept", "/tmp/from-b"],
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folder_on_both_machines_moves_on_each():
+    a, b = FakeFiles({"/tmp/d/x": b"1"}), FakeFiles({"/tmp/d/y": b"2"})
+    ws = two(a, b)
+    assert (await run(ws, "mv /tmp/d /tmp/e"))[0] == 0
+    assert (a.files, b.files) == ({"/tmp/e/x": b"1"}, {"/tmp/e/y": b"2"})
+    assert await run(ws, "ls /tmp/e") == (0, "x\ny\n", "")
+    assert await run(ws, "ls /tmp") == (0, "e\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cp_r_of_a_folder_on_both_machines_copies_each_name_in_place():
+    a, b = FakeFiles({"/tmp/d/x": b"1"}), FakeFiles({"/tmp/d/y": b"2"})
+    ws = two(a, b)
+    assert (await run(ws, "cp -r /tmp/d /tmp/e"))[0] == 0
+    assert (a.files["/tmp/e/x"], b.files["/tmp/e/y"]) == (b"1", b"2")
+    assert await run(ws, "ls /tmp/e") == (0, "x\ny\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_df_names_the_machine_and_its_path():
+    said = (
+        b"Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+        b"overlay 100 40 60 40% /\n"
+    )
+
+    def with_df(files: FakeFiles):
+        def answer(line, data):
+            if line.startswith("df "):
+                return RunAnswer(0, said, b"")
+            return files.answer(line, data)
+
+        return answer
+
+    ws = Workspace(
+        {"/srv": "@b"},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", with_df(FakeFiles())),
+            "b": ScriptedMachine("b", with_df(FakeFiles({"/srv/k": b"k"}))),
+        },
+    )
+    code, out, _ = await run(ws, "df /srv /tmp")
+    assert code == 0
+    assert [line.split()[0] for line in out.splitlines()[1:]] == [
+        "b:/srv",
+        "a:/tmp",
+    ]
+    named = await ws.shell("df /tmp", machine="b")
+    assert (await named.stdout_str()).splitlines()[1].split()[0] == "b:/tmp"
+    await ws.close()
+
+
+class Seen(Policy):
+    def __init__(self) -> None:
+        self.machines: list[tuple[str, str | None]] = []
+
+    async def pre_vfs(self, ctx):
+        self.machines.append((ctx.path.virtual, ctx.machine))
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_file_policy_is_told_the_machine_a_call_acts_on():
+    seen = Seen()
+    a, b = FakeFiles(), FakeFiles({"/srv/kept": b"k"})
+    ws = two(
+        a,
+        b,
+        mounts={"/srv": "@b", "/data": RAMVFS()},
+        policies=[seen],
+    )
+    await ws.shell("cat /srv/kept; echo x > /data/f; touch /tmp/one")
+    await ws.shell("touch /tmp/two", machine="b")
+    told = dict(seen.machines)
+    assert told["/srv/kept"] == "b"
+    assert told["/data/f"] is None
+    assert told["/tmp/one"] is None
+    assert told["/tmp/two"] == "b"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_that_is_a_file_here_and_a_folder_there_is_the_newer():
+    a, b = FakeFiles({"/tmp/k": b"file"}), FakeFiles({"/tmp/k/in": b"1"})
+    ws = two(a, b)
+    a.answer("cat > /tmp/k", b"newer")
+    assert await run(ws, "cat /tmp/k") == (0, "newer", "")
+    assert await run(ws, "rm /tmp/k") == (0, "", "")
+    assert (a.files, b.files) == ({}, {"/tmp/k/in": b"1"})
+    assert await run(ws, "ls /tmp/k") == (0, "in\n", "")
+    code, _, err = await run(ws, "rm /tmp/k")
+    assert (code, "Is a directory" in err) == (1, True)
+    assert b.files == {"/tmp/k/in": b"1"}
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_a_machine_runs_whole_writes_where_mirage_writes():
+    a = FakeFiles({"/srv/k": b"k"}, programs=("cat",))
+    b = FakeFiles({"/tmp/kept": b"old"}, programs=("cat",))
+    ws = two(a, b, mounts={"/srv": "@a"})
+    line = "cd /srv && cat > /tmp/kept << 'EOF'\nnew\nEOF"
+    assert (await run(ws, line))[0] == 0
+    assert (b.files["/tmp/kept"], "/tmp/kept" in a.files) == (b"new\n", False)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_what_reads_a_program_s_pipe_writes_on_the_program_s_machine():
+    a, b = FakeFiles(), FakeFiles({"/srv/k": b"k"})
+    tmp = MachineVFS(MachineVFSConfig(root="/tmp", default_machine="b"))
+    ws = two(a, b, mounts={"/tmp": tmp, "/srv": "@b"})
+    assert (await run(ws, "echo x > /tmp/alone"))[0] == 0
+    assert (await run(ws, "gen | tee /tmp/piped"))[0] == 0
+    assert (await run(ws, "cd /srv && gen | tee /tmp/from-b"))[0] == 0
+    assert sorted(a.files) == ["/tmp/piped"]
+    assert sorted(b.files) == ["/srv/k", "/tmp/alone", "/tmp/from-b"]
     await ws.close()

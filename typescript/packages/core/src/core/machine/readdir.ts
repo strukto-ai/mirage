@@ -17,8 +17,40 @@ import { enotdir } from '../../errors/fs.ts'
 import type { FsError } from '../../errors/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import type { TreeRow } from '../posix/types.ts'
-import { rowStat, rows } from './stat.ts'
+import type { PosixEntry } from '../posix/types.ts'
+import { chosen } from './place.ts'
+import { entries, entryStat } from './stat.ts'
+import { Holder } from './types.ts'
+
+/**
+ * Every machine's entries below one directory as one listing, each name
+ * once: the entry of the machine every look at the name goes to (`chosen`).
+ *
+ * @param accessor the mount's machines.
+ * @param machines the machines listed, in order.
+ * @param listed what each printed, the directory's own entry left out.
+ */
+function merged(
+  accessor: MachineAccessor,
+  machines: string[],
+  listed: PosixEntry[][],
+): Map<string, PosixEntry> {
+  const held = new Map<string, Holder[]>()
+  for (const [at, found] of listed.entries()) {
+    const machine = machines[at] ?? ''
+    for (const entry of found) {
+      const copies = held.get(entry.rel) ?? []
+      copies.push(new Holder(machine, entry))
+      held.set(entry.rel, copies)
+    }
+  }
+  const picked = new Map<string, PosixEntry>()
+  for (const [rel, copies] of held) {
+    const { entry } = chosen(accessor, copies)
+    if (entry !== null) picked.set(rel, entry)
+  }
+  return picked
+}
 
 /**
  * A directory's children on every machine that holds it, each name once,
@@ -36,11 +68,11 @@ export async function readdir(
   pathSpec: PathSpec,
 ): Promise<FileStat[]> {
   const scope = pathSpec.pattern !== null ? pathSpec.dir : pathSpec
-  const found = await Promise.allSettled(machines.map((m) => rows(accessor, m, scope, 1)))
-  const merged = new Map<string, TreeRow>()
+  const found = await Promise.allSettled(machines.map((m) => entries(accessor, m, scope, 1)))
+  const listing: string[] = []
+  const listed: PosixEntry[][] = []
   let failure: FsError | null = null
-  let listed = false
-  for (const result of found) {
+  for (const [at, result] of found.entries()) {
     if (result.status === 'rejected') {
       const reason: unknown = result.reason
       const code = reason instanceof Error && 'code' in reason ? reason.code : null
@@ -57,11 +89,44 @@ export async function readdir(
       failure = enotdir(scope)
       continue
     }
-    listed = true
-    for (const row of below) if (!merged.has(row.rel)) merged.set(row.rel, row)
+    listing.push(machines[at] ?? '')
+    listed.push(below)
   }
-  if (!listed) throw failure ?? enotdir(scope)
-  return [...merged]
+  if (listing.length === 0) throw failure ?? enotdir(scope)
+  return [...merged(accessor, listing, listed)]
     .sort(([a], [b]) => compareCodePoints(a, b))
-    .map(([name, row]) => rowStat(name, row))
+    .map(([name, entry]) => entryStat(name, entry))
+}
+
+/**
+ * Every entry under a directory on the machines that hold it, merged by
+ * path as a listing merges them, from one find on each, where a walk sends
+ * a listing per directory. A machine whose find fails leaves the walk to
+ * readdir, which reports it.
+ *
+ * @param accessor the mount's machines.
+ * @param machines the machines holding the directory.
+ * @param path the directory.
+ */
+export async function tree(
+  accessor: MachineAccessor,
+  machines: string[],
+  path: PathSpec,
+): Promise<Map<string, FileStat> | null> {
+  const found = await Promise.allSettled(machines.map((m) => entries(accessor, m, path, null)))
+  const listed: PosixEntry[][] = []
+  for (const result of found) {
+    if (result.status === 'rejected') {
+      if (!(result.reason instanceof Error) || !('code' in result.reason)) throw result.reason
+      console.debug(`${path.virtual}: one find failed; walking it instead:`, result.reason)
+      return null
+    }
+    const [top, ...below] = result.value
+    if (top?.kind !== 'd') return null
+    listed.push(below)
+  }
+  const stats = new Map<string, FileStat>()
+  for (const [rel, entry] of merged(accessor, machines, listed))
+    stats.set(rel, entryStat(rel.split('/').pop() ?? rel, entry))
+  return stats
 }

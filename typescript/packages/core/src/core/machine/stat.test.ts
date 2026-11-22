@@ -14,21 +14,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { failed, ok, ScriptedMachine } from '../../../tests/fixtures/machine.ts'
-import { bound, DIR, ROW, spec } from '../../../tests/fixtures/machine_files.ts'
+import { bound, ROW, spec } from '../../../tests/fixtures/machine_files.ts'
 import { FileType } from '../../types.ts'
-import { rowStat, stat, tree } from './stat.ts'
+import { entryStat, leaf, stat } from './stat.ts'
 
-const ENC = new TextEncoder()
-
-function joined(...parts: (Uint8Array | string)[]): Uint8Array {
-  return ENC.encode(
-    parts.map((p) => (typeof p === 'string' ? p : new TextDecoder().decode(p))).join(''),
-  )
-}
-
-describe('rowStat', () => {
+describe('entryStat', () => {
   it("keeps the machine's kind, mode, times and owners", () => {
-    const row = {
+    const entry = {
       kind: 'f',
       mode: 0o640,
       size: 12,
@@ -42,7 +34,7 @@ describe('rowStat', () => {
       blocks: 8,
       rel: '',
     }
-    const got = rowStat('x.py', row)
+    const got = entryStat('x.py', entry)
     expect([got.type, got.size, got.mode, got.uid, got.gid]).toEqual([
       FileType.FILE,
       12,
@@ -62,7 +54,7 @@ describe('rowStat', () => {
     ['l', FileType.FILE, 7],
     ['s', FileType.FILE, 7],
   ])('maps %s', (kind, want, size) => {
-    const got = rowStat('n', {
+    const got = entryStat('n', {
       kind,
       mode: 0o755,
       size: 7,
@@ -100,13 +92,9 @@ describe('stat', () => {
   })
 })
 
-describe('tree', () => {
-  it('merges every machine and leaves a failure to the walk', async () => {
-    const a = new ScriptedMachine('a', () => ok(joined(DIR, 'f 644 1 0 0 0 0 1 0 x\0')))
-    const b = new ScriptedMachine('b', () => ok(joined(DIR, 'f 644 2 0 0 0 0 1 0 y\0')))
-    const rows = await tree(bound([a, b]), ['a', 'b'], spec('/d'))
-    expect([...(rows?.keys() ?? [])].sort()).toEqual(['x', 'y'])
-    const gone = new ScriptedMachine('gone', () => failed('find: lost\n'))
-    expect(await tree(bound([a, gone]), ['a', 'gone'], spec('/d'))).toBeNull()
+describe('leaf', () => {
+  it('names the last part and the root', () => {
+    expect(leaf(spec('/d/x.txt'))).toBe('x.txt')
+    expect(leaf(spec(''))).toBe('/')
   })
 })

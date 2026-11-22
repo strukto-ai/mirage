@@ -42,6 +42,13 @@ export interface RouteDecision<R extends RuntimeIdentity> {
    * then exit 126.
    */
   readonly fallback: R | null
+  /**
+   * The machine the line or the command names (`execute({ machine })`, a
+   * policy's `Route`), which a command Mirage runs itself is then about;
+   * absent when none is named, and for a route that keeps the line in
+   * Mirage.
+   */
+  readonly machine?: string
 }
 
 /**

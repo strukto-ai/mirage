@@ -22,8 +22,8 @@ RunFn: TypeAlias = Callable[[str], Awaitable[tuple[int | None, bytes, bytes]]]
 
 
 @dataclass(frozen=True, slots=True)
-class TreeRow:
-    """One entry of a ``TREE_FORMAT`` listing, as find printed it.
+class PosixEntry:
+    """One entry of a ``ENTRY_FORMAT`` listing, as find printed it.
 
     Args:
         kind (str): find's type letter (``f``, ``d``, ``l``, ``p``, ...).

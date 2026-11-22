@@ -51,14 +51,14 @@ describe('capacity', () => {
     const out =
       'Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100 40 60 40% /\n'
     const machine = new ScriptedMachine('box', () => ok(out))
-    expect(await capacity(bound([machine]), PathSpec.fromStrPath('/'))).toEqual({
+    expect(await capacity(bound([machine]), 'box', PathSpec.fromStrPath('/'))).toEqual({
       state: CapacityState.QUOTA,
       total: 102400,
       used: 40960,
       available: 61440,
     })
     const odd = new ScriptedMachine('odd', () => ok('what\n'))
-    expect((await capacity(bound([odd]), PathSpec.fromStrPath('/'))).state).toBe(
+    expect((await capacity(bound([odd]), 'odd', PathSpec.fromStrPath('/'))).state).toBe(
       CapacityState.UNKNOWN,
     )
   })

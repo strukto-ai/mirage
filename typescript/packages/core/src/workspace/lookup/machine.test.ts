@@ -172,10 +172,27 @@ describe('operand routing', () => {
     )
     expect(await out(ws, 'cat /tmp/a.py')).toBe('ran\n')
     expect([a.ran, b.ran]).toEqual([['cat /tmp/a.py'], []])
-    const both = await ws.shell('cat /tmp/both')
-    expect(both.exitCode).toBe(1)
-    expect(DEC.decode(both.stderr)).toContain('on several machines: a, b')
+    expect(await out(ws, 'cat /tmp/both')).toBe('1')
     expect([a.ran, b.ran]).toEqual([['cat /tmp/a.py'], []])
+    await ws.close()
+  })
+
+  it('keeps a name on two machines with Mirage from any folder', async () => {
+    const a = new FakeFiles({ '/srv/k': 'k', '/tmp/both': 'old' }, TOOLS)
+    const b = new FakeFiles({ '/tmp/both': 'b' }, TOOLS)
+    const ws = new Workspace(
+      { '/srv': '@a' },
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    b.answer('cat > /tmp/both', new TextEncoder().encode('new'))
+    expect(await out(ws, 'cd /srv && cat /tmp/both')).toBe('new')
+    expect(await out(ws, 'cd /srv && ls /tmp')).toBe('both\n')
+    expect([a.ran, b.ran]).toEqual([[], []])
+    expect(await out(ws, 'cd /srv && cat k')).toBe('ran\n')
+    expect([a.ran, b.ran]).toEqual([['cat k'], []])
     await ws.close()
   })
 
@@ -237,6 +254,37 @@ describe('operand routing', () => {
     await ws.shell('printf x | ln -s a.py /tmp/link')
     await ws.shell('readlink /tmp/link')
     expect(files.ran).toEqual(['ln -s a.py /tmp/link', 'readlink /tmp/link'])
+    await ws.close()
+  })
+
+  it('makes a link in a folder both machines hold on a machine', async () => {
+    const a = new FakeFiles({ '/tmp/a.py': 'x' }, ['ln'])
+    const b = new FakeFiles({ '/tmp/d/t': 't' }, ['ln'])
+    const first = new ScriptedMachine('a', a.answer)
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        machines: { a: first, b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    await ws.shell('ln -s /tmp/a.py /tmp/link')
+    await ws.shell('ln -s /tmp/d/t /tmp/d/link')
+    await ws.shell('ln -s /tmp/a.py /tmp/named', { machine: 'b' })
+    await ws.shell('ln -s /tmp/nowhere /tmp/dangling', { machine: 'b' })
+    await ws.shell('cd /tmp && ln -s a.py beside')
+    expect(first.cwds.at(-1)).toBe('/tmp')
+    await ws.shell('cd /data && ln -s /tmp/a.py /tmp/from-store')
+    expect(first.cwds.at(-1)).toBe('/')
+    await ws.shell('cd /data && ln -s /tmp/a.py ../tmp/typed-relative')
+    expect(a.ran).toEqual([
+      'ln -s /tmp/a.py /tmp/link',
+      'ln -s /tmp/a.py /tmp/named',
+      'ln -s a.py beside',
+      'ln -s /tmp/a.py /tmp/from-store',
+    ])
+    expect(b.ran).toEqual(['ln -s /tmp/d/t /tmp/d/link', 'ln -s /tmp/nowhere /tmp/dangling'])
+    expect(await out(ws, 'readlink /tmp/typed-relative')).toBe('/tmp/a.py\n')
     await ws.close()
   })
 

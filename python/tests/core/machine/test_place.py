@@ -19,10 +19,20 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
-from mirage.core.machine.place import holder, holders, lands, stage
+from mirage.core.machine.place import (
+    chosen,
+    command_machine,
+    holder,
+    holders,
+    kernel_view,
+    new_name_machine,
+    running_machine,
+    write_machine,
+)
+from mirage.core.machine.types import Holder
 from mirage.execution.types import MachineName
 from tests.fixtures.machine import ScriptedMachine
-from tests.fixtures.machine_files import bound, holding, spec
+from tests.fixtures.machine_files import FakeFiles, bound, holding, spec
 
 
 def running_on(name: str):
@@ -31,12 +41,16 @@ def running_on(name: str):
     )
 
 
+def preferring(name: str):
+    return bind_caller(current_caller().changed({"preferred_machine": name}))
+
+
 @pytest.mark.asyncio
 async def test_one_machine_asks_nothing():
     box = ScriptedMachine("box", holding())
     accessor = bound(box)
-    assert await holders(accessor, spec("/x")) == ["box"]
-    assert await lands(accessor, spec("/x")) == "box"
+    assert await holders(accessor, spec("/x")) == [Holder("box")]
+    assert await write_machine(accessor, spec("/x")) == "box"
     assert box.lines == []
 
 
@@ -51,32 +65,142 @@ async def test_a_name_is_read_where_it_is():
 
 
 @pytest.mark.asyncio
-async def test_a_name_on_two_machines_is_the_running_program_s_or_refused():
+async def test_a_name_on_two_machines_is_the_copy_written_last():
+    old = ScriptedMachine("old", holding("/tmp/x", written=1700000000))
+    new = ScriptedMachine("new", holding("/tmp/x", written=1700000009))
+    assert await holder(bound(old, new), spec("/x")) == "new"
+    assert await holder(bound(new, old), spec("/x")) == "new"
+    held = await holders(bound(old, new), spec("/x"))
+    assert [one.machine for one in held] == ["old", "new"]
+    assert [one.written for one in held] == [1700000000000, 1700000009000]
+
+
+@pytest.mark.asyncio
+async def test_a_newer_copy_wins_over_the_command_s_machine():
+    old = ScriptedMachine("old", holding("/tmp/x", written=1700000000))
+    new = ScriptedMachine("new", holding("/tmp/x", written=1700000009))
+    accessor = bound(old, new)
+    token = running_on("old")
+    try:
+        assert await holder(accessor, spec("/x")) == "new"
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_copies_written_together_go_to_the_command_s_machine():
     a = ScriptedMachine("a", holding("/tmp/x"))
     b = ScriptedMachine("b", holding("/tmp/x"))
     accessor = bound(a, b)
-    with pytest.raises(OSError, match="on several machines: a, b"):
-        await holder(accessor, spec("/x"))
+    assert await holder(accessor, spec("/x")) == "a"
     token = running_on("b")
     try:
-        assert stage(accessor) == "b"
+        assert running_machine(accessor) == "b"
+        assert command_machine(accessor) == "b"
+        assert await holder(accessor, spec("/x")) == "b"
+    finally:
+        reset_caller(token)
+    token = preferring("b")
+    try:
+        assert running_machine(accessor) is None
+        assert command_machine(accessor) == "b"
         assert await holder(accessor, spec("/x")) == "b"
     finally:
         reset_caller(token)
 
 
 @pytest.mark.asyncio
-async def test_a_new_name_lands_on_the_program_s_machine_else_the_default():
+async def test_a_program_s_machine_comes_before_the_preferred_one():
     a = ScriptedMachine("a", holding())
     b = ScriptedMachine("b", holding())
     accessor = bound(a, b)
-    assert accessor.default_machine == "a"
-    assert await lands(accessor, spec("/new")) == "a"
-    token = running_on("b")
+    token = bind_caller(
+        current_caller().changed(
+            {
+                "machine": MachineName("scripted", "b"),
+                "preferred_machine": "a",
+            }
+        )
+    )
     try:
-        assert await lands(accessor, spec("/new")) == "b"
+        assert command_machine(accessor) == "b"
     finally:
         reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_a_machine_off_the_mount_is_not_the_command_s():
+    a = ScriptedMachine("a", holding())
+    b = ScriptedMachine("b", holding())
+    accessor = bound(a, b, machines=("a",))
+    token = preferring("b")
+    try:
+        assert command_machine(accessor) is None
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_a_kernel_s_view_answers_for_the_command_s_machine():
+    a = ScriptedMachine("a", holding("/proc/cpuinfo", written=1700000000))
+    b = ScriptedMachine("b", holding("/proc/cpuinfo", written=1700000009))
+    accessor = bound(a, b, root="/")
+    path = spec("/proc/cpuinfo", prefix="")
+    assert kernel_view(accessor, path) == "a"
+    assert await holder(accessor, path) == "a"
+    assert b.lines == []
+    token = preferring("b")
+    try:
+        assert await holder(accessor, path) == "b"
+    finally:
+        reset_caller(token)
+    assert kernel_view(accessor, spec("/tmp/x", prefix="")) is None
+    assert kernel_view(bound(a, root="/"), path) is None
+
+
+def test_chosen_takes_the_only_holder_unasked():
+    a = ScriptedMachine("a", holding())
+    assert chosen(bound(a), [Holder("a")]) == Holder("a")
+
+
+@pytest.mark.asyncio
+async def test_a_new_name_lands_on_the_command_s_machine_else_the_default():
+    a = ScriptedMachine("a", FakeFiles().answer)
+    b = ScriptedMachine("b", FakeFiles().answer)
+    accessor = bound(a, b)
+    assert accessor.default_machine == "a"
+    assert await write_machine(accessor, spec("/new")) == "a"
+    for token in (running_on("b"), preferring("b")):
+        try:
+            assert await write_machine(accessor, spec("/new")) == "b"
+        finally:
+            reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_a_new_name_lands_where_its_folder_is():
+    a = ScriptedMachine("a", FakeFiles().answer)
+    b = ScriptedMachine("b", FakeFiles({"/tmp/d/kept": b"1"}).answer)
+    accessor = bound(a, b)
+    assert await new_name_machine(accessor, spec("/d/new")) == "b"
+    assert await write_machine(accessor, spec("/d/new")) == "b"
+    token = preferring("a")
+    try:
+        assert await write_machine(accessor, spec("/d/new")) == "b"
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_parents_look_up_to_the_nearest_folder_a_machine_holds():
+    a = ScriptedMachine("a", FakeFiles().answer)
+    b = ScriptedMachine("b", FakeFiles({"/tmp/g/kept": b"1"}).answer)
+    accessor = bound(a, b)
+    deep = spec("/g/sub/deep")
+    assert await write_machine(accessor, deep, parents=True) == "b"
+    assert await write_machine(accessor, deep) == "a"
+    fresh = spec("/fresh/sub/deep")
+    assert await write_machine(accessor, fresh, parents=True) == "a"
 
 
 @pytest.mark.asyncio
@@ -85,7 +209,27 @@ async def test_an_existing_name_is_written_where_it_is():
     b = ScriptedMachine("b", holding("/tmp/kept"))
     token = running_on("a")
     try:
-        assert await lands(bound(a, b), spec("/kept")) == "b"
+        assert await write_machine(bound(a, b), spec("/kept")) == "b"
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+async def test_what_a_program_replaces_lands_on_its_own_machine():
+    a = ScriptedMachine("a", holding())
+    b = ScriptedMachine("b", holding("/tmp/kept"))
+    accessor = bound(a, b)
+    assert await write_machine(accessor, spec("/kept"), replaces=True) == "b"
+    token = running_on("a")
+    try:
+        got = await write_machine(accessor, spec("/kept"), replaces=True)
+        assert got == "a"
+    finally:
+        reset_caller(token)
+    token = preferring("a")
+    try:
+        got = await write_machine(accessor, spec("/kept"), replaces=True)
+        assert got == "b"
     finally:
         reset_caller(token)
 

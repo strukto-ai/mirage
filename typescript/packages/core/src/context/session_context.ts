@@ -169,6 +169,12 @@ export interface Caller {
   // The machine the running command's program runs on, where a name its
   // redirects make lands; null for a command Mirage runs itself.
   readonly machine: MachineName | null
+  // The machine a command Mirage runs itself is about, by its name under
+  // `machines:`: the one the line names, else the one whose program writes
+  // the pipe it reads, else the one its folder is on. A new name it makes
+  // lands there, and of copies written at the same time it takes that
+  // machine's; null when nothing says.
+  readonly preferredMachine: string | null
   // Whether the running program's stderr goes where its stdout goes
   // (`2>&1`), so a machine joins the two where the program writes them.
   readonly joinsErrors: boolean
@@ -229,6 +235,7 @@ const UNBOUND: Caller = {
   streamed: [],
   outputFile: null,
   machine: null,
+  preferredMachine: null,
   joinsErrors: false,
 }
 

@@ -134,10 +134,12 @@ import {
 } from '../lookup/lookup.ts'
 import {
   binProgram,
+  folderMachine,
   linkMachine,
   operandMachine,
   programMachine,
   severalMachines,
+  writerMachine,
 } from '../lookup/machine.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -992,7 +994,7 @@ async function runArgv(
         if (answer === null || here === undefined) return
         let routing: RouteDecision<Runtime>
         try {
-          routing = routed(registry.runtimeEntries, here.bindings, answer.machine)
+          routing = routed(registry.runtimeEntries, here.bindings, answer.machine, here.machine)
         } catch (caught) {
           throw new RouteError(caught instanceof Error ? caught.message : String(caught), {
             cause: caught,
@@ -1155,21 +1157,65 @@ async function runArgv(
       ? runner(runRedirected, guard, name, argv.args)
       : runRedirected(stdin, sink, redirects)
   // A name the command's redirects make lands on the machine its program
-  // runs on (`python gen.py > /tmp/out`), or the machine a command runs on
-  // whole because its files are that machine's (`/tmp/tool > /tmp/out`),
-  // which matters only over several machines, so only then is it asked
-  // before the redirects open, once the command is admitted: a refused one
-  // never reaches a machine.
+  // runs on (`python gen.py > /tmp/out`), or the machine a program named by
+  // its path runs on because the file is that machine's
+  // (`/tmp/tool > /tmp/out`), which matters only over several machines, so
+  // only then is it asked before the redirects open, once the command is
+  // admitted: a refused one never reaches a machine. A command of Mirage's
+  // own that a machine runs whole (`cat > /tmp/out`) is no program of that
+  // machine: what it writes goes where Mirage's own writes go.
   let machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
-  if ((runner !== null || redirects.length > 0) && severalMachines(registry)) {
+  if (
+    name.includes('/') &&
+    (runner !== null || redirects.length > 0) &&
+    severalMachines(registry)
+  ) {
     const denied = await guard([], stdin)
     if (denied !== null) return denied
     const [held] = await heldMachine(argv, deps, context, stdin)
     if (held?.runtime) machine = held.runtime.machine
   }
+  const preferred = preferredMachine(
+    session,
+    registry,
+    context.frame.routing,
+    context.frame.stdinProgram,
+  )
   const outer = currentCaller()
-  if ((machine?.toString() ?? null) === (outer.machine?.toString() ?? null)) return run()
-  return bindCaller({ ...outer, machine }, run)
+  if (
+    (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
+    preferred === outer.preferredMachine
+  )
+    return run()
+  return bindCaller({ ...outer, machine, preferredMachine: preferred }, run)
+}
+
+/**
+ * The machine a command Mirage runs itself is about
+ * (`Caller.preferredMachine`): the one the line names, else the one whose
+ * program writes the pipe it reads, else the one its folder is on; null when
+ * nothing says, and in a workspace that runs programs on one machine, where
+ * nothing is to choose. Mirrors Python's `_preferred_machine`.
+ *
+ * @param session the session.
+ * @param registry the mount registry.
+ * @param routing the line's placement.
+ * @param feeder the word naming the program that writes the pipe the command
+ *   reads.
+ */
+function preferredMachine(
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  feeder: string | null,
+): string | null {
+  if (routing === undefined || !severalMachines(registry)) return null
+  if (routing.machine !== undefined) return routing.machine
+  const writer =
+    feeder === null || feeder === ''
+      ? null
+      : writerMachine(programRuntime(registry, [feeder], session, routing), session.cwd, registry)
+  return writer ?? folderMachine(session.cwd, registry)
 }
 
 /**
@@ -1598,7 +1644,7 @@ async function runResolved(
       flags: LnFlags,
     ): Promise<RedirectResult | null> => {
       if (routing === undefined) return null
-      const machine = await linkMachine(
+      const onMachine = await linkMachine(
         plans.map((plan) => [
           plan.linkAbs,
           resolvePath(wordText(plan.source), flags.symbolic ? parent(plan.linkAbs) : session.cwd),
@@ -1607,9 +1653,23 @@ async function runResolved(
         session,
         registry,
         namespace.sessionLinks(session),
+        plans.every(
+          (plan) =>
+            plan.linkTyped.startsWith('/') &&
+            (flags.symbolic || wordText(plan.source).startsWith('/')),
+        ),
       )
-      if (machine === null) return null
-      return runExternal(argv, null, session, registry, machine, signal, sink)
+      if (onMachine === null) return null
+      return runExternal(
+        argv,
+        null,
+        session,
+        registry,
+        onMachine.runtime,
+        signal,
+        sink,
+        onMachine.cwd,
+      )
     }
 
     return runNamespaceProgram(

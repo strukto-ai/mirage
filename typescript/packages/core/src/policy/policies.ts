@@ -416,7 +416,7 @@ export async function preVfsGate(
   prefix: string,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<VfsContext, 'mode' | 'access' | 'gate'> & {
+  access: Pick<VfsContext, 'mode' | 'access' | 'gate' | 'machine'> & {
     decisions?: Decisions | null
     final?: boolean
     caller?: Caller
@@ -434,6 +434,7 @@ export async function preVfsGate(
       sessionId,
       ...(issuer !== undefined ? { issuer } : {}),
       ...context,
+      machine: context.machine ?? null,
       caller: policyCaller((caller ?? currentCaller()).session, policies.account),
     }
     const decide = (): Promise<VfsExplanation> =>
@@ -461,6 +462,7 @@ export async function preVfsGate(
     sessionId,
     ...(issuer !== undefined ? { issuer } : {}),
     ...context,
+    machine: context.machine ?? null,
     caller: policyCaller((caller ?? currentCaller()).session, policies.account),
   }
   const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, !wants))
@@ -506,7 +508,7 @@ export async function postVfsGate(
   result: unknown,
   sessionId = '',
   issuer?: symbol,
-  access: Pick<VfsContext, 'mode' | 'access'> & {
+  access: Pick<VfsContext, 'mode' | 'access' | 'machine'> & {
     decisions?: Decisions | null
     caller?: Caller
   } = {},
@@ -525,6 +527,7 @@ export async function postVfsGate(
     sessionId,
     ...(issuer !== undefined ? { issuer } : {}),
     ...context,
+    machine: context.machine ?? null,
     caller: policyCaller((caller ?? currentCaller()).session, policies.account),
     result,
   }

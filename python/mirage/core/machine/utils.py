@@ -17,7 +17,7 @@ from mirage.core.posix.errors import refusal
 from mirage.core.posix.utils import join_root
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
-from mirage.utils.path import norm
+from mirage.utils.path import norm, parent
 
 
 def remote(accessor: MachineAccessor, path: PathSpec) -> str:
@@ -38,6 +38,20 @@ def mount_base(path: PathSpec) -> str:
     """
     virtual = path.virtual.rstrip("/")
     return norm(virtual[: len(virtual) - len(path.vfs_path)] or "/")
+
+
+def folder_of(path: PathSpec) -> PathSpec:
+    """The folder a name is in, on the same mount; the mount's root for
+    a name at the root, and for the root itself.
+
+    Args:
+        path (PathSpec): a path on the mount.
+    """
+    virtual = parent(path.virtual.rstrip("/") or "/")
+    key = path.vfs_path.strip("/").rpartition("/")[0]
+    if not path.vfs_path.strip("/"):
+        virtual = mount_base(path)
+    return PathSpec(virtual=virtual, directory=parent(virtual), vfs_path=key)
 
 
 def virtual_of(

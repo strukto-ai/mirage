@@ -49,6 +49,7 @@ import {
   handleBackground,
   oneProgram,
   programText,
+  programWord,
   pump,
   reportReaped,
   runProgram,
@@ -154,7 +155,13 @@ export async function handlePipe(
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
     const input = i === 0 ? stdin : (upstream?.stream() ?? null)
-    if (i > 0) childEvaluation.frame.stdin = input
+    const fedBy = childEvaluation.frame.stdinProgram
+    const before = commands[i - 1]
+    if (i > 0) {
+      childEvaluation.frame.stdin = input
+      childEvaluation.frame.stdinProgram =
+        before === undefined || processes === undefined ? null : programWord(before, session)
+    }
     const run = async (): Promise<void> => {
       let io = new IOResult()
       let childExec = new ExecutionNode({ command: cmd.text })
@@ -246,6 +253,7 @@ export async function handlePipe(
         childNodes[i] = childExec
         if (failed) await discardIo(io)
         if (inParent) {
+          childEvaluation.frame.stdinProgram = fedBy
           const left = session.openInputs()
           Object.assign(session, fd0)
           if (descriptor === undefined) session.descriptors.delete(FD_STDIN)

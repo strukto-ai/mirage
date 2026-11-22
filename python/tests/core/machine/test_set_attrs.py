@@ -54,7 +54,7 @@ async def test_capacity_reads_df():
         b"overlay 100 40 60 40% /\n"
     )
     box = ScriptedMachine("box", lambda line, data: ok(out))
-    got = await capacity(bound(box), PathSpec.from_str_path("/"))
+    got = await capacity(bound(box), "box", PathSpec.from_str_path("/"))
     assert (got.state, got.total, got.used, got.available) == (
         CapacityState.QUOTA,
         102400,
@@ -62,5 +62,5 @@ async def test_capacity_reads_df():
         61440,
     )
     odd = ScriptedMachine("odd", lambda line, data: ok(b"what\n"))
-    got = await capacity(bound(odd), PathSpec.from_str_path("/"))
+    got = await capacity(bound(odd), "odd", PathSpec.from_str_path("/"))
     assert got.state is CapacityState.UNKNOWN

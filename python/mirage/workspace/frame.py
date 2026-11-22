@@ -42,6 +42,10 @@ class ExecutionFrame:
     bash's inherit the descriptor.
     ``stdin`` is the pipe a pipeline stage reads, which a program the
     stage starts reads too while its standard input is still that pipe.
+    ``stdin_program`` is the word naming the one program that writes that
+    pipe (``gen | tee log``), None when the stage before is anything
+    else, and in a pipeline with no process table: what the stage writes
+    is about the machine that program runs on.
     ``ending`` is the id of the command a job runs as a whole, whose
     redirects its shell never puts back: it ends with the command, so
     bash keeps no copy of what they replace.
@@ -61,6 +65,7 @@ class ExecutionFrame:
     substitution: bool = False
     writers: list[tuple[str | None, int]] = field(default_factory=list)
     stdin: ByteSource | None = None
+    stdin_program: str | None = None
     ending: int | None = None
 
     def fork(self) -> ExecutionFrame:

@@ -176,10 +176,12 @@ from mirage.workspace.lookup.lookup import (
 )
 from mirage.workspace.lookup.machine import (
     bin_program,
+    folder_machine,
     link_machine,
     operand_machine,
     program_machine,
     several_machines,
+    writer_machine,
 )
 from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.mount import MountRegistry
@@ -1015,7 +1017,10 @@ async def _run_argv(
                 return
             try:
                 context.frame.routing = routed(
-                    registry.runtime_entries, here.bindings, route.machine
+                    registry.runtime_entries,
+                    here.bindings,
+                    route.machine,
+                    here.machine,
                 )
             except ValueError as exc:
                 raise RouteError(str(exc)) from exc
@@ -1162,14 +1167,21 @@ async def _run_argv(
 
     # A name the command's redirects make lands on the machine its
     # program runs on (``python gen.py > /tmp/out``), or the machine a
-    # command runs on whole because its files are that machine's
-    # (``/tmp/tool > /tmp/out``), which matters only over several
-    # machines, so only then is it asked before the redirects open, once
-    # the command is admitted: a refused one never reaches a machine.
+    # program named by its path runs on because the file is that
+    # machine's (``/tmp/tool > /tmp/out``), which matters only over
+    # several machines, so only then is it asked before the redirects
+    # open, once the command is admitted: a refused one never reaches a
+    # machine. A command of Mirage's own that a machine runs whole
+    # (``cat > /tmp/out``) is no program of that machine: what it
+    # writes goes where Mirage's own writes go.
     machine = _stage_machine(
         name, argv.args, session, registry, context.frame.routing
     )
-    if (runner is not None or redirects) and several_machines(registry):
+    if (
+        "/" in name
+        and (runner is not None or redirects)
+        and several_machines(registry)
+    ):
         denied = await guard((), stdin)
         if denied is not None:
             return denied
@@ -1179,9 +1191,17 @@ async def _run_argv(
             if held is None or held.runtime is None
             else held.runtime.machine
         )
+    preferred = _preferred_machine(
+        session, registry, context.frame.routing, context.frame.stdin_program
+    )
+    caller = current_caller()
     staged = (
-        bind_caller(current_caller().changed({"machine": machine}))
-        if machine != current_caller().machine
+        bind_caller(
+            caller.changed(
+                {"machine": machine, "preferred_machine": preferred}
+            )
+        )
+        if (machine, preferred) != (caller.machine, caller.preferred_machine)
         else None
     )
     try:
@@ -1247,6 +1267,41 @@ def _stage_machine(
     if getattr(runtime, "reach", "workspace") == "workspace":
         return None
     return None if runtime is None else runtime.machine
+
+
+def _preferred_machine(
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    feeder: str | None,
+) -> str | None:
+    """The machine a command Mirage runs itself is about
+    (``Caller.preferred_machine``): the one the line names, else the one
+    whose program writes the pipe it reads, else the one its folder is
+    on; None when nothing says, and in a workspace that runs programs on
+    one machine, where nothing is to choose.
+
+    Args:
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        routing (RouteDecision | None): the line's placement.
+        feeder (str | None): the word naming the program that writes the
+            pipe the command reads.
+    """
+    if routing is None or not several_machines(registry):
+        return None
+    if routing.machine is not None:
+        return routing.machine
+    writer = (
+        writer_machine(
+            program_runtime(registry, [feeder], session, routing),
+            session.cwd,
+            registry,
+        )
+        if feeder
+        else None
+    )
+    return writer or folder_machine(session.cwd, registry)
 
 
 async def _held_machine(
@@ -1894,7 +1949,7 @@ async def run_resolved(
             # its programs follow them.
             if routing is None:
                 return None
-            machine = await link_machine(
+            on_machine = await link_machine(
                 [
                     (
                         plan.link_abs,
@@ -1911,16 +1966,25 @@ async def run_resolved(
                 session,
                 registry,
                 namespace.session_links(session),
+                all(
+                    plan.link_typed.startswith("/")
+                    and (
+                        flags.symbolic
+                        or word_text(plan.source).startswith("/")
+                    )
+                    for plan in plans
+                ),
             )
-            if machine is None:
+            if on_machine is None:
                 return None
             return await run_external(
                 argv,
                 None,
                 session,
                 registry,
-                machine,
+                on_machine.runtime,
                 sink,
+                on_machine.cwd,
             )
 
         return await _run_namespace_program(

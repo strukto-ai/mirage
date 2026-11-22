@@ -18,8 +18,8 @@
  */
 export type RunFn = (command: string) => Promise<[number | null, Uint8Array, Uint8Array]>
 
-/** One entry of a `TREE_FORMAT` listing, as find printed it. */
-export interface TreeRow {
+/** One entry of a `ENTRY_FORMAT` listing, as find printed it. */
+export interface PosixEntry {
   /** find's type letter (`f`, `d`, `l`, `p`, ...). */
   readonly kind: string
   /** The permission bits. */

@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ScriptedMachine } from '../../../tests/fixtures/machine.ts'
+import { failed, ok, ScriptedMachine, type Answer } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles } from '../../../tests/fixtures/machine_files.ts'
+import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import type { MountSpec } from '../../workspace/workspace/types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -22,6 +23,7 @@ import { RAMVFS } from '../ram/ram.ts'
 import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
+const ENC = new TextEncoder()
 
 function two(
   a: FakeFiles,
@@ -65,11 +67,65 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it('refuses a name on both machines as ambiguous', async () => {
-    const ws = two(new FakeFiles({ '/tmp/x': 'a' }), new FakeFiles({ '/tmp/x': 'b' }))
+  it('takes a name on both machines from the copy written last', async () => {
+    const a = new FakeFiles({ '/tmp/x': 'a' })
+    const b = new FakeFiles({ '/tmp/x': 'b' })
+    const ws = two(a, b)
+    expect(await run(ws, 'cat /tmp/x')).toEqual([0, 'a', ''])
+    b.answer('cat > /tmp/x', ENC.encode('later'))
+    expect(await run(ws, 'cat /tmp/x')).toEqual([0, 'later', ''])
+    expect(await run(ws, 'wc -c < /tmp/x')).toEqual([0, '5\n', ''])
+    expect(await run(ws, 'stat -c %s /tmp/x')).toEqual([0, '5\n', ''])
+    expect(await run(ws, "ls -l /tmp | grep -c ' 5 '")).toEqual([0, '1\n', ''])
+    await ws.close()
+  })
+
+  it('sends a write to the copy written last', async () => {
+    const a = new FakeFiles({ '/tmp/x': 'a' })
+    const b = new FakeFiles({ '/tmp/x': 'b' })
+    const ws = two(a, b)
+    b.answer('cat > /tmp/x', ENC.encode('later'))
+    expect((await run(ws, 'echo more >> /tmp/x'))[0]).toBe(0)
+    expect([texts(a)['/tmp/x'], texts(b)['/tmp/x']]).toEqual(['a', 'latermore\n'])
+    expect((await run(ws, 'echo new > /tmp/x'))[0]).toBe(0)
+    expect([texts(a)['/tmp/x'], texts(b)['/tmp/x']]).toEqual(['a', 'new\n'])
+    await ws.close()
+  })
+
+  it('takes the name off every machine on rm', async () => {
+    const a = new FakeFiles({ '/tmp/x': 'a' })
+    const b = new FakeFiles({ '/tmp/x': 'b' })
+    const ws = two(a, b)
+    expect(await run(ws, 'rm /tmp/x')).toEqual([0, '', ''])
+    expect([texts(a), texts(b)]).toEqual([{}, {}])
     const [code, , err] = await run(ws, 'cat /tmp/x')
-    expect(code).toBe(1)
-    expect(err).toContain('on several machines: a, b')
+    expect([code, err.includes('No such file or directory')]).toEqual([1, true])
+    await ws.close()
+  })
+
+  it('takes the old name off every machine on mv', async () => {
+    const a = new FakeFiles({ '/tmp/x': 'a' })
+    const b = new FakeFiles({ '/tmp/x': 'b' })
+    const ws = two(a, b)
+    b.answer('cat > /tmp/x', ENC.encode('later'))
+    expect((await run(ws, 'mv /tmp/x /tmp/y'))[0]).toBe(0)
+    expect([texts(a), texts(b)]).toEqual([{}, { '/tmp/y': 'later' }])
+    expect(await run(ws, 'ls /tmp')).toEqual([0, 'y\n', ''])
+    await ws.close()
+  })
+
+  it('lands a new name where its folder is', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/d/kept': 'k' })
+    const ws = two(a, b)
+    expect((await run(ws, 'echo hi > /tmp/d/new'))[0]).toBe(0)
+    expect((await run(ws, 'mkdir -p /tmp/d/sub/deep'))[0]).toBe(0)
+    expect((await run(ws, 'touch /tmp/top'))[0]).toBe(0)
+    expect([texts(a), texts(b)]).toEqual([
+      { '/tmp/top': '' },
+      { '/tmp/d/kept': 'k', '/tmp/d/new': 'hi\n' },
+    ])
+    expect([a.dirs.has('/tmp/d'), b.dirs.has('/tmp/d/sub/deep')]).toEqual([false, true])
     await ws.close()
   })
 
@@ -96,7 +152,20 @@ describe('MachineVFS', () => {
     const a = new FakeFiles({ '/tmp/src/f': 'x' })
     const b = new FakeFiles()
     b.dirs.add('/tmp/dst')
-    const ws = two(a, b)
+    const refusing: Answer = (line, data) =>
+      line.startsWith('mv ')
+        ? failed("mv: cannot move '/tmp/src': Permission denied\n")
+        : a.answer(line, data)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          a: new ScriptedMachine('a', refusing),
+          b: new ScriptedMachine('b', b.answer),
+        },
+      },
+    )
     expect((await run(ws, 'mv -T /tmp/src /tmp/dst'))[0]).toBe(1)
     expect(b.dirs.has('/tmp/dst')).toBe(true)
     await ws.close()
@@ -148,13 +217,33 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it('moves the bytes through Mirage for a cp onto another machine', async () => {
+  it("keeps cp on the source's machine", async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/src': 'payload' })
     const ws = two(a, b)
     expect((await run(ws, 'cp /tmp/src /tmp/dst'))[0]).toBe(0)
-    expect(texts(a)).toEqual({ '/tmp/dst': 'payload' })
-    expect(texts(b)).toEqual({ '/tmp/src': 'payload' })
+    expect(texts(a)).toEqual({})
+    expect(texts(b)).toEqual({ '/tmp/src': 'payload', '/tmp/dst': 'payload' })
+    await ws.close()
+  })
+
+  it("makes the newest copy with a cp onto another machine's name", async () => {
+    const a = new FakeFiles({ '/tmp/dst': 'old' })
+    const b = new FakeFiles({ '/tmp/src': 'new' })
+    const ws = two(a, b)
+    expect((await run(ws, 'cp /tmp/src /tmp/dst'))[0]).toBe(0)
+    expect([texts(a)['/tmp/dst'], texts(b)['/tmp/dst']]).toEqual(['old', 'new'])
+    expect(await run(ws, 'cat /tmp/dst')).toEqual([0, 'new', ''])
+    await ws.close()
+  })
+
+  it('makes a folder only another machine holds for a cp into it', async () => {
+    const a = new FakeFiles({ '/tmp/d/kept': 'k' })
+    const b = new FakeFiles({ '/tmp/src': 's' })
+    const ws = two(a, b)
+    expect((await run(ws, 'cp /tmp/src /tmp/d/copy'))[0]).toBe(0)
+    expect(texts(b)['/tmp/d/copy']).toBe('s')
+    expect(await run(ws, 'ls /tmp/d')).toEqual([0, 'copy\nkept\n', ''])
     await ws.close()
   })
 
@@ -239,6 +328,139 @@ describe('MachineVFS', () => {
     expect(await run(ws, 'ls /tmp')).toEqual([0, 'old.log\n', ''])
     expect(await run(ws, 'rm /tmp/old.log')).toEqual([0, '', ''])
     expect(a.files.has('/tmp/old.log')).toBe(false)
+    await ws.close()
+  })
+
+  it('gives a named machine the new names Mirage makes', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles()
+    const ws = two(a, b)
+    expect((await ws.shell('touch /tmp/here')).exitCode).toBe(0)
+    expect((await ws.shell('touch /tmp/there', { machine: 'b' })).exitCode).toBe(0)
+    expect((await ws.shell('mkdir /tmp/d', { machine: 'b' })).exitCode).toBe(0)
+    expect([texts(a), texts(b)]).toEqual([{ '/tmp/here': '' }, { '/tmp/there': '' }])
+    expect([a.dirs.has('/tmp/d'), b.dirs.has('/tmp/d')]).toEqual([false, true])
+    await ws.close()
+  })
+
+  it('gives a folder one machine shows the new names made from it', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/srv/kept': 'k' })
+    const ws = two(a, b, { '/srv': '@b' })
+    expect((await run(ws, 'cd /srv && touch /tmp/from-b'))[0]).toBe(0)
+    expect((await run(ws, 'cd /tmp && touch /tmp/from-tmp'))[0]).toBe(0)
+    expect([texts(a), Object.keys(texts(b)).sort()]).toEqual([
+      { '/tmp/from-tmp': '' },
+      ['/srv/kept', '/tmp/from-b'],
+    ])
+    await ws.close()
+  })
+
+  it('moves a folder on both machines on each', async () => {
+    const a = new FakeFiles({ '/tmp/d/x': '1' })
+    const b = new FakeFiles({ '/tmp/d/y': '2' })
+    const ws = two(a, b)
+    expect((await run(ws, 'mv /tmp/d /tmp/e'))[0]).toBe(0)
+    expect([texts(a), texts(b)]).toEqual([{ '/tmp/e/x': '1' }, { '/tmp/e/y': '2' }])
+    expect(await run(ws, 'ls /tmp/e')).toEqual([0, 'x\ny\n', ''])
+    expect(await run(ws, 'ls /tmp')).toEqual([0, 'e\n', ''])
+    await ws.close()
+  })
+
+  it('copies each name in place for a cp -r of a folder on both machines', async () => {
+    const a = new FakeFiles({ '/tmp/d/x': '1' })
+    const b = new FakeFiles({ '/tmp/d/y': '2' })
+    const ws = two(a, b)
+    expect((await run(ws, 'cp -r /tmp/d /tmp/e'))[0]).toBe(0)
+    expect([texts(a)['/tmp/e/x'], texts(b)['/tmp/e/y']]).toEqual(['1', '2'])
+    expect(await run(ws, 'ls /tmp/e')).toEqual([0, 'x\ny\n', ''])
+    await ws.close()
+  })
+
+  it('names the machine and its path in df', async () => {
+    const said =
+      'Filesystem 1024-blocks Used Available Capacity Mounted on\noverlay 100 40 60 40% /\n'
+    const withDf =
+      (files: FakeFiles): Answer =>
+      (line, data) =>
+        line.startsWith('df ') ? ok(said) : files.answer(line, data)
+    const ws = new Workspace(
+      { '/srv': '@b' },
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          a: new ScriptedMachine('a', withDf(new FakeFiles())),
+          b: new ScriptedMachine('b', withDf(new FakeFiles({ '/srv/k': 'k' }))),
+        },
+      },
+    )
+    const [code, out] = await run(ws, 'df /srv /tmp')
+    expect(code).toBe(0)
+    expect(
+      out
+        .split('\n')
+        .slice(1, 3)
+        .map((line) => line.split(/\s+/)[0]),
+    ).toEqual(['b:/srv', 'a:/tmp'])
+    const named = await ws.shell('df /tmp', { machine: 'b' })
+    expect(DEC.decode(named.stdout).split('\n')[1]?.split(/\s+/)[0]).toBe('b:/tmp')
+    await ws.close()
+  })
+
+  it('tells a file policy the machine a call acts on', async () => {
+    const told = new Map<string, string | null | undefined>()
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/srv/kept': 'k' })
+    const ws = two(a, b, { '/srv': '@b', '/data': new RAMVFS() })
+    ws.policies.add({
+      preVfs(ctx: VfsContext): Action | null {
+        told.set(ctx.path.virtual, ctx.machine)
+        return null
+      },
+    })
+    await ws.shell('cat /srv/kept; echo x > /data/f; touch /tmp/one')
+    await ws.shell('touch /tmp/two', { machine: 'b' })
+    expect(told.get('/srv/kept')).toBe('b')
+    expect(told.get('/data/f')).toBeNull()
+    expect(told.get('/tmp/one')).toBeNull()
+    expect(told.get('/tmp/two')).toBe('b')
+    await ws.close()
+  })
+
+  it('takes the newer of a name that is a file here and a folder there', async () => {
+    const a = new FakeFiles({ '/tmp/k': 'file' })
+    const b = new FakeFiles({ '/tmp/k/in': '1' })
+    const ws = two(a, b)
+    a.answer('cat > /tmp/k', ENC.encode('newer'))
+    expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'newer', ''])
+    expect(await run(ws, 'rm /tmp/k')).toEqual([0, '', ''])
+    expect([texts(a), texts(b)]).toEqual([{}, { '/tmp/k/in': '1' }])
+    expect(await run(ws, 'ls /tmp/k')).toEqual([0, 'in\n', ''])
+    const [code, , err] = await run(ws, 'rm /tmp/k')
+    expect([code, err.includes('Is a directory')]).toEqual([1, true])
+    expect(texts(b)).toEqual({ '/tmp/k/in': '1' })
+    await ws.close()
+  })
+
+  it('writes where Mirage writes for a command a machine runs whole', async () => {
+    const a = new FakeFiles({ '/srv/k': 'k' }, ['cat'])
+    const b = new FakeFiles({ '/tmp/kept': 'old' }, ['cat'])
+    const ws = two(a, b, { '/srv': '@a' })
+    expect((await run(ws, "cd /srv && cat > /tmp/kept << 'EOF'\nnew\nEOF"))[0]).toBe(0)
+    expect([texts(b)['/tmp/kept'], '/tmp/kept' in texts(a)]).toEqual(['new\n', false])
+    await ws.close()
+  })
+
+  it("writes on a program's machine what reads that program's pipe", async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/srv/k': 'k' })
+    const tmp = new MachineVFS({ root: '/tmp', defaultMachine: 'b' })
+    const ws = two(a, b, { '/tmp': tmp, '/srv': '@b' })
+    expect((await run(ws, 'echo x > /tmp/alone'))[0]).toBe(0)
+    expect((await run(ws, 'gen | tee /tmp/piped'))[0]).toBe(0)
+    expect((await run(ws, 'cd /srv && gen | tee /tmp/from-b'))[0]).toBe(0)
+    expect(Object.keys(texts(a)).sort()).toEqual(['/tmp/piped'])
+    expect(Object.keys(texts(b)).sort()).toEqual(['/srv/k', '/tmp/alone', '/tmp/from-b'])
     await ws.close()
   })
 })

@@ -14,15 +14,15 @@
 
 import pytest
 
-from mirage.core.machine.stat import row_stat, stat, tree
-from mirage.core.posix.types import TreeRow
+from mirage.core.machine.stat import entry_stat, leaf, stat
+from mirage.core.posix.types import PosixEntry
 from mirage.types import FileType
 from tests.fixtures.machine import ScriptedMachine, failed, ok
-from tests.fixtures.machine_files import DIR, ROW, bound, spec
+from tests.fixtures.machine_files import ROW, bound, spec
 
 
-def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
-    row = TreeRow(
+def test_entry_stat_keeps_the_machine_s_kind_mode_times_and_owners():
+    entry = PosixEntry(
         "f",
         0o640,
         12,
@@ -36,7 +36,7 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         8,
         "",
     )
-    got = row_stat("x.py", row)
+    got = entry_stat("x.py", entry)
     assert (got.type, got.size, got.mode, got.uid, got.gid) == (
         FileType.FILE,
         12,
@@ -59,8 +59,9 @@ def test_row_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         ("s", FileType.FILE, 7),
     ],
 )
-def test_row_stat_maps_each_kind(kind, want, size):
-    got = row_stat("n", TreeRow(kind, 0o755, 7, 0, 0, 0, 0, 0, 0, 1, 0, ""))
+def test_entry_stat_maps_each_kind(kind, want, size):
+    entry = PosixEntry(kind, 0o755, 7, 0, 0, 0, 0, 0, 0, 1, 0, "")
+    got = entry_stat("n", entry)
     assert (got.type, got.size) == (want, size)
 
 
@@ -83,17 +84,6 @@ async def test_stat_of_a_missing_path_is_enoent():
         await stat(bound(box), "box", spec("/x"))
 
 
-@pytest.mark.asyncio
-async def test_tree_merges_every_machine_and_leaves_a_failure_to_the_walk():
-    a = ScriptedMachine(
-        "a", lambda line, data: ok(DIR + b"f 644 1 0 0 0 0 1 0 x\0")
-    )
-    b = ScriptedMachine(
-        "b", lambda line, data: ok(DIR + b"f 644 2 0 0 0 0 1 0 y\0")
-    )
-    accessor = bound(a, b)
-    rows = await tree(accessor, ["a", "b"], spec("/d"))
-    assert rows is not None
-    assert sorted(rows) == ["x", "y"]
-    gone = ScriptedMachine("gone", lambda line, data: failed(b"find: lost\n"))
-    assert await tree(bound(a, gone), ["a", "gone"], spec("/d")) is None
+def test_leaf_names_the_last_part_and_the_root():
+    assert leaf(spec("/d/x.txt")) == "x.txt"
+    assert leaf(spec("")) == "/"
