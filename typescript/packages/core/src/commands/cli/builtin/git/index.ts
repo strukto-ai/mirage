@@ -1081,7 +1081,7 @@ export const GIT = new CLI({
       }),
       new CommandSpec({
         name: 'config',
-        description: 'Read repository configuration',
+        description: 'Read and write repository configuration',
         arguments: [
           new Argument('--global', { action: 'store_true', help: 'Read global configuration' }),
           new Argument('--system', {
@@ -1154,6 +1154,11 @@ export const GIT = new CLI({
             action: 'store_true',
             help: 'Get the variables whose names match a regular expression',
           }),
+          new Argument('--add', {
+            action: 'store_true',
+            help: 'Add a value beside any the variable has',
+          }),
+          new Argument('--unset', { action: 'store_true', help: 'Remove the variable' }),
           new Argument('name', { nargs: '?' }),
           new Argument('value', { nargs: '?' }),
           new Argument('value-pattern', { nargs: '?' }),
@@ -1699,7 +1704,7 @@ export const GIT = new CLI({
     'stash show': new CLIHandler({ fn: verb(stashShow) }),
     version: new CLIHandler({ fn: verb(version) }),
     remote: new CLIHandler({ fn: verb(remote) }),
-    config: new CLIHandler({ fn: verb(config) }),
+    config: new CLIHandler({ fn: verb(config), write: true }),
     'merge-base': new CLIHandler({ fn: verb(mergeBase) }),
     'show-ref': new CLIHandler({ fn: verb(showRef) }),
     'symbolic-ref': new CLIHandler({ fn: verb(symbolicRef, symbolicRefReadOnly), write: true }),

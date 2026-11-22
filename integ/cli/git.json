@@ -161,7 +161,7 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git -C /repo diff HEAD~1 HEAD | grep -F '+two'; rm -rf /repo/hk && git init -q /repo/hk && cd /repo/hk && printf 'ONE = 1\\n\\n# Three, the\\n# last of\\n# them.\\nTHREE = 3\\n' > c.py && printf '%s tail\\n  x1\\n  x2\\n  x3\\n  x4\\n  x5\\n  x6\\n' \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA가나\" > k.txt && git add . && git -c user.name=a -c user.email=a@b commit -qm one && printf 'ONE = 1\\n\\n# Two.\\nTWO = 2\\n\\n# Three, the\\n# last of\\n# them.\\nTHREE = 3\\n' > c.py && sed 's/^  x5$/  y5/' k.txt > k.new && mv k.new k.txt && git diff --stat && git diff; cd /repo && rm -rf hk",
+      "command": "git -C /repo diff HEAD~1 HEAD | grep -F '+two'; rm -rf /repo/hk && git init -q /repo/hk && cd /repo/hk && printf 'ONE = 1\\n\\n# Three, the\\n# last of\\n# them.\\nTHREE = 3\\n' > c.py && printf '%s tail\\n  x1\\n  x2\\n  x3\\n  x4\\n  x5\\n  x6\\n' \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\uac00\ub098\" > k.txt && git add . && git -c user.name=a -c user.email=a@b commit -qm one && printf 'ONE = 1\\n\\n# Two.\\nTWO = 2\\n\\n# Three, the\\n# last of\\n# them.\\nTHREE = 3\\n' > c.py && sed 's/^  x5$/  y5/' k.txt > k.new && mv k.new k.txt && git diff --stat && git diff; cd /repo && rm -rf hk",
       "expect": {
         "exit": 0,
         "stdout": "+two\n c.py  | 3 +++\n k.txt | 2 +-\n 2 files changed, 4 insertions(+), 1 deletion(-)\ndiff --git a/c.py b/c.py\nindex 61b1312..bef0d4a 100644\n--- a/c.py\n+++ b/c.py\n@@ -1,5 +1,8 @@\n ONE = 1\n \n+# Two.\n+TWO = 2\n+\n # Three, the\n # last of\n # them.\ndiff --git a/k.txt b/k.txt\nindex 95b838f..5d74bc2 100644\n--- a/k.txt\n+++ b/k.txt\n@@ -3,5 +3,5 @@ AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n   x2\n   x3\n   x4\n-  x5\n+  y5\n   x6\n",
@@ -2919,11 +2919,11 @@
         "git-disk",
         "git-ram"
       ],
-      "command": "git -C /repo config --get remote.absent.url",
+      "command": "git -C /repo config --get remote.absent.url; echo rc=$?; cp /repo/.git/config /repo/.git/config.saved; git -C /repo config user.email new@example.com; git -C /repo config --add user.email two@example.com; git -C /repo config user.email x; echo rc=$?; git -C /repo config set remote.Origin.url X; git -C /repo config --unset user.name; git -C /repo config --get-regexp 'user|remote'; sed -n '/^\\[user\\]/,$p' /repo/.git/config; mv /repo/.git/config.saved /repo/.git/config; git -C /repo config --get user.email; printf '[user] email = a\\n' > /repo/c.cfg; git -C /repo config -f c.cfg user.email b; cat /repo/c.cfg; printf '[core ]\\n' > /repo/c.cfg; git -C /repo config -f c.cfg a.b c; echo rc=$?; : > /repo/c.cfg.lock; git -C /repo config -f c.cfg a.b c; echo rc=$?; rm /repo/c.cfg /repo/c.cfg.lock",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": ""
+        "exit": 0,
+        "stdout": "rc=1\nrc=5\nuser.email new@example.com\nuser.email two@example.com\nremote.Origin.url X\n[user]\n\temail = new@example.com\n\temail = two@example.com\n[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[remote \"Origin\"]\n\turl = X\ninteg@example.com\n[user]\n\temail = b\nrc=3\nrc=255\n",
+        "stderr": "warning: user.email has multiple values\nerror: cannot overwrite multiple values with a single value\n       Use a regexp, --add or --replace-all to change user.email.\nerror: invalid section name 'core'\nerror: invalid config file c.cfg\nerror: could not lock config file c.cfg: File exists\n"
       }
     },
     {

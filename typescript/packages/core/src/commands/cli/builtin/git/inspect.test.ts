@@ -139,12 +139,179 @@ it('prints the worktree root in line order among revisions', async () => {
   expect(DEC.decode(result.stdout)).toBe(`${head}/repo\n${head}`)
 })
 
+async function freshConfig(): Promise<[Workspace, () => Promise<string>]> {
+  const fresh = await mountRepo(repoPath)
+  const read = async (): Promise<string> =>
+    DEC.decode((await fresh.shell('cat /repo/.git/config')).stdout)
+  return [fresh, read]
+}
+
+// git 2.47.3 on debian:stable-slim: a set rewrites the variable's line spelled
+// as typed, --add goes after the block's last variable, a new block takes the
+// name's case, and unset takes an emptied block with it.
+it('writes config lines as git does', async () => {
+  const [fresh, read] = await freshConfig()
+  const original = await read()
+  for (const form of [
+    'user.email a@b',
+    'user.Email c@d',
+    '--add user.email e@f',
+    'set user.phone 1',
+    'unset user.phone',
+    'remote.Origin.url X',
+    "core.x ' lead'",
+    "set sec.y 'a#b'",
+    '--unset core.x',
+    '--unset sec.y',
+  ]) {
+    const result = await fresh.shell(`git -C /repo config ${form}`)
+    expect([form, result.exitCode, DEC.decode(result.stderr)]).toEqual([form, 0, ''])
+  }
+  expect(await read()).toBe(
+    `${original}[user]\n\tEmail = c@d\n\temail = e@f\n[remote "Origin"]\n\turl = X\n`,
+  )
+  await fresh.close()
+})
+
+// git 2.47.3 on debian:stable-slim: a variable can share its header's line, a
+// backslash continues a value only unescaped and outside a comment, only LF
+// ends a line, a byte order mark stays, a carriage return is quoted, and a new
+// name is placed in the older [section.sub] block without case but matched
+// with it.
 it.each([
-  'user.email changed@example.com',
-  "user.name ''",
-  '--global user.email changed@example.com',
+  ['[user] email = old\n', 'user.email new', '[user]\n\temail = new\n'],
+  ['[user] email = old\n\tname = x\n', '--unset user.email', '[user]\n\tname = x\n'],
+  ['[core] bare\n[x]\n\ty = 1\n', '--unset core.bare', '[x]\n\ty = 1\n'],
+  [
+    '[core]\n\tpath = foo\\\\\n\tbare = false\n',
+    'core.path bar',
+    '[core]\n\tpath = bar\n\tbare = false\n',
+  ],
+  [
+    '[core]\n\tpath = foo ; c\\\n\tbare = false\n',
+    'core.path x',
+    '[core]\n\tpath = x\n\tbare = false\n',
+  ],
+  [
+    '[core]\n\tpath = foo\\\n bar\n\tbare = false\n',
+    'core.path x',
+    '[core]\n\tpath = x\n\tbare = false\n',
+  ],
+  ['[user]\n\tname = "a\rb"\n', 'user.name x', '[user]\n\tname = x\n'],
+  ['﻿[user]\n\temail = old\n', '--unset user.email', '﻿\n'],
+  ['', "a.b $'x\\r'", '[a]\n\tb = "x\r"\n'],
+  ['[user.s]\n\temail = a\n', 'user.S.email x', '[user.s]\n\temail = a\n\temail = x\n'],
+  ['[a.b "c"]\n\tx = old\n', 'a.b.c.x new', '[a.b "c"]\n\tx = new\n'],
+  ['[a "b.c"]\n\tx = old\n', 'a.b.c.x new', '[a "b.c"]\n\tx = new\n'],
+])('reads a config file as git does: %j %s', async (before, form, after) => {
+  const fresh = await mountRepo(repoPath)
+  await fresh.dispatch('write', '/repo/f', [new TextEncoder().encode(before)])
+  const result = await fresh.shell(`git -C /repo config -f f ${form}`)
+  expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+  expect((await fresh.shell('cat /repo/f')).stdout).toEqual(new TextEncoder().encode(after))
+  await fresh.close()
+})
+
+it.each([
+  [
+    '[user ]\n',
+    '-f f user.email x',
+    3,
+    "error: invalid section name 'user'\nerror: invalid config file f\n",
+  ],
+  [
+    '[user]\n\n\temail = "x\n',
+    '-f f --unset user.email',
+    128,
+    'fatal: bad config line 3 in file f\n',
+  ],
+  ['[user]\n\tname = a\\q\n', '-f f user.email x', 128, 'fatal: bad config line 2 in file f\n'],
+  ['[user]\n\tname = "a\\', '-f f user.email x', 128, 'fatal: bad config line 3 in file f\n'],
+  [
+    '',
+    '-f missing/f a.b c',
+    255,
+    'error: could not lock config file missing/f: No such file or directory\n',
+  ],
+])('refuses to write a config file as git does: %j %s', async (before, form, code, err) => {
+  const fresh = await mountRepo(repoPath)
+  await fresh.dispatch('write', '/repo/f', [new TextEncoder().encode(before)])
+  const result = await fresh.shell(`git -C /repo config ${form}`)
+  expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([code, err])
+  expect(DEC.decode((await fresh.shell('cat /repo/f')).stdout)).toBe(before)
+  expect((await fresh.shell('ls /repo/f.lock')).exitCode).toBe(2)
+  expect((await fresh.shell('ls /repo/missing')).exitCode).toBe(2)
+  await fresh.close()
+})
+
+it('keeps a raw byte from config set to get', async () => {
+  const fresh = await mountRepo(repoPath)
+  const result = await fresh.shell(
+    "git -C /repo config -f f user.name $'a\\xffb'; git -C /repo config -f f --get user.name",
+  )
+  expect([result.exitCode, [...result.stdout]]).toEqual([0, [0x61, 0xff, 0x62, 0x0a]])
+  await fresh.close()
+})
+
+// git 2.47.3: a lock already there is another writer's.
+it('waits for no config lock', async () => {
+  const [fresh, read] = await freshConfig()
+  await fresh.dispatch('write', '/repo/.git/config.lock', [new Uint8Array()])
+  const before = await read()
+  const result = await fresh.shell('cd /repo && git config a.b c')
+  expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+    255,
+    'error: could not lock config file .git/config: File exists\n',
+  ])
+  expect(await read()).toBe(before)
+  expect((await fresh.shell('ls /repo/.git/config.lock')).exitCode).toBe(0)
+  await fresh.close()
+})
+
+it.each([
+  [
+    'user.email x',
+    5,
+    'warning: user.email has multiple values\n' +
+      'error: cannot overwrite multiple values with a single value\n' +
+      '       Use a regexp, --add or --replace-all to change user.email.\n',
+  ],
+  ['--unset user.email', 5, 'warning: user.email has multiple values\n'],
+  ['--unset nope.key', 5, ''],
+  ['foo bar', 2, 'error: key does not contain a section: foo\n'],
+  ['a. c', 2, 'error: key does not contain variable name: a.\n'],
+  ['a.1b c', 1, 'error: invalid key: a.1b\n'],
+  ['--add --unset a.b c', 129, "error: options '--unset' and '--add' cannot be used together\n"],
+  ['--unset --value=x user.email', 129, "error: unknown option `value=x'\nusage: "],
+  ['--fixed-value user.email x', 129, "error: --fixed-value only applies with 'value-pattern'\n"],
+  [
+    'set --fixed-value user.email x',
+    128,
+    'fatal: --fixed-value only applies with --value=<pattern>\n',
+  ],
+  ["$'a.b\\nc.d' x", 1, 'error: invalid key (newline): a.b\nc.d\n'],
+  ['--default=fb user.name Ada', 129, 'error: --default is only applicable to --get\n'],
+  ['set --default=fb user.name Ada', 129, "error: unknown option `default=fb'\nusage: "],
+  ['--file - a.b c', 128, 'fatal: writing to stdin is not supported\n'],
+])('refuses config write %s as git does', async (form, code, err) => {
+  const [fresh, read] = await freshConfig()
+  for (const line of ['user.email a@b', '--add user.email c@d'])
+    await fresh.shell(`git -C /repo config ${line}`)
+  const before = await read()
+  const result = await fresh.shell(`git -C /repo config ${form}`)
+  expect(result.exitCode).toBe(code)
+  expect(DEC.decode(result.stderr).startsWith(err)).toBe(true)
+  expect(await read()).toBe(before)
+  await fresh.close()
+})
+
+it.each([
   'user.name changed old',
-])('refuses config writes explicitly: %s', async (form) => {
+  '--unset user.name old',
+  '--bool core.bare yes',
+  'rename-section core other',
+  '--worktree x.y z',
+])('refuses config writes mirage lacks: %s', async (form) => {
   const before = await ws.dispatch('read', '/repo/.git/config')
   const [code, out, err] = await run(`config ${form}`)
   expect(code).toBe(1)

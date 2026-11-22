@@ -287,6 +287,7 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-h", "--human-readable", action="store_true"),
             Argument("-H", "--si", action="store_true"),
             Argument("-k", action="store_true"),
+            Argument("-m", action="store_true"),
             Argument("-i", "--inodes", action="store_true"),
             Argument("-a", "--all", action="store_true"),
             Argument("-T", "--print-type", action="store_true"),

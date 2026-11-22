@@ -47,7 +47,7 @@
     {
       "id": "git_config_write_explicit_refusal",
       "seq": 10000013,
-      "command": "git -C /repo config user.email changed@example.com",
+      "command": "git -C /repo config user.email changed@example.com integ@example.com",
       "expect": {
         "exit": 1,
         "stdout": "",

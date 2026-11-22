@@ -777,15 +777,33 @@ impl Run<'_, '_> {
 
     /// The components a member extracts to, below the extraction root: its
     /// name without its leading slashes and `--strip-components` of it,
-    /// `.` and empty components left out.
+    /// `.` and empty components left out, then under `--one-top-level`'s
+    /// folder unless it already starts with it. A member stripped to
+    /// nothing stays nothing; GNU tar opens the folder itself for it.
     fn parts(&self, name: &[u8]) -> Vec<Vec<u8>> {
+        let kept = |part: &&[u8]| !part.is_empty() && *part != b".";
         let name = &name[name.iter().take_while(|&&b| b == b'/').count()..];
-        trimmed(name)
+        let parts: Vec<Vec<u8>> = trimmed(name)
             .split(|&b| b == b'/')
             .skip(self.config.strip)
-            .filter(|part| !part.is_empty() && *part != b".")
+            .filter(kept)
             .map(<[u8]>::to_vec)
-            .collect()
+            .collect();
+        match &self.config.top {
+            Some(top) => {
+                let top: Vec<Vec<u8>> = top
+                    .split(|&b| b == b'/')
+                    .filter(kept)
+                    .map(<[u8]>::to_vec)
+                    .collect();
+                if parts.starts_with(&top) {
+                    parts
+                } else {
+                    [top, parts].concat()
+                }
+            }
+            _ => parts,
+        }
     }
 
     /// One member under the name `--transform` gave it, its data read past
@@ -824,6 +842,8 @@ impl Run<'_, '_> {
                 [&config.base[..], b"/", &target].concat()
             };
             (Vec::new(), normalized(&joined))
+        } else if config.top.as_ref().is_some_and(|top| top.starts_with(b"/")) {
+            (Vec::new(), self.parts(&target))
         } else {
             (config.base.clone(), self.parts(&target))
         };

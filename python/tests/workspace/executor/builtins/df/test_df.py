@@ -256,6 +256,17 @@ async def test_df_last_size_format_wins():
     assert hk.splitlines()[0].split()[1] == "1K-blocks"
     _, kh = await _run(ws, "df -k -h /q")
     assert kh.splitlines()[0].split()[1] == "Size"
+    _, m = await _run(ws, "df -m /q")
+    assert m.splitlines()[0].split()[1] == "1M-blocks"
+    assert m.splitlines()[1].split()[1] == "1"
+    _, pm = await _run(ws, "df -P -m /q")
+    assert pm.splitlines()[0].split()[1] == "1048576-blocks"
+    _, mk = await _run(ws, "df -m -k /q")
+    assert mk.splitlines()[0].split()[1] == "1K-blocks"
+    _, km = await _run(ws, "df -k -m /q")
+    assert km.splitlines()[0].split()[1] == "1M-blocks"
+    _, mh = await _run(ws, "df -m -h /q")
+    assert mh.splitlines()[0].split()[1] == "Size"
 
 
 @pytest.mark.asyncio
