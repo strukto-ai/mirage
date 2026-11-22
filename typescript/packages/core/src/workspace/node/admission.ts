@@ -223,7 +223,7 @@ function walkedMounts(
   const roots = new Set<string>()
   for (const path of paths)
     for (const entry of registry.descendantMounts(path.virtual))
-      roots.add(entry.prefix.replace(/\/+$/, ''))
+      roots.add(rstripSlash(entry.prefix))
   return [...roots].sort(compareCodePoints)
 }
 
