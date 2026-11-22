@@ -1155,6 +1155,22 @@ async def test_a_profile_mode_on_a_folder_is_refused_at_every_entry():
 
 
 @pytest.mark.asyncio
+async def test_a_named_profile_mode_on_a_folder_is_refused_once_its_mount_exists():
+    ws = Workspace({"/tmp": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.set_profile("agent", {"mounts": {"/data/keep": "read"}})
+        ws.create_session("a", profile="agent")
+        ws.add_mount("/data", RAMVFS(), MountMode.WRITE)
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            ws.create_session("b", profile="agent")
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            await ws.set_session_profile(ws.default_session_id, "agent")
+        assert "b" not in [s.session_id for s in ws.list_sessions()]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_profile_mode_holds_on_every_mount_the_workspace_has():
     ws = Workspace(
         {"/data": RAMVFS(), "/data/sub": RAMVFS()},

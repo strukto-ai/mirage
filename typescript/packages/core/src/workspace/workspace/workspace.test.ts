@@ -702,6 +702,16 @@ describe('profile modes', () => {
     expect('agent' in ws.profiles).toBe(false)
   })
 
+  it('refuses a named profile mode on a folder once its mount exists', async () => {
+    const ws = new Workspace({ '/tmp': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    ws.setProfile('agent', SessionProfile({ mounts: { '/data/keep': 'read' } }))
+    ws.createSession('a', { profile: 'agent' })
+    ws.addMount('/data', new RAMVFS(), MountMode.WRITE)
+    expect(() => ws.createSession('b', { profile: 'agent' })).toThrow(folderMode)
+    await expect(ws.setSessionProfile(ws.defaultSessionId, 'agent')).rejects.toThrow(folderMode)
+  })
+
   it('holds a mode on every mount the workspace has', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/data/sub': new RAMVFS() },

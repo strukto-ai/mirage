@@ -1494,7 +1494,7 @@ export class Workspace {
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
-    this.checkModes(options.profile ?? null, inline)
+    this.checkModes(base, inline)
     const compiled = this.compile(base, options.profile ?? null, inline, false)
     return this.sessionManager.create(sessionId, { profile: compiled })
   }
@@ -1681,14 +1681,15 @@ export class Workspace {
   }
 
   /**
-   * Hold each document handed in against the mounts there are now, as it
-   * enters the workspace; a profile named here was checked when it was
-   * defined, so a name or null passes.
+   * Hold each document against the mounts there are now, as it enters the
+   * workspace or a session: a profile defined by name before the mount its
+   * folder lies in is refused when a session takes it. A named document
+   * arrives resolved; null stands for none.
    */
-  private checkModes(...docs: (SessionProfile | string | null)[]): void {
+  private checkModes(...docs: (SessionProfile | null)[]): void {
     const prefixes = this.registry.allMounts().map((entry) => entry.prefix)
     for (const doc of docs) {
-      if (doc !== null && typeof doc !== 'string') checkMountModes(doc, prefixes)
+      if (doc !== null) checkMountModes(doc, prefixes)
     }
   }
 
@@ -1704,8 +1705,9 @@ export class Workspace {
     profile: string | SessionProfile | null,
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    this.checkModes(profile)
-    const compiled = this.compile(this.baseProfile(profile), profile, null, false)
+    const base = this.baseProfile(profile)
+    this.checkModes(base)
+    const compiled = this.compile(base, profile, null, false)
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
     if (this.isShuttingDown()) throw new Error('Workspace is closed')

@@ -2756,7 +2756,7 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
-        self._check_modes(profile, inline)
+        self._check_modes(base, inline)
         compiled = self._compile(base, profile, inline, defer=False)
         return self._session_mgr.create(session_id, profile=compiled)
 
@@ -3011,21 +3011,22 @@ class Workspace:
         self._compile(doc, name)
         self._profiles[name] = doc
 
-    def _check_modes(self, *docs: SessionProfile | str | None) -> None:
-        """Hold each document handed in against the mounts there are now,
-        as it enters the workspace; a profile named here was checked when
-        it was defined.
+    def _check_modes(self, *docs: SessionProfile | None) -> None:
+        """Hold each document against the mounts there are now, as it
+        enters the workspace or a session: a profile defined by name
+        before the mount its folder lies in is refused when a session
+        takes it.
 
         Args:
-            *docs (SessionProfile | str | None): the documents, a name or
-                None standing for a profile already defined.
+            *docs (SessionProfile | None): the documents, a named one
+                resolved; None for none.
 
         Raises:
             PolicyError: a ``mode`` on a folder inside a mount.
         """
         prefixes = [entry.prefix for entry in self._registry.mounts()]
         for doc in docs:
-            if isinstance(doc, SessionProfile):
+            if doc is not None:
                 check_mount_modes(doc, prefixes)
 
     async def set_session_profile(
@@ -3049,10 +3050,9 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        self._check_modes(profile)
-        compiled = self._compile(
-            self._base_profile(profile), profile, defer=False
-        )
+        base = self._base_profile(profile)
+        self._check_modes(base)
+        compiled = self._compile(base, profile, defer=False)
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:
