@@ -1,3 +1,4 @@
+import { SharedInput } from '../io/async_line_iterator.ts'
 import type { ByteSource, IOResult } from '../io/types.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { JobConsole } from '../shell/console/index.ts'
@@ -13,6 +14,22 @@ export type ProcessSubLine = (
     started?: (process: ProcessHandle, session: SessionState) => void
   },
 ) => Promise<IOResult>
+
+/**
+ * The one program writing a pipe a pipeline stage reads: the pipe, as the
+ * stage is handed it; the program's words, null for one only known when it
+ * runs; and the folder the pipeline started in, which the program runs from
+ * whatever folder its reader moves to. `machine` is the machine the program
+ * runs on, asked once for the pipe (`placed`): null before it is asked, and
+ * for a program Mirage runs itself.
+ */
+export interface PipeWriter {
+  readonly pipe: ByteSource
+  readonly words: readonly (string | null)[]
+  readonly cwd: string
+  placed: boolean
+  machine: string | null
+}
 
 /** Temporary state of one evaluation; never part of a session record. */
 export class ExecutionFrame {
@@ -46,13 +63,27 @@ export class ExecutionFrame {
   // The pipe a pipeline stage reads, which a program the stage starts reads
   // too while its standard input is still that pipe.
   stdin: ByteSource | null = null
+  // The one program that writes that pipe (`gen | tee log`), null when the
+  // stage before is anything else, and in a pipeline with no process table:
+  // what the stage writes is about the machine that program runs on. A child
+  // shell that reads the same pipe keeps it (`gen | (tee log)`).
+  stdinWriter: PipeWriter | null = null
   // The id of the command a job runs as a whole, whose redirects its shell
   // never puts back: it ends with the command, so bash keeps no copy of what
   // they replace.
   ending: number | null = null
 
-  fork(): ExecutionFrame {
+  /**
+   * A child evaluation's frame. `stdin` is the input a child shell reads in
+   * its parent's place (a subshell, a pipeline's first stage), whose writer
+   * the child keeps when it is the pipe this frame's stage reads; null for
+   * one that reads none of it (a substitution, a job).
+   */
+  fork(stdin: ByteSource | null = null): ExecutionFrame {
     const child = new ExecutionFrame()
+    const given = stdin instanceof SharedInput ? stdin.lines.input : stdin
+    if (this.stdinWriter !== null && given === this.stdinWriter.pipe)
+      child.stdinWriter = this.stdinWriter
     child.abortSignal = this.abortSignal
     child.lineTimeout = this.lineTimeout
     child.shell = this.shell

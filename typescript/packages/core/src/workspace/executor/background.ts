@@ -295,7 +295,7 @@ export function programText(left: TSNodeLike, session: SessionState): string | n
 }
 
 /** `programWord`'s word and the words after it, null when the job is not one program. */
-function programWords(left: TSNodeLike, session: SessionState): (string | null)[] | null {
+export function programWords(left: TSNodeLike, session: SessionState): (string | null)[] | null {
   if (!simpleCommand(left)) return null
   const invocations = commandInvocations(left)
   const first = invocations[0]

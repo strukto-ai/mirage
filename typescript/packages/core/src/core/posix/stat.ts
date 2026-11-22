@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { singleQuote } from '../../utils/quote.ts'
-import { FIND, TREE_FORMAT } from './constants.ts'
-import type { TreeRow } from './types.ts'
+import { FIND, ENTRY_FORMAT } from './constants.ts'
+import type { PosixEntry } from './types.ts'
 
 /**
  * The find that lists `scope` and what is below it, links followed, one
- * `TREE_FORMAT` record per entry.
+ * `ENTRY_FORMAT` record per entry.
  *
  * @param scope the path where the files are.
  * @param depth how deep to list: 0 for the scope alone (a stat), 1 for its
@@ -26,7 +26,7 @@ import type { TreeRow } from './types.ts'
  */
 export function treeCommand(scope: string, depth: number | null = null): string {
   const bound = depth === null ? '' : ` -maxdepth ${String(depth)}`
-  return `${FIND} ${singleQuote(scope)}${bound} -printf ${singleQuote(TREE_FORMAT)}`
+  return `${FIND} ${singleQuote(scope)}${bound} -printf ${singleQuote(ENTRY_FORMAT)}`
 }
 
 /**
@@ -53,10 +53,10 @@ function milliseconds(stamp: string): number {
  *
  * @param out find's output.
  */
-export function parseTree(out: Uint8Array): TreeRow[] | null {
+export function parseEntries(out: Uint8Array): PosixEntry[] | null {
   if (out[out.length - 1] !== 0) return null
   const decoder = new TextDecoder('utf-8', { fatal: true })
-  const rows: TreeRow[] = []
+  const entries: PosixEntry[] = []
   let start = 0
   for (let end = out.indexOf(0); end !== -1; end = out.indexOf(0, start)) {
     let fields: string[]
@@ -85,7 +85,7 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
     )
       return null
     if (![mtime, atime].every((t) => /^-?\d+(\.\d*)?$/.test(t))) return null
-    rows.push({
+    entries.push({
       kind,
       mode: Number.parseInt(mode, 8),
       size: Number(size),
@@ -100,5 +100,5 @@ export function parseTree(out: Uint8Array): TreeRow[] | null {
       rel: fields.slice(9).join(' '),
     })
   }
-  return rows
+  return entries
 }

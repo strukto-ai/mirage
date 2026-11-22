@@ -21,41 +21,62 @@ import { refusal } from '../posix/errors.ts'
 import { checked, remote } from './utils.ts'
 
 /**
- * Copy a file on one machine.
+ * A copy's line, the new name's folder made first when asked.
+ *
+ * @param line the copy.
+ * @param target the new name's path on the machine.
+ * @param makeParent make its folder there first.
+ */
+function inFolder(line: string, target: string, makeParent: boolean): string {
+  if (!makeParent) return line
+  const cut = target.lastIndexOf('/')
+  const parent = cut > 0 ? target.slice(0, cut) : '/'
+  return `mkdir -p -- ${singleQuote(parent)} && ${line}`
+}
+
+/**
+ * Copy a file on the source's machine.
  *
  * @param accessor the mount's machines.
- * @param machine the machine both names are on.
+ * @param machine the source's machine.
  * @param src the source.
  * @param dst the copy.
+ * @param makeParent make the copy's folder there first, when only another
+ *   machine holds it.
  */
 export async function copy(
   accessor: MachineAccessor,
   machine: string,
   src: PathSpec,
   dst: PathSpec,
+  makeParent = false,
 ): Promise<void> {
   const old = singleQuote(remote(accessor, src))
-  const fresh = singleQuote(remote(accessor, dst))
-  await checked(accessor, machine, `cp -T -- ${old} ${fresh}`, dst)
+  const fresh = remote(accessor, dst)
+  const line = inFolder(`cp -T -- ${old} ${singleQuote(fresh)}`, fresh, makeParent)
+  await checked(accessor, machine, line, dst)
 }
 
 /**
- * Copy a directory tree on one machine with one `cp -RL`.
+ * Copy a directory tree onto a fresh name on the source's machine, with
+ * one `cp -RL`.
  *
  * @param accessor the mount's machines.
- * @param machine the machine both names are on.
+ * @param machine the source's machine.
  * @param src the directory.
  * @param dst the copy.
+ * @param makeParent make the copy's folder there first, when only another
+ *   machine holds it.
  */
 export async function dirCopy(
   accessor: MachineAccessor,
   machine: string,
   src: PathSpec,
   dst: PathSpec,
+  makeParent = false,
 ): Promise<void> {
-  const [status, out, err] = await accessor.run(
-    machine,
-    copyTreeCommand(remote(accessor, src), remote(accessor, dst)),
-  )
+  const fresh = remote(accessor, dst)
+  const line = inFolder(copyTreeCommand(remote(accessor, src), fresh), fresh, makeParent)
+  const [status, out, err] = await accessor.run(machine, line)
   if (status !== 0 || new TextDecoder().decode(out) !== COPIED) throw refusal(dst, err)
 }

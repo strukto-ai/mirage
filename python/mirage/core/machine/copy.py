@@ -21,20 +21,64 @@ from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
 
+def _in_folder(line: str, target: str, make_parent: bool) -> str:
+    """A copy's line, the new name's folder made first when asked.
+
+    Args:
+        line (str): the copy.
+        target (str): the new name's path on the machine.
+        make_parent (bool): make its folder there first.
+    """
+    if not make_parent:
+        return line
+    parent = target.rsplit("/", 1)[0] or "/"
+    return f"mkdir -p -- {single_quote(parent)} && {line}"
+
+
 async def copy(
-    accessor: MachineAccessor, machine: str, src: PathSpec, dst: PathSpec
+    accessor: MachineAccessor,
+    machine: str,
+    src: PathSpec,
+    dst: PathSpec,
+    make_parent: bool = False,
 ) -> None:
+    """Copy a file on the source's machine.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the source's machine.
+        src (PathSpec): the source.
+        dst (PathSpec): the copy.
+        make_parent (bool): make the copy's folder there first, when
+            only another machine holds it.
+    """
     old = single_quote(remote(accessor, src))
-    new = single_quote(remote(accessor, dst))
-    await checked(accessor, machine, f"cp -T -- {old} {new}", dst)
+    new = remote(accessor, dst)
+    line = _in_folder(f"cp -T -- {old} {single_quote(new)}", new, make_parent)
+    await checked(accessor, machine, line, dst)
 
 
 async def dir_copy(
-    accessor: MachineAccessor, machine: str, src: PathSpec, dst: PathSpec
+    accessor: MachineAccessor,
+    machine: str,
+    src: PathSpec,
+    dst: PathSpec,
+    make_parent: bool = False,
 ) -> None:
-    status, out, err = await accessor.run(
-        machine,
-        copy_tree_command(remote(accessor, src), remote(accessor, dst)),
+    """Copy a directory tree onto a fresh name on the source's machine.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the source's machine.
+        src (PathSpec): the directory.
+        dst (PathSpec): the copy.
+        make_parent (bool): make the copy's folder there first, when
+            only another machine holds it.
+    """
+    new = remote(accessor, dst)
+    line = _in_folder(
+        copy_tree_command(remote(accessor, src), new), new, make_parent
     )
+    status, out, err = await accessor.run(machine, line)
     if status != 0 or out != COPIED:
         raise refusal(dst, err)

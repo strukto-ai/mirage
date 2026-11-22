@@ -873,6 +873,22 @@ class BaseVFS:
         """
         return None
 
+    def acts_on(self) -> str | None:
+        """The machine whose files a call on this mount acts on, as far
+        as the mount tells before the call runs; None for a mount that is
+        no machine's files. A mount of one machine's files names it; one
+        over several names the machine the running command is about,
+        which a name another machine holds may still lead away from.
+        """
+        return None
+
+    def filesystem(self) -> str:
+        """What ``df`` names this mount's filesystem: the driver's name,
+        or for a machine's files the machine and the path there, as an
+        NFS mount names its server and export.
+        """
+        return self.name
+
     async def capacity(self) -> CapacityResult:
         """How much space this backend has, for ``df``.
 

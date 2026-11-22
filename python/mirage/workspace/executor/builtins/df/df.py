@@ -398,7 +398,7 @@ async def handle_df(
     for mount in mounts:
         async with mount.use():
             cap = await mount.vfs.capacity()
-        cells = [mount.vfs.name]
+        cells = [mount.vfs.filesystem()]
         if show_type:
             cells.append(mount.vfs.name)
         cells += _num_cells(cap, human, si, block, inodes)

@@ -198,6 +198,12 @@ class Caller:
         machine (MachineName | None): the machine the running command's
             program runs on, where a name its redirects make lands; None
             for a command Mirage runs itself.
+        preferred_machine (str | None): the machine a command Mirage runs
+            itself is about, by its name under ``machines:``: the one the
+            line names, else the one whose program writes the pipe it
+            reads, else the one its folder is on. A new name it makes
+            lands there, and of copies written at the same time it takes
+            that machine's; None when nothing says.
         joins_errors (bool): whether the running program's stderr goes
             where its stdout goes (``2>&1``), so a machine joins the two
             where the program writes them.
@@ -249,6 +255,7 @@ class Caller:
     ] = ()
     output_file: str | None = None
     machine: MachineName | None = None
+    preferred_machine: str | None = None
     joins_errors: bool = False
 
     @property

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from mirage.io.types import ByteSource
 from mirage.rs.session import ShellVars
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.session.session import SessionState
@@ -27,7 +28,9 @@ class EvaluationContext:
 
 
 def child_context(
-    context: EvaluationContext, records: ShellVars | None = None
+    context: EvaluationContext,
+    records: ShellVars | None = None,
+    stdin: ByteSource | None = None,
 ) -> EvaluationContext:
     """A child shell's evaluation: the session's subshell and a new frame.
 
@@ -35,7 +38,9 @@ def child_context(
         context (EvaluationContext): the parent shell's evaluation.
         records (ShellVars | None): the child's variables when a running
             expansion made them; None copies the session's.
+        stdin (ByteSource | None): the input the child reads in its
+            parent's place (``ExecutionFrame.fork``).
     """
     return EvaluationContext(
-        context.session.subshell(records), context.frame.fork(), context
+        context.session.subshell(records), context.frame.fork(stdin), context
     )

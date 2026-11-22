@@ -801,6 +801,26 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
+   * The machine whose files a call on this mount acts on, as far as the
+   * mount tells before the call runs; null for a mount that is no machine's
+   * files. A mount of one machine's files names it; one over several names
+   * the machine the running command is about, which a name another machine
+   * holds may still lead away from.
+   */
+  actsOn(): string | null {
+    return null
+  }
+
+  /**
+   * What `df` names this mount's filesystem: the driver's name, or for a
+   * machine's files the machine and the path there, as an NFS mount names
+   * its server and export.
+   */
+  filesystem(): string {
+    return this.name
+  }
+
+  /**
    * How much space this backend has, for `df`. The default is UNKNOWN,
    * which `df` renders as `-`. A driver that can answer truthfully (a
    * real filesystem, a provider that exposes a storage quota) overrides

@@ -487,10 +487,13 @@ export function routed(
   entries: readonly Runtime[],
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
   machine: string | undefined,
+  named?: string,
 ): RouteDecision<Runtime> {
   // Null prototype: captures are arbitrary command names.
   const placed = Object.create(null) as Record<string, Runtime | null>
+  let about = named
   if (machine === 'workspace') {
+    about = undefined
     for (const entry of entries) {
       for (const command of entry.captures) placed[command] = null
     }
@@ -500,9 +503,16 @@ export function routed(
     )
   } else {
     Object.assign(placed, bindings)
-    if (machine !== undefined) Object.assign(placed, machineBindingsFor(entries, machine))
+    if (machine !== undefined) {
+      Object.assign(placed, machineBindingsFor(entries, machine))
+      about = machine
+    }
   }
-  return { bindings: placed, fallback: catchAll(entries) }
+  return {
+    bindings: placed,
+    fallback: catchAll(entries),
+    ...(about === undefined ? {} : { machine: about }),
+  }
 }
 
 /**

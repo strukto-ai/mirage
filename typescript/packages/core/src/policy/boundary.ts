@@ -36,6 +36,7 @@ export class Boundary {
     readonly decisions: Decisions | null = null,
     readonly access?: SessionAccess,
     readonly caller?: Caller,
+    readonly machine?: string,
   ) {}
 
   async admit(
@@ -50,6 +51,7 @@ export class Boundary {
       decisions: this.decisions,
       ...(this.access === undefined ? {} : { access: this.access }),
       ...(this.caller === undefined ? {} : { caller: this.caller }),
+      ...(this.machine === undefined ? {} : { machine: this.machine }),
       ...access,
     })
   }
@@ -76,6 +78,7 @@ export class Boundary {
         decisions: this.decisions,
         ...(this.access === undefined ? {} : { access: this.access }),
         ...(this.caller === undefined ? {} : { caller: this.caller }),
+        ...(this.machine === undefined ? {} : { machine: this.machine }),
       },
     )
     return result

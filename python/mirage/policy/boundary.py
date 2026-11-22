@@ -36,6 +36,8 @@ class Boundary:
             that asks is put to where no line is running.
         caller (Caller): who makes the operation; its session's grants
             govern it.
+        machine (str | None): the machine the owning mount says the
+            operation acts on (``BaseVFS.acts_on``).
     """
 
     policies: Policies
@@ -43,6 +45,7 @@ class Boundary:
     mode: MountMode | None = None
     decisions: Decisions | None = None
     caller: Caller = Caller()
+    machine: str | None = None
 
     @property
     def session_id(self) -> str:
@@ -70,6 +73,7 @@ class Boundary:
             decisions=self.decisions,
             final=final,
             caller=self.caller,
+            machine=self.machine,
         )
 
     async def complete(
@@ -95,5 +99,6 @@ class Boundary:
             mode=self.mode,
             decisions=self.decisions,
             caller=self.caller,
+            machine=self.machine,
         )
         return result

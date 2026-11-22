@@ -33,6 +33,8 @@ describe('tree ops', () => {
     await rename(accessor, 'box', spec('/a'), spec('/b/c'), true)
     await copy(accessor, 'box', spec('/a'), spec('/b'))
     await dirCopy(accessor, 'box', spec('/s'), spec('/t'))
+    await copy(accessor, 'box', spec('/a'), spec('/n/b'), true)
+    await dirCopy(accessor, 'box', spec('/s'), spec('/n/t'), true)
     expect(machine.lines).toEqual([
       "mkdir -p -- '/tmp/d'",
       "rm -- '/tmp/f'",
@@ -41,6 +43,8 @@ describe('tree ops', () => {
       "mkdir -p -- '/tmp/b' && mv -T -- '/tmp/a' '/tmp/b/c'",
       "cp -T -- '/tmp/a' '/tmp/b'",
       "env LC_ALL=C cp -RL -- '/tmp/s' '/tmp/t' && echo copied",
+      "mkdir -p -- '/tmp/n' && cp -T -- '/tmp/a' '/tmp/n/b'",
+      "mkdir -p -- '/tmp/n' && env LC_ALL=C cp -RL -- '/tmp/s' '/tmp/n/t' && echo copied",
     ])
   })
 

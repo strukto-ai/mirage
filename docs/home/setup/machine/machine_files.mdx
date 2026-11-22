@@ -170,7 +170,8 @@ output in the order the program wrote them, as in bash.
 ## Several Machines
 
 With several machines, the `/tmp` Mirage mounts by itself shows all of their
-`/tmp` files together. `/tmp: "@gpu"` shows machine `gpu`'s only.
+`/tmp` files together, as one machine would hold them. `/tmp: "@gpu"` shows
+machine `gpu`'s only.
 
 ```mermaid
 flowchart LR
@@ -185,16 +186,28 @@ flowchart LR
     b --> L
 ```
 
-| Operation | Lands on |
+| Operation | Acts on |
 | --- | --- |
-| Read, write, `rm` an existing name | The machine holding it |
-| Write a new name | The machine running the program (`python3 gen.py > /tmp/out`), else `default_machine` |
-| `ls`, `find`, `grep -r` | Every machine, each name once |
-| `mv` | The source's machine |
-| `cp` to another machine | Bytes move through Mirage |
+| Read, `stat`, `chmod`, append to an existing name | The machine holding it; of several, the copy written last |
+| `rm` | Every machine holding the name |
+| `mv` | The machine holding the name, and the old name goes from every machine. A folder is renamed on every machine holding it |
+| `cp` | The source's machine, so no bytes cross. Another machine's copy of the new name is removed |
+| Write a new name | The machine the command is about when it holds the folder, else the machine that holds the folder |
+| A program's `>` (`python3 gen.py > /tmp/out`) | The program's machine |
+| `ln`, `ln -s` | The machine holding the link's target, so the link leads somewhere there; a link to a name no machine holds lands like a new name |
+| `ls`, `find`, `grep -r` | Every machine, each name once, by the copy written last |
+| A name that is a file on one machine and a folder on another | The copy written last: a file shown there has no entries |
+| `/proc`, `/sys` | The machine the command is about: a kernel's view of its own machine is never merged |
 
-A name on two machines is refused as ambiguous unless the command's program
-runs on one of them.
+The machine a command is about is the one its program runs on. For a command
+Mirage runs itself it is the machine the line names, else the one whose
+program writes its pipe, else the one its folder is on, else
+`default_machine`.
+
+Mirage copies nothing between machines to keep them alike. A program opens
+its own machine's disk, so it reads that machine's copy whatever another
+machine holds. "Written last" compares the modification times the machines
+report, each by its own clock.
 
 ## Behavior
 
@@ -204,6 +217,9 @@ runs on one of them.
   machines.
 - **Owners:** `stat` and listings report the machine's own owners and modes;
   `chmod`, `chown` and `touch` apply on the machine.
+- **`df`:** the Filesystem column names the machine and the path there, as
+  `gpu:/tmp`, with that machine's space. Over several machines it answers
+  for the machine the command is about.
 - **Tools:** the machine needs GNU `find` (for `-printf`), `cat`, `head`,
   `tail`, `dd` and the coreutils sums; a stock Debian or Ubuntu image has them.
 - **Daytona:** its exec takes no input, so a write to its files is refused

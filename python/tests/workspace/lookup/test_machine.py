@@ -189,10 +189,46 @@ async def test_on_two_machines_only_the_one_holding_every_path_runs_it():
     )
     assert await out(ws, "cat /tmp/a.py") == "ran\n"
     assert (a.ran, b.ran) == (["cat /tmp/a.py"], [])
-    both = await ws.shell("cat /tmp/both")
-    assert both.exit_code == 1
-    assert "on several machines: a, b" in await both.stderr_str()
+    assert await out(ws, "cat /tmp/both") == "1"
     assert (a.ran, b.ran) == (["cat /tmp/a.py"], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_from_a_shared_mount_s_root_the_machine_holding_the_path_runs():
+    a = FakeFiles(programs=("cat",))
+    b = FakeFiles({"/tmp/data/f": b"x"}, programs=("cat",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    assert await out(ws, "cd /tmp && cat data/f") == "ran\n"
+    assert (a.ran, b.ran) == ([], ["cat data/f"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_name_on_two_machines_stays_with_mirage_from_any_folder():
+    a = FakeFiles({"/srv/k": b"k", "/tmp/both": b"old"}, programs=TOOLS)
+    b = FakeFiles({"/tmp/both": b"b"}, programs=TOOLS)
+    ws = Workspace(
+        {"/srv": "@a"},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    b.answer("cat > /tmp/both", b"new")
+    assert await out(ws, "cd /srv && cat /tmp/both") == "new"
+    assert await out(ws, "cd /srv && ls /tmp") == "both\n"
+    assert (a.ran, b.ran) == ([], [])
+    assert await out(ws, "cd /srv && cat k") == "ran\n"
+    assert (a.ran, b.ran) == (["cat k"], [])
     await ws.close()
 
 
@@ -267,6 +303,99 @@ async def test_a_link_in_the_machine_s_folder_is_made_and_read_there():
     await ws.shell("printf x | ln -s a.py /tmp/link")
     await ws.shell("readlink /tmp/link")
     assert files.ran == ["ln -s a.py /tmp/link", "readlink /tmp/link"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_link_in_a_folder_both_machines_hold_is_made_on_a_machine():
+    a = FakeFiles({"/tmp/a.py": b"x"}, programs=("ln",))
+    b = FakeFiles({"/tmp/d/t": b"t"}, programs=("ln",))
+    first = ScriptedMachine("a", a.answer)
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines={"a": first, "b": ScriptedMachine("b", b.answer)},
+    )
+    await ws.shell("ln -s /tmp/a.py /tmp/link")
+    await ws.shell("ln -s /tmp/d/t /tmp/d/link")
+    await ws.shell("ln -s /tmp/a.py /tmp/named", machine="b")
+    await ws.shell("ln -s /tmp/nowhere /tmp/dangling", machine="b")
+    await ws.shell("cd /tmp && ln -s a.py beside")
+    assert first.cwds[-1] == "/tmp"
+    await ws.shell("cd /data && ln -s /tmp/a.py /tmp/from-store")
+    assert first.cwds[-1] == "/"
+    await ws.shell("cd /data && ln -s /tmp/a.py ../tmp/typed-relative")
+    assert a.ran == [
+        "ln -s /tmp/a.py /tmp/link",
+        "ln -s /tmp/a.py /tmp/named",
+        "ln -s a.py beside",
+        "ln -s /tmp/a.py /tmp/from-store",
+    ]
+    assert b.ran == [
+        "ln -s /tmp/d/t /tmp/d/link",
+        "ln -s /tmp/nowhere /tmp/dangling",
+    ]
+    assert await out(ws, "readlink /tmp/typed-relative") == "/tmp/a.py\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_link_another_machine_would_break_stays_mirage_s():
+    a = FakeFiles(
+        {"/tmp/only/kept": b"k", "/tmp/existing": b"e"}, programs=("ln",)
+    )
+    b = FakeFiles({"/tmp/target": b"t"}, programs=("ln",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    await ws.shell("ln -s /tmp/target /tmp/only/link")
+    assert await out(ws, "readlink /tmp/only/link") == "/tmp/target\n"
+    taken = await ws.shell("ln -sT /tmp/target /tmp/existing")
+    assert taken.exit_code == 1
+    assert "File exists" in await taken.stderr_str()
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_hard_link_into_one_machine_s_folder_is_made_there():
+    a = FakeFiles({"/tmp/t": b"old"}, programs=("ln",))
+    b = FakeFiles({"/tmp/t": b"t", "/srv/kept": b"k"}, programs=("ln",))
+    ws = Workspace(
+        {"/srv": "@b"},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    b.answer("cat > /tmp/t", b"newer")
+    assert (await ws.shell("ln /tmp/t /srv/link")).exit_code == 0
+    assert (a.ran, b.ran) == ([], ["ln /tmp/t /srv/link"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_link_below_a_file_shown_over_a_folder_is_made_nowhere():
+    a = FakeFiles({"/tmp/d/kept": b"k", "/tmp/t": b"t"}, programs=("ln",))
+    b = FakeFiles({"/tmp/d": b"file"}, programs=("ln",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    b.answer("cat > /tmp/d", b"newer")
+    made = await ws.shell("ln -s /tmp/t /tmp/d/link")
+    assert made.exit_code == 1
+    assert (a.ran, b.ran) == ([], [])
     await ws.close()
 
 

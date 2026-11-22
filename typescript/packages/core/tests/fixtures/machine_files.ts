@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MachineAccessor } from '../../src/accessor/machine.ts'
-import { TREE_FORMAT } from '../../src/core/posix/constants.ts'
+import { ENTRY_FORMAT } from '../../src/core/posix/constants.ts'
 import { PathSpec } from '../../src/types.ts'
 import type { RunAnswer } from '../../src/runtime/types.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
@@ -50,9 +50,18 @@ export function spec(path: string, prefix = '/tmp'): PathSpec {
 
 /** An answer holding `paths` as files and every other stat missing. */
 export function holding(...paths: string[]): Answer {
+  return holdingSince(1700000000, ...paths)
+}
+
+/**
+ * `holding`, the files written at `written`, in epoch seconds. Mirrors
+ * Python's `holding(written=)`.
+ */
+export function holdingSince(written: number, ...paths: string[]): Answer {
+  const entry = ENC.encode(`f 644 3 ${String(written)} 1700000001 0 50 1 0 \0`)
   return (line) => {
     if (line.includes('-maxdepth 0')) {
-      if (paths.some((p) => line.includes(`'${p}'`))) return ok(ROW)
+      if (paths.some((p) => line.includes(`'${p}'`))) return ok(entry)
       return failed("find: 'x': No such file or directory\n")
     }
     return ok('hi\n')
@@ -73,10 +82,14 @@ function words(part: string): string[] {
 
 /**
  * One machine's own files, answering the lines a machine mount sends as its
- * POSIX tools would. Mirrors Python's `tests/fixtures/machine_files.FakeFiles`.
+ * POSIX tools would. Every write stamps its file from one clock all the
+ * machines share, so the copy written last is the same whichever machine is
+ * asked. Mirrors Python's `tests/fixtures/machine_files.FakeFiles`.
  */
 export class FakeFiles {
+  private static clock = 0
   readonly files: Map<string, Uint8Array>
+  readonly written = new Map<string, number>()
   readonly dirs = new Set(['/', '/tmp', '/dev', '/dev/shm'])
   readonly programs: Set<string>
   readonly ran: string[] = []
@@ -105,9 +118,38 @@ export class FakeFiles {
     return result
   }
 
+  private stamp(path: string): void {
+    FakeFiles.clock += 1
+    this.written.set(path, FakeFiles.clock)
+  }
+
   private row(path: string, rel: string): string {
-    if (this.dirs.has(path)) return `d 755 4096 0 0 0 0 2 8 ${rel}\0`
-    return `f 644 ${String(this.files.get(path)?.byteLength ?? 0)} 0 0 0 0 1 0 ${rel}\0`
+    const at = String(this.written.get(path) ?? 0)
+    if (this.dirs.has(path)) return `d 755 4096 ${at} 0 0 0 2 8 ${rel}\0`
+    return `f 644 ${String(this.files.get(path)?.byteLength ?? 0)} ${at} 0 0 0 1 0 ${rel}\0`
+  }
+
+  private moveFolder(src: string, dst: string): RunAnswer {
+    if (!this.dirs.has(dirname(dst))) return this.missing('mv', dst)
+    for (const name of [...this.dirs].sort()) {
+      if (name === src || name.startsWith(`${src}/`)) {
+        this.dirs.delete(name)
+        this.dirs.add(dst + name.slice(src.length))
+      }
+    }
+    for (const [name, data] of [...this.files].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      if (name.startsWith(`${src}/`)) {
+        this.files.delete(name)
+        this.files.set(dst + name.slice(src.length), data)
+      }
+    }
+    for (const [name, at] of [...this.written]) {
+      if (name === src || name.startsWith(`${src}/`)) {
+        this.written.delete(name)
+        this.written.set(dst + name.slice(src.length), at)
+      }
+    }
+    return ok()
   }
 
   private missing(tool: string, path: string): RunAnswer {
@@ -123,7 +165,7 @@ export class FakeFiles {
       return this.dirs.has(dirname(real)) ? ok(`${real}\n`) : failed('')
     }
     if (w.slice(0, 4).join(' ') === 'env LC_ALL=C find -L') {
-      if (w.at(-2) !== '-printf' || w.at(-1) !== TREE_FORMAT)
+      if (w.at(-2) !== '-printf' || w.at(-1) !== ENTRY_FORMAT)
         throw new Error(`unexpected find format: ${w.join(' ')}`)
       const path = this.real(w[4] ?? '')
       const depth = w[5] === '-maxdepth' ? Number(w[6]) : null
@@ -152,6 +194,7 @@ export class FakeFiles {
       joined.set(old)
       joined.set(add, old.byteLength)
       this.files.set(path, joined)
+      this.stamp(path)
       return ok()
     }
     if (head === 'mkdir') {
@@ -187,11 +230,14 @@ export class FakeFiles {
     if (head === 'mv' || head === 'cp') {
       const src = w.at(-2) ?? ''
       const dst = w.at(-1) ?? ''
+      if (head === 'mv' && this.dirs.has(src)) return this.moveFolder(src, dst)
       const found = this.files.get(src)
       if (found === undefined) return this.missing(head, src)
       if (!this.dirs.has(dirname(dst))) return this.missing(head, dst)
       this.files.set(dst, found)
+      this.written.set(dst, this.written.get(src) ?? 0)
       if (head === 'mv') this.files.delete(src)
+      else this.stamp(dst)
       return ok()
     }
     this.ran.push(w.join(' '))
