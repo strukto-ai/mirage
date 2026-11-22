@@ -1316,6 +1316,52 @@
       "error": "commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
     },
     {
+      "name": "commands: a rule's recursive glob names its folder",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "paths": [
+                  "/d/keep/**"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "error": "commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
+    },
+    {
+      "name": "commands: a rule's glob path names no one folder",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "commands": {
+              "rm": {
+                "decision": "deny",
+                "paths": [
+                  "/d/*/sub/*"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "error": "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide"
+    },
+    {
       "name": "commands: the block is a mapping",
       "config": {
         "mounts": {

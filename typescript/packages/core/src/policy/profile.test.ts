@@ -501,8 +501,16 @@ it.each([
     'profile.commands.gh.--admin: a rule takes no paths; scope it to a folder with mounts[/r].commands.gh.--admin',
   ],
   [
+    { commands: { rm: { decision: 'deny', paths: ['/d/keep/**'] } } },
+    'profile.commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
+  ],
+  [
     { commands: { cat: { decision: 'deny', paths: ['*.pem'] } } },
-    'profile.commands.cat: a rule takes no paths; hide those paths with paths.hide',
+    'profile.commands.cat: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.cat, or hide those paths with paths.hide',
+  ],
+  [
+    { commands: { rm: { decision: 'deny', paths: [''] } } },
+    'profile.commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide',
   ],
   [
     {

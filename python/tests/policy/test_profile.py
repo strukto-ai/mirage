@@ -3112,8 +3112,24 @@ def test_a_policy_names_its_programs_per_method():
             "folder with mounts[/r].commands.gh.--admin",
         ),
         (
+            {
+                "commands": {
+                    "rm": {"decision": "deny", "paths": ["/d/keep/**"]}
+                }
+            },
+            "commands.rm: a rule takes no paths; scope it to a folder with "
+            "mounts[/d/keep].commands.rm",
+        ),
+        (
             {"commands": {"cat": {"decision": "deny", "paths": ["*.pem"]}}},
-            "commands.cat: a rule takes no paths; hide those paths with "
+            "commands.cat: a rule takes no paths; scope it to each folder "
+            "with mounts[<folder>].commands.cat, or hide those paths with "
+            "paths.hide",
+        ),
+        (
+            {"commands": {"rm": {"decision": "deny", "paths": [""]}}},
+            "commands.rm: a rule takes no paths; scope it to each folder "
+            "with mounts[<folder>].commands.rm, or hide those paths with "
             "paths.hide",
         ),
         (

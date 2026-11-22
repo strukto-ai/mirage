@@ -206,9 +206,10 @@ fn shown(name: &[u32]) -> String {
 }
 
 /// Where a rule's paths go now: the folder entry its first path names
-/// (`/data/keep/*` gives `mounts[/data/keep].commands.rm`), or a hide
-/// for a name pattern or a glob, which no folder spells. `key` is the
-/// rule's place under its `commands` block.
+/// (`/data/keep/*` and `/data/keep/**` give
+/// `mounts[/data/keep].commands.rm`), or, for a glob, a relative or an
+/// empty path, which no one folder spells, an entry per folder or a
+/// hide. `key` is the rule's place under its `commands` block.
 fn no_paths(raw: &Doc, at: &str, key: &str) -> String {
     let first = match raw.get("paths") {
         Doc::List(items) => items.first(),
@@ -216,24 +217,30 @@ fn no_paths(raw: &Doc, at: &str, key: &str) -> String {
         _ => None,
     };
     let folder = match first {
-        Some(Doc::Text(path)) => {
-            let path = path.strip_suffix(&[47, 42]).unwrap_or(path);
+        Some(Doc::Text(path)) if path.first() == Some(&47) => {
+            let path = path
+                .strip_suffix(&[47, 42, 42])
+                .or_else(|| path.strip_suffix(&[47, 42]))
+                .unwrap_or(path);
             let path = path.strip_suffix(&[47]).unwrap_or(path);
             if path.is_empty() {
                 Some("/".to_owned())
-            } else if path.first() == Some(&47) && !crate::policy::is_glob(path) {
-                Some(shown(path))
-            } else {
+            } else if crate::policy::is_glob(path) {
                 None
+            } else {
+                Some(shown(path))
             }
         }
+        Some(Doc::Text(_)) => None,
         _ => Some("<folder>".to_owned()),
     };
     match folder {
         Some(folder) => format!(
             "{at}: a rule takes no paths; scope it to a folder with mounts[{folder}].commands{key}"
         ),
-        None => format!("{at}: a rule takes no paths; hide those paths with paths.hide"),
+        None => format!(
+            "{at}: a rule takes no paths; scope it to each folder with mounts[<folder>].commands{key}, or hide those paths with paths.hide"
+        ),
     }
 }
 
@@ -1257,12 +1264,24 @@ mod tests {
                 "commands.rm: a rule takes no paths; scope it to a folder with mounts[<folder>].commands.rm",
             ),
             (
+                m(&[("rm", rule(texts(&["/data/keep/**"])))]),
+                "commands.rm: a rule takes no paths; scope it to a folder with mounts[/data/keep].commands.rm",
+            ),
+            (
                 m(&[("rm", rule(texts(&["*.pem"])))]),
-                "commands.rm: a rule takes no paths; hide those paths with paths.hide",
+                "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
             ),
             (
                 m(&[("rm", rule(texts(&["/data/secret*"])))]),
-                "commands.rm: a rule takes no paths; hide those paths with paths.hide",
+                "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/data/*/sub/*"])))]),
+                "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
+            ),
+            (
+                m(&[("rm", rule(texts(&[""])))]),
+                "commands.rm: a rule takes no paths; scope it to each folder with mounts[<folder>].commands.rm, or hide those paths with paths.hide",
             ),
             (
                 m(&[("*", m(&[("paths", texts(&["/vault/*"]))]))]),
