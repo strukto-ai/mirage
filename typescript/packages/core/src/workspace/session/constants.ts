@@ -33,7 +33,6 @@ export const OLDER_FORMAT = new AdmissionRules([
         {
           decision: Outcome.DENY,
           reason: 'rules saved in an older format; recreate the session',
-          paths: [],
         },
       ],
       subcommands: new Map(),

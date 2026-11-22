@@ -208,81 +208,24 @@
   ],
   "admissions": [
     {
-      "name": "per_subject_deny",
-      "trees": [
-        {
-          "mount": null,
-          "commands": {
-            "cp": [
-              {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/sealed/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "review",
-                "paths": [
-                  "/review/deep/*"
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "facts": {
-        "command": "cp",
-        "tokens": [
-          "cp",
-          "/sealed/x",
-          "/review/deep/y"
-        ],
-        "tool": true,
-        "cwd": "/",
-        "paths": [
-          "/sealed/x",
-          "/review/deep/y"
-        ],
-        "operands": [
-          "/sealed/x",
-          "/review/deep/y"
-        ],
-        "walks": false,
-        "subtree": false,
-        "move_target": null
-      },
-      "expected": {
-        "outcome": "deny",
-        "at": "/cp/*/0",
-        "matched_path": "/sealed/x",
-        "source": "top",
-        "asks": []
-      }
-    },
-    {
       "name": "all_winning_asks",
       "trees": [
         {
-          "mount": null,
+          "mount": "/a",
           "commands": {
-            "cp": [
-              {
-                "decision": "ask",
-                "reason": "source",
-                "paths": [
-                  "/a/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "destination",
-                "paths": [
-                  "/deep/b/*"
-                ]
-              }
-            ]
+            "cp": {
+              "decision": "ask",
+              "reason": "source"
+            }
+          }
+        },
+        {
+          "mount": "/deep/b",
+          "commands": {
+            "cp": {
+              "decision": "ask",
+              "reason": "destination"
+            }
           }
         }
       ],
@@ -309,12 +252,11 @@
       },
       "expected": {
         "outcome": "ask",
-        "at": "/cp/*/0",
-        "matched_path": "/a/x",
-        "source": "top",
+        "at": "/cp/*",
+        "source": "mounts./a",
         "asks": [
-          "/cp/*/0",
-          "/cp/*/1"
+          "/cp/*",
+          "/cp/*"
         ]
       }
     },
@@ -322,22 +264,16 @@
       "name": "list_leaf_takes_its_strictest",
       "trees": [
         {
-          "mount": null,
+          "mount": "/repo",
           "commands": {
             "cp": [
               {
                 "decision": "deny",
-                "reason": "broad",
-                "paths": [
-                  "/repo/*"
-                ]
+                "reason": "broad"
               },
               {
                 "decision": "ask",
-                "reason": "deep",
-                "paths": [
-                  "/repo/outbox/*"
-                ]
+                "reason": "deep"
               }
             ]
           }
@@ -364,8 +300,7 @@
       "expected": {
         "outcome": "deny",
         "at": "/cp/*/0",
-        "matched_path": "/repo/outbox/x",
-        "source": "top",
+        "source": "mounts./repo",
         "asks": []
       }
     },
@@ -375,22 +310,19 @@
         {
           "mount": null,
           "commands": {
-            "cp": [
-              {
-                "decision": "deny",
-                "reason": "deny",
-                "paths": [
-                  "/repo/*"
-                ]
-              },
-              {
-                "decision": "ask",
-                "reason": "ask",
-                "paths": [
-                  "/repo/*"
-                ]
-              }
-            ]
+            "cp": {
+              "decision": "ask",
+              "reason": "ask"
+            }
+          }
+        },
+        {
+          "mount": "/repo",
+          "commands": {
+            "cp": {
+              "decision": "deny",
+              "reason": "deny"
+            }
           }
         }
       ],
@@ -414,9 +346,8 @@
       },
       "expected": {
         "outcome": "deny",
-        "at": "/cp/*/0",
-        "matched_path": "/repo/x",
-        "source": "top",
+        "at": "/cp/*",
+        "source": "mounts./repo",
         "asks": []
       }
     },
@@ -446,7 +377,6 @@
       "expected": {
         "outcome": "deny",
         "at": "/*",
-        "matched_path": null,
         "source": "top",
         "asks": []
       }
@@ -470,7 +400,6 @@
       "expected": {
         "outcome": "allow",
         "at": null,
-        "matched_path": null,
         "source": "",
         "asks": []
       }
@@ -512,7 +441,6 @@
       "expected": {
         "outcome": "deny",
         "at": "/*",
-        "matched_path": null,
         "source": "mounts./scratch/child",
         "asks": []
       }
@@ -552,7 +480,6 @@
       "expected": {
         "outcome": "allow",
         "at": null,
-        "matched_path": null,
         "source": "",
         "asks": []
       }
@@ -561,14 +488,11 @@
       "name": "subtree_source",
       "trees": [
         {
-          "mount": null,
+          "mount": "/repo/locked",
           "commands": {
             "mv": {
               "decision": "deny",
-              "reason": "inside",
-              "paths": [
-                "/repo/locked/*"
-              ]
+              "reason": "inside"
             }
           }
         }
@@ -597,8 +521,7 @@
       "expected": {
         "outcome": "deny",
         "at": "/mv/*",
-        "matched_path": "/repo",
-        "source": "top",
+        "source": "mounts./repo/locked",
         "asks": []
       }
     }

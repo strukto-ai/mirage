@@ -129,7 +129,6 @@ def test_shared_matching_corpus():
         assert (None if result.rule is None else result.rule.at) == expected[
             "at"
         ], name
-        assert result.matched_path == expected["matched_path"], name
         assert result.source == expected["source"], name
         assert [a.at for a in result.asks] == expected["asks"], name
 

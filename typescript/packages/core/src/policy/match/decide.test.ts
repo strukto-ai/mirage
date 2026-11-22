@@ -50,41 +50,6 @@ describe('decide', () => {
     }
   })
 
-  it("one operand's ask never answers for another operand's deny", () => {
-    const rules = trees({
-      cp: [
-        { decision: 'deny', reason: 'sealed', paths: ['/p/*'] },
-        { decision: 'ask', reason: 'nod', paths: ['/review/*'] },
-      ],
-    })
-    const ruling = decide(line(['cp', '/p/secret', '/review/out']), rules)
-    expect(ruling.outcome).toBe(Outcome.DENY)
-    expect(ruling.matchedPath).toBe('/p/secret')
-    expect(ruling.asks).toEqual([])
-    const asked = decide(line(['cp', '/review/x', '/elsewhere']), rules)
-    expect(asked.outcome).toBe(Outcome.ASK)
-    expect(asked.rule?.reason).toBe('nod')
-  })
-
-  it('the strictest leaf covering a path decides it', () => {
-    const rules = trees({
-      cat: [
-        { decision: 'deny', paths: ['/a/*'] },
-        { decision: 'ask', paths: ['/a/open/*'] },
-      ],
-    })
-    expect(decide(line(['cat', '/a/open/x']), rules).outcome).toBe(Outcome.DENY)
-    expect(decide(line(['cat', '/b']), rules).outcome).toBe(Outcome.ALLOW)
-  })
-
-  it('a leaf with paths says nothing for a line naming none', () => {
-    const rules = trees({ rm: { decision: 'deny', paths: ['/wip/*'] } })
-    expect(decide(line(['rm', '/wip/x']), rules).outcome).toBe(Outcome.DENY)
-    const whole = decide(line(['rm']), rules)
-    expect(whole.outcome).toBe(Outcome.ALLOW)
-    expect(whole.matchedPath).toBeNull()
-  })
-
   it('a mount tree reports where it was written', () => {
     const rules = trees(null, { '/a': { rm: { decision: 'deny', paths: ['b/*'] } } })
     const ruling = decide(line(['rm', '/a/b/x']), rules)
@@ -92,20 +57,6 @@ describe('decide', () => {
     expect(ruling.rule?.paths).toEqual(['/a/b/*'])
     expect(ruling.source).toBe('mounts./a')
     expect(decide(line(['rm', '/c/x']), rules).outcome).toBe(Outcome.ALLOW)
-  })
-
-  it("every subject's ask is reported, not just the winner", () => {
-    const rules = trees({
-      cp: [
-        { decision: 'ask', reason: 'source', paths: ['/a/*'] },
-        { decision: 'ask', reason: 'dest', paths: ['/b/*'] },
-      ],
-    })
-    const ruling = decide(line(['cp', '/a/x', '/b/y']), rules)
-    expect(ruling.outcome).toBe(Outcome.ASK)
-    expect(new Set(ruling.asks.map((a) => a.reason))).toEqual(new Set(['source', 'dest']))
-    const one = decide(line(['cp', '/a/x', '/a/y']), rules)
-    expect(one.asks.map((a) => a.reason)).toEqual(['source'])
   })
 
   it('the top tree and the inline tree are judged apart', () => {

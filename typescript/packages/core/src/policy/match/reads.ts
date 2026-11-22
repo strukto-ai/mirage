@@ -22,15 +22,12 @@ export function hasRules(rules: AdmissionRules | null): boolean {
 }
 
 function rootDenies(scoped: ScopedTree): boolean {
-  return (
-    !scoped.mount &&
-    scoped.tree.decision.some((leaf) => leaf.decision === Outcome.DENY && leaf.paths.length === 0)
-  )
+  return !scoped.mount && scoped.tree.decision.some((leaf) => leaf.decision === Outcome.DENY)
 }
 
 /**
- * Whether a top-level tree denies, on every path, each line it names no
- * command for: its root's own decision is a deny with no paths.
+ * Whether a top-level tree denies each line it names no command for: its
+ * root's own decision is a deny.
  */
 export function closedByDefault(rules: AdmissionRules | null): boolean {
   return rules?.trees.some(rootDenies) ?? false
@@ -55,7 +52,7 @@ export function closed(rules: AdmissionRules | null): boolean {
  * The whole-line gate asks this for a word the runtime, not the gate,
  * will expand: the head of every command is read by every tree, but an
  * argument only matters to a node below the command (a subcommand, an
- * option, an operand), a leaf with paths, or a mount's tree, so a
+ * option, an operand) or a folder entry's tree, so a
  * dynamic argument to a command no such node names is nothing a tree
  * would have seen anyway.
  */
@@ -64,16 +61,16 @@ export function readsArgs(rules: AdmissionRules | null, name: string): boolean {
 }
 
 /**
- * Whether a leaf with paths in force reads this command's paths.
+ * Whether a folder entry's tree in force reads this command's paths.
  *
  * The argv builder asks this before deciding who resolves a glob
  * operand: a mount command's pattern is normally pushed down to the
  * backend, so the gate would see the pattern, not the matches, and
- * `cat /scratch/*\/k` would pass a leaf on `/scratch/private` that
- * `cat /scratch/private/k` fails. When a leaf that reads paths (or a
- * mount's tree) applies to the command, whether it names the command or
- * every command, the shell expands the glob first, so the gate judges
- * the paths the command will touch.
+ * `cat /scratch/*\/k` would pass a folder entry for `/scratch/private`
+ * that `cat /scratch/private/k` fails. When a folder entry's tree speaks
+ * for the command, whether it names the command or every command, the
+ * shell expands the glob first, so the gate judges the paths the command
+ * will touch.
  */
 export function scopesPaths(rules: AdmissionRules | null, name: string): boolean {
   return (

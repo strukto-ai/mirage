@@ -272,22 +272,23 @@ mod tests {
         assert_eq!(out, b"true");
     }
 
-    fn tree(commands: &str) -> String {
+    fn tree(mount: &str, commands: &str) -> String {
         let root = crate::document::tree_of(&serde_json::from_str(commands).unwrap()).unwrap();
+        let mount: Vec<u32> = mount.chars().map(u32::from).collect();
         serde_json::to_string(
-            &serde_json::json!({"rules": {"trees": [{"mount": null, "root": root}]}}),
+            &serde_json::json!({"rules": {"trees": [{"mount": mount, "root": root}]}}),
         )
         .unwrap()
     }
 
     #[test]
     fn decides_with_host_supplied_subtree_facts() {
-        let config = tree(r#"{"rm": {"decision": "deny", "reason": "no", "paths": ["/r/*"]}}"#);
+        let config = tree("/r/k", r#"{"rm": {"decision": "deny", "reason": "no"}}"#);
         let facts = |subtree: bool| {
             format!(
                 r#"{{"op": "decide", "facts": {{"tokens": [[114,109],[47,114]], "tool": true,
-                "cwd": [47], "paths": [{{"virtual_path": [47,114], "display_path": [47,114]}}],
-                "operands": [{{"virtual_path": [47,114], "display_path": [47,114]}}],
+                "cwd": [47], "paths": [{{"virtual_path": [47,114]}}],
+                "operands": [{{"virtual_path": [47,114]}}],
                 "walks": false, "subtree": {subtree}, "moves": false, "move_target": null}}}}"#
             )
         };
@@ -298,8 +299,9 @@ mod tests {
     #[test]
     fn judges_a_reached_file_under_the_line_walk() {
         let config = tree(
-            r#"{"cp": {"decision": "ask", "reason": "no", "paths": ["/r/*"]},
-                "rm": {"decision": "deny", "reason": "no", "paths": ["/r/*"]}}"#,
+            "/r",
+            r#"{"cp": {"decision": "ask", "reason": "no"},
+                "rm": {"decision": "deny", "reason": "no"}}"#,
         );
         let walked = ask(
             &config,

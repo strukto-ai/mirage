@@ -35,7 +35,23 @@
               "PAGER": "cat"
             },
             "mounts": {
-              "/d": "rw"
+              "/d": {
+                "mode": "rw",
+                "commands": {
+                  "rm": {
+                    "decision": "deny",
+                    "reason": "no rm here"
+                  }
+                }
+              },
+              "/d/shared": {
+                "commands": {
+                  "rm": {
+                    "decision": "ask",
+                    "reason": "sign-off"
+                  }
+                }
+              }
             },
             "commands": {
               "*": "deny",
@@ -45,23 +61,7 @@
                 "*": "allow",
                 "push": "ask"
               },
-              "rm": [
-                "allow",
-                {
-                  "decision": "ask",
-                  "reason": "sign-off",
-                  "paths": [
-                    "/d/shared/*"
-                  ]
-                },
-                {
-                  "decision": "deny",
-                  "reason": "no rm here",
-                  "paths": [
-                    "/d/*"
-                  ]
-                }
-              ],
+              "rm": "allow",
               "shred": "deny"
             },
             "paths": {

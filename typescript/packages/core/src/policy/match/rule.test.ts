@@ -66,35 +66,6 @@ describe('command trees over paths', () => {
     expect(verdict(rules, line(['grep', '-r', 'x', '/scratch/f']))[0]).toBe(Outcome.ALLOW)
   })
 
-  it("a leaf's paths read the one path grammar", () => {
-    const prod = trees({ rm: { decision: 'deny', paths: ['/data/prod'] } })
-    for (const virtual of ['/data/prod', '/data/prod/x'])
-      expect(verdict(prod, line(['rm', virtual]))).toEqual([Outcome.DENY, virtual])
-    expect(verdict(prod, line(['rm', '/data/production']))[0]).toBe(Outcome.ALLOW)
-    const keys = trees({ '*': { decision: 'deny', paths: ['*.key'] } })
-    expect(verdict(keys, line(['cat', '/a/b.key/c']))[0]).toBe(Outcome.DENY)
-    expect(verdict(keys, line(['cat', '/a/b.keyx']))[0]).toBe(Outcome.ALLOW)
-    const one = trees({ '*': { decision: 'deny', paths: ['/d/?.txt', '/d/[ab].c'] } })
-    expect(verdict(one, line(['cat', '/d/a.txt']))[0]).toBe(Outcome.DENY)
-    expect(verdict(one, line(['cat', '/d/ab.txt']))[0]).toBe(Outcome.ALLOW)
-    expect(verdict(one, line(['cat', '/d/b.c']))[0]).toBe(Outcome.DENY)
-    expect(verdict(one, line(['cat', '/d/c.c']))[0]).toBe(Outcome.ALLOW)
-  })
-
-  it('a subtree command on the directory holding the scope matches', () => {
-    const rules = trees({ '*': { decision: 'deny', paths: ['/x/locked/*'] } })
-    for (const words of [['rm', '-r'], ['rmdir']]) {
-      for (const operand of ['/x/locked', '/x'])
-        expect(verdict(rules, line([...words, operand]))).toEqual([Outcome.DENY, operand])
-      expect(verdict(rules, line([...words, '/x/other']))[0]).toBe(Outcome.ALLOW)
-    }
-    expect(verdict(rules, line(['mv', '/x', '/y']))).toEqual([Outcome.DENY, '/x'])
-    expect(verdict(rules, line(['mv', '/z', '/x/locked']))).toEqual([Outcome.DENY, '/x/locked'])
-    expect(verdict(rules, line(['mv', '/z', '/x']))[0]).toBe(Outcome.ALLOW)
-    expect(verdict(rules, line(['cat', '/x/locked']))[0]).toBe(Outcome.ALLOW)
-    expect(verdict(rules, line(['cp', '-r', '/x', '/y']))[0]).toBe(Outcome.ALLOW)
-  })
-
   it('ioRefusal judges a reached file as one more path', () => {
     const rules = trees({
       rm: [

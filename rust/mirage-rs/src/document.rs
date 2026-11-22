@@ -171,7 +171,8 @@ fn under(raw: &Doc, root: &[u32], at: &str) -> Result<(), String> {
 }
 
 const VERBS: [&str; 3] = ["allow", "ask", "deny"];
-const LEAF_FIELDS: [&str; 3] = ["decision", "reason", "paths"];
+const LEAF_FIELDS: [&str; 2] = ["decision", "reason"];
+const RULE_KEYS: [&str; 3] = ["decision", "reason", "paths"];
 const FLAT_EXAMPLE: &str = "commands: {\"*\": allow, rm: {--recursive: {--force: deny}}, gh: {pr: {merge: {--admin: deny}}}}";
 
 fn verb(raw: &Doc) -> bool {
@@ -180,7 +181,7 @@ fn verb(raw: &Doc) -> bool {
 
 fn leaf_like(raw: &Doc) -> bool {
     match raw {
-        Doc::Map(_) => LEAF_FIELDS
+        Doc::Map(_) => RULE_KEYS
             .iter()
             .any(|name| !matches!(raw.get(name), Doc::Null)),
         _ => true,
@@ -204,18 +205,52 @@ fn shown(name: &[u32]) -> String {
     Doc::Text(name.to_vec()).shown()
 }
 
-fn leaf(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+/// Where a rule's paths go now: the folder entry its first path names
+/// (`/data/keep/*` gives `mounts[/data/keep].commands.rm`), or a hide
+/// for a name pattern or a glob, which no folder spells. `key` is the
+/// rule's place under its `commands` block.
+fn no_paths(raw: &Doc, at: &str, key: &str) -> String {
+    let first = match raw.get("paths") {
+        Doc::List(items) => items.first(),
+        text @ Doc::Text(_) => Some(text),
+        _ => None,
+    };
+    let folder = match first {
+        Some(Doc::Text(path)) => {
+            let path = path.strip_suffix(&[47, 42]).unwrap_or(path);
+            let path = path.strip_suffix(&[47]).unwrap_or(path);
+            if path.is_empty() {
+                Some("/".to_owned())
+            } else if path.first() == Some(&47) && !crate::policy::is_glob(path) {
+                Some(shown(path))
+            } else {
+                None
+            }
+        }
+        _ => Some("<folder>".to_owned()),
+    };
+    match folder {
+        Some(folder) => format!(
+            "{at}: a rule takes no paths; scope it to a folder with mounts[{folder}].commands{key}"
+        ),
+        None => format!("{at}: a rule takes no paths; hide those paths with paths.hide"),
+    }
+}
+
+fn leaf(raw: &Doc, at: &str, key: &str) -> Answer {
     if verb(raw) {
         return Ok(object(vec![
             ("decision", raw.clone()),
             ("reason", Doc::text("")),
-            ("paths", Doc::List(Vec::new())),
         ]));
     }
     if !matches!(raw, Doc::Map(_)) {
         return Err(format!(
-            "{at} must be allow, ask, deny or a {{decision, reason, paths}} mapping"
+            "{at} must be allow, ask, deny or a {{decision, reason}} mapping"
         ));
+    }
+    if raw.field("paths").is_some() {
+        return Err(no_paths(raw, at, key));
     }
     fields(raw, &LEAF_FIELDS, at)?;
     let decision = raw.get("decision");
@@ -230,41 +265,28 @@ fn leaf(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
     Ok(object(vec![
         ("decision", decision.clone()),
         ("reason", reason),
-        (
-            "paths",
-            strings(
-                raw.get("paths"),
-                &format!("{at}.paths"),
-                Some("a path"),
-                dialect,
-            )?,
-        ),
     ]))
 }
 
-fn leaves(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+fn leaves(raw: &Doc, at: &str, root: &str) -> Answer {
+    let key = at.strip_prefix(root).unwrap_or_default();
     match raw {
         Doc::List(items) if items.is_empty() => Err(format!("{at} lists no decision")),
         Doc::List(items) => items
             .iter()
             .enumerate()
-            .map(|(i, item)| leaf(item, &format!("{at}[{i}]"), dialect))
+            .map(|(i, item)| leaf(item, &format!("{at}[{i}]"), key))
             .collect::<Result<Vec<_>, _>>()
             .map(Doc::List),
         Doc::Text(_) if !verb(raw) => Err(format!(
             "{at}: `{}` is no decision; write allow, ask or deny",
             raw.shown()
         )),
-        _ => Ok(Doc::List(vec![leaf(raw, at, dialect)?])),
+        _ => Ok(Doc::List(vec![leaf(raw, at, key)?])),
     }
 }
 
-fn words(
-    raw: &Doc,
-    at: &str,
-    dialect: Whitespace,
-    each: fn(&Doc, &str, Whitespace) -> Answer,
-) -> Answer {
+fn words(raw: &Doc, at: &str, root: &str, each: fn(&Doc, &str, &str) -> Answer) -> Answer {
     let fields = raw.mapping(at)?;
     if fields.is_empty() {
         return Err(format!("{at} names no word"));
@@ -272,16 +294,16 @@ fn words(
     let mut out = Vec::new();
     for (key, value) in fields {
         let word = key_name(key, at)?;
-        let target = each(value, &format!("{at}[{}]", shown(&word)), dialect)?;
+        let target = each(value, &format!("{at}[{}]", shown(&word)), root)?;
         out.push((Doc::Text(word), target));
     }
     Ok(Doc::Map(out))
 }
 
-fn value_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+fn value_rule(raw: &Doc, at: &str, root: &str) -> Answer {
     if leaf_like(raw) {
         return Ok(object(vec![
-            ("decision", leaves(raw, at, dialect)?),
+            ("decision", leaves(raw, at, root)?),
             ("options", Doc::Map(Vec::new())),
         ]));
     }
@@ -291,9 +313,9 @@ fn value_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
         let name = key_name(key, at)?;
         let here = format!("{at}.{}", shown(&name));
         if name == [u32::from(b'*')] {
-            decision = leaves(value, &here, dialect)?;
+            decision = leaves(value, &here, root)?;
         } else if dashed(&name) && name != [u32::from(b'-'), u32::from(b'*')] {
-            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+            options.push((Doc::Text(name), option_rule(value, &here, root)?));
         } else {
             return Err(format!(
                 "{at}: `{}` is no option; under a value, name the options that must also be present",
@@ -307,10 +329,10 @@ fn value_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
     ]))
 }
 
-fn option_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+fn option_rule(raw: &Doc, at: &str, root: &str) -> Answer {
     if leaf_like(raw) {
         return Ok(object(vec![
-            ("decision", leaves(raw, at, dialect)?),
+            ("decision", leaves(raw, at, root)?),
             ("values", Doc::Map(Vec::new())),
             ("options", Doc::Map(Vec::new())),
         ]));
@@ -322,15 +344,15 @@ fn option_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
         let name = key_name(key, at)?;
         let here = format!("{at}.{}", shown(&name));
         if name == [u32::from(b'*')] {
-            decision = leaves(value, &here, dialect)?;
+            decision = leaves(value, &here, root)?;
         } else if Doc::Text(name.clone()).named("values") {
-            values = words(value, &here, dialect, value_rule)?;
+            values = words(value, &here, root, value_rule)?;
         } else if name == [u32::from(b'-'), u32::from(b'*')] {
             return Err(format!(
                 "{here}: -* belongs on a command, not under an option"
             ));
         } else if dashed(&name) {
-            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+            options.push((Doc::Text(name), option_rule(value, &here, root)?));
         } else if Doc::Text(name.clone()).named("operands") {
             return Err(format!(
                 "{here}: operands belong on a command, not under an option"
@@ -349,11 +371,11 @@ fn option_rule(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
     ]))
 }
 
-fn command_node(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+fn command_node(raw: &Doc, at: &str, root: &str) -> Answer {
     let empty = || Doc::Map(Vec::new());
     if leaf_like(raw) {
         return Ok(object(vec![
-            ("decision", leaves(raw, at, dialect)?),
+            ("decision", leaves(raw, at, root)?),
             ("subcommands", empty()),
             ("options", empty()),
             ("other_options", Doc::List(Vec::new())),
@@ -369,17 +391,17 @@ fn command_node(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
         let name = key_name(key, at)?;
         let here = format!("{at}.{}", shown(&name));
         if name == [u32::from(b'*')] {
-            decision = leaves(value, &here, dialect)?;
+            decision = leaves(value, &here, root)?;
         } else if name == [u32::from(b'-'), u32::from(b'*')] {
-            other = leaves(value, &here, dialect)?;
+            other = leaves(value, &here, root)?;
         } else if dashed(&name) {
-            options.push((Doc::Text(name), option_rule(value, &here, dialect)?));
+            options.push((Doc::Text(name), option_rule(value, &here, root)?));
         } else if Doc::Text(name.clone()).named("operands") {
-            operands = words(value, &here, dialect, command_node)?;
+            operands = words(value, &here, root, command_node)?;
         } else if Doc::Text(name.clone()).named("values") {
             return Err(format!("{here}: values belong under an option"));
         } else {
-            subcommands.push((Doc::Text(name), command_node(value, &here, dialect)?));
+            subcommands.push((Doc::Text(name), command_node(value, &here, root)?));
         }
     }
     if !subcommands.is_empty() && !matches!(&operands, Doc::Map(fields) if fields.is_empty()) {
@@ -426,7 +448,7 @@ fn path_only(raw: &Doc) -> bool {
     })
 }
 
-fn tree(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
+fn tree(raw: &Doc, at: &str) -> Answer {
     if flat(raw) {
         let hide = if path_only(raw) {
             "; a rule with paths and no command has no place in the tree, \
@@ -446,13 +468,13 @@ fn tree(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
         let name = key_name(key, at)?;
         let here = format!("{at}.{}", shown(&name));
         if name == [u32::from(b'*')] {
-            decision = leaves(value, &here, dialect)?;
+            decision = leaves(value, &here, at)?;
         } else if dashed(&name) {
             return Err(format!(
                 "{at}: the option {} needs a command; put it under one",
                 shown(&name)
             ));
-        } else if LEAF_FIELDS
+        } else if RULE_KEYS
             .iter()
             .chain(&["operands", "values"])
             .any(|reserved| Doc::Text(name.clone()).named(reserved))
@@ -462,7 +484,7 @@ fn tree(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
                 shown(&name)
             ));
         } else {
-            commands.push((Doc::Text(name), command_node(value, &here, dialect)?));
+            commands.push((Doc::Text(name), command_node(value, &here, at)?));
         }
     }
     Ok(object(vec![
@@ -523,14 +545,9 @@ pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::
                 } else {
                     Outcome::Allow
                 };
-                let paths = match item.get("paths") {
-                    Doc::List(paths) => paths.iter().map(text).collect(),
-                    _ => Vec::new(),
-                };
                 Leaf {
                     decision,
                     reason: text(item.get("reason")),
-                    paths,
                 }
             })
             .collect()
@@ -574,7 +591,7 @@ pub(crate) fn tree_of(value: &serde_json::Value) -> Result<crate::policy::tree::
                 .collect(),
         }
     }
-    Ok(node(&tree(&doc(value), "commands", Whitespace::Python)?))
+    Ok(node(&tree(&doc(value), "commands")?))
 }
 
 fn hide_group(raw: &Doc, at: &str, dialect: Whitespace) -> Answer {
@@ -892,9 +909,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let at = Doc::Text(at).shown();
     let result = match op.as_str() {
         "strings" => strings(&raw, &at, names.as_deref(), dialect),
-        "absolute" => absolute(&raw, &at).map(|()| Doc::Null),
         "under" => under(&raw, &root, &at).map(|()| Doc::Null),
-        "tree" => tree(&raw, &at, dialect),
+        "tree" => tree(&raw, &at),
         "paths" => paths(&raw, &at, dialect),
         "config" => workspace_fields(&raw, names.as_deref().unwrap_or("workspace"), &at),
         _ => return Err(StreamError::new("document: unknown operation")),
@@ -1115,7 +1131,7 @@ mod tests {
     }
 
     fn shape(raw: &Doc) -> Answer {
-        tree(raw, "commands", Whitespace::Python)
+        tree(raw, "commands")
     }
 
     fn decisions(node: &Doc) -> Vec<String> {
@@ -1168,7 +1184,6 @@ mod tests {
                     Doc::text("ask"),
                     m(&[
                         ("decision", Doc::text("deny")),
-                        ("paths", texts(&["/data/keep/*"])),
                         ("reason", Doc::text("kept")),
                     ]),
                 ]),
@@ -1208,7 +1223,60 @@ mod tests {
             panic!("rm holds a list")
         };
         assert_eq!(rm_leaves[1].get("reason").shown(), "kept");
-        assert_eq!(rm_leaves[1].get("paths"), &texts(&["/data/keep/*"]));
+        assert_eq!(rm_leaves[1].field("paths"), None);
+    }
+
+    #[test]
+    fn a_rule_with_paths_names_the_folder_entry_to_write() {
+        let rule = |paths: Doc| m(&[("decision", Doc::text("deny")), ("paths", paths)]);
+        let cases = [
+            (
+                m(&[("rm", rule(texts(&["/data/keep/*"])))]),
+                "commands.rm: a rule takes no paths; scope it to a folder with mounts[/data/keep].commands.rm",
+            ),
+            (
+                m(&[(
+                    "rm",
+                    Doc::List(vec![Doc::text("allow"), rule(texts(&["/data/keep"]))]),
+                )]),
+                "commands.rm[1]: a rule takes no paths; scope it to a folder with mounts[/data/keep].commands.rm",
+            ),
+            (
+                m(&[(
+                    "gh",
+                    m(&[("pr", m(&[("--admin", rule(texts(&["/repo/*"])))]))]),
+                )]),
+                "commands.gh.pr.--admin: a rule takes no paths; scope it to a folder with mounts[/repo].commands.gh.pr.--admin",
+            ),
+            (
+                m(&[("rm", rule(Doc::text("/d/a")))]),
+                "commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/a].commands.rm",
+            ),
+            (
+                m(&[("rm", rule(Doc::List(Vec::new())))]),
+                "commands.rm: a rule takes no paths; scope it to a folder with mounts[<folder>].commands.rm",
+            ),
+            (
+                m(&[("rm", rule(texts(&["*.pem"])))]),
+                "commands.rm: a rule takes no paths; hide those paths with paths.hide",
+            ),
+            (
+                m(&[("rm", rule(texts(&["/data/secret*"])))]),
+                "commands.rm: a rule takes no paths; hide those paths with paths.hide",
+            ),
+            (
+                m(&[("*", m(&[("paths", texts(&["/vault/*"]))]))]),
+                "commands.*: a rule takes no paths; scope it to a folder with mounts[/vault].commands.*",
+            ),
+        ];
+        for (raw, error) in cases {
+            assert_eq!(shape(&raw).unwrap_err(), error);
+        }
+        let mount = m(&[("rm", rule(texts(&["/d/keep/*"])))]);
+        assert_eq!(
+            tree(&mount, "mounts[/d].commands").unwrap_err(),
+            "mounts[/d].commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
+        );
     }
 
     #[test]

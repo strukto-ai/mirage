@@ -44,45 +44,6 @@ def test_an_option_tightens_its_command():
         assert ruling.rule.at == "/rm/--recursive/*"
 
 
-def test_one_operands_ask_never_answers_for_another_operands_deny():
-    rules = trees(
-        {
-            "cp": [
-                {"decision": "deny", "reason": "sealed", "paths": ["/p/*"]},
-                {"decision": "ask", "reason": "nod", "paths": ["/review/*"]},
-            ]
-        }
-    )
-    ruling = decide(line("cp", "/p/secret", "/review/out"), rules)
-    assert ruling.outcome is Outcome.DENY
-    assert ruling.matched_path == "/p/secret"
-    assert ruling.asks == ()
-    asked = decide(line("cp", "/review/x", "/elsewhere"), rules)
-    assert asked.outcome is Outcome.ASK
-    assert asked.rule is not None and asked.rule.reason == "nod"
-
-
-def test_the_strictest_leaf_covering_a_path_decides_it():
-    rules = trees(
-        {
-            "cat": [
-                {"decision": "deny", "paths": ["/a/*"]},
-                {"decision": "ask", "paths": ["/a/open/*"]},
-            ]
-        }
-    )
-    assert decide(line("cat", "/a/open/x"), rules).outcome is Outcome.DENY
-    assert decide(line("cat", "/b"), rules).outcome is Outcome.ALLOW
-
-
-def test_a_leaf_with_paths_says_nothing_for_a_line_naming_none():
-    rules = trees({"rm": {"decision": "deny", "paths": ["/wip/*"]}})
-    assert decide(line("rm", "/wip/x"), rules).outcome is Outcome.DENY
-    whole = decide(line("rm"), rules)
-    assert whole.outcome is Outcome.ALLOW
-    assert whole.matched_path is None
-
-
 def test_a_mount_tree_reports_where_it_was_written():
     rules = trees(
         mounts={"/a": {"rm": {"decision": "deny", "paths": ["b/*"]}}}
@@ -92,22 +53,6 @@ def test_a_mount_tree_reports_where_it_was_written():
     assert ruling.rule is not None and ruling.rule.paths == ("/a/b/*",)
     assert ruling.source == "mounts./a"
     assert decide(line("rm", "/c/x"), rules).outcome is Outcome.ALLOW
-
-
-def test_every_subjects_ask_is_reported_not_just_the_winner():
-    rules = trees(
-        {
-            "cp": [
-                {"decision": "ask", "reason": "source", "paths": ["/a/*"]},
-                {"decision": "ask", "reason": "dest", "paths": ["/b/*"]},
-            ]
-        }
-    )
-    ruling = decide(line("cp", "/a/x", "/b/y"), rules)
-    assert ruling.outcome is Outcome.ASK
-    assert {a.reason for a in ruling.asks} == {"source", "dest"}
-    one = decide(line("cp", "/a/x", "/a/y"), rules)
-    assert [a.reason for a in one.asks] == ["source"]
 
 
 def test_the_top_tree_and_inline_tree_are_judged_apart():

@@ -714,9 +714,7 @@ class MachineMounts:
                 "and this line runs as none"
             )
         rules = current.commands
-        if rules is not None and any(
-            rule.paths or rule.mount for rule in rule_table(rules)
-        ):
+        if rules is not None and any(rule.mount for rule in rule_table(rules)):
             return await refused_run(
                 self._provider,
                 "this file transport cannot enforce program-specific path "

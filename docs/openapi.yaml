@@ -6657,7 +6657,8 @@ components:
             that applies wins.
       title: CommandDecision
       description: What a place in a command tree decides. Write `allow`, `ask` or `deny`; an object
-        to add a reason or limit the decision to paths; or a list of those.
+        to add a reason; or a list of those. A decision for one folder goes in that folder's
+        `mounts` entry.
     CommandLeaf:
       properties:
         decision:
@@ -6665,18 +6666,12 @@ components:
         reason:
           type: string
           description: Why the command is refused or needs approval. A default when omitted.
-        paths:
-          type: array
-          items:
-            type: string
-          description: Paths the decision covers. For any other path it says nothing, and the
-            decision from higher in the tree applies. Omit to cover every path.
       additionalProperties: false
       type: object
       required:
         - decision
       title: CommandLeaf
-      description: One decision with a reason, limited to paths, or both.
+      description: One decision with a reason.
     CommandTreeNode:
       anyOf:
         - $ref: '#/components/schemas/CommandDecision'
@@ -7098,9 +7093,9 @@ components:
       allOf:
         - $ref: '#/components/schemas/CommandsBlock'
       title: MountCommandsBlock
-      description: A command tree for lines that work inside this mount, by their working directory
-        or a path they name. It is judged beside the profile's own tree and the stricter result
-        wins, so it can only tighten. Paths in it must lie under the mount.
+      description: A command tree for lines that work inside this mount or folder, by their working
+        directory or a path they name. It is judged beside the profile's own tree and the stricter
+        result wins, so it can only tighten.
     MountMode:
       type: string
       enum:

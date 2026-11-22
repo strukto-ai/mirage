@@ -28,15 +28,13 @@ def has_rules(rules: AdmissionRules | None) -> bool:
 
 def _root_denies(scoped: ScopedTree) -> bool:
     return not scoped.mount and any(
-        leaf.decision is Outcome.DENY and not leaf.paths
-        for leaf in scoped.tree.decision
+        leaf.decision is Outcome.DENY for leaf in scoped.tree.decision
     )
 
 
 def closed_by_default(rules: AdmissionRules | None) -> bool:
-    """Whether a top-level tree denies, on every path, each line it
-    names no command for: its root's own decision is a deny with no
-    paths.
+    """Whether a top-level tree denies each line it names no command
+    for: its root's own decision is a deny.
 
     Args:
         rules (AdmissionRules | None): the session's command trees.
@@ -65,7 +63,7 @@ def reads_args(rules: AdmissionRules | None, name: str) -> bool:
     The whole-line gate asks this for a word the runtime, not the gate,
     will expand: the head of every command is read by every tree, but an
     argument only matters to a node below the command (a subcommand, an
-    option, an operand), a leaf with paths, or a mount's tree, so a
+    option, an operand) or a folder entry's tree, so a
     dynamic argument to a command no such node names is nothing a tree
     would have seen anyway.
 
@@ -81,16 +79,17 @@ def reads_args(rules: AdmissionRules | None, name: str) -> bool:
 
 
 def scopes_paths(rules: AdmissionRules | None, name: str) -> bool:
-    """Whether a leaf with paths in force reads this command's paths.
+    """Whether a folder entry's tree in force reads this command's
+    paths.
 
     The argv builder asks this before deciding who resolves a glob
     operand: a mount command's pattern is normally pushed down to the
     backend, so the gate would see the pattern, not the matches, and
-    ``cat /scratch/*/k`` would pass a leaf on ``/scratch/private``
-    that ``cat /scratch/private/k`` fails. When a leaf that reads
-    paths (or a mount's tree) applies to the command, whether it names
-    the command or every command, the shell expands the glob first, so
-    the gate judges the paths the command will touch.
+    ``cat /scratch/*/k`` would pass a folder entry for
+    ``/scratch/private`` that ``cat /scratch/private/k`` fails. When a
+    folder entry's tree speaks for the command, whether it names the
+    command or every command, the shell expands the glob first, so the
+    gate judges the paths the command will touch.
 
     Args:
         rules (AdmissionRules | None): the session's command trees.

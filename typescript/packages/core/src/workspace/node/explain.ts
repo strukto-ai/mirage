@@ -220,7 +220,7 @@ export interface Judgment {
   readonly reason: string
   /** Where in the document the rule was written. */
   readonly source: string
-  /** The operand a path-scoped rule matched, as typed. */
+  /** The file a redirect was refused for. */
   readonly matchedPath: string | null
   /** The paths the rules were shown, after the session's hides. */
   readonly paths: readonly string[]
@@ -407,7 +407,7 @@ async function explained(
     rule,
     reason: document?.reason ?? '',
     source: rule !== null ? sourceOf(rule) : document !== null ? 'commands' : '',
-    matchedPath: document?.kind === 'deny' ? (document.path ?? null) : null,
+    matchedPath: null,
     paths: ctx.paths.map((p) => p.virtual),
     exitCode: 0,
     stderr: '',
@@ -1208,13 +1208,12 @@ function isJudged(expl: Judgment): boolean {
 
 /**
  * Whether a tree's root decided the command by its own decision, which
- * speaks for every command the tree names nothing for. A root leaf with
- * paths states a rule about those paths, and holds the line. Mirrors the
+ * speaks for every command the tree names nothing for. Mirrors the
  * Python `_by_default`.
  */
 function byDefault(expl: Judgment): boolean {
   const rule = expl.rule
-  return rule !== null && (rule.paths ?? []).length === 0 && (rule.at ?? '').split('/')[1] === '*'
+  return rule !== null && (rule.at ?? '').split('/')[1] === '*'
 }
 
 /**
@@ -1273,8 +1272,7 @@ function asksFor(one: Judged): boolean {
  * word, a command no tree names (a function the line defines first,
  * say), or words only the runtime can expand fail where they occur
  * rather than against the whole line. A mount entry's root speaks about
- * its folder, as a root leaf with paths speaks about those paths, so it
- * holds the line (`inFolder`).
+ * its folder, so it holds the line (`inFolder`).
  */
 function isVerdict(expl: Judgment): boolean {
   if (expl.exitCode === 0 || (byDefault(expl) && !inFolder(expl))) return false

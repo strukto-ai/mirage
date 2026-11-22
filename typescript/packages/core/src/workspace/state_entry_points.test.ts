@@ -1358,57 +1358,6 @@ describe('command permissions end to end', () => {
     expect((await line(ws, 'cat /repo/locked/y'))[0]).toBe(1)
   })
 
-  it('a command-scoped path rule reads the path the command touches', async () => {
-    // A command-scoped rule never runs at the dispatcher, so the command
-    // plane has to see the path the command will actually touch: for a
-    // command that follows links (open(2)) that is the target, for one
-    // that acts on the link itself (rm, lstat(2)) it is the link.
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        profiles: {
-          default: SessionProfile({
-            commands: {
-              cat: { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] },
-              head: { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] },
-              rm: { decision: 'deny', reason: 'keep the link', paths: ['/data/link'] },
-            },
-          }),
-        },
-      },
-    )
-    open.push(ws)
-    await ws.shell(
-      'echo top > /data/secret && ln -s /data/secret /data/link && ln -s /data/secret /data/other',
-    )
-    expect(await line(ws, 'cat /data/secret')).toEqual([
-      1,
-      '',
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
-    ])
-    // Through the link: refused, the operand named as typed.
-    expect(await line(ws, 'cat /data/link')).toEqual([
-      1,
-      '',
-      'cat: /data/link: Permission denied\npolicy denied: sealed\n',
-    ])
-    expect(await line(ws, 'head -n 1 /data/other')).toEqual([
-      1,
-      '',
-      "head: cannot open '/data/other' for reading: Permission denied\npolicy denied: sealed\n",
-    ])
-    // rm removes the link, not the target: the target's rule does not
-    // apply, the link's own does.
-    expect(await line(ws, 'rm /data/other')).toEqual([0, '', ''])
-    expect(await line(ws, 'rm /data/link')).toEqual([
-      1,
-      '',
-      "rm: cannot remove '/data/link': Permission denied\npolicy denied: keep the link\n",
-    ])
-    expect((await line(ws, 'cat /data/link'))[0]).toBe(1)
-  })
-
   it('redirect targets are judged with the line', async () => {
     // The shell reads `<` and writes `>` on its own fds, outside the
     // admitted command's gate window, so the targets are judged at the

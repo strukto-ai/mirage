@@ -43,12 +43,9 @@ def not_allowed(words: Sequence[str]) -> str:
 
 def reason_of(rule: CommandRule, matched: Matched | None) -> str:
     """Why a leaf refuses or asks: the reason written on it, else, for
-    a deny that covers every path, the command path, options and keys
-    that fired (``rm --recursive is not allowed``, ``echo secret* is not
-    allowed``), else the default.
-
-    A deny scoped to paths keeps the default: the line's own error
-    names the path it refused.
+    a deny, the command path, options and keys that fired (``rm
+    --recursive is not allowed``, ``echo secret* is not allowed``), else
+    the default.
 
     Args:
         rule (CommandRule): the leaf that spoke.
@@ -56,11 +53,7 @@ def reason_of(rule: CommandRule, matched: Matched | None) -> str:
     """
     if rule.reason:
         return rule.reason
-    if (
-        rule.decision is Outcome.DENY
-        and not rule.paths
-        and matched is not None
-    ):
+    if rule.decision is Outcome.DENY and matched is not None:
         return not_allowed((*matched.command, *matched.flags, *matched.keys))
     return DEFAULT_DENY_REASON
 
@@ -81,10 +74,7 @@ def operand_paths(ctx: CommandContext) -> list[PathSpec]:
 
 
 def _path_fact(path: PathSpec) -> dict[str, list[int]]:
-    return {
-        "virtual_path": units(path.virtual),
-        "display_path": units(path.raw_path or path.virtual),
-    }
+    return {"virtual_path": units(path.virtual)}
 
 
 def read_wire(read: CommandRead) -> dict[str, Any]:
@@ -180,13 +170,15 @@ def io_reach(
     granted: Collection[CommandRule] = (),
 ) -> bool:
     """Whether a leaf the running line walked could refuse an entry at
-    or under this path: its paths could cover something in the subtree.
+    or under this path: its folder entry lies in the subtree, or holds
+    it.
 
     What a native walk asks before it trusts the raw tree, per operand
-    the way a hide is: a leaf on ``/repo/.env`` leaves ``find /s3`` its
-    native op. An ask the line holds a grant for refuses no entry
-    (``io_refusal``), so it reaches none: ``rm -rf /x`` approved under
-    an ask on ``/x/*`` keeps the backend's one-call removal.
+    the way a hide is: a folder entry for ``/repo/private`` leaves
+    ``find /s3`` its native op. An ask the line holds a grant for
+    refuses no entry (``io_refusal``), so it reaches none: ``rm -rf /x``
+    approved under ``mounts: {/x: {commands: {rm: ask}}}`` keeps the
+    backend's one-call removal.
 
     Args:
         rules (AdmissionRules | None): the session's command trees.
@@ -217,9 +209,9 @@ def io_refusal(
     """The reason a command may not touch an entry it reached on its
     own, None when it may.
 
-    The entry is judged as one more path of the line, by the walk the
-    gate judged the line on: the strictest leaf over every tree whose
-    mount holds it. A deny refuses; an ask refuses unless the line holds
+    The entry is judged by the walk the gate judged the line on: the
+    strictest leaf over every folder entry's tree whose folder holds
+    it. A deny refuses; an ask refuses unless the line holds
     a grant under it (the nod the gate took for ``rm -r /x`` covers the
     entries under ``/x``; a walk that wanders into an asked scope from
     outside gets no nod mid-command, so it is refused and the agent

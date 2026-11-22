@@ -34,31 +34,19 @@ def test_reads_args_only_where_a_node_reads_past_the_name():
         {
             "*": "allow",
             "rm": "deny",
-            "cat": {"decision": "deny", "paths": ["/secret*"]},
             "git": {"push": {"--force": "deny"}},
         },
         mounts={"/repo": {"ls": "deny"}},
     )
     assert reads_args(rules, "git")
-    assert reads_args(rules, "cat")
     assert reads_args(rules, "ls")
     assert not reads_args(rules, "rm")
     assert not reads_args(rules, "echo")
     assert not reads_args(None, "rm")
 
 
-def test_a_leaf_with_paths_on_the_root_reads_every_commands_args():
-    rules = trees({"*": {"decision": "ask", "paths": ["/locked/*"]}})
-    assert reads_args(rules, "echo")
-    assert scopes_paths(rules, "echo")
-
-
-def test_scopes_paths_is_a_leaf_with_paths_that_applies_to_the_command():
-    rules = trees(
-        {"rm": "deny", "cat": {"decision": "deny", "paths": ["/secret*"]}},
-        mounts={"/repo": {"ls": "deny"}},
-    )
-    assert scopes_paths(rules, "cat")
+def test_scopes_paths_is_a_folder_tree_that_speaks_for_the_command():
+    rules = trees({"rm": "deny"}, mounts={"/repo": {"ls": "deny"}})
     assert scopes_paths(rules, "ls")
     assert not scopes_paths(rules, "rm")
     assert not scopes_paths(rules, "echo")
@@ -71,8 +59,5 @@ def test_closed_is_a_top_level_root_that_denies_and_names_nothing():
     listed = trees({"*": "deny", "ls": "allow"})
     assert not closed(listed)
     assert closed_by_default(listed)
-    assert not closed_by_default(
-        trees({"*": {"decision": "deny", "paths": ["/x"]}})
-    )
     assert not closed_by_default(trees(mounts={"/a": {"*": "deny"}}))
     assert not closed(None)

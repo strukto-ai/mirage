@@ -112,7 +112,6 @@ pub struct RestrictionPlan {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct PathFact {
     pub virtual_path: Text,
-    pub display_path: Text,
 }
 
 /// One option a line or a pattern carries, by its canonical spelling.
@@ -164,23 +163,6 @@ impl Default for CommandFacts {
             subtree: false,
             moves: false,
             move_target: None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Subject {
-    pub path: Option<PathFact>,
-    pub holds: bool,
-    pub ancestors: bool,
-}
-
-impl Default for Subject {
-    fn default() -> Self {
-        Self {
-            path: None,
-            holds: false,
-            ancestors: true,
         }
     }
 }

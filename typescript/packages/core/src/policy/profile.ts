@@ -85,10 +85,10 @@ export interface VarsBlock {
  * than as a permission error naming something the profile cannot see.
  *
  * `commands` here is a command tree of its own. It applies to a line
- * that works inside this mount, by cwd or by a path it names, which a
- * path-scoped leaf cannot express (`cd /repo && git commit` names no
- * path). It is judged beside the top-level tree and the strictest
- * result wins, so it only tightens.
+ * that works inside this mount or folder, by cwd or by a path it names
+ * (`cd /repo && git commit` names no path and still works in `/repo`).
+ * It is judged beside the top-level tree and the strictest result wins,
+ * so it only tightens.
  */
 export interface ProfileMount {
   readonly mode?: MountMode | null
@@ -111,9 +111,10 @@ export interface ProfileMount {
  * the same profile share one object and neither can bend the other's view.
  *
  * Two rules decide a line against it, and they are the whole law. A
- * rule naming no path is read by verb (deny before ask before allow),
- * wherever it is written. A rule carrying paths, and every hide, is
- * read by anchor depth: the deeper entry wins, ties break by verb.
+ * command rule is read by verb (deny before ask before allow), wherever
+ * it is written; a rule for one folder is written in that folder's
+ * `mounts` entry. A hide is read by anchor depth: the deeper entry wins,
+ * ties break by verb.
  *
  * `mounts` is keyed by prefix; a bare mode string is sugar for the
  * section that carries only a mode. `parseProfileMounts` normalizes
@@ -252,21 +253,6 @@ function stringList(raw: unknown, where: string, names?: string): readonly strin
 }
 
 /**
- * Refuse a relative path entry. Every path in the document is absolute:
- * an entry is either an absolute path or a name pattern (`*.pem`, no
- * slash, matching a path component anywhere). A plain `xxx` or an
- * anchored `secrets/*` would otherwise be read from the root (`/xxx`,
- * `/secrets/*`), which is never what a relative spelling meant. There is
- * no relative spelling anywhere: a mount section spells its paths in
- * full and they are checked against the mount root (`underMount`),
- * which is what a rebase used to do silently and wrongly (`/repo/secret`
- * under `/repo` became `/repo/repo/secret`).
- */
-function absolutePaths(entries: readonly string[], where: string): void {
-  validateDocument('absolute', entries, where)
-}
-
-/**
  * Refuse a path entry in a mount's section that leaves the mount. A
  * mount's rules are about that mount, so a path under `mounts./repo`
  * names something inside `/repo`. A name pattern carries no anchor and
@@ -301,7 +287,7 @@ interface NodeDoc {
 }
 
 function readLeaves(raw: readonly RuleLeaf[]): readonly RuleLeaf[] {
-  return raw.map((item) => ({ decision: item.decision, reason: item.reason, paths: item.paths }))
+  return raw.map((item) => ({ decision: item.decision, reason: item.reason }))
 }
 
 function readOption(raw: OptionDoc): OptionRule {
@@ -351,13 +337,7 @@ export function commandTree(raw: unknown, where = 'commands'): CommandNode {
 
 function leavesDoc(leaves: readonly RuleLeaf[]): unknown {
   const docs = leaves.map((leaf) =>
-    leaf.reason === '' && leaf.paths.length === 0
-      ? leaf.decision
-      : {
-          decision: leaf.decision,
-          ...(leaf.reason === '' ? {} : { reason: leaf.reason }),
-          ...(leaf.paths.length === 0 ? {} : { paths: [...leaf.paths] }),
-        },
+    leaf.reason === '' ? leaf.decision : { decision: leaf.decision, reason: leaf.reason },
   )
   return docs.length === 1 ? docs[0] : docs
 }
@@ -423,24 +403,6 @@ export function VarsBlock(raw: unknown, where = 'vars'): VarsBlock {
   return { hide: stringList(obj.hide, `${where}.hide`) }
 }
 
-function optionPaths(rule: OptionRule): string[] {
-  const out = rule.decision.flatMap((leaf) => [...leaf.paths])
-  for (const value of rule.values.values()) {
-    for (const leaf of value.decision) out.push(...leaf.paths)
-    for (const inner of value.options.values()) out.push(...optionPaths(inner))
-  }
-  for (const inner of rule.options.values()) out.push(...optionPaths(inner))
-  return out
-}
-
-function leafPaths(node: CommandNode): string[] {
-  const out = [...node.decision, ...node.otherOptions].flatMap((leaf) => [...leaf.paths])
-  for (const rule of node.options.values()) out.push(...optionPaths(rule))
-  for (const child of [...node.subcommands.values(), ...node.operands.values()])
-    out.push(...leafPaths(child))
-  return out
-}
-
 /** Validate one `mounts.<prefix>` section of a profile. */
 export function ProfileMount(raw: unknown, root: string, where: string): ProfileMount {
   // A bare mode string is sugar for the section that carries only a mode.
@@ -461,13 +423,8 @@ export function ProfileMount(raw: unknown, root: string, where: string): Profile
     )
     out.paths = paths
   }
-  if (obj.commands !== undefined && obj.commands !== null) {
-    const commands = commandTree(obj.commands, `${where}.commands`)
-    const paths = leafPaths(commands)
-    absolutePaths(paths, `${where}.commands paths`)
-    underMount(paths, root, `${where}.commands paths`)
-    out.commands = commands
-  }
+  if (obj.commands !== undefined && obj.commands !== null)
+    out.commands = commandTree(obj.commands, `${where}.commands`)
   return out
 }
 
@@ -708,11 +665,8 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
   if (obj.paths !== undefined && obj.paths !== null)
     out.paths = PathsBlock(obj.paths, `${where}.paths`)
   if (obj.vars !== undefined && obj.vars !== null) out.vars = VarsBlock(obj.vars, `${where}.vars`)
-  if (obj.commands !== undefined && obj.commands !== null) {
-    const commands = commandTree(obj.commands, `${where}.commands`)
-    absolutePaths(leafPaths(commands), 'commands paths')
-    out.commands = commands
-  }
+  if (obj.commands !== undefined && obj.commands !== null)
+    out.commands = commandTree(obj.commands, `${where}.commands`)
   return out
 }
 

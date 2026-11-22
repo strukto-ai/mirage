@@ -650,10 +650,7 @@ export class MachineMounts {
       )
     const current = getCurrentSession()
     const rules = current?.commands
-    if (
-      rules != null &&
-      ruleTable(rules).some((rule) => (rule.paths?.length ?? 0) > 0 || rule.mount)
-    )
+    if (rules != null && ruleTable(rules).some((rule) => rule.mount))
       return refusedRun(
         this.provider,
         'this file transport cannot enforce program-specific path rules',

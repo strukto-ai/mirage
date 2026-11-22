@@ -31,31 +31,19 @@ describe('reads', () => {
       {
         '*': 'allow',
         rm: 'deny',
-        cat: { decision: 'deny', paths: ['/secret*'] },
         git: { push: { '--force': 'deny' } },
       },
       { '/repo': { ls: 'deny' } },
     )
     expect(readsArgs(rules, 'git')).toBe(true)
-    expect(readsArgs(rules, 'cat')).toBe(true)
     expect(readsArgs(rules, 'ls')).toBe(true)
     expect(readsArgs(rules, 'rm')).toBe(false)
     expect(readsArgs(rules, 'echo')).toBe(false)
     expect(readsArgs(null, 'rm')).toBe(false)
   })
 
-  it("a leaf with paths on the root reads every command's args", () => {
-    const rules = trees({ '*': { decision: 'ask', paths: ['/locked/*'] } })
-    expect(readsArgs(rules, 'echo')).toBe(true)
-    expect(scopesPaths(rules, 'echo')).toBe(true)
-  })
-
-  it('scopesPaths is a leaf with paths that applies to the command', () => {
-    const rules = trees(
-      { rm: 'deny', cat: { decision: 'deny', paths: ['/secret*'] } },
-      { '/repo': { ls: 'deny' } },
-    )
-    expect(scopesPaths(rules, 'cat')).toBe(true)
+  it("scopesPaths is a folder's tree that speaks for the command", () => {
+    const rules = trees({ rm: 'deny' }, { '/repo': { ls: 'deny' } })
     expect(scopesPaths(rules, 'ls')).toBe(true)
     expect(scopesPaths(rules, 'rm')).toBe(false)
     expect(scopesPaths(rules, 'echo')).toBe(false)
@@ -68,7 +56,6 @@ describe('reads', () => {
     const listed = trees({ '*': 'deny', ls: 'allow' })
     expect(closed(listed)).toBe(false)
     expect(closedByDefault(listed)).toBe(true)
-    expect(closedByDefault(trees({ '*': { decision: 'deny', paths: ['/x'] } }))).toBe(false)
     expect(closedByDefault(trees(null, { '/a': { '*': 'deny' } }))).toBe(false)
     expect(closed(null)).toBe(false)
   })

@@ -76,42 +76,6 @@ def test_a_walking_command_touches_the_mounts_under_its_operands():
     )
 
 
-def test_a_leafs_paths_read_the_one_path_grammar():
-    prod = trees({"rm": {"decision": "deny", "paths": ["/data/prod"]}})
-    for virtual in ("/data/prod", "/data/prod/x"):
-        assert _verdict(prod, line("rm", virtual)) == (Outcome.DENY, virtual)
-    assert _verdict(prod, line("rm", "/data/production"))[0] is Outcome.ALLOW
-    keys = trees({"*": {"decision": "deny", "paths": ["*.key"]}})
-    assert _verdict(keys, line("cat", "/a/b.key/c"))[0] is Outcome.DENY
-    assert _verdict(keys, line("cat", "/a/b.keyx"))[0] is Outcome.ALLOW
-    one = trees(
-        {"*": {"decision": "deny", "paths": ["/d/?.txt", "/d/[ab].c"]}}
-    )
-    assert _verdict(one, line("cat", "/d/a.txt"))[0] is Outcome.DENY
-    assert _verdict(one, line("cat", "/d/ab.txt"))[0] is Outcome.ALLOW
-    assert _verdict(one, line("cat", "/d/b.c"))[0] is Outcome.DENY
-    assert _verdict(one, line("cat", "/d/c.c"))[0] is Outcome.ALLOW
-
-
-def test_a_subtree_command_on_the_directory_holding_the_scope_matches():
-    rules = trees({"*": {"decision": "deny", "paths": ["/x/locked/*"]}})
-    for words in (("rm", "-r"), ("rmdir",)):
-        for operand in ("/x/locked", "/x"):
-            assert _verdict(rules, line(*words, operand)) == (
-                Outcome.DENY,
-                operand,
-            )
-        assert _verdict(rules, line(*words, "/x/other"))[0] is Outcome.ALLOW
-    assert _verdict(rules, line("mv", "/x", "/y")) == (Outcome.DENY, "/x")
-    assert _verdict(rules, line("mv", "/z", "/x/locked")) == (
-        Outcome.DENY,
-        "/x/locked",
-    )
-    assert _verdict(rules, line("mv", "/z", "/x"))[0] is Outcome.ALLOW
-    assert _verdict(rules, line("cat", "/x/locked"))[0] is Outcome.ALLOW
-    assert _verdict(rules, line("cp", "-r", "/x", "/y"))[0] is Outcome.ALLOW
-
-
 def test_io_refusal_judges_a_reached_file_as_one_more_path():
     rules = trees(
         {

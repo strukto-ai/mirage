@@ -123,11 +123,7 @@ class PolicyMatcher:
 
 def _leaves_wire(leaves: tuple[RuleLeaf, ...]) -> list[Wire]:
     return [
-        {
-            "decision": leaf.decision.value,
-            "reason": units(leaf.reason),
-            "paths": [units(v) for v in leaf.paths],
-        }
+        {"decision": leaf.decision.value, "reason": units(leaf.reason)}
         for leaf in leaves
     ]
 
@@ -218,7 +214,6 @@ def rule_table(rules: AdmissionRules) -> tuple[CommandRule, ...]:
                 reason=reason,
                 decision=decision,
                 at=from_units(row["at"]),
-                paths=tuple(from_units(v) for v in row["paths"]),
                 mount=from_units(row["mount"] or []),
             )
         )

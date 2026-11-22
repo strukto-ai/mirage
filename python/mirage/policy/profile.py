@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
@@ -68,27 +68,6 @@ from mirage.utils.path import norm
 _DOC = ConfigDict(extra="forbid", frozen=True)
 
 
-def _absolute_paths(entries: tuple[str, ...], where: str) -> None:
-    """Refuse a relative path entry. Every path in the document is
-    absolute.
-
-    An entry is either an absolute path or a name pattern (``*.pem``,
-    no slash, matching a path component anywhere). A plain ``xxx`` or
-    an anchored ``secrets/*`` would otherwise be read from the root
-    (``/xxx``, ``/secrets/*``), which is never what a relative spelling
-    meant. There is no relative spelling anywhere: a mount section
-    spells its paths in full and they are checked against the mount
-    root (``_under_mount``), which is what a rebase used to do silently
-    and wrongly (``/repo/secret`` under ``/repo`` became
-    ``/repo/repo/secret``).
-
-    Args:
-        entries (tuple[str, ...]): the entries as written.
-        where (str): the field's name, for the message.
-    """
-    validate_document("absolute", entries, where)
-
-
 def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
     """Refuse a path entry in a mount's section that leaves the mount.
 
@@ -112,11 +91,7 @@ def _under_mount(entries: tuple[str, ...], root: str, where: str) -> None:
 
 def _read_leaves(raw: list[Any]) -> tuple[RuleLeaf, ...]:
     return tuple(
-        RuleLeaf(
-            decision=Outcome(item["decision"]),
-            reason=item["reason"],
-            paths=tuple(item["paths"]),
-        )
+        RuleLeaf(decision=Outcome(item["decision"]), reason=item["reason"])
         for item in raw
     )
 
@@ -178,36 +153,11 @@ def command_tree(raw: Any, where: str = "commands") -> CommandNode:
     return _read_node(validate_document("tree", raw, where))
 
 
-def _option_paths(rule: OptionRule) -> Iterator[str]:
-    for leaf in rule.decision:
-        yield from leaf.paths
-    for value in rule.values.values():
-        for leaf in value.decision:
-            yield from leaf.paths
-        for inner in value.options.values():
-            yield from _option_paths(inner)
-    for inner in rule.options.values():
-        yield from _option_paths(inner)
-
-
-def _leaf_paths(node: CommandNode) -> Iterator[str]:
-    for leaf in (*node.decision, *node.other_options):
-        yield from leaf.paths
-    for rule in node.options.values():
-        yield from _option_paths(rule)
-    for child in (*node.subcommands.values(), *node.operands.values()):
-        yield from _leaf_paths(child)
-
-
 def _leaves_doc(leaves: tuple[RuleLeaf, ...]) -> Any:
     docs = [
         leaf.decision.value
-        if not leaf.reason and not leaf.paths
-        else {
-            "decision": leaf.decision.value,
-            **({"reason": leaf.reason} if leaf.reason else {}),
-            **({"paths": list(leaf.paths)} if leaf.paths else {}),
-        }
+        if not leaf.reason
+        else {"decision": leaf.decision.value, "reason": leaf.reason}
         for leaf in leaves
     ]
     return docs[0] if len(docs) == 1 else docs
@@ -398,9 +348,9 @@ class ProfileMount(BaseModel):
     something the profile cannot see.
 
     ``commands`` here is a command tree of its own. It applies to a line
-    that works inside this mount, by cwd or by a path it names, which a
-    path-scoped leaf cannot express (``cd /repo && git commit`` names no
-    path). It is judged beside the top-level tree and the strictest
+    that works inside this mount or folder, by cwd or by a path it names
+    (``cd /repo && git commit`` names no path and still works in
+    ``/repo``). It is judged beside the top-level tree and the strictest
     result wins, so it only tightens.
 
     Args:
@@ -559,13 +509,16 @@ def parse_profile_mounts(v: Any) -> Any:
             )
         if isinstance(entry, str):
             entry = {"mode": entry}
-        elif isinstance(entry, Mapping) and isinstance(
-            entry.get("paths"), Mapping
-        ):
-            entry = {
-                **entry,
-                "paths": _paths(entry["paths"], f"mounts[{root}].paths"),
-            }
+        elif isinstance(entry, Mapping):
+            entry = {**entry}
+            if isinstance(entry.get("paths"), Mapping):
+                entry["paths"] = _paths(
+                    entry["paths"], f"mounts[{root}].paths"
+                )
+            if entry.get("commands") is not None:
+                entry["commands"] = command_tree(
+                    entry["commands"], f"mounts[{root}].commands"
+                )
         entries[root] = entry
     return entries
 
@@ -585,10 +538,10 @@ class SessionProfile(BaseModel):
     profile share one object and neither can bend the other's view.
 
     Two rules decide a line against it, and they are the whole law.
-    A rule naming no path is read by verb (deny before ask before
-    allow), wherever it is written. A rule carrying paths, and every
-    hide, is read by anchor depth: the deeper entry wins, ties break by
-    verb.
+    A command rule is read by verb (deny before ask before allow),
+    wherever it is written; a rule for one folder is written in that
+    folder's ``mounts`` entry. A hide is read by anchor depth: the
+    deeper entry wins, ties break by verb.
 
     A profile may also state a ``policy``: for each method it answers at
     (``pre_execute``, ``pre_command``, ``pre_vfs``, ``pre_network`` and
@@ -615,8 +568,7 @@ class SessionProfile(BaseModel):
             omits keeps its own mode and gains no rules.
         paths (PathsBlock | None): the profile's hides, absolute.
         vars (VarsBlock | None): the profile's hidden variables.
-        commands (CommandNode | None): the profile's command tree, its
-            paths absolute.
+        commands (CommandNode | None): the profile's command tree.
         policy (dict[ScriptMethod, list[ProfilePolicy]] | None): the
             profile's policy: each ``pre_`` method's programs, asked in
             order.
@@ -671,31 +623,23 @@ class SessionProfile(BaseModel):
     @field_validator("commands", mode="before")
     @classmethod
     def _v_commands(cls, v: Any) -> Any:
-        if v is None:
-            return None
-        tree = command_tree(v)
-        _absolute_paths(tuple(_leaf_paths(tree)), "commands paths")
-        return tree
+        return None if v is None else command_tree(v)
 
     _v_mounts = field_validator("mounts", mode="before")(parse_profile_mounts)
 
     @model_validator(mode="after")
     def _v_absolute(self) -> "SessionProfile":
-        # `commands` and `paths` check their own entries, so only the
-        # mount boundaries are left to this one.
+        # `paths` checks its own entries, so only the mount boundaries
+        # are left to this one.
         for prefix, entry in (self.mounts or {}).items():
-            where = f"mounts[{prefix}]"
             if entry.paths is not None:
+                where = f"mounts[{prefix}]"
                 _under_mount(entry.paths.hide, prefix, f"{where}.paths.hide")
                 _under_mount(
                     tuple(e.path for e in entry.paths.show),
                     prefix,
                     f"{where}.paths.show",
                 )
-            if entry.commands is not None:
-                paths = tuple(_leaf_paths(entry.commands))
-                _absolute_paths(paths, f"{where}.commands paths")
-                _under_mount(paths, prefix, f"{where}.commands paths")
         return self
 
 

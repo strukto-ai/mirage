@@ -175,8 +175,8 @@ class CommandRule:
     asked about.
 
     A leaf is named by its place in the canonical tree, the mount its
-    tree belongs to, and its decision, reason and paths. Editing any of
-    them makes another rule, so an approval given to the old one no
+    tree belongs to, and its decision and reason. Editing any of them
+    makes another rule, so an approval given to the old one no
     longer holds. A coded Ask's rule names the program, path, line or
     host it asked about, in ``commands`` or ``paths``.
 
@@ -188,8 +188,8 @@ class CommandRule:
         at (str): the leaf's place, a JSON Pointer over the canonical
             tree (``/rm/--recursive/*``, a node's own decision at
             ``/rm/*``); empty for a coded Ask's rule.
-        paths (tuple[str, ...]): the paths the leaf covers, anchored to
-            its mount; empty covers every path.
+        paths (tuple[str, ...]): the paths a coded Ask asked about;
+            empty for a leaf.
         mount (str): the mount prefix of the tree the leaf belongs to;
             empty for a profile's top-level tree and for inline
             permissions.
@@ -233,16 +233,15 @@ class Ruling:
     Args:
         outcome (Outcome): which verb spoke.
         rule (CommandRule | None): the leaf that spoke; None on ALLOW.
-        matched_path (str | None): the operand a path-scoped rule
-            matched, as typed, which the GNU line names
-            (``rm: cannot remove 'letters.txt': Permission denied``);
-            None when the rule reaches the whole line.
+        matched_path (str | None): the file a redirect was refused
+            for, which its error names; None for a command, which a
+            rule reaches whole.
         source (str): where in the document the leaf was written, for a
             host reading a decision: ``top`` or ``mounts./repo``. Empty
             on ALLOW.
         asks (tuple[CommandRule, ...]): every ask leaf that spoke for
-            the line, over every tree and every path it names, ``rule``
-            among them. Only ASK fills it, and the line runs only once
+            the line, over every tree that judges it, ``rule`` among
+            them. Only ASK fills it, and the line runs only once
             each has been answered: one nod covers its own leaf and no
             other, so an ask on a destination cannot carry a source past
             the ask written for it. One entry is the ordinary case.
@@ -585,20 +584,14 @@ class SessionDecisionsQuery(Protocol):
 class RuleLeaf:
     """One decision a command tree states at one place.
 
-    A leaf with paths speaks only for a path it covers; for any other
-    path it says nothing, and the decision from higher up applies.
-
     Args:
         decision (Outcome): allow, ask or deny.
         reason (str): why, carried on a refusal or an ask; empty for the
             default reason.
-        paths (tuple[str, ...]): the paths it covers, in the document's
-            path grammar; empty covers every path.
     """
 
     decision: Outcome
     reason: str = ""
-    paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

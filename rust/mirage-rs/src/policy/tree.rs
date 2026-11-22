@@ -13,7 +13,6 @@ const STAR: u32 = 42;
 pub struct Leaf {
     pub decision: Outcome,
     pub reason: Text,
-    pub paths: Vec<Text>,
 }
 
 /// A word map as the host sends it: each word or glob with its target,
@@ -342,15 +341,6 @@ impl CompiledTree {
         self.named(name).is_some() || !self.root.decision.is_empty()
     }
 
-    /// The leaves that decide for a command's bare line: its node's own,
-    /// else the root default.
-    fn base(&self, name: &[u32]) -> &[usize] {
-        match self.named(name) {
-            Some(node) if !node.decision.is_empty() => &node.decision,
-            _ => &self.root.decision,
-        }
-    }
-
     /// Walk a line through the tree once, before any path is known.
     pub fn walk(&self, line: &Line) -> Vec<Branch> {
         let mut steps = vec![Step {
@@ -497,17 +487,15 @@ impl CompiledTree {
     }
 
     /// Whether some line of a command may run under this tree: its node,
-    /// or a node below it, holds a decision that is not a deny for every
-    /// path. Options only tighten, so they are not asked.
+    /// or a node below it, holds a decision that is not a deny. Options
+    /// only tighten, so they are not asked.
     pub fn may_run(&self, name: &[u32], table: &[Placed]) -> bool {
         fn open(ids: &[usize], table: &[Placed], inherited: bool) -> bool {
             if ids.is_empty() {
                 return inherited;
             }
-            !ids.iter().any(|&id| {
-                let leaf = &table[id].leaf;
-                leaf.decision == Outcome::Deny && leaf.paths.is_empty()
-            })
+            !ids.iter()
+                .any(|&id| table[id].leaf.decision == Outcome::Deny)
         }
         fn below(node: &CompiledNode, table: &[Placed], inherited: bool) -> bool {
             let here = open(&node.decision, table, inherited);
@@ -525,73 +513,38 @@ impl CompiledTree {
     }
 
     /// Whether the tree reads more of a command's line than its name:
-    /// its node has subcommands, options or operands, or a decision for
-    /// it is scoped to paths.
-    pub fn reads_args(&self, name: &[u32], table: &[Placed]) -> bool {
+    /// its node has subcommands, options or operands.
+    pub fn reads_args(&self, name: &[u32]) -> bool {
         self.named(name).is_some_and(|node| {
             !node.subcommands.is_empty()
                 || !node.options.is_empty()
                 || !node.other_options.is_empty()
                 || node.operands.is_some()
-        }) || self.scopes_paths(name, table)
-    }
-
-    /// Whether a decision the tree holds for a command is scoped to
-    /// paths, at its node, below it, or in the root default.
-    pub fn scopes_paths(&self, name: &[u32], table: &[Placed]) -> bool {
-        fn scoped(ids: &[usize], table: &[Placed]) -> bool {
-            ids.iter().any(|&id| !table[id].leaf.paths.is_empty())
-        }
-        fn option(rule: &CompiledOption, table: &[Placed]) -> bool {
-            scoped(&rule.decision, table)
-                || rule
-                    .values
-                    .iter()
-                    .flat_map(|map| map.targets.iter())
-                    .any(|value| {
-                        scoped(&value.decision, table)
-                            || value.options.iter().any(|(_, o)| option(o, table))
-                    })
-                || rule.options.iter().any(|(_, o)| option(o, table))
-        }
-        fn subtree(node: &CompiledNode, table: &[Placed]) -> bool {
-            scoped(&node.decision, table)
-                || scoped(&node.other_options, table)
-                || node.options.iter().any(|(_, o)| option(o, table))
-                || node
-                    .subcommands
-                    .values()
-                    .chain(node.operands.iter().flat_map(|map| map.targets.iter()))
-                    .any(|child| subtree(child, table))
-        }
-        scoped(self.base(name), table) || self.named(name).is_some_and(|n| subtree(n, table))
+        })
     }
 }
 
-/// Judge walked branches with the leaves that apply: in each branch the
-/// deepest step holding an applying leaf gives the base, each option
-/// group speaks its applying `first`, else its applying `then`, and the
-/// strictest voice over every branch wins.
-pub fn resolve(branches: &[Branch], table: &[Placed], applies: &dyn Fn(usize) -> bool) -> Verdict {
-    let speaking =
-        |ids: &[usize]| -> Vec<usize> { ids.iter().copied().filter(|&id| applies(id)).collect() };
+/// Judge walked branches: in each branch the deepest step holding a
+/// leaf gives the base, each option group speaks its `first`, else its
+/// `then`, and the strictest voice over every branch wins.
+pub fn resolve(branches: &[Branch], table: &[Placed]) -> Verdict {
     let mut voices: Vec<(usize, &Group)> = Vec::new();
     for branch in branches {
-        if let Some((step, ids)) = branch
+        if let Some(step) = branch
             .steps
             .iter()
             .rev()
-            .map(|step| (step, speaking(&step.first)))
-            .find(|(_, ids)| !ids.is_empty())
+            .find(|step| !step.first.is_empty())
         {
-            voices.extend(ids.into_iter().map(|id| (id, step)));
+            voices.extend(step.first.iter().map(|&id| (id, step)));
         }
         for group in &branch.groups {
-            let mut ids = speaking(&group.first);
-            if ids.is_empty() {
-                ids = speaking(&group.then);
-            }
-            voices.extend(ids.into_iter().map(|id| (id, group)));
+            let ids = if group.first.is_empty() {
+                &group.then
+            } else {
+                &group.first
+            };
+            voices.extend(ids.iter().map(|&id| (id, group)));
         }
     }
     let decision = |id: usize| table[id].leaf.decision;
@@ -692,9 +645,7 @@ mod tests {
             operands: &operands,
             tool,
         };
-        let verdict = resolve(&tree.walk(&line), &table, &|id| {
-            table[id].leaf.paths.is_empty()
-        });
+        let verdict = resolve(&tree.walk(&line), &table);
         (verdict, table)
     }
 
@@ -955,7 +906,7 @@ mod tests {
         let tree = json!({
             "*": "allow",
             "rm": {"*": {"decision": "ask", "reason": "deletes"}, "--recursive": "deny"},
-            "cp": {"*": ["ask", {"decision": "deny", "paths": ["/k/*"]}]},
+            "cp": {"*": ["ask", {"decision": "deny", "reason": "kept"}]},
             "curl": {"--request": {"values": {"DELETE": "deny"}}},
             "git": {"checkout": {"operands": {"release/*": "ask"}}},
         });
@@ -996,14 +947,14 @@ mod tests {
     }
 
     #[test]
-    fn may_run_scopes_and_reads_answer_by_the_command_node() {
+    fn may_run_and_reads_answer_by_the_command_node() {
         let mut table = Vec::new();
         let tree = CompiledTree::new(
             &crate::document::tree_of(&json!({
                 "*": "deny",
                 "gh": {"pr": {"view": "allow"}},
                 "ls": "allow",
-                "cp": {"decision": "allow", "paths": ["/tmp/*"]},
+                "cp": {"decision": "allow", "reason": "copies"},
                 "rm": {"--force": "ask"},
             }))
             .unwrap(),
@@ -1012,10 +963,8 @@ mod tests {
         let runs = |name: &str| tree.may_run(&text(name), &table);
         assert!(runs("gh") && runs("ls") && runs("cp"));
         assert!(!runs("rm") && !runs("cat"));
-        assert!(tree.scopes_paths(&text("cp"), &table));
-        assert!(!tree.scopes_paths(&text("ls"), &table));
-        assert!(tree.reads_args(&text("rm"), &table));
-        assert!(tree.reads_args(&text("gh"), &table));
-        assert!(!tree.reads_args(&text("ls"), &table));
+        assert!(tree.reads_args(&text("rm")));
+        assert!(tree.reads_args(&text("gh")));
+        assert!(!tree.reads_args(&text("ls")) && !tree.reads_args(&text("cp")));
     }
 }

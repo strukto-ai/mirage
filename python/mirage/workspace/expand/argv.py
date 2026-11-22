@@ -283,9 +283,9 @@ async def expand_argv(
         # session that turned on nullglob, failglob or globstar has its
         # mount-command globs expanded here too, and the command receives
         # matches the way it does across a mount boundary. So does a
-        # command a path-scoped rule names: the admission gate reads the
-        # words before the backend would resolve them, and a pattern
-        # that only later matches under the rule's path would pass a
+        # command a folder entry's tree speaks for: the admission gate
+        # reads the words before the backend would resolve them, and a
+        # pattern that only later matches under the folder would pass a
         # gate its matches fail. And so does a pattern that walks a `.`
         # or `..`, which no backend key holds.
         words = await resolve_globs(

@@ -48,8 +48,7 @@ export class PermissionsPolicy implements Policy {
     if (decision.outcome === Outcome.ASK) {
       return { kind: 'ask', reason: decision.reason, rule, rules: decision.asks }
     }
-    const path = decision.matchedPath === null ? {} : { path: decision.matchedPath }
     const matched = decision.matched === null ? {} : { matched: decision.matched }
-    return { kind: 'deny', reason: decision.reason, ...path, rule, ...matched }
+    return { kind: 'deny', reason: decision.reason, rule, ...matched }
   }
 }

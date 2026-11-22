@@ -225,30 +225,6 @@
       }
     },
     {
-      "name": "tree: a leaf scoped to paths, a name pattern among them",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "rm": {
-                "decision": "deny",
-                "reason": "prod",
-                "paths": [
-                  "/d/prod/*",
-                  "*.pem"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    {
       "name": "tree: a leaf list, each leaf applying on its own",
       "config": {
         "mounts": {
@@ -264,36 +240,9 @@
                   "ask",
                   {
                     "decision": "deny",
-                    "reason": "kept",
-                    "paths": [
-                      "/d/keep/*"
-                    ]
+                    "reason": "kept"
                   }
                 ]
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "tree: an option's leaf takes paths too",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "rm": {
-                "--recursive": {
-                  "decision": "deny",
-                  "paths": [
-                    "/d/tmp/*"
-                  ]
-                }
               }
             }
           }
@@ -326,7 +275,7 @@
       }
     },
     {
-      "name": "tree: a mount section takes a tree, its paths under that root",
+      "name": "tree: a mount section and a folder inside it each take a tree",
       "config": {
         "mounts": {
           "/d": {
@@ -338,15 +287,16 @@
             "mounts": {
               "/d": {
                 "commands": {
-                  "rm": {
-                    "decision": "deny",
-                    "reason": "shared",
-                    "paths": [
-                      "/d/shared/*"
-                    ]
-                  },
                   "git": {
                     "push": "ask"
+                  }
+                }
+              },
+              "/d/shared": {
+                "commands": {
+                  "rm": {
+                    "decision": "deny",
+                    "reason": "shared"
                   }
                 }
               }

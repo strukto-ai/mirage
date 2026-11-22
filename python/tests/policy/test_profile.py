@@ -353,18 +353,6 @@ def test_a_relative_path_is_refused_everywhere(entry):
         SessionProfile.model_validate({"paths": {"hide": [entry]}})
     with pytest.raises(ValidationError, match="is relative"):
         SessionProfile.model_validate(
-            {"commands": {"rm": {"decision": "ask", "paths": ["/ok", entry]}}}
-        )
-    with pytest.raises(ValidationError, match="is relative"):
-        SessionProfile.model_validate(
-            {
-                "commands": {
-                    "rm": {"--force": {"decision": "deny", "paths": [entry]}}
-                }
-            }
-        )
-    with pytest.raises(ValidationError, match="is relative"):
-        SessionProfile.model_validate(
             {"mounts": {"/repo": {"paths": {"hide": [entry]}}}}
         )
     SessionProfile.model_validate({"paths": {"hide": ["/" + entry, "*.pem"]}})
@@ -376,12 +364,10 @@ def test_a_mount_sections_paths_must_lie_under_that_mount(entry):
     # something inside it. This is what a rebase used to do by joining,
     # which turned `/repo/secret` under `/repo` into `/repo/repo/secret`
     # and protected nothing.
-    for block in (
-        {"paths": {"hide": [entry]}},
-        {"commands": {"rm": {"decision": "deny", "paths": [entry]}}},
-    ):
-        with pytest.raises(ValidationError, match="outside the mount"):
-            SessionProfile.model_validate({"mounts": {"/repo": block}})
+    with pytest.raises(ValidationError, match="outside the mount"):
+        SessionProfile.model_validate(
+            {"mounts": {"/repo": {"paths": {"hide": [entry]}}}}
+        )
     # The root itself, anything under it, and a name pattern all pass.
     ok = SessionProfile.model_validate(
         {
@@ -402,16 +388,13 @@ def test_the_root_mounts_section_holds_every_path_under_it():
             "mounts": {
                 "/": {
                     "paths": {"hide": ["/secret", "*.pem"]},
-                    "commands": {
-                        "*": {"decision": "deny", "paths": ["/secret/*"]}
-                    },
+                    "commands": {"*": "deny"},
                 }
             }
         }
     )
     assert profile.mounts["/"].paths.hide == ("/secret", "*.pem")
     assert profile.mounts["/"].commands is not None
-    assert profile.mounts["/"].commands.decision[0].paths == ("/secret/*",)
 
 
 def test_a_blank_hide_entry_is_refused():
@@ -1086,75 +1069,6 @@ async def test_find_delete_is_judged_by_finds_own_leaf_not_by_rms():
             "policy denied: frozen\n",
         )
         assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
-    finally:
-        await ws.close()
-
-
-LINK_DOC = {
-    "commands": {
-        "cat": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/secret*"],
-        },
-        "head": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/secret*"],
-        },
-        "rm": {
-            "decision": "deny",
-            "reason": "keep the link",
-            "paths": ["/data/link"],
-        },
-    }
-}
-
-
-@pytest.mark.asyncio
-async def test_a_command_scoped_path_rule_reads_the_path_the_command_touches():
-    # A command-scoped rule never runs at the dispatcher, so the command
-    # plane has to see the path the command will actually touch: for a
-    # command that follows links (open(2)) that is the target, for one
-    # that acts on the link itself (rm, lstat(2)) it is the link.
-    ws = Workspace(
-        {"/data/": (RAMVFS(), MountMode.WRITE)},
-        mode=MountMode.WRITE,
-        profiles={"default": LINK_DOC},
-    )
-    try:
-        await ws.shell(
-            "echo top > /data/secret && "
-            "ln -s /data/secret /data/link && "
-            "ln -s /data/secret /data/other"
-        )
-        assert await _line(ws, "cat /data/secret") == (
-            1,
-            "",
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
-        )
-        # Through the link: refused, the operand named as typed.
-        assert await _line(ws, "cat /data/link") == (
-            1,
-            "",
-            "cat: /data/link: Permission denied\npolicy denied: sealed\n",
-        )
-        assert await _line(ws, "head -n 1 /data/other") == (
-            1,
-            "",
-            "head: cannot open '/data/other' for reading: Permission denied\n"
-            "policy denied: sealed\n",
-        )
-        # rm removes the link, not the target: the target's rule does
-        # not apply, the link's own does.
-        assert await _line(ws, "rm /data/other") == (0, "", "")
-        assert await _line(ws, "rm /data/link") == (
-            1,
-            "",
-            "rm: cannot remove '/data/link': Permission denied\n"
-            "policy denied: keep the link\n",
-        )
-        assert (await _line(ws, "cat /data/link"))[0] == 1
     finally:
         await ws.close()
 
@@ -3215,6 +3129,51 @@ def test_a_policy_names_its_programs_per_method():
     assert sorted(profile.policy) == ["post_vfs", "pre_vfs"]
 
 
+@pytest.mark.parametrize(
+    "doc, message",
+    [
+        (
+            {"commands": {"rm": {"decision": "deny", "paths": ["/d/keep/*"]}}},
+            "commands.rm: a rule takes no paths; scope it to a folder with "
+            "mounts[/d/keep].commands.rm",
+        ),
+        (
+            {
+                "commands": {
+                    "gh": {"--admin": {"decision": "ask", "paths": ["/r"]}}
+                }
+            },
+            "commands.gh.--admin: a rule takes no paths; scope it to a "
+            "folder with mounts[/r].commands.gh.--admin",
+        ),
+        (
+            {"commands": {"cat": {"decision": "deny", "paths": ["*.pem"]}}},
+            "commands.cat: a rule takes no paths; hide those paths with "
+            "paths.hide",
+        ),
+        (
+            {
+                "mounts": {
+                    "/d": {
+                        "commands": {
+                            "rm": [
+                                "allow",
+                                {"decision": "deny", "paths": ["/d/keep/*"]},
+                            ]
+                        }
+                    }
+                }
+            },
+            "mounts[/d].commands.rm[1]: a rule takes no paths; scope it to "
+            "a folder with mounts[/d/keep].commands.rm",
+        ),
+    ],
+)
+def test_a_rule_with_paths_names_the_folder_entry_to_write(doc, message):
+    with pytest.raises(ValidationError, match=re.escape(message)):
+        SessionProfile.model_validate(doc)
+
+
 def test_explicit_null_reason_is_refused():
     with pytest.raises(ValidationError, match="reason"):
         SessionProfile.model_validate(
@@ -3280,7 +3239,7 @@ _TREE = {
     "cp": {
         "*": [
             "ask",
-            {"decision": "deny", "paths": ["/data/keep/*"], "reason": "kept"},
+            {"decision": "deny", "reason": "kept"},
         ],
         "-*": "deny",
         "--recursive": {"--force": "deny"},
@@ -3306,7 +3265,7 @@ def test_command_tree_reads_names_options_operands_and_values():
     cp = tree.subcommands["cp"]
     assert cp.decision == (
         RuleLeaf(Outcome.ASK),
-        RuleLeaf(Outcome.DENY, "kept", ("/data/keep/*",)),
+        RuleLeaf(Outcome.DENY, "kept"),
     )
     assert cp.other_options == (RuleLeaf(Outcome.DENY),)
     assert cp.options["--recursive"].options["--force"].decision == (

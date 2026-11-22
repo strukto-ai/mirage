@@ -140,7 +140,7 @@ describe('policy stream', () => {
   it('shares a rule table nobody can change between equal rule sets', () => {
     const built = () =>
       new AdmissionRules([
-        { tree: tree({ rm: { decision: 'deny', paths: ['/a'] } }), mount: '', inline: false },
+        { tree: tree({ rm: { decision: 'deny', reason: 'kept' } }), mount: '', inline: false },
       ])
     const [first, second] = [built(), built()]
     const row = ruleTable(first)[0]
@@ -148,8 +148,7 @@ describe('policy stream', () => {
     expect(() => {
       ;(row as { reason: string }).reason = 'changed'
     }).toThrow(TypeError)
-    expect(() => (row.paths as string[]).push('/b')).toThrow(TypeError)
-    expect(ruleTable(second)[0]).toMatchObject({ reason: '', paths: ['/a'] })
+    expect(ruleTable(second)[0]).toMatchObject({ reason: 'kept' })
   })
 
   it('keeps component depth and surrogate text', () => {

@@ -1293,27 +1293,7 @@
       "error": "reason must be a string"
     },
     {
-      "name": "commands: paths is a list, not a scalar",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "rm": {
-                "decision": "deny",
-                "paths": "/d/a"
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "name": "commands: a blank path entry",
+      "name": "commands: a rule takes no paths",
       "config": {
         "mounts": {
           "/d": {
@@ -1326,35 +1306,14 @@
               "rm": {
                 "decision": "deny",
                 "paths": [
-                  " "
+                  "/d/keep/*"
                 ]
               }
             }
           }
         }
-      }
-    },
-    {
-      "name": "commands: a relative path entry",
-      "config": {
-        "mounts": {
-          "/d": {
-            "vfs": "ram"
-          }
-        },
-        "profiles": {
-          "p": {
-            "commands": {
-              "rm": {
-                "decision": "deny",
-                "paths": [
-                  "d/a"
-                ]
-              }
-            }
-          }
-        }
-      }
+      },
+      "error": "commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
     },
     {
       "name": "commands: the block is a mapping",
@@ -1374,7 +1333,7 @@
       }
     },
     {
-      "name": "mount section: a leaf path must be under the mount",
+      "name": "mount section: a rule takes no paths",
       "config": {
         "mounts": {
           "/d": {
@@ -1386,18 +1345,22 @@
             "mounts": {
               "/d": {
                 "commands": {
-                  "rm": {
-                    "decision": "deny",
-                    "paths": [
-                      "/other/x"
-                    ]
-                  }
+                  "rm": [
+                    "allow",
+                    {
+                      "decision": "deny",
+                      "paths": [
+                        "/d/keep/*"
+                      ]
+                    }
+                  ]
                 }
               }
             }
           }
         }
-      }
+      },
+      "error": "mounts[/d].commands.rm[1]: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm"
     },
     {
       "name": "profile: a mounts key is a literal path, never a glob",

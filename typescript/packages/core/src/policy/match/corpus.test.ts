@@ -68,7 +68,6 @@ const corpus = z
         expected: z.object({
           outcome: z.string(),
           at: z.string().nullable(),
-          matched_path: z.string().nullable(),
           source: z.string(),
           asks: z.array(z.string()),
         }),
@@ -140,7 +139,6 @@ describe('shared policy compatibility cases', () => {
     )
     expect(ruling.outcome).toBe(row.expected.outcome)
     expect(ruling.rule?.at ?? null).toBe(row.expected.at)
-    expect(ruling.matchedPath).toBe(row.expected.matched_path)
     expect(ruling.source).toBe(row.expected.source)
     expect(ruling.asks.map((a) => a.at)).toEqual(row.expected.asks)
   })

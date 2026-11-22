@@ -152,14 +152,6 @@ describe('SessionProfile', () => {
       // pattern (no slash) is the one relative spelling with a meaning,
       // and it means the same thing inside a mount section as outside.
       expect(() => SessionProfile({ paths: { hide: [entry] } })).toThrow(/is relative/)
-      expect(() =>
-        SessionProfile({ commands: { rm: { decision: 'ask', paths: ['/ok', entry] } } }),
-      ).toThrow(/is relative/)
-      expect(() =>
-        SessionProfile({
-          commands: { rm: { '--force': { decision: 'deny', paths: [entry] } } },
-        }),
-      ).toThrow(/is relative/)
       expect(() => SessionProfile({ mounts: { '/repo': { paths: { hide: [entry] } } } })).toThrow(
         /is relative/,
       )
@@ -174,12 +166,9 @@ describe('SessionProfile', () => {
       // names something inside it. This is what a rebase used to do by
       // joining, which turned `/repo/secret` under `/repo` into
       // `/repo/repo/secret` and protected nothing.
-      for (const block of [
-        { paths: { hide: [entry] } },
-        { commands: { rm: { decision: 'deny', paths: [entry] } } },
-      ]) {
-        expect(() => SessionProfile({ mounts: { '/repo': block } })).toThrow(/outside the mount/)
-      }
+      expect(() => SessionProfile({ mounts: { '/repo': { paths: { hide: [entry] } } } })).toThrow(
+        /outside the mount/,
+      )
       // The root itself, anything under it, and a name pattern all pass.
       const ok = SessionProfile({
         mounts: { '/repo': { paths: { hide: ['/repo', '/repo/a', '*.pem'] } } },
@@ -277,13 +266,13 @@ describe('SessionProfile', () => {
       mounts: {
         '/': {
           paths: { hide: ['/secret', '*.pem'] },
-          commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/secret/*'] } },
+          commands: { '*': { decision: 'deny', reason: 'sealed' } },
         },
       },
     })
     const root = profile.mounts?.get('/')
     expect(root?.paths?.hide).toEqual(['/secret', '*.pem'])
-    expect(root?.commands?.decision[0]?.paths).toEqual(['/secret/*'])
+    expect(root?.commands?.decision[0]?.reason).toBe('sealed')
   })
 })
 
@@ -502,6 +491,29 @@ describe('profileToDict', () => {
   })
 })
 
+it.each([
+  [
+    { commands: { rm: { decision: 'deny', paths: ['/d/keep/*'] } } },
+    'profile.commands.rm: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
+  ],
+  [
+    { commands: { gh: { '--admin': { decision: 'ask', paths: ['/r'] } } } },
+    'profile.commands.gh.--admin: a rule takes no paths; scope it to a folder with mounts[/r].commands.gh.--admin',
+  ],
+  [
+    { commands: { cat: { decision: 'deny', paths: ['*.pem'] } } },
+    'profile.commands.cat: a rule takes no paths; hide those paths with paths.hide',
+  ],
+  [
+    {
+      mounts: { '/d': { commands: { rm: ['allow', { decision: 'deny', paths: ['/d/keep/*'] }] } } },
+    },
+    'profile.mounts[/d].commands.rm[1]: a rule takes no paths; scope it to a folder with mounts[/d/keep].commands.rm',
+  ],
+])('refuses a rule with paths and names the folder entry to write: %j', (doc, message) => {
+  expect(() => SessionProfile(doc)).toThrow(message)
+})
+
 it('refuses an explicit null command reason', () => {
   expect(() => SessionProfile({ commands: { rm: { decision: 'deny', reason: null } } })).toThrow(
     'reason',
@@ -515,17 +527,13 @@ const TREE = {
   curl: { '--request': { values: { DELETE: 'deny', POST: { '--insecure': 'deny' } } } },
   git: { '--force': 'deny', checkout: { operands: { main: 'deny', 'release/*': 'ask' } } },
   cp: {
-    '*': ['ask', { decision: 'deny', paths: ['/data/keep/*'], reason: 'kept' }],
+    '*': ['ask', { decision: 'deny', reason: 'kept' }],
     '-*': 'deny',
     '--recursive': { '--force': 'deny' },
   },
 }
 
-const leaf = (decision: Outcome, reason = '', paths: string[] = []): RuleLeaf => ({
-  decision,
-  reason,
-  paths,
-})
+const leaf = (decision: Outcome, reason = ''): RuleLeaf => ({ decision, reason })
 
 describe('commandTree', () => {
   it('reads names, options, operands and values', () => {
@@ -544,7 +552,7 @@ describe('commandTree', () => {
     const checkout = tree.subcommands.get('git')?.subcommands.get('checkout')
     expect(checkout?.operands.get('release/*')?.decision).toEqual([leaf(Outcome.ASK)])
     const cp = tree.subcommands.get('cp')
-    expect(cp?.decision).toEqual([leaf(Outcome.ASK), leaf(Outcome.DENY, 'kept', ['/data/keep/*'])])
+    expect(cp?.decision).toEqual([leaf(Outcome.ASK), leaf(Outcome.DENY, 'kept')])
     expect(cp?.otherOptions).toEqual([leaf(Outcome.DENY)])
     expect(cp?.options.get('--recursive')?.options.get('--force')?.decision).toEqual([
       leaf(Outcome.DENY),

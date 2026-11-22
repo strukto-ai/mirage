@@ -94,7 +94,7 @@ def allowed(
         words (Sequence[str]): the command and its words; empty for a
             redirection, which no rule names.
         inside (bool): whether the line names a file under ``cwd``, so
-            that a rule written for paths there speaks; a CLI names none.
+            that a folder entry's tree for it speaks; a CLI names none.
         node (bool): whether ``words`` are a command tree's name and a
             subcommand path from its spec, judged as that node: the
             options a node requires are no part of the question, so no

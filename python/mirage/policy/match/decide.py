@@ -38,19 +38,12 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     the top-level tree to every line. Every tree speaks, and the
     strictest answer is the line's.
 
-    All of which is settled *per subject*, and only then across them,
-    because a line names more than one path and a leaf written for one
-    of them must not answer for the rest: with ``cp: {decision: deny,
-    paths: [/protected/*]}`` and ``cp: {decision: ask, paths:
-    [/review/*]}``, ``cp /protected/secret /review/out`` is the source's
-    deny. A line naming no path is judged once, and a leaf with paths
-    says nothing for it.
-
-    Ranking across subjects is the whole answer for a deny, which
-    refuses the line, and only half of it for an ask, which is a
-    question the host still has to answer. So every ask that spoke for
-    a subject is reported (``Ruling.asks``) and the entry point requires
-    all of them.
+    Ranking across trees is the whole answer for a deny, which refuses
+    the line, and only half of it for an ask, which is a question the
+    host still has to answer: with ``mounts: {/protected: {commands:
+    {cp: ask}}, /review: {commands: {cp: ask}}}``, ``cp /protected/a
+    /review/b`` meets both. So every ask that spoke is reported
+    (``Ruling.asks``) and the entry point requires all of them.
 
     ``PermissionsPolicy`` renders this into the outcome table and
     ``explain`` reports it, so the two cannot disagree about what a
@@ -69,7 +62,6 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
     table = rule_table(rules)
     rule = None if result["rule"] is None else table[result["rule"]]
-    path = result["matched_path"]
     fired = result["matched"]
     matched = (
         None
@@ -83,7 +75,6 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     return Ruling(
         outcome=Outcome(result["outcome"]),
         rule=rule,
-        matched_path=None if path is None else from_units(path),
         source="" if rule is None else source_of(rule),
         asks=tuple(table[index] for index in result["asks"]),
         matched=matched,
@@ -130,11 +121,10 @@ def redirect_ruling(
 ) -> Ruling:
     """The profile's answer about the files a redirect opens that no
     command owns: a compound statement's (``{ cat; } < f``, a loop, a
-    subshell) or a bare one (``> f``). Only a root leaf scoped to a path
-    the redirect opens speaks: one with paths, or a mount entry's, whose
-    scope is its folder, so ``mounts: {/keep: {commands: {"*": deny}}}``
-    refuses ``> /keep/f``. A top-level leaf with no paths is about
-    commands, so under ``{"*": deny, ls: allow}`` the group
+    subshell) or a bare one (``> f``). Only the root leaf of a folder
+    entry holding a path the redirect opens speaks, so ``mounts: {/keep:
+    {commands: {"*": deny}}}`` refuses ``> /keep/f``. The top-level tree
+    is about commands, so under ``{"*": deny, ls: allow}`` the group
     ``{ ls; } > out`` meets the same answer as ``ls > out``.
 
     Args:

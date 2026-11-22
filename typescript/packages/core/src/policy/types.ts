@@ -112,9 +112,9 @@ export interface Route {
  *
  * A leaf is named by its place in the canonical tree (`at`, a JSON
  * Pointer: `/rm/--recursive/*`, a node's own decision at `/rm/*`), the
- * mount its tree belongs to, and its decision, reason and paths. Editing
- * any of them makes another rule, so an approval given to the old one no
- * longer holds. A coded Ask's rule names the program, path, line or host
+ * mount its tree belongs to, and its decision and reason. Editing any of
+ * them makes another rule, so an approval given to the old one no longer
+ * holds. A coded Ask's rule names the program, path, line or host
  * it asked about, in `commands` or `paths`. `decision` absent reads as
  * ASK, `at` and `mount` absent as empty: a profile's top-level tree and
  * inline permissions carry no mount. `reason` is empty on a deny leaf
@@ -152,9 +152,8 @@ export interface Ruling {
   /** The leaf that spoke; null on ALLOW. */
   readonly rule: CommandRule | null
   /**
-   * The operand a path-scoped rule matched, as typed, which the GNU
-   * line names (`rm: cannot remove 'letters.txt': Permission denied`);
-   * null when the rule reaches the whole line.
+   * The file a redirect was refused for, which its error names; null for
+   * a command, which a rule reaches whole.
    */
   readonly matchedPath: string | null
   /**
@@ -449,15 +448,12 @@ export interface Grammar {
 }
 
 /**
- * One decision a command tree states at one place. A leaf with paths
- * speaks only for a path it covers; for any other path it says nothing,
- * and the decision from higher up applies. An empty reason is the
- * default one.
+ * One decision a command tree states at one place. An empty reason is
+ * the default one.
  */
 export interface RuleLeaf {
   readonly decision: Outcome
   readonly reason: string
-  readonly paths: readonly string[]
 }
 
 /**

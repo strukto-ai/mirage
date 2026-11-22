@@ -167,7 +167,7 @@ function plain(tree: CommandNode): boolean {
     tree.options.size === 0 &&
     tree.otherOptions.length === 0 &&
     tree.operands.size === 0
-  return bare && tree.decision.every((leaf) => leaf.reason === '' && leaf.paths.length === 0)
+  return bare && tree.decision.every((leaf) => leaf.reason === '')
 }
 
 function node(

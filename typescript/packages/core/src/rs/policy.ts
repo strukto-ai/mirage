@@ -107,7 +107,6 @@ export class PolicyMatcher {
           reason: reason === '' && row.decision === Outcome.ASK ? DEFAULT_ASK_REASON : reason,
           decision: row.decision,
           at: fromUnits(row.at),
-          paths: Object.freeze(row.paths.map(fromUnits)),
           mount: row.mount === null ? '' : fromUnits(row.mount),
         })
       }),
@@ -124,11 +123,7 @@ export class PolicyMatcher {
 }
 
 function leavesWire(leaves: readonly RuleLeaf[]): util.JSONType[] {
-  return leaves.map((leaf) => ({
-    decision: leaf.decision,
-    reason: units(leaf.reason),
-    paths: leaf.paths.map(units),
-  }))
+  return leaves.map((leaf) => ({ decision: leaf.decision, reason: units(leaf.reason) }))
 }
 
 function optionWire(rule: OptionRule): Wire {
@@ -173,7 +168,6 @@ interface RuleRow {
   readonly decision: Outcome
   readonly reason: number[]
   readonly at: number[]
-  readonly paths: number[][]
   readonly mount: number[] | null
 }
 

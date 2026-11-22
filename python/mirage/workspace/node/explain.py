@@ -247,8 +247,7 @@ class Judgment:
             coded condition did or when nothing did.
         reason (str): the rule's reason, empty when there is no rule.
         source (str): where in the document the rule was written.
-        matched_path (str | None): the operand a path-scoped rule
-            matched, as typed.
+        matched_path (str | None): the file a redirect was refused for.
         paths (tuple[str, ...]): the paths the rules were shown, after
             the session's hides dropped what it cannot see.
         exit_code (int): what the line would exit with, 0 to run.
@@ -357,7 +356,6 @@ async def _explained(
             if document is not None
             else ""
         ),
-        matched_path=document.path if isinstance(document, Deny) else None,
         paths=tuple(p.virtual for p in ctx.paths),
         answers=answers,
     )
@@ -815,8 +813,7 @@ def _is_verdict(expl: Judgment) -> bool:
     command no tree names (a function the line defines first, say), or
     words only the runtime can expand fail where they occur rather than
     against the whole line. A mount entry's root speaks about its
-    folder, as a root leaf with paths speaks about those paths, so it
-    holds the line (``_in_folder``).
+    folder, so it holds the line (``_in_folder``).
 
     Args:
         expl (Judgment): one command's explanation.
@@ -836,18 +833,13 @@ def _is_verdict(expl: Judgment) -> bool:
 
 def _by_default(expl: Judgment) -> bool:
     """Whether a tree's root decided the command by its own decision,
-    which speaks for every command the tree names nothing for. A root
-    leaf with paths states a rule about those paths, and holds the line.
+    which speaks for every command the tree names nothing for.
 
     Args:
         expl (Judgment): one command's explanation.
     """
     rule = expl.rule
-    return (
-        rule is not None
-        and not rule.paths
-        and rule.at.split("/")[1:2] == ["*"]
-    )
+    return rule is not None and rule.at.split("/")[1:2] == ["*"]
 
 
 def _in_folder(expl: Judgment) -> bool:

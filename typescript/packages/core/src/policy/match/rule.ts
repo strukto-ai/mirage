@@ -37,16 +37,14 @@ export function notAllowed(words: readonly string[]): string {
 }
 
 /**
- * Why a leaf refuses or asks: the reason written on it, else, for a deny
- * that covers every path, the command path, options and keys that fired
- * (`rm --recursive is not allowed`, `echo secret* is not allowed`), else
- * the default. A deny scoped to
- * paths keeps the default: the line's own error names the path it
- * refused. `matched` is null when what fired is unknown.
+ * Why a leaf refuses or asks: the reason written on it, else, for a deny,
+ * the command path, options and keys that fired (`rm --recursive is not
+ * allowed`, `echo secret* is not allowed`), else the default. `matched`
+ * is null when what fired is unknown.
  */
 export function reasonOf(rule: CommandRule, matched: Matched | null): string {
   if (rule.reason !== '') return rule.reason
-  if (rule.decision === Outcome.DENY && (rule.paths ?? []).length === 0 && matched !== null) {
+  if (rule.decision === Outcome.DENY && matched !== null) {
     return notAllowed([...matched.command, ...matched.flags, ...matched.keys])
   }
   return DEFAULT_DENY_REASON
@@ -64,7 +62,7 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
 }
 
 function pathFact(path: PathSpec): Record<string, util.JSONType> {
-  return { virtual_path: units(path.virtual), display_path: units(path.rawPath || path.virtual) }
+  return { virtual_path: units(path.virtual) }
 }
 
 /** A line's read in the stream's wire shape. Mirrors Python's read_wire. */
@@ -140,12 +138,13 @@ function grantedIndices(rules: AdmissionRules, granted: readonly CommandRule[]):
 
 /**
  * Whether a leaf the running line walked could refuse an entry at or
- * under this path: its paths could cover something in the subtree. What
- * a native walk asks before it trusts the raw tree, per operand the way
- * a hide is: a leaf on `/repo/.env` leaves `find /s3` its native op. An
- * ask the line holds a grant for refuses no entry (`ioRefusal`), so it
- * reaches none: `rm -rf /x` approved under an ask on `/x/*` keeps the
- * backend's one-call removal. `named` is the line's walk (`namingRules`).
+ * under this path: its folder entry lies in the subtree, or holds it.
+ * What a native walk asks before it trusts the raw tree, per operand the
+ * way a hide is: a folder entry for `/repo/private` leaves `find /s3` its
+ * native op. An ask the line holds a grant for refuses no entry
+ * (`ioRefusal`), so it reaches none: `rm -rf /x` approved under
+ * `mounts: {/x: {commands: {rm: ask}}}` keeps the backend's one-call
+ * removal. `named` is the line's walk (`namingRules`).
  */
 export function ioReach(
   rules: AdmissionRules | null,
@@ -168,9 +167,8 @@ export function ioReach(
  * The reason a command may not touch an entry it reached on its own,
  * null when it may.
  *
- * The entry is judged as one more path of the line, by the walk the gate
- * judged the line on: the strictest leaf over every tree whose mount
- * holds it. A deny refuses; an ask refuses unless the line holds a grant
+ * The entry is judged by the walk the gate judged the line on: the
+ * strictest leaf over every folder entry's tree whose folder holds it. A deny refuses; an ask refuses unless the line holds a grant
  * under it (the nod the gate took for `rm -r /x` covers the entries
  * under `/x`; a walk that wanders into an asked scope from outside gets
  * no nod mid-command, so it is refused and the agent names the path to

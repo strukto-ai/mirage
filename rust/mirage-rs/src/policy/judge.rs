@@ -1,12 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::profile::anchored;
 use super::tree::{Branch, CompiledTree, Line, Node, Placed, Verdict, rank, resolve};
 use super::visibility::norm_abs;
-use super::{
-    CommandFacts, FlagFact, Matched, Outcome, PathFact, Reading, Subject, Text, Visibility,
-    VisibilityMatcher, classify_paths,
-};
+use super::{CommandFacts, FlagFact, Matched, Outcome, PathFact, Reading, Text};
 
 /// One command tree of a session and where it applies: everywhere, or,
 /// for a mount's tree, on a line working inside that mount.
@@ -25,14 +21,13 @@ pub struct Trees {
     pub trees: Vec<ScopedTree>,
 }
 
-/// A leaf as a host names it: its decision, why, the paths it covers,
-/// its place in its tree and the mount that tree belongs to. Its index
-/// in `AdmissionMatcher::rules` is the id a ruling gives.
+/// A leaf as a host names it: its decision, why, its place in its tree
+/// and the mount that tree belongs to. Its index in
+/// `AdmissionMatcher::rules` is the id a ruling gives.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct RuleLeaf {
     pub decision: Outcome,
     pub reason: Text,
-    pub paths: Vec<Text>,
     pub at: Text,
     pub mount: Option<Text>,
 }
@@ -47,7 +42,7 @@ pub struct Walked {
 }
 
 /// The answer for one line: the strictest decision over every tree that
-/// applies and every path the line names.
+/// applies. `matched_path` names the file a redirect was refused for.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Ruling {
     pub outcome: Outcome,
@@ -100,47 +95,30 @@ pub struct AdmissionMatcher {
     trees: Vec<Scoped>,
     table: Vec<Placed>,
     rules: Vec<RuleLeaf>,
-    scopes: Vec<Option<VisibilityMatcher>>,
 }
 
 impl AdmissionMatcher {
-    /// Compile a session's trees into one leaf table. A mount tree's
-    /// paths are anchored to the mount, as a mount section's paths are.
+    /// Compile a session's trees into one leaf table.
     pub fn new(trees: Trees) -> Self {
         let mut table = Vec::new();
         let mut rules = Vec::new();
-        let mut scopes = Vec::new();
         let mut compiled = Vec::new();
         for scoped in trees.trees {
             let start = table.len();
             let tree = CompiledTree::new(&scoped.root, &mut table);
             let mount = scoped.mount.as_deref().map(norm_abs);
-            for placed in &mut table[start..] {
-                if let Some(root) = &mount {
-                    placed.leaf.paths = anchored(&placed.leaf.paths, root);
-                }
-                let leaf = &placed.leaf;
-                scopes.push((!leaf.paths.is_empty()).then(|| {
-                    VisibilityMatcher::new(Visibility {
-                        hidden: classify_paths(&leaf.paths),
-                        ..Visibility::default()
-                    })
-                }));
-                rules.push(RuleLeaf {
-                    decision: leaf.decision,
-                    reason: leaf.reason.clone(),
-                    paths: leaf.paths.clone(),
-                    at: placed.at.clone(),
-                    mount: mount.clone(),
-                });
-            }
+            rules.extend(table[start..].iter().map(|placed| RuleLeaf {
+                decision: placed.leaf.decision,
+                reason: placed.leaf.reason.clone(),
+                at: placed.at.clone(),
+                mount: mount.clone(),
+            }));
             compiled.push(Scoped { mount, tree });
         }
         Self {
             trees: compiled,
             table,
             rules,
-            scopes,
         }
     }
 
@@ -156,32 +134,13 @@ impl AdmissionMatcher {
         !self.trees.is_empty()
     }
 
-    fn reaches(&self, id: usize, subject: &Subject) -> bool {
-        let Some(scope) = &self.scopes[id] else {
-            return true;
-        };
-        subject.path.as_ref().is_some_and(|path| {
-            let path = &path.virtual_path;
-            scope.hide_depth(path).is_some()
-                || (subject.holds && scope.path_covers(path, subject.ancestors))
-        })
-    }
-
-    fn covers(&self, id: usize, path: &[u32]) -> bool {
-        self.scopes[id]
-            .as_ref()
-            .is_none_or(|scope| scope.hide_depth(path).is_some())
-    }
-
-    /// Judge a line: every tree that applies to it, once for each path it
-    /// names (once when it names none), the strictest result winning.
-    /// Every ask behind an ask result is reported, since the host needs
-    /// each one answered.
+    /// Judge a line: every tree that applies to it, the strictest
+    /// result winning. Every ask behind an ask result is reported, since
+    /// the host needs each one answered.
     pub fn decide(&self, facts: &CommandFacts) -> Ruling {
         let read = Read::new(&facts.tokens, facts.line.as_ref());
         let line = read.line(facts.tool);
-        let subjects = subjects(facts);
-        let mut best: Option<(Verdict, &Subject)> = None;
+        let mut best: Option<Verdict> = None;
         let mut asks: Vec<usize> = Vec::new();
         for scoped in &self.trees {
             if scoped
@@ -191,33 +150,26 @@ impl AdmissionMatcher {
             {
                 continue;
             }
-            let branches = scoped.tree.walk(&line);
-            for subject in &subjects {
-                let verdict = resolve(&branches, &self.table, &|id| self.reaches(id, subject));
-                for &id in &verdict.asks {
-                    if !asks.contains(&id) {
-                        asks.push(id);
-                    }
-                }
-                if best
-                    .as_ref()
-                    .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
-                {
-                    best = Some((verdict, subject));
+            let verdict = resolve(&scoped.tree.walk(&line), &self.table);
+            for &id in &verdict.asks {
+                if !asks.contains(&id) {
+                    asks.push(id);
                 }
             }
+            if best
+                .as_ref()
+                .is_none_or(|held| rank(verdict.outcome) > rank(held.outcome))
+            {
+                best = Some(verdict);
+            }
         }
-        let Some((verdict, subject)) = best else {
+        let Some(verdict) = best else {
             return Ruling::default();
         };
         Ruling {
             outcome: verdict.outcome,
             rule: verdict.leaf.filter(|_| verdict.outcome != Outcome::Allow),
-            matched_path: verdict
-                .leaf
-                .filter(|&id| !self.rules[id].paths.is_empty())
-                .and(subject.path.as_ref())
-                .map(|path| path.display_path.clone()),
+            matched_path: None,
             asks: if verdict.outcome == Outcome::Ask {
                 asks
             } else {
@@ -229,11 +181,10 @@ impl AdmissionMatcher {
 
     /// Judge the files a redirect opens that no command owns: a compound
     /// statement's (`{ cat; } < f`, a loop, a subshell) or a bare one
-    /// (`> f`). There is no command to walk, so only a root leaf scoped
-    /// to a path the redirect opens speaks: one with paths, or one of a
-    /// mount tree, whose scope is its mount. A top-level root leaf with
-    /// no paths is about commands and says nothing here. Each tree that
-    /// applies is judged on its own and the strictest wins, as in
+    /// (`> f`). There is no command to walk, so only the root leaves of
+    /// a folder entry's tree speak, for a path in that folder. The
+    /// top-level tree is about commands and says nothing here. Each tree
+    /// that applies is judged on its own and the strictest wins, as in
     /// `decide`.
     pub fn redirect(&self, paths: &[Text]) -> Ruling {
         let read = Read::new(&[], None);
@@ -241,30 +192,23 @@ impl AdmissionMatcher {
         let mut best: Option<(Verdict, &Text)> = None;
         let mut asks: Vec<usize> = Vec::new();
         for scoped in &self.trees {
-            let branches = scoped.tree.walk(&line);
-            for path in paths {
-                if scoped
-                    .mount
-                    .as_ref()
-                    .is_some_and(|mount| !under(path, mount))
-                {
-                    continue;
+            let Some(mount) = &scoped.mount else {
+                continue;
+            };
+            let Some(path) = paths.iter().find(|path| under(path, mount)) else {
+                continue;
+            };
+            let verdict = resolve(&scoped.tree.walk(&line), &self.table);
+            for &id in &verdict.asks {
+                if !asks.contains(&id) {
+                    asks.push(id);
                 }
-                let verdict = resolve(&branches, &self.table, &|id| {
-                    (scoped.mount.is_some() || !self.rules[id].paths.is_empty())
-                        && self.covers(id, path)
-                });
-                for &id in &verdict.asks {
-                    if !asks.contains(&id) {
-                        asks.push(id);
-                    }
-                }
-                if best
-                    .as_ref()
-                    .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
-                {
-                    best = Some((verdict, path));
-                }
+            }
+            if best
+                .as_ref()
+                .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
+            {
+                best = Some((verdict, path));
             }
         }
         let Some((verdict, path)) = best else {
@@ -284,10 +228,12 @@ impl AdmissionMatcher {
         }
     }
 
-    /// A line's walk through every tree, which the host keeps for the
-    /// files the line reaches (`io_reach`, `io_refusal`). A tree whose
-    /// walk holds no deny and no ask is left out, since it can refuse no
-    /// file: a line every tree allows walks nothing, and the host asks
+    /// A line's walk through every folder entry's tree, which the host
+    /// keeps for the files the line reaches (`io_reach`, `io_refusal`).
+    /// The top-level tree is left out: it judged the line as a whole, so
+    /// it has nothing more to say about one file. A tree whose walk
+    /// holds no deny and no ask is left out too, since it can refuse no
+    /// file: a line every folder allows walks nothing, and the host asks
     /// nothing for the files it reaches.
     pub fn naming(&self, tokens: &[Text], reading: Option<&Reading>, tool: bool) -> Vec<Walked> {
         let read = Read::new(tokens, reading);
@@ -295,6 +241,7 @@ impl AdmissionMatcher {
         self.trees
             .iter()
             .enumerate()
+            .filter(|(_, scoped)| scoped.mount.is_some())
             .map(|(tree, scoped)| Walked {
                 tree,
                 branches: scoped.tree.walk(&line),
@@ -318,48 +265,43 @@ impl AdmissionMatcher {
         })
     }
 
-    /// Whether a decision the line's walk holds is scoped to a path at or
-    /// under this one, so a walk below it has entries to judge. A mount
-    /// tree's deny or ask with no paths is scoped to its mount, so a walk
-    /// above or inside the mount reaches it. An ask the line holds a grant
-    /// for refuses nothing (`io_refusal`), so it reaches nothing.
+    /// Whether a deny or an ask the line's walk holds belongs to a folder
+    /// at or under this path, or above it, so a walk from here has
+    /// entries to judge. An ask the line holds a grant for refuses
+    /// nothing (`io_refusal`), so it reaches nothing.
     pub fn io_reach(&self, walked: &[Walked], path: &[u32], granted: &[usize]) -> bool {
         walked.iter().any(|w| {
-            let mount = self.trees.get(w.tree).and_then(|s| s.mount.as_ref());
-            Self::walked_ids(std::slice::from_ref(w)).any(|id| {
-                if self.rules[id].decision == Outcome::Ask && granted.contains(&id) {
-                    return false;
-                }
-                match self.scopes.get(id).and_then(Option::as_ref) {
-                    Some(scope) => scope.hides_intersect(path),
-                    None => {
-                        self.rules[id].decision != Outcome::Allow
-                            && mount.is_some_and(|m| under(path, m) || under(m, path))
+            let Some(mount) = self.trees.get(w.tree).and_then(|s| s.mount.as_ref()) else {
+                return false;
+            };
+            (under(path, mount) || under(mount, path))
+                && Self::walked_ids(std::slice::from_ref(w)).any(|id| {
+                    match self.rules[id].decision {
+                        Outcome::Allow => false,
+                        Outcome::Ask => !granted.contains(&id),
+                        Outcome::Deny => true,
                     }
-                }
-            })
+                })
         })
     }
 
-    /// The leaf that refuses a file the line reaches, judged as one more
-    /// path of the line: a deny, or an ask the line was not granted. Every
-    /// tree's asks count, as in `decide`, so a grant one tree asked for
-    /// never answers another's.
+    /// The leaf that refuses a file the line reaches: the verdict of each
+    /// walked folder that holds the file, a deny, or an ask the line was
+    /// not granted. Every tree's asks count, as in `decide`, so a grant
+    /// one tree asked for never answers another's.
     pub fn io_refusal(&self, walked: &[Walked], path: &[u32], granted: &[usize]) -> Option<usize> {
         let mut best: Option<Verdict> = None;
         let mut asks: Vec<usize> = Vec::new();
         for w in walked {
-            let Some(scoped) = self.trees.get(w.tree) else {
-                continue;
-            };
-            if scoped
-                .mount
-                .as_ref()
-                .is_some_and(|mount| !under(path, mount))
+            if !self
+                .trees
+                .get(w.tree)
+                .and_then(|scoped| scoped.mount.as_ref())
+                .is_some_and(|mount| under(path, mount))
             {
                 continue;
             }
-            let verdict = resolve(&w.branches, &self.table, &|id| self.covers(id, path));
+            let verdict = resolve(&w.branches, &self.table);
             for &id in &verdict.asks {
                 if !asks.contains(&id) {
                     asks.push(id);
@@ -389,21 +331,20 @@ impl AdmissionMatcher {
             .all(|scoped| scoped.tree.may_run(name, &self.table))
     }
 
-    /// Whether a ruling on the command depends on more than its name: its
-    /// words, its options, its paths, or the mount the line works in.
+    /// Whether a ruling on the command depends on more than its name:
+    /// its words, its options, or the folder the line works in.
     pub fn reads_args(&self, name: &[u32]) -> bool {
         self.trees.iter().any(|scoped| {
-            scoped.tree.reads_args(name, &self.table)
-                || (scoped.mount.is_some() && scoped.tree.speaks_for(name))
+            scoped.tree.reads_args(name) || (scoped.mount.is_some() && scoped.tree.speaks_for(name))
         })
     }
 
-    /// Whether a ruling on the command depends on the paths it names.
+    /// Whether a ruling on the command depends on the paths it names: a
+    /// folder entry's tree speaks for it.
     pub fn scopes_paths(&self, name: &[u32]) -> bool {
-        self.trees.iter().any(|scoped| {
-            scoped.tree.scopes_paths(name, &self.table)
-                || (scoped.mount.is_some() && scoped.tree.speaks_for(name))
-        })
+        self.trees
+            .iter()
+            .any(|scoped| scoped.mount.is_some() && scoped.tree.speaks_for(name))
     }
 }
 
@@ -411,38 +352,6 @@ fn destination(facts: &CommandFacts) -> Option<&PathFact> {
     (facts.moves && facts.operands.len() >= 2 && facts.move_target.is_none())
         .then(|| facts.operands.last())
         .flatten()
-}
-
-pub fn subjects(facts: &CommandFacts) -> Vec<Subject> {
-    if facts.paths.is_empty() {
-        return vec![Subject::default()];
-    }
-    let mut subjects: Vec<Subject> = facts
-        .paths
-        .iter()
-        .cloned()
-        .map(|path| Subject {
-            path: Some(path),
-            ..Subject::default()
-        })
-        .collect();
-    if facts.subtree {
-        let dst = destination(facts);
-        let count = facts.operands.len() - usize::from(dst.is_some());
-        subjects.extend(facts.operands[..count].iter().cloned().map(|path| Subject {
-            path: Some(path),
-            holds: true,
-            ancestors: true,
-        }));
-        if let Some(path) = dst {
-            subjects.push(Subject {
-                path: Some(path.clone()),
-                holds: true,
-                ancestors: false,
-            });
-        }
-    }
-    subjects
 }
 
 pub(crate) fn under(path: &[u32], root: &[u32]) -> bool {
@@ -523,7 +432,6 @@ mod tests {
     fn path(value: &str) -> PathFact {
         PathFact {
             virtual_path: text(value),
-            display_path: text(value),
         }
     }
 
@@ -592,11 +500,6 @@ mod tests {
                 "{name}"
             );
             assert_eq!(
-                ruling.matched_path,
-                expected["matched_path"].as_str().map(text),
-                "{name}"
-            );
-            assert_eq!(
                 ruling.asks.into_iter().map(at).collect::<Vec<_>>(),
                 strings(&expected["asks"]),
                 "{name}"
@@ -607,7 +510,6 @@ mod tests {
     fn path_of(value: &[u32]) -> PathFact {
         PathFact {
             virtual_path: value.to_vec(),
-            display_path: value.to_vec(),
         }
     }
 
@@ -683,43 +585,10 @@ mod tests {
     }
 
     #[test]
-    fn each_path_is_judged_and_one_covered_path_carries_no_other() {
+    fn a_walked_file_is_judged_by_the_folder_that_holds_it() {
         let m = matcher(
-            json!({"*": "deny", "rm": {"decision": "allow", "paths": ["/data/tmp/*"]}}),
-            &[],
-        );
-        let rm = |paths: &[&str]| {
-            let mut words = vec!["rm"];
-            words.extend_from_slice(paths);
-            outcome(&m, "/", &words, paths)
-        };
-        assert_eq!(rm(&["/data/tmp/a.log"]), Allow);
-        assert_eq!(rm(&["/etc/passwd"]), Deny);
-        assert_eq!(rm(&["/data/tmp/a.log", "/etc/passwd"]), Deny);
-        assert_eq!(rm(&[]), Deny);
-    }
-
-    #[test]
-    fn a_ruling_names_its_leaf_path_and_every_ask() {
-        let m = matcher(
-            json!({"cp": [
-                {"decision": "ask", "reason": "a", "paths": ["/a/*"]},
-                {"decision": "ask", "reason": "b", "paths": ["/b/*"]},
-            ]}),
-            &[],
-        );
-        let ruling = m.decide(&facts("/", &["cp", "/a/x", "/b/y"], &["/a/x", "/b/y"]));
-        assert_eq!(ruling.outcome, Ask);
-        assert_eq!(ruling.asks.len(), 2);
-        assert_eq!(ruling.matched_path, Some(text("/a/x")));
-        assert_eq!(m.rules()[ruling.rule.unwrap()].at, text("/cp/*/0"));
-    }
-
-    #[test]
-    fn a_walked_file_is_judged_as_one_more_path() {
-        let m = matcher(
-            json!({"*": "allow", "grep": {"decision": "deny", "paths": ["/data/src/secret/*"]}}),
-            &[],
+            json!({"*": "allow"}),
+            &[("/data/src/secret", json!({"grep": "deny"}))],
         );
         let line = facts("/", &["grep", "-r", "x", "/data/src"], &["/data/src"]);
         assert_eq!(m.decide(&line).outcome, Allow);
@@ -737,12 +606,11 @@ mod tests {
     #[test]
     fn a_walk_that_can_refuse_no_file_is_left_out() {
         let m = matcher(
-            json!({
-                "*": "allow",
-                "rm": "deny",
-                "cp": {"decision": "allow", "paths": ["/data/*"]},
-            }),
-            &[("/repo", json!({"git": "deny"}))],
+            json!({"*": "allow", "rm": "deny"}),
+            &[
+                ("/repo", json!({"git": "deny"})),
+                ("/data", json!({"cp": "allow"})),
+            ],
         );
         assert!(m.naming(&[text("echo"), text("hi")], None, true).is_empty());
         let cp = m.naming(&[text("cp")], None, true);
@@ -751,15 +619,12 @@ mod tests {
         assert_eq!(m.io_refusal(&cp, &text("/data/x"), &[]), None);
         let git = m.naming(&[text("git"), text("status")], None, true);
         assert_eq!(git.iter().map(|w| w.tree).collect::<Vec<_>>(), [1]);
-        assert_eq!(m.naming(&[text("rm")], None, true).len(), 1);
+        assert!(m.naming(&[text("rm")], None, true).is_empty());
     }
 
     #[test]
     fn a_walked_ask_needs_its_grant() {
-        let m = matcher(
-            json!({"cp": {"decision": "ask", "paths": ["/data/review/*"]}}),
-            &[],
-        );
+        let m = matcher(json!({}), &[("/data/review", json!({"cp": "ask"}))]);
         let walked = m.naming(&[text("cp")], None, true);
         let entry = text("/data/review/x");
         let ask = m.io_refusal(&walked, &entry, &[]).unwrap();
@@ -768,10 +633,7 @@ mod tests {
 
     #[test]
     fn a_granted_ask_reaches_nothing() {
-        let m = matcher(
-            json!({"rm": {"decision": "ask", "paths": ["/data/review/*"]}}),
-            &[],
-        );
+        let m = matcher(json!({}), &[("/data/review", json!({"rm": "ask"}))]);
         let walked = m.naming(&[text("rm"), text("-rf"), text("/data")], None, true);
         let ask = m.io_refusal(&walked, &text("/data/review/x"), &[]).unwrap();
         assert!(m.io_reach(&walked, &text("/data"), &[]));
@@ -783,11 +645,11 @@ mod tests {
     #[test]
     fn a_granted_ask_leaves_a_deny_below_it_reaching() {
         let m = matcher(
-            json!({"rm": [
-                {"decision": "ask", "paths": ["/data/*"]},
-                {"decision": "deny", "paths": ["/data/keep/*"]},
-            ]}),
-            &[],
+            json!({}),
+            &[
+                ("/data", json!({"rm": "ask"})),
+                ("/data/keep", json!({"rm": "deny"})),
+            ],
         );
         let walked = m.naming(&[text("rm"), text("-rf"), text("/data")], None, true);
         let ask = m.io_refusal(&walked, &text("/data/x"), &[]).unwrap();
@@ -801,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mount_trees_leaf_with_no_paths_reaches_its_mount() {
+    fn a_folder_trees_leaf_reaches_its_folder() {
         let m = matcher(
             json!({"grep": "ask"}),
             &[
@@ -829,10 +691,10 @@ mod tests {
     fn a_walked_file_needs_every_trees_grant() {
         let m = matcher(
             json!({"grep": "ask"}),
-            &[(
-                "/data",
-                json!({"*": {"decision": "ask", "paths": ["secret"]}}),
-            )],
+            &[
+                ("/data", json!({"grep": "ask"})),
+                ("/data/secret", json!({"*": "ask"})),
+            ],
         );
         let line = facts("/", &["grep", "-r", "x", "/data"], &["/data"]);
         let walked = m.naming(&line.tokens, None, true);
@@ -858,30 +720,17 @@ mod tests {
     }
 
     #[test]
-    fn a_redirect_meets_only_the_root_leaves_scoped_to_its_paths() {
-        let sealed = matcher(
-            json!({"*": {"decision": "deny", "paths": ["/d/secret.txt"]}}),
-            &[],
-        );
-        let ruling = sealed.redirect(&[text("/d/out"), text("/d/secret.txt")]);
-        assert_eq!(ruling.outcome, Deny);
-        assert_eq!(ruling.matched_path, Some(text("/d/secret.txt")));
-        assert_eq!(sealed.redirect(&[text("/d/out")]).outcome, Allow);
+    fn a_redirect_meets_no_top_level_leaf() {
         let closed = matcher(json!({"*": "deny", "ls": "allow"}), &[]);
         assert_eq!(closed.redirect(&[text("/d/out")]).outcome, Allow);
-        let named = matcher(
-            json!({"cat": {"decision": "deny", "paths": ["/d/secret.txt"]}}),
-            &[],
-        );
-        assert_eq!(named.redirect(&[text("/d/secret.txt")]).outcome, Allow);
         let asks = matcher(
-            json!({"*": {"decision": "ask", "paths": ["/d/*"]}}),
-            &[(
-                "/d",
-                json!({"*": {"decision": "ask", "paths": ["secret.txt"]}}),
-            )],
+            json!({"*": "ask"}),
+            &[
+                ("/d", json!({"*": "ask"})),
+                ("/d/keep", json!({"*": "ask"})),
+            ],
         );
-        let ruling = asks.redirect(&[text("/d/secret.txt")]);
+        let ruling = asks.redirect(&[text("/d/keep/f.txt")]);
         assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 2));
         assert_eq!(asks.redirect(&[text("/e/x")]).outcome, Allow);
     }
