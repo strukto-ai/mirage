@@ -388,9 +388,17 @@ export class ProcessTable {
    * ignores it (`catcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
-   * if it ignores the signal nothing happens. Mirrors Python's `_signal_own`.
+   * if it ignores the signal nothing happens. A signal sent to the whole group
+   * (`killpg`, `whole`) reaches the program its shell runs right now even when
+   * the shell traps it, as that program, a child in the same group, takes the
+   * signal at its default. Mirrors Python's `_signal_own`.
    */
-  private signalOwn(handle: ProcessHandle, signal: number, group: boolean): boolean | null {
+  private signalOwn(
+    handle: ProcessHandle,
+    signal: number,
+    group: boolean,
+    whole = false,
+  ): boolean | null {
     if (KEPT_SIGNALS.has(signal)) {
       // A kept signal the shell traps runs its action all the same
       // (`trap ... WINCH`), CONT going on as well; STOP is never caught, and
@@ -402,7 +410,7 @@ export class ProcessTable {
         this.pause(handle)
       } else if (signal === SIGCONT) {
         const held = this.resume(handle)
-        if (held !== null) return this.signalOwn(handle, held, group)
+        if (held !== null) return this.signalOwn(handle, held, group, whole)
       }
       return true
     }
@@ -412,6 +420,7 @@ export class ProcessTable {
       // A shell's ignore of a signal its process ignores anyway leaves it to
       // that, a group's included.
       const caught = catcher(signal, handle.record.id.pid)
+      if (caught === true && whole) handle.interrupt(signal)
       if (caught === true || (caught === false && !handle.ignores.has(signal))) return true
     }
     let found = true
@@ -462,7 +471,7 @@ export class ProcessTable {
               other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
           ))
       )
-        this.signalOwn(member, signal, true)
+        this.signalOwn(member, signal, true, true)
     }
     await Promise.all([...sending.values()].filter((sent) => sent !== null))
   }

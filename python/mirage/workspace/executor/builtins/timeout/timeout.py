@@ -59,6 +59,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
     CONTINUE_SIGNALS,
+    NESTED_SHELLS,
     NOT_FOUND_STATUS,
     SHELL_IGNORED_SIGNALS,
     SIGCHLD,
@@ -91,7 +92,7 @@ from mirage.workspace.executor.statement import (
     redirected_body,
     reported_command,
 )
-from mirage.workspace.executor.traps import ignored_signals
+from mirage.workspace.executor.traps import ignored_signals, own_action
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
@@ -437,7 +438,9 @@ async def _supervise(
 
     def forked(process: ProcessHandle) -> None:
         child.session.process_id = process.record.pid
-        child.frame.shell = process
+        # timeout execs its command, so a nested shell runs as this
+        # process, and answers the signals it gets (`trap ... TERM`).
+        child.frame.shell = None if name in NESTED_SHELLS else process
 
     try:
         process = processes.start(
@@ -581,6 +584,10 @@ async def _deadline(
             either, return_when=asyncio.FIRST_COMPLETED
         )
         resumed.cancel()
+    if task in done and task.cancelled():
+        # A signal from elsewhere ended the command, a nested shell that
+        # runs as it included (`bash -c 'kill $$'`).
+        return await _ended(console, held, [], 128 + (process.signal or 9))
     if task in done:
         task.result()
         stdout, io = ran[0]
@@ -679,7 +686,8 @@ def _killed_report(
     ):
         return ""
     row = (process.record.pid, 128 + number, number, reported_command(node))
-    return signal_report(shell_voice(), [row], True)
+    trapped = own_action(context.session, number)
+    return signal_report(shell_voice(), [row], True, trapped)
 
 
 def _own_job(

@@ -69,6 +69,17 @@ def test_signal_report_tells_of_term_only_in_the_foreground():
     )
 
 
+def test_signal_report_names_a_trapped_signal_alone_in_the_foreground():
+    assert signal_report(VOICE, [(9, 138, 10, "sleep 3")], True, True) == (
+        "User defined signal 1\n"
+    )
+    assert signal_report(VOICE, [(9, 137, 9, "sleep 3")], True, True) == (
+        "Killed\n"
+    )
+    assert signal_report(VOICE, [(9, 138, 10, "sleep 3")], False, True) == ""
+    assert signal_report(VOICE, [(9, 130, 2, "sleep 3")], True, True) == ""
+
+
 def test_signal_report_lists_a_pipeline_under_its_first_stage():
     assert signal_report(
         VOICE,

@@ -39,6 +39,7 @@ import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import {
   CONTINUE_SIGNALS,
+  NESTED_SHELLS,
   NOT_FOUND_STATUS,
   SHELL_IGNORED_SIGNALS,
   SIGCHLD,
@@ -66,7 +67,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { programText } from '../../background.ts'
 import { redirectedBody, reportedCommand } from '../../statement.ts'
-import { ignoredSignals } from '../../traps.ts'
+import { ignoredSignals, ownAction } from '../../traps.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
@@ -281,6 +282,11 @@ interface Supervision {
   // The command is a program that got the signal as sent, on a machine or
   // acting on signals itself.
   onMachine: () => boolean
+  // The signal left the command going: a shell that runs as it traps or
+  // ignores it (`bash -c 'trap ... TERM; ...'`).
+  goesOn: () => boolean
+  // The signal that ended the command, null while it runs or once it exited.
+  killedBy: () => number | null
   // What a `kill -STOP` of timeout itself holds it until, null while none does.
   held: () => Promise<void> | null
   // Whether its job is timeout alone, which a stop of itself holds.
@@ -400,7 +406,9 @@ export async function handleTimeout(
       limit: session.processes.max,
       started: (forked) => {
         child.session.processId = forked.record.id.pid
-        child.frame.shell = forked
+        // timeout execs its command, so a nested shell runs as this
+        // process, and answers the signals it gets (`trap ... TERM`).
+        child.frame.shell = NESTED_SHELLS.has(name) ? null : forked
       },
       ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
       programIgnores: ignoredSignals(session),
@@ -454,6 +462,8 @@ export async function handleTimeout(
     foreground,
     ignored: process.ignores.has(signal),
     onMachine: () => process.record.program || process.takesSignals,
+    goesOn: () => process.signal === null,
+    killedBy: () => process.endedBy,
     held: () => {
       const job = ownJob(processes, process, syntax, session)
       return job?.paused === true ? job.resumed() : null
@@ -512,6 +522,7 @@ function killedReport(
     shellVoice(),
     [[process.record.id.pid, 128 + number, number, reportedCommand(node)]],
     true,
+    ownAction(context.session, number),
   )
 }
 
@@ -614,10 +625,19 @@ async function supervise(
     return await ended(sink, held, said, exitCode)
   }
   try {
-    const result =
-      seconds > 0 && seconds < Infinity
-        ? await raceDeadline(run, seconds, reached, how.held)
-        : await run
+    let result: IOResult | typeof TIMED_OUT
+    try {
+      result =
+        seconds > 0 && seconds < Infinity
+          ? await raceDeadline(run, seconds, reached, how.held)
+          : await run
+    } catch (err) {
+      // A signal from elsewhere ended the command, a nested shell that runs
+      // as it included (`bash -c 'kill $$'`).
+      const killed = how.killedBy()
+      if (killed === null) throw err
+      return await ended(sink, held, [], 128 + killed)
+    }
     if (result !== TIMED_OUT) {
       return [
         await sink.snapshot(Channel.STDOUT),
@@ -658,9 +678,11 @@ async function supervise(
       }
       return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
     }
-    // A program on a machine got the signal as sent and may outlive it:
-    // only -k's KILL then ends the wait.
-    const onMachine = how.onMachine()
+    // A program on a machine got the signal as sent and may outlive it, as
+    // a shell that traps or ignores it does: only -k's KILL then ends the
+    // wait.
+    await sent
+    const onMachine = how.onMachine() || how.goesOn()
     let late: IOResult | typeof TIMED_OUT | null = null
     if (kill.at !== null || onMachine) {
       const ending = run.then(

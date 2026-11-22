@@ -69,6 +69,7 @@ from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
     SHELL_IGNORED_SIGNALS,
+    SIGTERM,
     TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
@@ -120,9 +121,9 @@ from mirage.workspace.executor.traps import (
     arm_signals,
     ignored_signals,
     inherit_traps,
+    own_action,
     start_job_traps,
 )
-from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.session import SessionState
@@ -487,7 +488,8 @@ def report_jobs(
 ) -> bytes:
     """bash's reports of the jobs its shell started that a signal ended
     since it last told, as it tells once it reaped a child or waited:
-    each once, and the TERM, INT or PIPE that ended one untold. The
+    each once, and the TERM, INT or PIPE that ended one untold, as one
+    the shell has an action for is, for good. The
     signal is the one ``kill`` stopped a job with, or the one that ended
     the native program a job's status is. A substitution's shell tells
     of none.
@@ -516,19 +518,21 @@ def report_jobs(
         ended = job.signal if job.signal is not None else process.ended_by
         if ended is None or ended < 1 or job.exit_code != 128 + ended:
             continue
+        trapped = own_action(session, ended)
         report = signal_report(
             shell_voice(),
             [(job.shown_pid, job.exit_code, ended, job.command)],
             False,
+            trapped,
         )
-        if report:
+        if report or trapped:
             job.reported = True
             told.append(report)
     return encode_text("".join(told))
 
 
 def report_reaped(
-    frame: ExecutionFrame,
+    context: EvaluationContext,
     reaped: Sequence[tuple[ProcessHandle, int, TSNodeLike]],
 ) -> None:
     """Queue bash's report of a child its shell waited for that a signal
@@ -536,13 +540,15 @@ def report_reaped(
     reaping command's stderr with those of the shell's jobs.
 
     Args:
-        frame (ExecutionFrame): the evaluation of the reaping command.
+        context (EvaluationContext): the evaluation of the reaping
+            command.
         reaped (Sequence[tuple[ProcessHandle, int, TSNodeLike]]): each
             process of the child, its status and the command it ran.
     """
-    if frame.substitution:
+    if context.frame.substitution:
         return
-    listed = signal_reported(reaped[-1][0].ended_by)
+    ended = reaped[-1][0].ended_by
+    listed = signal_reported(ended)
     processes = [
         (
             process.record.pid,
@@ -552,8 +558,9 @@ def report_reaped(
         )
         for process, code, node in reaped
     ]
-    frame.reports.append(
-        encode_text(signal_report(shell_voice(), processes, True))
+    trapped = ended is not None and own_action(context.session, ended)
+    context.frame.reports.append(
+        encode_text(signal_report(shell_voice(), processes, True, trapped))
     )
 
 
@@ -643,6 +650,7 @@ async def run_program(
         result, signal = await shell.program(run)
     finally:
         context.frame.shell = shell
+    reported = b""
     if signal is None:
         assert result is not None
         stdout, io, ran = result
@@ -653,13 +661,38 @@ async def run_program(
         record_status(context.session, code)
         stdout, io = None, IOResult(exit_code=code)
         ran = ExecutionNode(command=get_text(node), exit_code=code)
+        reported = _program_report(context, shell, code, signal)
     if job_table is None:
-        context.frame.reports.append(b"")
+        context.frame.reports.append(reported)
         return stdout, io, ran
-    told = report_jobs(context, job_table)
+    told = reported + report_jobs(context, job_table)
     if told:
         await tell(told, io, ran, sink)
     return stdout, io, ran
+
+
+def _program_report(
+    context: EvaluationContext,
+    shell: ProcessHandle,
+    code: int,
+    signal: int,
+) -> bytes:
+    """bash's report of a program its shell ran that a signal ended. The
+    program has no pid of its own to list, so only a report naming the
+    signal alone is told: TERM's, and one the shell has an action for,
+    whose signal reached the program as one of the shell's group.
+
+    Args:
+        context (EvaluationContext): the shell.
+        shell (ProcessHandle): the process the program ran in.
+        code (int): the status it ended with.
+        signal (int): the signal that ended it.
+    """
+    trapped = own_action(context.session, signal)
+    if context.frame.substitution or not (signal == SIGTERM or trapped):
+        return b""
+    row = (shell.record.pid, code, signal, "")
+    return encode_text(signal_report(shell_voice(), [row], True, trapped))
 
 
 def _job_left(

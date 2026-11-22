@@ -92,6 +92,21 @@ def ignored_signals(session: SessionState) -> frozenset[int]:
     )
 
 
+def own_action(session: SessionState, signal: int) -> bool:
+    """Whether the shell has an action of its own for ``signal`` (``trap
+    ACTION USR1``), which bash's report of a foreground child the signal
+    ended names alone; an action it only lists, its parent's, is not its
+    own.
+
+    Args:
+        session (SessionState): the shell.
+        signal (int): the signal.
+    """
+    return bool(session.signal_traps.get(signal)) and not (
+        session.signal_traps_inherited
+    )
+
+
 def start_job_traps(session: SessionState, lists: bool) -> None:
     """Start a background job's shell, or a stage of a background
     pipeline: with job control off, one that runs commands of its own

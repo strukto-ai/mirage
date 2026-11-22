@@ -330,7 +330,9 @@ async def test_signal_outcomes(args, code, said):
 )
 async def test_ignored_signals_let_the_command_finish(args, code):
     shell = FakeShell(delay=0.2, exit_code=3)
-    stdout, io, _ = await timed(shell, [*args, "0.05", "sh"], make_context())
+    stdout, io, _ = await timed(
+        shell, [*args, "0.05", "sleep"], make_context()
+    )
     assert io.exit_code == code
     assert stdout == b"done\n"
 
@@ -340,7 +342,7 @@ async def test_stopped_timeout_never_returns():
     shell = FakeShell(delay=0.05)
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
-            timed(shell, ["-s", "STOP", "0.01", "sh"], make_context()),
+            timed(shell, ["-s", "STOP", "0.01", "sleep"], make_context()),
             timeout=0.3,
         )
 

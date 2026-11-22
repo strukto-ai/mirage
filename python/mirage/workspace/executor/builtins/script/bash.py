@@ -297,6 +297,10 @@ async def handle_bash(
         # pid the shell's `$$`, whose own subshells and programs it forks.
         runner = current_caller().process
         if runner is not None:
+            # The shell runs commands of its own, so its first program is
+            # not the one the runner was started for: only its last runs
+            # in its place.
+            runner.one_command = False
             session.shell_pid = runner.record.pid
             seed_parent(session, runner.record.parent or 0)
             seed_shell(session, nested=True)
@@ -352,7 +356,7 @@ async def _in_process(
     # A program that runs it (`xargs sh -c`) is its parent, not the shell.
     node = caller.session._line_node
     if node is not None and not is_program_invocation(caller.session):
-        report_reaped(caller.frame, [(process, code, node)])
+        report_reaped(caller, [(process, code, node)])
     return ran[0] if ran else IOResult(exit_code=code)
 
 

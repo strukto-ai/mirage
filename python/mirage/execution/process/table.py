@@ -480,7 +480,11 @@ class ProcessTable:
                 logger.debug("signal %d not sent: %s", signal, sent)
 
     def _signal_own(
-        self, handle: ProcessHandle, signal: int, group: bool
+        self,
+        handle: ProcessHandle,
+        signal: int,
+        group: bool,
+        whole: bool = False,
     ) -> bool:
         """What a signal does to a process Mirage runs itself. It pauses
         at STOP and goes on at CONT, taking then the signal it was sent
@@ -491,12 +495,17 @@ class ProcessTable:
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
         (``_deliver``); one signalled alone stops what it started too,
-        and if it ignores the signal nothing happens.
+        and if it ignores the signal nothing happens. A signal sent to
+        the whole group (``killpg``) reaches the program its shell runs
+        right now even when the shell traps it, as that program, a child
+        in the same group, takes the signal at its default.
 
         Args:
             handle (ProcessHandle): the process.
             signal (int): the signal.
             group (bool): it gets the signal as one of a group would.
+            whole (bool): the whole group gets it, the program the
+                process runs right now included.
 
         Returns:
             bool: whether the process was there to signal.
@@ -512,7 +521,7 @@ class ProcessTable:
             elif signal == SIGCONT:
                 held = self.resume(handle)
                 if held is not None:
-                    return self._signal_own(handle, held, group)
+                    return self._signal_own(handle, held, group, whole)
             return True
         if signal != SIGKILL and self.hold_signal(handle, signal):
             return True
@@ -521,6 +530,8 @@ class ProcessTable:
             # A shell's ignore of a signal its process ignores anyway
             # leaves it to that, a group's included.
             caught = catcher(signal, handle.record.pid)
+            if caught and whole:
+                handle.interrupt(signal)
             if caught or (caught is False and signal not in handle.ignores):
                 return True
         if group:
@@ -581,7 +592,7 @@ class ProcessTable:
                     for other in members
                 )
             ):
-                self._signal_own(member, signal, True)
+                self._signal_own(member, signal, True, whole=True)
         await asyncio.gather(*(s for s in sending.values() if s is not None))
 
     def _sees(

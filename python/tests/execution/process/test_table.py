@@ -685,6 +685,50 @@ async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest
     await outside.join()
 
 
+# A shell that traps a signal keeps it for its action, and the program it
+# runs right now goes on when the shell alone is sent it; sent to the whole
+# group, the signal reaches that program too, which ends with it.
+@pytest.mark.asyncio
+async def test_a_group_signal_a_shell_traps_still_ends_its_program():
+    processes = ProcessTable()
+    caught: list[int] = []
+    started = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+    finish = asyncio.Event()
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        started.clear()
+        outcome.append(await child.program(program))
+        return 0
+
+    def catcher(signal: int, pid: int) -> bool:
+        caught.append(signal)
+        return True
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = catcher
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal_group(child.record.group, 15)
+        await started.wait()
+        assert await processes.signal(child, 15)
+        finish.set()
+        assert (await child.join()).exit == 0
+    assert caught == [15, 15]
+    assert outcome == [(None, 15), (0, None)]
+
+
 # A pid a session's lines take in turn runs each line under it; one a live
 # runner holds is not taken twice, and later pids go on past it.
 @pytest.mark.asyncio

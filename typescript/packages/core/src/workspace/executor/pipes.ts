@@ -358,8 +358,7 @@ export async function handlePipe(
     if (stage !== null && stage !== undefined) waited.push([stage, ios[i]?.exitCode ?? 0, cmd])
   })
   // A background pipeline is the job, which its shell reports itself.
-  if (waited.length > 0 && currentCaller().process?.pipeline !== true)
-    reportReaped(context.frame, waited)
+  if (waited.length > 0 && currentCaller().process?.pipeline !== true) reportReaped(context, waited)
   if (session.shellOptions.pipefail === true) {
     let rightmostFailure = 0
     for (let k = ios.length - 1; k >= 0; k--) {

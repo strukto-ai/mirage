@@ -655,6 +655,181 @@
         "stdout": "expected\nx\n1\nold\nunset\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "timeout_nested_shell_runs_its_term_trap",
+      "seq": 1300103,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout 0.5 bash -c 'trap \"echo caught\" TERM; sleep 3; echo after'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "caught\nafter\nrc=124\n",
+        "stderr": "Terminated\n"
+      }
+    },
+    {
+      "id": "timeout_nested_shell_keeps_its_ignore_and_status",
+      "seq": 1300104,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout 0.3 bash -c 'trap \"\" TERM; sleep 0.6; echo after'; echo rc=$?; timeout --preserve-status 0.3 bash -c 'trap \"echo caught; exit 3\" TERM; sleep 3; echo after'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\nrc=124\ncaught\nrc=3\n",
+        "stderr": "Terminated\n"
+      }
+    },
+    {
+      "id": "timeout_foreground_leaves_the_trapping_shells_program",
+      "seq": 1300105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout --foreground 0.3 bash -c 'trap \"echo caught\" TERM; sleep 0.6; echo after'; echo rc=$?; timeout -s USR1 0.3 bash -c 'trap \"echo usr1\" USR1; sleep 3; echo after'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "caught\nafter\nrc=124\nusr1\nafter\nrc=124\n",
+        "stderr": "User defined signal 1\n"
+      }
+    },
+    {
+      "id": "timeout_trap_runs_after_the_interrupted_command",
+      "seq": 1300106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "timeout 0.3 bash -c 'trap \"echo caught\" TERM; { sleep 3; echo grp; }; echo after'; timeout 0.3 bash -c 'trap \"echo caught\" TERM; sleep 3 & wait; echo after $?'; timeout -s INT 0.3 bash -c 'trap \"echo int\" INT; sleep 3; echo after'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "caught\ngrp\nafter\ncaught\nafter 143\nint\nafter\nrc=124\n",
+        "stderr": "Terminated\n"
+      }
+    },
+    {
+      "id": "timeout_nested_shell_signalled_by_itself",
+      "seq": 1300107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "x=$(timeout 5 bash -c 'echo a; kill $$; echo b'); echo \"x=$x rc=$?\"; x=$(timeout 5 bash -c 'trap \"echo t\" TERM; kill $$; echo b'); echo \"x=$x rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "x=a rc=143\nx=t\nb rc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

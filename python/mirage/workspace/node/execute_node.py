@@ -1108,7 +1108,7 @@ async def _fork_subshell(
         forked,
     )
     code = await process.reap()
-    report_reaped(context.frame, [(process, code, node)])
+    report_reaped(context, [(process, code, node)])
     if results:
         return results[0]
     return result(get_text(node), exit_code=code)
