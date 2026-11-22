@@ -152,13 +152,16 @@
               "rm": {
                 "decision": "deny",
                 "reason": "no deletes"
-              },
-              "cat": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/ram/secret*"
-                ]
+              }
+            },
+            "mounts": {
+              "/ram/secret": {
+                "commands": {
+                  "cat": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -210,8 +213,8 @@
         {
           "command": "'cat' \"/ram/secret\"",
           "expect": {
-            "exit": 1,
-            "stderr": "cat: /ram/secret: Permission denied\n"
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
