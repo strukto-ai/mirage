@@ -1049,6 +1049,18 @@
     {"op": "exec", "session": "rm_r", "command": "rm --bogus -r /data/d", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "delete", "command": "ls /data/d", "expect": {"value": {"exit_code": 0, "stdout": "a.txt\n", "stderr": "", "decision": null}}}
    ]
+  },
+  {
+   "id": "a_mode_on_a_folder_or_a_glob_key_is_refused_at_session_creation",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "folder", "profile": {"mounts": {"/data/keep": "read"}}, "expect": {"error": "mounts[/data/keep]: a mode applies to a whole mount and /data/keep is not one; put the mode on the mount /data, or give the folder a mode with mounts[/data].paths.show"}},
+    {"op": "session", "id": "glob", "profile": {"mounts": {"/data/*/sub": {"commands": {"rm": "deny"}}}}, "expect": {"error": "mounts[/data/*/sub]: a key is a literal path, not a glob; write one key per folder"}},
+    {"op": "session", "id": "agent", "profile": {"mounts": {"/data": {"paths": {"show": {"/data": "write", "/data/keep": "read"}}}, "/data/keep": {"commands": {"rm": "deny"}}}}},
+    {"op": "exec", "command": "mkdir -p /data/keep && echo hi > /data/keep/x", "expect": {"value": {"exit_code": 0}}},
+    {"op": "exec", "session": "agent", "command": "echo y > /data/keep/y", "expect": {"value": {"exit_code": 1}}},
+    {"op": "exec", "session": "agent", "command": "rm /data/keep/x", "expect": {"value": {"exit_code": 126, "stderr": "rm: Permission denied\n"}}}
+   ]
   }
 ]
 }

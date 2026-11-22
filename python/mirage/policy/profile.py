@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
@@ -37,6 +37,7 @@ from mirage.policy.constants import (
     METHODS,
     PROGRAM_RUNTIME,
 )
+from mirage.policy.errors import PolicyError
 from mirage.policy.types import (
     AdmissionRules,
     CommandNode,
@@ -61,6 +62,7 @@ from mirage.types import (
     parse_mount_mode,
     weaker_mode,
 )
+from mirage.utils.hidden import is_glob
 from mirage.utils.path import norm
 
 _DOC = ConfigDict(extra="forbid", frozen=True)
@@ -550,6 +552,11 @@ def parse_profile_mounts(v: Any) -> Any:
         if not isinstance(prefix, str):
             raise ValueError("mounts keys must be strings")
         root = norm(prefix)
+        if is_glob(root):
+            raise ValueError(
+                f"mounts[{root}]: a key is a literal path, not a glob; "
+                "write one key per folder"
+            )
         if isinstance(entry, str):
             entry = {"mode": entry}
         elif isinstance(entry, Mapping) and isinstance(
@@ -690,6 +697,36 @@ class SessionProfile(BaseModel):
                 _absolute_paths(paths, f"{where}.commands paths")
                 _under_mount(paths, prefix, f"{where}.commands paths")
         return self
+
+
+def check_mount_modes(profile: SessionProfile, mounts: Iterable[str]) -> None:
+    """Refuse a ``mode`` on a ``mounts`` key that is not a mount.
+
+    A mode caps a whole mount and a session looks it up by the mount's
+    prefix, so on a folder inside a mount it would load and cap nothing.
+    A key that is not a mount may still carry ``commands`` and ``paths``.
+
+    Args:
+        profile (SessionProfile): the document.
+        mounts (Iterable[str]): the workspace's mount prefixes.
+
+    Raises:
+        PolicyError: a key with a mode is not a mount.
+    """
+    prefixes = {norm(prefix) for prefix in mounts}
+    for key, entry in (profile.mounts or {}).items():
+        if entry.mode is None or key in prefixes:
+            continue
+        owner = max(
+            (p for p in prefixes if p == "/" or key.startswith(p + "/")),
+            key=len,
+            default="/",
+        )
+        raise PolicyError(
+            f"mounts[{key}]: a mode applies to a whole mount and {key} is "
+            f"not one; put the mode on the mount {owner}, or give the "
+            f"folder a mode with mounts[{owner}].paths.show"
+        )
 
 
 def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:

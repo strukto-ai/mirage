@@ -23,6 +23,7 @@ import { type Language, ScriptSource } from '../runtime/types.ts'
 import { type EnvEntries, EnvVar, SecretRef } from '../secrets/config.ts'
 import type { Limit, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
+import { isGlob } from '../utils/hidden.ts'
 import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
 import { norm } from '../utils/path.ts'
 import { isPlainObject } from '../utils/records.ts'
@@ -33,6 +34,7 @@ import {
   parseCommandLimits,
 } from './builtin/output_cap.ts'
 import { CTX_ENV, METHODS, PROGRAM_RUNTIME } from './constants.ts'
+import { PolicyError } from './errors.ts'
 import {
   type AdmissionRules,
   type CommandNode,
@@ -489,6 +491,11 @@ export function parseProfileMounts(
   for (const [prefix, entry] of entries) {
     if (typeof prefix !== 'string') throw new Error(`${where} keys must be strings`)
     const root = norm(prefix)
+    if (isGlob(root)) {
+      throw new Error(
+        `${where}[${root}]: a key is a literal path, not a glob; write one key per folder`,
+      )
+    }
     sections.set(root, ProfileMount(entry, root, `${where}[${root}]`))
   }
   return sections
@@ -707,6 +714,28 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     out.commands = commands
   }
   return out
+}
+
+/**
+ * Refuse a `mode` on a `mounts` key that is not a mount. A mode caps a
+ * whole mount and a session looks it up by the mount's prefix, so on a
+ * folder inside a mount it would load and cap nothing. A key that is not
+ * a mount may still carry `commands` and `paths`.
+ */
+export function checkMountModes(profile: SessionProfile, mounts: Iterable<string>): void {
+  const prefixes = new Set([...mounts].map((prefix) => norm(prefix)))
+  for (const [key, entry] of profile.mounts ?? []) {
+    if (entry.mode == null || prefixes.has(key)) continue
+    let owner = '/'
+    for (const p of prefixes) {
+      if ((p === '/' || key.startsWith(`${p}/`)) && p.length > owner.length) owner = p
+    }
+    throw new PolicyError(
+      `mounts[${key}]: a mode applies to a whole mount and ${key} is not one; ` +
+        `put the mode on the mount ${owner}, or give the folder a mode with ` +
+        `mounts[${owner}].paths.show`,
+    )
+  }
 }
 
 /**

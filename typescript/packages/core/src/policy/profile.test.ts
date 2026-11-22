@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import {
+  checkMountModes,
   commandTree,
   compileProgram,
   parseProfileMounts,
@@ -295,6 +296,40 @@ describe('parseProfileMounts', () => {
       new Map([['/a', { mode: MountMode.WRITE }]]),
     )
     expect(parseProfileMounts(null)).toBeNull()
+  })
+
+  it('refuses a glob key, which is a literal path', () => {
+    expect(() => parseProfileMounts({ '/data/*/sub': { commands: { rm: 'deny' } } })).toThrow(
+      'mounts[/data/*/sub]: a key is a literal path, not a glob; write one key per folder',
+    )
+    expect(() => parseProfileMounts({ '/data/k?ep': 'read' })).toThrow(
+      'mounts[/data/k?ep]: a key is a literal',
+    )
+  })
+})
+
+describe('checkMountModes', () => {
+  it('refuses a mode on a key that is not a mount', () => {
+    const profile = SessionProfile({ mounts: { '/data': 'read', '/data/keep/deep': 'read' } })
+    expect(() => {
+      checkMountModes(profile, ['/', '/data/', '/other/'])
+    }).toThrow(
+      'mounts[/data/keep/deep]: a mode applies to a whole mount and /data/keep/deep is not one; ' +
+        'put the mode on the mount /data, or give the folder a mode with mounts[/data].paths.show',
+    )
+  })
+
+  it('lets a key that is not a mount carry commands and paths', () => {
+    const profile = SessionProfile({
+      mounts: {
+        '/': 'read',
+        '/data': 'read',
+        '/data/keep': { commands: { rm: 'deny' }, paths: { hide: ['/data/keep/x'] } },
+      },
+    })
+    expect(() => {
+      checkMountModes(profile, ['/', '/data/'])
+    }).not.toThrow()
   })
 })
 

@@ -123,6 +123,7 @@ from mirage.policy import (
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.match.grammar import unread_names
+from mirage.policy.profile import check_mount_modes
 from mirage.policy.types import (
     AdmissionRules,
     DryRun,
@@ -541,11 +542,6 @@ class Workspace:
             else None
         )
         self._profiles: dict[str, SessionProfile] = {}
-        for name, doc in (profiles or {}).items():
-            self.set_profile(name, doc)
-        self._default_profile_name = profile
-        if profile is not None and profile not in self._profiles:
-            raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
             session_id,
             store=stores.sessions,
@@ -636,6 +632,27 @@ class Workspace:
         self._implicit_root = install_mounts(
             self._registry, specs, index, mode
         )
+        self.observer = Observer(
+            store=stores.observe,
+            clock=self._clock,
+            workspace_id=self._workspace_id,
+            machine=self.process_table.machine.name,
+            processes=self.process_table.records,
+            instance=lambda machine: self.machine_table.instance(machine),
+        )
+        self._registry.observer = self.observer
+        # The stores this workspace's state lives in, whether the state
+        # store built them or the caller passed one in directly: delete
+        # clears these, not only what the state store would hand out.
+        self._planes = (stores.namespace, stores.observe, stores.sessions)
+        self._mount_views()
+        # Every mount is in place, so a profile's modes can be held
+        # against the mounts they name.
+        for name, doc in (profiles or {}).items():
+            self.set_profile(name, doc)
+        self._default_profile_name = profile
+        if profile is not None and profile not in self._profiles:
+            raise PolicyError(f"unknown profile {profile!r}")
         # What the workspace and its mounts hide from every session,
         # stamped onto the default session now and onto every session
         # created or hydrated later.
@@ -656,20 +673,6 @@ class Workspace:
             self._session_mgr.get(session_id), self._registry.max_env
         )
 
-        self.observer = Observer(
-            store=stores.observe,
-            clock=self._clock,
-            workspace_id=self._workspace_id,
-            machine=self.process_table.machine.name,
-            processes=self.process_table.records,
-            instance=lambda machine: self.machine_table.instance(machine),
-        )
-        self._registry.observer = self.observer
-        # The stores this workspace's state lives in, whether the state
-        # store built them or the caller passed one in directly: delete
-        # clears these, not only what the state store would hand out.
-        self._planes = (stores.namespace, stores.observe, stores.sessions)
-        self._mount_views()
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
         # and the policy gates fire exactly once, at that entry point. It runs
@@ -2753,6 +2756,7 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
+        self._check_modes(profile, inline)
         compiled = self._compile(base, profile, inline, defer=False)
         return self._session_mgr.create(session_id, profile=compiled)
 
@@ -3003,8 +3007,26 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
+        self._check_modes(doc)
         self._compile(doc, name)
         self._profiles[name] = doc
+
+    def _check_modes(self, *docs: SessionProfile | str | None) -> None:
+        """Hold each document handed in against the mounts there are now,
+        as it enters the workspace; a profile named here was checked when
+        it was defined.
+
+        Args:
+            *docs (SessionProfile | str | None): the documents, a name or
+                None standing for a profile already defined.
+
+        Raises:
+            PolicyError: a ``mode`` on a key that is not a mount.
+        """
+        prefixes = [entry.prefix for entry in self._registry.mounts()]
+        for doc in docs:
+            if isinstance(doc, SessionProfile):
+                check_mount_modes(doc, prefixes)
 
     async def set_session_profile(
         self,
@@ -3027,6 +3049,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
+        self._check_modes(profile)
         compiled = self._compile(
             self._base_profile(profile), profile, defer=False
         )

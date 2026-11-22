@@ -17,6 +17,7 @@ import contextlib
 import inspect
 import io
 import itertools
+import re
 import subprocess
 import sys
 import uuid
@@ -35,6 +36,7 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.machine import MachineHandle
+from mirage.policy.errors import PolicyError
 from mirage.types import (
     FileChangeKind,
     FileEvent,
@@ -1125,5 +1127,54 @@ async def test_a_line_runs_under_a_max_memory_past_4_gib(max_memory):
             'hi\n{"a":1}\n',
             "",
         )
+    finally:
+        await ws.close()
+
+
+FOLDER_MODE = "mounts[/data/keep]: a mode applies to a whole mount"
+
+
+@pytest.mark.asyncio
+async def test_a_profile_mode_on_a_folder_is_refused_at_every_entry():
+    folder = {"mounts": {"/data/keep": "read"}}
+    with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+        Workspace({"/data": RAMVFS()}, profiles={"agent": folder})
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            ws.set_profile("agent", folder)
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            ws.create_session("a", profile=folder)
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            ws.create_session("b", mounts={"/data/keep": "read"})
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            await ws.set_session_profile(ws.default_session_id, folder)
+        assert "agent" not in ws.profiles
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_mode_holds_on_every_mount_the_workspace_has():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "agent": {
+                "mounts": {
+                    "/": "read",
+                    "/data": "read",
+                    "/usr/bin": "read",
+                    "/data/keep": {"commands": {"rm": "deny"}},
+                }
+            }
+        },
+    )
+    try:
+        ws.add_mount("/later", RAMVFS(), MountMode.WRITE)
+        ws.set_profile("later", {"mounts": {"/later": "read"}})
+        ws.create_session("a", profile="later")
+        io = await ws.shell("echo x > /later/f", session_id="a")
+        assert io.exit_code == 1
     finally:
         await ws.close()

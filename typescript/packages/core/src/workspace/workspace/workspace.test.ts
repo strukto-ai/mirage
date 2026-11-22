@@ -682,3 +682,47 @@ it.each(['4GB', '8GB'])('runs a line under a max_memory of %s', async (maxMemory
     await ws.close()
   }
 })
+
+describe('profile modes', () => {
+  const folderMode = 'mounts[/data/keep]: a mode applies to a whole mount'
+
+  it('refuses a mode on a folder at every entry a document takes', async () => {
+    const folder = SessionProfile({ mounts: { '/data/keep': 'read' } })
+    expect(() => new Workspace({ '/data': new RAMVFS() }, { profiles: { agent: folder } })).toThrow(
+      folderMode,
+    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    expect(() => {
+      ws.setProfile('agent', folder)
+    }).toThrow(folderMode)
+    expect(() => ws.createSession('a', { profile: folder })).toThrow(folderMode)
+    expect(() => ws.createSession('b', { mounts: { '/data/keep': 'read' } })).toThrow(folderMode)
+    await expect(ws.setSessionProfile(ws.defaultSessionId, folder)).rejects.toThrow(folderMode)
+    expect('agent' in ws.profiles).toBe(false)
+  })
+
+  it('holds a mode on every mount the workspace has', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          agent: SessionProfile({
+            mounts: {
+              '/': 'read',
+              '/data': 'read',
+              '/usr/bin': 'read',
+              '/data/keep': { commands: { rm: 'deny' } },
+            },
+          }),
+        },
+      },
+    )
+    open.push(ws)
+    ws.addMount('/later', new RAMVFS(), MountMode.WRITE)
+    ws.setProfile('later', SessionProfile({ mounts: { '/later': 'read' } }))
+    ws.createSession('a', { profile: 'later' })
+    expect((await ws.shell('echo x > /later/f', { sessionId: 'a' })).exitCode).toBe(1)
+  })
+})

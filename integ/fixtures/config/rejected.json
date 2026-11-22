@@ -1398,6 +1398,28 @@
           }
         }
       }
+    },
+    {
+      "name": "profile: a mounts key is a literal path, never a glob",
+      "error": "mounts[/d/*/sub]: a key is a literal path, not a glob; write one key per folder",
+      "config": {
+        "mounts": {
+          "/d": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "p": {
+            "mounts": {
+              "/d/*/sub": {
+                "commands": {
+                  "rm": "deny"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

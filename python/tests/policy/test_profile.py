@@ -40,6 +40,7 @@ from mirage.policy.profile import (
     ProfileMount,
     SessionProfile,
     VarsBlock,
+    check_mount_modes,
     command_tree,
     compile_program,
     profile_from_dict,
@@ -234,6 +235,12 @@ def test_profile_mounts_refuses_a_bare_list():
         ({"/repo"}, "mounts must be a mapping of prefix to its settings"),
         ({"/repo": "nope"}, "'nope' is not a valid MountMode"),
         ({"/repo": {"mode": 7}}, "mount mode must be a mode name or alias"),
+        (
+            {"/data/*/sub": {"commands": {"rm": "deny"}}},
+            "mounts[/data/*/sub]: a key is a literal path, not a glob; "
+            "write one key per folder",
+        ),
+        ({"/data/k?ep": "read"}, "mounts[/data/k?ep]: a key is a literal"),
     ],
 )
 def test_profile_mounts_rejects_what_typescript_rejects(mounts, message):
@@ -243,6 +250,37 @@ def test_profile_mounts_rejects_what_typescript_rejects(mounts, message):
     # the loader's contract promises.
     with pytest.raises(ValidationError, match=re.escape(message)):
         SessionProfile.model_validate({"mounts": mounts})
+
+
+def test_a_mode_on_a_key_that_is_not_a_mount_is_refused():
+    profile = SessionProfile.model_validate(
+        {"mounts": {"/data": "read", "/data/keep/deep": "read"}}
+    )
+    with pytest.raises(
+        PolicyError,
+        match=re.escape(
+            "mounts[/data/keep/deep]: a mode applies to a whole mount and "
+            "/data/keep/deep is not one; put the mode on the mount /data, "
+            "or give the folder a mode with mounts[/data].paths.show"
+        ),
+    ):
+        check_mount_modes(profile, ["/", "/data/", "/other/"])
+
+
+def test_a_key_that_is_not_a_mount_may_carry_commands_and_paths():
+    profile = SessionProfile.model_validate(
+        {
+            "mounts": {
+                "/": "read",
+                "/data": "read",
+                "/data/keep": {
+                    "commands": {"rm": "deny"},
+                    "paths": {"hide": ["/data/keep/x"]},
+                },
+            }
+        }
+    )
+    check_mount_modes(profile, ["/", "/data/"])
 
 
 def test_profile_rejects_unknown_and_unshipped_fields():
@@ -723,7 +761,7 @@ def test_workspace_names_a_default_role_by_name():
     assert ws.create_session("agent").mount_modes["/a"] == MountMode.READ
     with pytest.raises(PolicyError, match="unknown profile 'gone'"):
         Workspace(
-            {"/a": (RAMVFS(), MountMode.WRITE)},
+            {"/a": (RAMVFS(), MountMode.WRITE), "/b": RAMVFS()},
             profiles=PROFILES,
             profile="gone",
         )

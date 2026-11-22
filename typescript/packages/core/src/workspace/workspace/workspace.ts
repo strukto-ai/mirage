@@ -57,6 +57,7 @@ import { Decisions } from '../../policy/decisions.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type { Policies } from '../../policy/index.ts'
 import {
+  checkMountModes,
   parseProfileMounts,
   parseProfilePolicy,
   type CompiledProfile,
@@ -551,13 +552,6 @@ export class Workspace {
     // and max_env below, a line's time limit as the line starts.
     this.registry.ceilings = options.ceilings ?? {}
     this.processTable.ceiling = this.registry.ceilings.maxProcesses ?? null
-    for (const [name, profile] of Object.entries(options.profiles ?? {})) {
-      this.setProfile(name, profile)
-    }
-    this.defaultProfileName = options.profile ?? null
-    if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
-      throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
-    }
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
     // (PermissionsPolicy, reading each session's compiled layers from
@@ -645,6 +639,15 @@ export class Workspace {
         write: WritePolicy.UNCONDITIONAL,
       })
       this.syntheticRootAnchor = true
+    }
+    // Every mount is in place, so a profile's modes can be held against
+    // the mounts they name.
+    for (const [name, profile] of Object.entries(options.profiles ?? {})) {
+      this.setProfile(name, profile)
+    }
+    this.defaultProfileName = options.profile ?? null
+    if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
+      throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
     }
     // The workspace's own session is a session created without a name,
     // so `profiles.default` shapes it too (design 3.4): the primary
@@ -1491,6 +1494,7 @@ export class Workspace {
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
+    this.checkModes(options.profile ?? null, inline)
     const compiled = this.compile(base, options.profile ?? null, inline, false)
     return this.sessionManager.create(sessionId, { profile: compiled })
   }
@@ -1671,8 +1675,21 @@ export class Workspace {
         sourceFor(entry.managed.source)
       }
     }
+    this.checkModes(profile)
     this.compile(profile, name)
     this.profilesInternal[name] = profile
+  }
+
+  /**
+   * Hold each document handed in against the mounts there are now, as it
+   * enters the workspace; a profile named here was checked when it was
+   * defined, so a name or null passes.
+   */
+  private checkModes(...docs: (SessionProfile | string | null)[]): void {
+    const prefixes = this.registry.allMounts().map((entry) => entry.prefix)
+    for (const doc of docs) {
+      if (doc !== null && typeof doc !== 'string') checkMountModes(doc, prefixes)
+    }
   }
 
   /**
@@ -1687,6 +1704,7 @@ export class Workspace {
     profile: string | SessionProfile | null,
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    this.checkModes(profile)
     const compiled = this.compile(this.baseProfile(profile), profile, null, false)
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
