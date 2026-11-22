@@ -385,20 +385,18 @@
         },
         {
           "profile": {
-            "commands": {
-              "python3": {
-                "decision": "deny",
-                "reason": "blocked alias",
-                "paths": [
-                  "/data/blocked/*"
-                ]
-              },
-              "node": {
-                "decision": "deny",
-                "reason": "blocked alias",
-                "paths": [
-                  "/data/blocked/*"
-                ]
+            "mounts": {
+              "/data/blocked/item": {
+                "commands": {
+                  "python3": {
+                    "decision": "deny",
+                    "reason": "blocked alias"
+                  },
+                  "node": {
+                    "decision": "deny",
+                    "reason": "blocked alias"
+                  }
+                }
               }
             }
           }
