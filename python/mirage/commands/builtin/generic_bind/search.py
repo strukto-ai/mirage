@@ -51,6 +51,7 @@ from mirage.errors.types import WalkLimitError
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import revision_for
+from mirage.policy.errors import PolicyDenied
 from mirage.shell.bytes import byte_view, utf8_locale
 from mirage.types import FileType, PathSpec, ReadStreamFn
 from mirage.utils.encoding import bom_of
@@ -476,7 +477,9 @@ async def ruled_out(
 ) -> Callable[[PathSpec], Awaitable[bool]] | None:
     """A test for the walked files a search for ``terms`` cannot match,
     by the search of the mount serving each of ``dirs``; None when one of
-    them does not answer for every file below it.
+    them does not answer for every file below it, or a rule refuses the
+    search of one: its files are then read one by one, and each is judged
+    by its own read.
 
     The test is true for a file the search rules out: one it does not
     name, among those it covers (``searchable``). A path named on the
@@ -511,18 +514,22 @@ async def ruled_out(
             return None
     elif not files.answers("files_containing"):
         return None
-    answers = await asyncio.gather(
-        *(
-            files.files_containing(
-                scope,
-                text,
-                whole_word=terms.whole_word,
-                ignore_case=terms.ignore_case,
+    try:
+        answers = await asyncio.gather(
+            *(
+                files.files_containing(
+                    scope,
+                    text,
+                    whole_word=terms.whole_word,
+                    ignore_case=terms.ignore_case,
+                )
+                for scope in dirs
+                for text in terms.texts
             )
-            for scope in dirs
-            for text in terms.texts
         )
-    )
+    except PolicyDenied as exc:
+        logger.debug("search refused, reading each file: %s", exc)
+        return None
     found: set[str] = set()
     for answer in answers:
         if answer is None:

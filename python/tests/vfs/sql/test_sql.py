@@ -39,7 +39,12 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.postgres import PostgresSqlDriver
 from mirage.vfs.sql.sql import SqlVFS
-from mirage.vfs.sql.types import SqlDialect, SqlDriver, SqlStatement
+from mirage.vfs.sql.types import (
+    SqlDialect,
+    SqlDriver,
+    SqlStatement,
+    SqlValue,
+)
 from mirage.vfs.testing import MutationFixture, check_mutation_contract
 from mirage.workspace import Workspace
 from mirage.workspace.record.sql import SqlRecordClient
@@ -58,6 +63,11 @@ def at(p: str) -> PathSpec:
 
 async def whole(vfs: SqlVFS, p: str) -> bytes:
     return await materialize(await vfs.read(at(p)))
+
+
+async def _streamed(*chunks: bytes) -> AsyncIterator[bytes]:
+    for chunk in chunks:
+        yield chunk
 
 
 def racing(vfs: SqlVFS, sql: list[str]) -> None:
@@ -903,7 +913,7 @@ async def test_a_capped_write_walks_its_path_once_and_counts_what_it_wrote():
     asked: list[str] = []
     query = driver.query
 
-    def counting(sql: str, params: Sequence[object] = ()):
+    def counting(sql: str, params: Sequence[SqlValue] = ()):
         asked.append(sql)
         return query(sql, params)
 
@@ -915,14 +925,9 @@ async def test_a_capped_write_walks_its_path_once_and_counts_what_it_wrote():
     assert usage.used == 2
     await vfs.append(at("/d/f"), b"123")
     assert usage.used == 5
-
-    async def parts() -> AsyncIterator[bytes]:
-        yield b"ab"
-        yield b"cd"
-
-    await vfs.write(at("/d/f"), parts())
+    await vfs.write(at("/d/f"), _streamed(b"ab", b"cd"))
     assert usage.used == 4
-    await vfs.append(at("/d/f"), parts())
+    await vfs.append(at("/d/f"), _streamed(b"ab", b"cd"))
     assert usage.used == 8
     assert await whole(vfs, "/d/f") == b"abcdabcd"
     assert (
@@ -938,12 +943,8 @@ async def test_a_capped_write_walks_its_path_once_and_counts_what_it_wrote():
     # follows the file as it stands, not as the write first found it.
     small = SqlVFS(capacity=8)
     await small.write(at("/f"), b"abcdefgh")
-
-    async def over() -> AsyncIterator[bytes]:
-        yield b"123456789"
-
     with pytest.raises(OSError) as raised:
-        await small.write(at("/f"), over())
+        await small.write(at("/f"), _streamed(b"123456789"))
     assert raised.value.errno == errno.EDQUOT
     assert small.usage is not None and small.usage.used == 0
     await small.write(at("/g"), b"1")
@@ -962,7 +963,7 @@ async def test_a_sole_writer_walks_one_name_through_the_folder_it_just_walked():
     asked: list[str] = []
     query = driver.query
 
-    def counting(sql: str, params: Sequence[object] = ()):
+    def counting(sql: str, params: Sequence[SqlValue] = ()):
         asked.append(sql)
         return query(sql, params)
 
@@ -1001,6 +1002,8 @@ SEARCHES = [
     "git grep -n -e alpha -e beta",
     "git grep -n absent",
     "git grep -n needle -- src",
+    "git grep -qi needle -- d src; echo quiet=$?",
+    "git grep -in needle -- d src",
     "ast-grep run -p 'needle($A)' .",
     "ast-grep run -l ts -p 'needle($A)' .",
     "ast-grep run -p '$A($B)' src",
@@ -1038,8 +1041,23 @@ async def _searched(vfs: BaseVFS) -> tuple[Workspace, list[tuple]]:
             }
         },
     )
+    ws.create_session(
+        "walled",
+        profile={
+            "commands": {
+                "*": [
+                    "allow",
+                    {
+                        "decision": "deny",
+                        "reason": "walled",
+                        "paths": ["/w/repo/src"],
+                    },
+                ]
+            }
+        },
+    )
     answers = []
-    for session in (None, "sealed"):
+    for session in (None, "sealed", "walled"):
         for line in SEARCHES:
             ran = await ws.shell(
                 f"cd /w/repo && {line}",

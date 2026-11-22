@@ -51,6 +51,11 @@ async function bytes(
   return materialize(await vfs.read(at(p), undefined, offset, size))
 }
 
+// eslint-disable-next-line @typescript-eslint/require-await
+async function* streamed(...chunks: string[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) yield enc.encode(chunk)
+}
+
 // A writer racing the next op: `other` (statements, or another mount's op)
 // lands just before the op's own batch, after its lookups.
 function racing(driver: SqlDriver, other: readonly string[] | (() => Promise<void>)): void {
@@ -490,6 +495,8 @@ const SEARCHES = [
   'git grep -n -e alpha -e beta',
   'git grep -n absent',
   'git grep -n needle -- src',
+  'git grep -qi needle -- d src; echo quiet=$?',
+  'git grep -in needle -- d src',
   "ast-grep run -p 'needle($A)' .",
   "ast-grep run -l ts -p 'needle($A)' .",
   "ast-grep run -p '$A($B)' src",
@@ -498,8 +505,8 @@ const SEARCHES = [
   'rg -n needle',
 ]
 
-// A repository on `vfs`, and what each search answers in it, with and without
-// a rule that seals one file.
+// A repository on `vfs`, and what each search answers in it: with no rule, with
+// one that seals a file, and with one that seals a folder.
 async function searched(vfs: BaseVFS): Promise<[Workspace, [string, string, string, number][]]> {
   const ws = new Workspace({ '/': new RAMVFS(), '/w': vfs }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
@@ -515,8 +522,15 @@ async function searched(vfs: BaseVFS): Promise<[Workspace, [string, string, stri
       },
     }),
   })
+  ws.createSession('walled', {
+    profile: SessionProfile({
+      commands: {
+        '*': ['allow', { decision: 'deny', reason: 'walled', paths: ['/w/repo/src'] }],
+      },
+    }),
+  })
   const answers: [string, string, string, number][] = []
-  for (const session of [undefined, 'sealed']) {
+  for (const session of [undefined, 'sealed', 'walled']) {
     for (const line of SEARCHES) {
       const ran = await ws.shell(
         `cd /w/repo && ${line}`,
@@ -692,25 +706,18 @@ describe('SqlVFS folders', () => {
     expect(vfs.usage?.used).toBe(2)
     await vfs.append(at('/d/f'), enc.encode('123'))
     expect(vfs.usage?.used).toBe(5)
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async function* parts(): AsyncIterable<Uint8Array> {
-      yield enc.encode('ab')
-      yield enc.encode('cd')
-    }
-    await vfs.write(at('/d/f'), parts())
+    await vfs.write(at('/d/f'), streamed('ab', 'cd'))
     expect(vfs.usage?.used).toBe(4)
-    await vfs.append(at('/d/f'), parts())
+    await vfs.append(at('/d/f'), streamed('ab', 'cd'))
     expect(vfs.usage?.used).toBe(8)
     expect(dec.decode(await bytes(vfs, '/d/f'))).toBe('abcdabcd')
     // A replacement refused part way has emptied the file, and the count
     // follows the file as it stands, not as the write first found it.
     const small = new SqlVFS({ driver: new SqliteDriver(), capacity: 8 })
     await small.write(at('/f'), enc.encode('abcdefgh'))
-    // eslint-disable-next-line @typescript-eslint/require-await
-    async function* over(): AsyncIterable<Uint8Array> {
-      yield enc.encode('123456789')
-    }
-    await expect(small.write(at('/f'), over())).rejects.toMatchObject({ code: 'EDQUOT' })
+    await expect(small.write(at('/f'), streamed('123456789'))).rejects.toMatchObject({
+      code: 'EDQUOT',
+    })
     expect(small.usage?.used).toBe(0)
     await small.write(at('/g'), enc.encode('1'))
     expect(small.usage?.used).toBe(1)

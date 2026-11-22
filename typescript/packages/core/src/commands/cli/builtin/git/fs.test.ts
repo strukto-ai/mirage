@@ -26,7 +26,15 @@ import { IOResult } from '../../../../io/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 
-import { applyDelta, configValues, gitFs, openPacks, packedObject } from './fs.ts'
+import {
+  applyDelta,
+  configValues,
+  gitFs,
+  inflate,
+  openPacks,
+  packedObject,
+  storedZlib,
+} from './fs.ts'
 import { ensureDir } from './io.ts'
 import type { CallerDispatchFn } from '../../../../context/session_context.ts'
 import { Files } from '../../../../workspace/files.ts'
@@ -282,5 +290,28 @@ describe('packed reads of a damaged pack', () => {
     expect(err).toBeInstanceOf(Error)
     expect(err).not.toBeInstanceOf(git.Errors.NotFoundError)
     await expect(read('cd'.padEnd(40, '0'))).rejects.toBeInstanceOf(git.Errors.NotFoundError)
+  })
+})
+
+describe('inflate', () => {
+  it('returns one whole stream exactly, at and around its buffer sizes', () => {
+    for (const size of [0, 1, 16383, 16384, 16385, 32768, 100000]) {
+      const data = new Uint8Array(size).map((_, i) => i % 251)
+      for (const packed of [deflateSync(data), storedZlib(data)]) {
+        const out = inflate(packed)
+        expect(out.length).toBe(size)
+        expect(Buffer.from(out).equals(data)).toBe(true)
+      }
+    }
+  })
+
+  it('refuses a stream cut short, and one with bytes past its end', () => {
+    const whole = deflateSync(new TextEncoder().encode('blob 11\0some object'))
+    expect(inflateSync(whole).length).toBe(19)
+    for (const cut of [0, 1, 2, whole.length - 5, whole.length - 1]) {
+      expect(() => inflate(whole.subarray(0, cut))).toThrow('inflate: ')
+    }
+    expect(() => inflate(new Uint8Array([...whole, 0]))).toThrow('inflate: ')
+    expect(() => inflate(new Uint8Array([...whole, ...whole]))).toThrow('inflate: ')
   })
 })

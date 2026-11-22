@@ -25,6 +25,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { mountKey } from '../../../utils/key_prefix.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
+import { PolicyDenied } from '../../../policy/errors.ts'
 import { FileType, type FileStat, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { WalkLimitError } from '../../../errors/types.ts'
@@ -408,7 +409,9 @@ export async function matchingTree(
 /**
  * A test for the walked files a search for `terms` cannot match, by the
  * search of the mount serving each of `dirs`; null when one of them does not
- * answer for every file below it. The test is true for a file the search
+ * answer for every file below it, or a rule refuses the search of one: its
+ * files are then read one by one, and each is judged by its own read. The
+ * test is true for a file the search
  * rules out: one it does not name, among those it covers (`searchable`). A
  * path named on the line (`named`) is never ruled out by a search asked about
  * directories, nor one pinned to a revision, since a search sees the current
@@ -439,16 +442,23 @@ export async function ruledOut(
       : !files.answers('files_containing')
   )
     return null
-  const answers = await Promise.all(
-    dirs.flatMap((scope) =>
-      terms.texts.map((text) =>
-        files.filesContaining(scope, text, {
-          wholeWord: terms.wholeWord,
-          ignoreCase: terms.ignoreCase,
-        }),
+  let answers: (PathSpec[] | null)[]
+  try {
+    answers = await Promise.all(
+      dirs.flatMap((scope) =>
+        terms.texts.map((text) =>
+          files.filesContaining(scope, text, {
+            wholeWord: terms.wholeWord,
+            ignoreCase: terms.ignoreCase,
+          }),
+        ),
       ),
-    ),
-  )
+    )
+  } catch (err) {
+    if (!(err instanceof PolicyDenied)) throw err
+    console.debug('search refused, reading each file:', err)
+    return null
+  }
   const found = new Set<string>()
   for (const answer of answers) {
     if (answer === null) return null
