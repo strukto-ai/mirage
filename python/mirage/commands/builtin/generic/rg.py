@@ -3,12 +3,14 @@ import logging
 import posixpath
 import time
 from collections.abc import (
+    AsyncGenerator,
     AsyncIterator,
     Awaitable,
     Callable,
     Mapping,
     Sequence,
 )
+from contextlib import suppress
 from functools import partial
 from typing import TypedDict, cast
 
@@ -76,6 +78,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
 from mirage.errors.types import WalkLimitError
+from mirage.io.errors import PipeClosed
 from mirage.io.stream import close_quietly, yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.scan import scanned
@@ -742,19 +745,21 @@ async def rg_generic(
     out = (
         _list_files(found, f, warnings, io, notes)
         if pat is None
-        else _search_all(
-            found,
-            paths,
-            pat,
-            f,
-            operand_stream,
-            warnings,
-            implicit,
-            cwd,
-            io,
-            stopped,
-            ctx.shell,
-            notes,
+        else _written(
+            _search_all(
+                found,
+                paths,
+                pat,
+                f,
+                operand_stream,
+                warnings,
+                implicit,
+                cwd,
+                io,
+                stopped,
+                ctx.shell,
+                notes,
+            )
         )
     )
     return out, io
@@ -858,18 +863,63 @@ async def _search_single(
     )
     io = IOResult(exit_code=1)
     tally = Tally()
-    return _settled(
-        stream_haystack(
-            operand_stream(p), pat, f, name, label, tally, True, is_stdin(p)
-        ),
-        f,
-        label,
-        tally,
-        io,
-        p.raw_path,
-        name,
-        pat,
+    return _written(
+        _settled(
+            stream_haystack(
+                operand_stream(p),
+                pat,
+                f,
+                name,
+                label,
+                tally,
+                True,
+                is_stdin(p),
+            ),
+            f,
+            label,
+            tally,
+            io,
+            p.raw_path,
+            name,
+            pat,
+        )
     ), io
+
+
+async def _written(
+    chunks: AsyncGenerator[bytes, None],
+) -> AsyncIterator[bytes]:
+    """A search's output as a pipe takes it. A reader that goes away has
+    taken the last chunk; the search runs on to its next write, which the
+    closed pipe refuses as ripgrep's is refused, and the search's own end
+    settles its status and what it reports.
+
+    Args:
+        chunks (AsyncGenerator[bytes, None]): the search's output, which
+            stops at a ``PipeClosed`` thrown into it.
+    """
+    gone = False
+    try:
+        async for chunk in chunks:
+            yield chunk
+    except GeneratorExit:
+        gone = True
+        raise
+    finally:
+        if gone:
+            await _refuse_next_write(chunks)
+        await close_quietly(chunks)
+
+
+async def _refuse_next_write(chunks: AsyncGenerator[bytes, None]) -> None:
+    """Run a search on to its next write and refuse it.
+
+    Args:
+        chunks (AsyncGenerator[bytes, None]): the search's output.
+    """
+    with suppress(StopAsyncIteration, PipeClosed):
+        await anext(chunks)
+        await chunks.athrow(PipeClosed())
 
 
 def _refused(line: str, f: RgFlags) -> tuple[ByteSource | None, IOResult]:
@@ -893,7 +943,7 @@ async def _settled(
     shown: str,
     name: str,
     program: RgProgram,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """One streamed haystack's output, headed when --heading names it,
     with the exit status settled however the output ends.
 
@@ -907,7 +957,7 @@ async def _settled(
         name (str): the haystack as rg prints it, which a search that
             gave up names.
     """
-    printed = failed = False
+    printed = failed = cut = False
     try:
         async for chunk in chunks:
             if not printed and (
@@ -916,6 +966,10 @@ async def _settled(
                 yield heading
             printed = True
             yield chunk
+    except PipeClosed:
+        # ripgrep stops at the write a closed pipe refuses, and the file
+        # it was writing counts for nothing (14.1.1).
+        cut = True
     except FS_ERRORS as exc:
         # A read that fails once the stream is open is the searcher's to
         # report, exit 2, as ripgrep reports it for any file it searches.
@@ -937,7 +991,7 @@ async def _settled(
         if not failed:
             listed = printed if f.files_without_match and not f.quiet else None
             selected = tally.selected if listed is None else listed
-            io.exit_code = 0 if selected else 1
+            io.exit_code = 0 if selected and not cut else 1
 
 
 def json_summary(f: RgFlags) -> bool:
@@ -1073,32 +1127,25 @@ async def haystacks(
     # does -j1 and a sort; every other line runs its parallel walker.
     parallel = runs_parallel(f)
     several = parallel and len(paths) > 1
-    # Every operand is looked up before any is searched, so one that is
-    # not there is reported even when the output's reader stops early
-    # (14.1.1).
-    found: list[tuple[PathSpec, FileStat | None, bool]] = []
-    for p in paths:
-        if is_stdin(p):
-            found.append((p, None, False))
-            continue
-        if p.walk_error is not None:
-            warnings.append(
-                walk_error_line(p.raw_path, walk_refusal(p), several)
-            )
-            continue
-        try:
-            s = await st(p.virtual)
-            found.append((p, s, s.type == FileType.DIRECTORY))
-        except WALK_ERRORS as exc:
-            try:
-                # A directory that exists only because mounts sit under
-                # it answers readdir but not stat.
-                await rd(p.virtual)
-                found.append((p, None, True))
-            except WALK_ERRORS:
-                warnings.append(walk_error_line(p.raw_path, exc, several))
+    # The parallel walker looks every operand up before it searches any, so
+    # one that is not there is reported even when the output's reader
+    # stops early; the one-thread walker reaches each in turn, and stops at
+    # a closed pipe before the rest (14.1.1).
+    ahead = (
+        [await _looked_up(p, st, rd, warnings, several) for p in paths]
+        if parallel
+        else None
+    )
     ignore = None if reader is None else (f.ignore_sources, reader)
-    for p, known, is_dir in found:
+    for index, p in enumerate(paths):
+        entry = (
+            ahead[index]
+            if ahead is not None
+            else await _looked_up(p, st, rd, warnings, several)
+        )
+        if entry is None:
+            continue
+        known, is_dir = entry
         if is_stdin(p):
             yield Haystack(
                 p.virtual, operand_name(p), fifo_stat(p.raw_path), p
@@ -1137,6 +1184,42 @@ async def haystacks(
                     break
         finally:
             await close_quietly(walked)
+
+
+async def _looked_up(
+    p: PathSpec,
+    st: Callable[[str], Awaitable[FileStat]],
+    rd: Callable[[str], Awaitable[list[str]]],
+    warnings: list[str],
+    several: bool,
+) -> tuple[FileStat | None, bool] | None:
+    """An operand's stat and whether the walk enters it, or None for one
+    that is not there, reported in the warnings.
+
+    Args:
+        p (PathSpec): the operand.
+        st (Callable): the wrapped stat.
+        rd (Callable): the wrapped readdir.
+        warnings (list[str]): collects what could not be read.
+        several (bool): ripgrep's parallel walker words the report.
+    """
+    if is_stdin(p):
+        return None, False
+    if p.walk_error is not None:
+        warnings.append(walk_error_line(p.raw_path, walk_refusal(p), several))
+        return None
+    try:
+        s = await st(p.virtual)
+    except WALK_ERRORS as exc:
+        try:
+            # A directory that exists only because mounts sit under it
+            # answers readdir but not stat.
+            await rd(p.virtual)
+        except WALK_ERRORS:
+            warnings.append(walk_error_line(p.raw_path, exc, several))
+            return None
+        return None, True
+    return s, s.type == FileType.DIRECTORY
 
 
 async def _list_files(
@@ -1217,7 +1300,7 @@ async def _search_all(
     stopped: set[str],
     shell: ShellFn | None = None,
     notes: Sequence[str] = (),
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """Search every haystack in order and put the output together.
 
     ripgrep labels every line when the line named more than one path or
@@ -1249,7 +1332,7 @@ async def _search_all(
     lone = not multi
     pre_globs = Overrides(f.pre_globs, (), False)
     progressive = not (f.stats or f.json or f.search_zip)
-    printed = selected = skipped = False
+    printed = selected = skipped = before = False
     searched = 0
     records = json_summary(f)
     totals = Totals()
@@ -1257,6 +1340,7 @@ async def _search_all(
     try:
         async for h in found:
             searched += 1
+            before = selected
             walked = h.spec is None
             lone = lone and not walked
             name = printed_path(h.shown, f)
@@ -1399,6 +1483,7 @@ async def _search_all(
             # --stats and --json count every file, -q or not (14.1.1).
             if f.quiet and tally.selected and not (f.stats or f.json):
                 break
+        before = selected
         if records:
             yield format_output(
                 pat,
@@ -1421,6 +1506,12 @@ async def _search_all(
                     "total": time.perf_counter() - started,
                 },
             )
+    except PipeClosed:
+        # ripgrep stops at the write a closed pipe refuses. One thread
+        # counts the file it was writing for nothing; the parallel searcher
+        # has counted a file's match before it prints it (14.1.1).
+        if not (runs_parallel(f) and not lone):
+            selected = before
     finally:
         await close_quietly(found)
         if f.files_without_match and not f.quiet:

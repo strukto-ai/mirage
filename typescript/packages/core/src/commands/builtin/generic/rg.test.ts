@@ -495,3 +495,42 @@ describe('rg walks under the ignore files of each directory', () => {
     expect(out[1]).toEqual(['link/b.txt\n', '', 0])
   })
 })
+
+describe('rg on a closed pipe', () => {
+  // ripgrep 14.1.1: one thread reaches each operand in turn and stops at the
+  // write a closed pipe refuses, the file it was writing counting for
+  // nothing; a file whose output the pipe took counts, and its walk goes on.
+  // The parallel walker looks every operand up first.
+  it('stops at the write the pipe refuses', async () => {
+    const gone = 'No such file or directory (os error 2)\n'
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const dec = new TextDecoder()
+    const out: [string, string, number][] = []
+    try {
+      for (const line of [
+        'seq 200000 > /big && echo hello > /a',
+        "rg -j1 '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 '^' /nosuch /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 '^' /a /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg -j1 -c '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg '^' /big /nosuch | head -n 1; echo ${PIPESTATUS[0]}",
+        "rg '^' /big | head -n 1; echo ${PIPESTATUS[0]}",
+        "seq 200000 | rg '^' | head -n 1; echo ${PIPESTATUS[1]}",
+      ]) {
+        const io = await ws.shell(line)
+        out.push([dec.decode(io.stdout), dec.decode(io.stderr), io.exitCode])
+      }
+    } finally {
+      await ws.close()
+    }
+    expect(out.slice(1)).toEqual([
+      ['/big:1\n1\n', '', 0],
+      ['/big:1\n2\n', `rg: /nosuch: IO error for operation on /nosuch: ${gone}`, 0],
+      ['/a:hello\n0\n', '', 0],
+      ['/big:200000\n2\n', `rg: /nosuch: IO error for operation on /nosuch: ${gone}`, 0],
+      ['/big:1\n2\n', `rg: /nosuch: ${gone}`, 0],
+      ['1\n1\n', '', 0],
+      ['1\n1\n', '', 0],
+    ])
+  })
+})
