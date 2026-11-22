@@ -133,11 +133,11 @@
         "ram-commands"
       ],
       "session": "frozen",
-      "command": "tar -tf /scratch/wk.tar; mkdir -p /scratch/fz; cd /scratch/fz; ln -s old zl; touch -h -d 2001-02-03T04:05:06Z zl; zip -qy z.zip zl; cd /scratch/locked; zip -quy /scratch/fz/z.zip; echo rc=$?; cd /; rm -r /scratch/fz",
+      "command": "tar -tf /scratch/wk.tar",
       "expect": {
-        "exit": 126,
-        "stdout": "",
-        "stderr": "cd: Permission denied\n"
+        "exit": 0,
+        "stdout": "scratch/wk/\nscratch/wk/open/\nscratch/wk/open/o\nscratch/wk/sealed/\n",
+        "stderr": ""
       }
     },
     {
@@ -208,6 +208,20 @@
         "exit": 126,
         "stdout": "",
         "stderr": "cp: Permission denied\n"
+      }
+    },
+    {
+      "id": "a_line_that_enters_a_denied_folder_is_held_whole",
+      "seq": 923112,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "mkdir -p /scratch/fz; cd /scratch/fz; ln -s old zl; touch -h -d 2001-02-03T04:05:06Z zl; zip -qy z.zip zl; cd /scratch/locked; zip -quy /scratch/fz/z.zip; echo rc=$?; cd /; rm -r /scratch/fz",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "cd: Permission denied\n"
       }
     },
     {

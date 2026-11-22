@@ -145,14 +145,13 @@
       }
     },
     {
-      "id": "cmd_find_delete_is_gated_at_the_dispatcher",
+      "id": "cmd_find_delete_under_a_denied_folder_is_held",
       "seq": 923026,
       "targets": [
         "ram-commands"
       ],
       "session": "frozen",
       "command": "find /scratch/locked -name y -delete",
-      "explain_blind": "the refusal comes from the dispatcher during the walk, below the command plane the dry run reads",
       "expect": {
         "exit": 126,
         "stdout": "",
