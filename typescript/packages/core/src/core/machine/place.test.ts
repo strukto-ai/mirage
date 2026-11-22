@@ -26,9 +26,9 @@ import { MachineName } from '../../execution/types.ts'
 import {
   chosen,
   commandMachine,
-  holder,
+  holdingMachine,
   holders,
-  kernelView,
+  kernelViewMachine,
   newNameMachine,
   runningMachine,
   writeMachine,
@@ -65,18 +65,18 @@ describe('placement', () => {
       new ScriptedMachine('a', holding()),
       new ScriptedMachine('b', holding('/tmp/out.csv')),
     ])
-    expect(await holder(accessor, spec('/out.csv'))).toBe('b')
-    await expect(holder(accessor, spec('/none'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await holdingMachine(accessor, spec('/out.csv'))).toBe('b')
+    await expect(holdingMachine(accessor, spec('/none'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('takes a name on two machines from the copy written last', async () => {
     const old = new ScriptedMachine('old', holdingSince(1700000000, '/tmp/x'))
     const fresh = new ScriptedMachine('new', holdingSince(1700000009, '/tmp/x'))
-    expect(await holder(bound([old, fresh]), spec('/x'))).toBe('new')
-    expect(await holder(bound([fresh, old]), spec('/x'))).toBe('new')
+    expect(await holdingMachine(bound([old, fresh]), spec('/x'))).toBe('new')
+    expect(await holdingMachine(bound([fresh, old]), spec('/x'))).toBe('new')
     const held = await holders(bound([old, fresh]), spec('/x'))
     expect(held.map((one) => one.machine)).toEqual(['old', 'new'])
-    expect(held.map((one) => one.written)).toEqual([1700000000000, 1700000009000])
+    expect(held.map((one) => one.writtenMs)).toEqual([1700000000000, 1700000009000])
   })
 
   it("lets a newer copy win over the command's machine", async () => {
@@ -85,7 +85,7 @@ describe('placement', () => {
       new ScriptedMachine('new', holdingSince(1700000009, '/tmp/x')),
     ])
     await runningOn('old', async () => {
-      expect(await holder(accessor, spec('/x'))).toBe('new')
+      expect(await holdingMachine(accessor, spec('/x'))).toBe('new')
     })
   })
 
@@ -94,16 +94,16 @@ describe('placement', () => {
       new ScriptedMachine('a', holding('/tmp/x')),
       new ScriptedMachine('b', holding('/tmp/x')),
     ])
-    expect(await holder(accessor, spec('/x'))).toBe('a')
+    expect(await holdingMachine(accessor, spec('/x'))).toBe('a')
     await runningOn('b', async () => {
       expect(runningMachine(accessor)).toBe('b')
       expect(commandMachine(accessor)).toBe('b')
-      expect(await holder(accessor, spec('/x'))).toBe('b')
+      expect(await holdingMachine(accessor, spec('/x'))).toBe('b')
     })
     await preferring('b', async () => {
       expect(runningMachine(accessor)).toBeNull()
       expect(commandMachine(accessor)).toBe('b')
-      expect(await holder(accessor, spec('/x'))).toBe('b')
+      expect(await holdingMachine(accessor, spec('/x'))).toBe('b')
     })
   })
 
@@ -137,14 +137,14 @@ describe('placement', () => {
     const b = new ScriptedMachine('b', holdingSince(1700000009, '/proc/cpuinfo'))
     const accessor = bound([a, b], { root: '/' })
     const path = spec('/proc/cpuinfo', '')
-    expect(kernelView(accessor, path)).toBe('a')
-    expect(await holder(accessor, path)).toBe('a')
+    expect(kernelViewMachine(accessor, path)).toBe('a')
+    expect(await holdingMachine(accessor, path)).toBe('a')
     expect(b.lines).toEqual([])
     await preferring('b', async () => {
-      expect(await holder(accessor, path)).toBe('b')
+      expect(await holdingMachine(accessor, path)).toBe('b')
     })
-    expect(kernelView(accessor, spec('/tmp/x', ''))).toBeNull()
-    expect(kernelView(bound([a], { root: '/' }), path)).toBeNull()
+    expect(kernelViewMachine(accessor, spec('/tmp/x', ''))).toBeNull()
+    expect(kernelViewMachine(bound([a], { root: '/' }), path)).toBeNull()
   })
 
   it('takes the only holder unasked', () => {

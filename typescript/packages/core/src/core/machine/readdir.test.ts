@@ -115,7 +115,7 @@ describe('tree', () => {
     )
     const found = await tree(bound([a, b]), ['a', 'b'], spec('/d'))
     expect([...(found?.keys() ?? [])].sort()).toEqual(['s/both', 'x', 'y'])
-    expect([found?.get('s/both')?.machine, found?.get('s/both')?.written]).toEqual(['b', 9000])
+    expect([found?.get('s/both')?.machine, found?.get('s/both')?.writtenMs]).toEqual(['b', 9000])
     const gone = new ScriptedMachine('gone', () => failed('find: lost\n'))
     expect(await tree(bound([a, gone]), ['a', 'gone'], spec('/d'))).toBeNull()
   })

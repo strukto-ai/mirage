@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked
+from mirage.core.machine.utils import run_checked
 from mirage.types import CapacityResult, CapacityState, PathSpec
 from mirage.utils.quote import single_quote
 
@@ -30,7 +30,7 @@ async def capacity(
         path (PathSpec): the mount root, for an error.
     """
     target = single_quote(accessor.root)
-    out = await checked(accessor, machine, f"df -Pk -- {target}", path)
+    out = await run_checked(accessor, machine, f"df -Pk -- {target}", path)
     lines = out.decode(errors="replace").strip().split("\n")
     fields = lines[-1].split() if len(lines) > 1 else []
     if len(fields) < 4 or not all(f.isdigit() for f in fields[1:4]):

@@ -20,7 +20,7 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm, parent
 
 
-def remote(accessor: MachineAccessor, path: PathSpec) -> str:
+def machine_path(accessor: MachineAccessor, path: PathSpec) -> str:
     """A mount path's path on the machines.
 
     Args:
@@ -30,7 +30,7 @@ def remote(accessor: MachineAccessor, path: PathSpec) -> str:
     return join_root(accessor.root, path.mount_path)
 
 
-def mount_base(path: PathSpec) -> str:
+def mount_prefix(path: PathSpec) -> str:
     """The virtual path of the mount root ``path`` is under.
 
     Args:
@@ -50,7 +50,7 @@ def folder_of(path: PathSpec) -> PathSpec:
     virtual = parent(path.virtual.rstrip("/") or "/")
     key = path.vfs_path.strip("/").rpartition("/")[0]
     if not path.vfs_path.strip("/"):
-        virtual = mount_base(path)
+        virtual = mount_prefix(path)
     return PathSpec(virtual=virtual, directory=parent(virtual), vfs_path=key)
 
 
@@ -63,7 +63,7 @@ def leaf(path: PathSpec) -> str:
     return path.mount_path.rstrip("/").rsplit("/", 1)[-1] or "/"
 
 
-def virtual_of(
+def virtual_path(
     accessor: MachineAccessor, path: PathSpec, real: str
 ) -> str | None:
     """The virtual name a path on the machines has on the mount ``path``
@@ -77,10 +77,10 @@ def virtual_of(
     root = accessor.root.rstrip("/")
     if root and real != root and not real.startswith(root + "/"):
         return None
-    return norm(f"{mount_base(path)}/{real[len(root) :].lstrip('/')}")
+    return norm(f"{mount_prefix(path)}/{real[len(root) :].lstrip('/')}")
 
 
-async def checked(
+async def run_checked(
     accessor: MachineAccessor,
     machine: str,
     command: str,

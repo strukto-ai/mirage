@@ -403,7 +403,7 @@ async def pre_vfs_gate(
         caller (Caller | None): who makes the call; None for the caller
             bound here.
         machine (str | None): the machine the owning mount says the call
-            acts on (``BaseVFS.acts_on``).
+            acts on (``BaseVFS.call_machine``).
 
     Raises:
         Explained: in a dry run (``explaining``), once the gate's answer

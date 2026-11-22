@@ -807,7 +807,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * the machine the running command is about, which a name another machine
    * holds may still lead away from.
    */
-  actsOn(): string | null {
+  callMachine(): string | null {
     return null
   }
 

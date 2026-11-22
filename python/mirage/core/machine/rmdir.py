@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -21,5 +21,5 @@ from mirage.utils.quote import single_quote
 async def rmdir(
     accessor: MachineAccessor, machine: str, path: PathSpec
 ) -> None:
-    target = single_quote(remote(accessor, path))
-    await checked(accessor, machine, f"rmdir -- {target}", path)
+    target = single_quote(machine_path(accessor, path))
+    await run_checked(accessor, machine, f"rmdir -- {target}", path)

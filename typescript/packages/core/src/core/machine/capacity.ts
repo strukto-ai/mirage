@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { CapacityState, type CapacityResult, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { checked } from './utils.ts'
+import { runChecked } from './utils.ts'
 
 /**
  * The space of the filesystem the root sits on, on one machine, from its
@@ -30,7 +30,7 @@ export async function capacity(
   machine: string,
   path: PathSpec,
 ): Promise<CapacityResult> {
-  const out = await checked(accessor, machine, `df -Pk -- ${singleQuote(accessor.root)}`, path)
+  const out = await runChecked(accessor, machine, `df -Pk -- ${singleQuote(accessor.root)}`, path)
   const lines = new TextDecoder().decode(out).trim().split('\n')
   const fields = lines.length > 1 ? (lines[lines.length - 1] ?? '').split(/\s+/) : []
   const [total, used, available] = fields.slice(1, 4)

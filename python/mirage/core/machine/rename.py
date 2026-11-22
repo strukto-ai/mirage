@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -36,10 +36,10 @@ async def rename(
         make_parent (bool): make the new name's parent there first, when
             only another machine holds it.
     """
-    old = single_quote(remote(accessor, src))
-    new = remote(accessor, dst)
+    old = single_quote(machine_path(accessor, src))
+    new = machine_path(accessor, dst)
     line = f"mv -T -- {old} {single_quote(new)}"
     if make_parent:
         parent = new.rsplit("/", 1)[0] or "/"
         line = f"mkdir -p -- {single_quote(parent)} && {line}"
-    await checked(accessor, machine, line, dst)
+    await run_checked(accessor, machine, line, dst)

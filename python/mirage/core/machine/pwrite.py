@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.errors.fs import enotsup
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -42,6 +42,6 @@ async def pwrite(
         raise enotsup("machine", "pwrite", path)
     timer = start_op()
     seek = f"seek={offset} oflag=seek_bytes conv=notrunc status=none"
-    target = single_quote(remote(accessor, path))
-    await checked(accessor, machine, f"dd of={target} {seek}", path, data)
+    target = single_quote(machine_path(accessor, path))
+    await run_checked(accessor, machine, f"dd of={target} {seek}", path, data)
     record("pwrite", path.virtual, "machine", len(data), timer)

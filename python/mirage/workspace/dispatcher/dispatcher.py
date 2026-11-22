@@ -918,7 +918,7 @@ class Dispatcher:
             mount.mode if mount is not None else MountMode.WRITE,
             self._namespace.registry.decisions,
             caller,
-            mount.vfs.acts_on() if mount is not None else None,
+            mount.vfs.call_machine() if mount is not None else None,
         )
 
     @property

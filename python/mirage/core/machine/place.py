@@ -17,9 +17,9 @@ import asyncio
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KERNEL_VIEWS
-from mirage.core.machine.stat import hidden_on, stat_entry
+from mirage.core.machine.stat import hidden_machines, stat_entry
 from mirage.core.machine.types import Holder
-from mirage.core.machine.utils import folder_of, remote
+from mirage.core.machine.utils import folder_of, machine_path
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
 
@@ -54,7 +54,7 @@ def command_machine(accessor: MachineAccessor) -> str | None:
     return preferred if preferred in accessor.names() else None
 
 
-def kernel_view(
+def kernel_view_machine(
     accessor: MachineAccessor, path: PathSpec, below: str = ""
 ) -> str | None:
     """The one machine a name answers for when it is a kernel's own view
@@ -70,7 +70,7 @@ def kernel_view(
     """
     if not accessor.several:
         return None
-    real = remote(accessor, path)
+    real = machine_path(accessor, path)
     if below:
         real = f"{real.rstrip('/')}/{below}"
     if not any(real == at or real.startswith(at + "/") for at in KERNEL_VIEWS):
@@ -78,18 +78,20 @@ def kernel_view(
     return command_machine(accessor) or accessor.default_machine
 
 
-async def asked(accessor: MachineAccessor, path: PathSpec) -> list[str]:
+async def asked_machines(
+    accessor: MachineAccessor, path: PathSpec
+) -> list[str]:
     """The machines asked about a name, in the order ``machines:`` lists
     them: every machine of the mount, less each whose own links lead the
     name to one the session hides, and for a kernel's view of its machine
-    only the one it answers for (``kernel_view``).
+    only the one it answers for (``kernel_view_machine``).
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the name.
     """
-    hidden = await hidden_on(accessor, path)
-    own = kernel_view(accessor, path)
+    hidden = await hidden_machines(accessor, path)
+    own = kernel_view_machine(accessor, path)
     return [
         name
         for name in accessor.names()
@@ -99,14 +101,14 @@ async def asked(accessor: MachineAccessor, path: PathSpec) -> list[str]:
 
 async def holders(accessor: MachineAccessor, path: PathSpec) -> list[Holder]:
     """The machines that hold a name, each with its entry there, asked in
-    parallel (``asked``); a mount on one machine asks nothing and lets
+    parallel (``asked_machines``); a mount on one machine asks nothing and lets
     the op itself report a missing name.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the name.
     """
-    names = await asked(accessor, path)
+    names = await asked_machines(accessor, path)
     if not accessor.several:
         return [Holder(name) for name in names]
     found = await asyncio.gather(
@@ -135,15 +137,17 @@ def chosen(accessor: MachineAccessor, held: list[Holder]) -> Holder:
     """
     if len(held) == 1:
         return held[0]
-    last = max(one.written for one in held)
-    latest = [one for one in held if one.written == last]
+    last = max(one.written_ms for one in held)
+    latest = [one for one in held if one.written_ms == last]
     about = command_machine(accessor)
     return next((one for one in latest if one.machine == about), latest[0])
 
 
-async def holder(accessor: MachineAccessor, path: PathSpec) -> str:
-    """The machine a read of an existing name, or a change to it, goes
-    to (``chosen``).
+async def existing_holders(
+    accessor: MachineAccessor, path: PathSpec
+) -> list[Holder]:
+    """The machines holding a name that must exist, every one of which a
+    removal or a rename reaches.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -155,7 +159,64 @@ async def holder(accessor: MachineAccessor, path: PathSpec) -> str:
     held = await holders(accessor, path)
     if not held:
         raise enoent(path)
-    return chosen(accessor, held).machine
+    return held
+
+
+async def holding_machine(accessor: MachineAccessor, path: PathSpec) -> str:
+    """The machine a read of an existing name, or a change to it, goes
+    to (``chosen``).
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): the name.
+
+    Raises:
+        FileNotFoundError: no machine holds it.
+    """
+    return chosen(accessor, await existing_holders(accessor, path)).machine
+
+
+async def refuse_hidden(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> None:
+    """Refuse a name a machine's own links lead to one the session
+    hides, before a program of the machine's writes through them.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the write runs on.
+        path (PathSpec): the name written.
+
+    Raises:
+        FileNotFoundError: the name leads to a hidden one there.
+    """
+    if machine in await hidden_machines(accessor, path):
+        raise enoent(path)
+
+
+async def machines_lacking_folder(
+    accessor: MachineAccessor, machines: list[str], path: PathSpec
+) -> list[str]:
+    """The machines a new name lands on that must make its folder first,
+    since only other machines hold it; none where no machine holds the
+    folder, whose lack the op reports.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machines (list[str]): the machines the name lands on.
+        path (PathSpec): the new name.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file,
+            whatever an older folder on another machine is.
+    """
+    if not accessor.several:
+        return []
+    held = await holders(accessor, folder_of(path))
+    if held and not chosen(accessor, held).is_folder:
+        raise enotdir(path)
+    folders = [one.machine for one in held if one.is_folder]
+    return [m for m in machines if folders and m not in folders]
 
 
 async def new_name_machine(
@@ -184,9 +245,9 @@ async def new_name_machine(
     above = folder_of(path)
     while True:
         held = await holders(accessor, above)
-        if held and not chosen(accessor, held).folder:
+        if held and not chosen(accessor, held).is_folder:
             raise enotdir(path)
-        folders = [one for one in held if one.folder]
+        folders = [one for one in held if one.is_folder]
         if folders or not parents or not above.vfs_path:
             break
         above = folder_of(above)
@@ -224,6 +285,5 @@ async def write_machine(
         if held:
             return chosen(accessor, held).machine
     target = running or await new_name_machine(accessor, path, parents)
-    if target in await hidden_on(accessor, path):
-        raise enoent(path)
+    await refuse_hidden(accessor, target, path)
     return target

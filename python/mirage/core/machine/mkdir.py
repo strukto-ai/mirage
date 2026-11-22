@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -21,6 +21,6 @@ from mirage.utils.quote import single_quote
 async def mkdir(
     accessor: MachineAccessor, machine: str, path: PathSpec, parents: bool
 ) -> None:
-    target = single_quote(remote(accessor, path))
+    target = single_quote(machine_path(accessor, path))
     flag = " -p" if parents else ""
-    await checked(accessor, machine, f"mkdir{flag} -- {target}", path)
+    await run_checked(accessor, machine, f"mkdir{flag} -- {target}", path)

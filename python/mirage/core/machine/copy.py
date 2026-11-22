@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import checked, remote
+from mirage.core.machine.utils import machine_path, run_checked
 from mirage.core.posix.constants import COPIED
 from mirage.core.posix.copy import copy_tree_command
 from mirage.core.posix.errors import refusal
@@ -52,10 +52,10 @@ async def copy(
         make_parent (bool): make the copy's folder there first, when
             only another machine holds it.
     """
-    old = single_quote(remote(accessor, src))
-    new = remote(accessor, dst)
+    old = single_quote(machine_path(accessor, src))
+    new = machine_path(accessor, dst)
     line = _in_folder(f"cp -T -- {old} {single_quote(new)}", new, make_parent)
-    await checked(accessor, machine, line, dst)
+    await run_checked(accessor, machine, line, dst)
 
 
 async def dir_copy(
@@ -75,9 +75,9 @@ async def dir_copy(
         make_parent (bool): make the copy's folder there first, when
             only another machine holds it.
     """
-    new = remote(accessor, dst)
+    new = machine_path(accessor, dst)
     line = _in_folder(
-        copy_tree_command(remote(accessor, src), new), new, make_parent
+        copy_tree_command(machine_path(accessor, src), new), new, make_parent
     )
     status, out, err = await accessor.run(machine, line)
     if status != 0 or out != COPIED:

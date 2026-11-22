@@ -34,14 +34,11 @@ from mirage.core.machine.rm import rm_r as _rm_r
 from mirage.core.machine.rmdir import rmdir as _rmdir
 from mirage.core.machine.search import files_containing as _files_containing
 from mirage.core.machine.set_attrs import set_attrs as _set_attrs
-from mirage.core.machine.stat import hidden_on as _hidden_on
+from mirage.core.machine.stat import has_hides as _has_hides
 from mirage.core.machine.stat import holder_stat as _holder_stat
-from mirage.core.machine.stat import restricted as _restricted
 from mirage.core.machine.stat import stat as _stat
 from mirage.core.machine.truncate import truncate as _truncate
-from mirage.core.machine.types import Holder
 from mirage.core.machine.unlink import unlink as _unlink
-from mirage.core.machine.utils import folder_of as _folder_of
 from mirage.core.machine.utils import leaf as _leaf
 from mirage.core.machine.write import write as _write
 from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, enotsup
@@ -114,12 +111,12 @@ class MachineVFS(BaseVFS):
         )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
-        machines = await place.asked(self.accessor, path)
+        machines = await place.asked_machines(self.accessor, path)
         if not machines:
             raise enoent(path)
         return await _readdir(self.accessor, machines, path)
 
-    def acts_on(self) -> str | None:
+    def call_machine(self) -> str | None:
         if not self.accessor.bound:
             return None
         if not self.accessor.several:
@@ -129,11 +126,12 @@ class MachineVFS(BaseVFS):
     def filesystem(self) -> str:
         if not self.accessor.bound:
             return self.name
-        machine = self.acts_on() or self.accessor.default_machine
+        machine = self.call_machine() or self.accessor.default_machine
         return f"{machine}:{self.config.root.rstrip('/') or '/'}"
 
     async def stat(self, path: PathSpec) -> FileStat:
-        one = place.chosen(self.accessor, await self._everywhere(path))
+        held = await place.existing_holders(self.accessor, path)
+        one = place.chosen(self.accessor, held)
         if one.entry is None:
             return await _stat(self.accessor, one.machine, path)
         return _holder_stat(_leaf(path), one)
@@ -144,29 +142,29 @@ class MachineVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
     ) -> ByteSource:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _read(self.accessor, machine, path, offset, size)
 
     async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _first_lines(self.accessor, machine, path, n)
 
     async def last_lines(self, path: PathSpec, n: int) -> bytes | None:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _last_lines(self.accessor, machine, path, n)
 
     async def line_count(self, path: PathSpec) -> int | None:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _line_count(self.accessor, machine, path)
 
     async def checksum(self, path: PathSpec, algorithm: str) -> str | None:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _checksum(self.accessor, machine, path, algorithm)
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        if _restricted(path):
+        if _has_hides(path):
             return None
-        held = await self._everywhere(path)
+        held = await place.existing_holders(self.accessor, path)
         shown = await _tree(self.accessor, [h.machine for h in held], path)
         if shown is None:
             return None
@@ -183,7 +181,7 @@ class MachineVFS(BaseVFS):
         whole_word: bool,
         ignore_case: bool,
     ) -> list[PathSpec] | None:
-        if _restricted(path):
+        if _has_hides(path):
             return None
         held = await place.holders(self.accessor, path)
         return await _files_containing(
@@ -225,60 +223,78 @@ class MachineVFS(BaseVFS):
         await _mkdir(self.accessor, machine, path, parents)
 
     async def unlink(self, path: PathSpec) -> None:
-        # Every machine's copy goes, or an older one would show again;
-        # a folder another machine holds at the name is left alone.
-        held = await self._everywhere(path)
+        """Remove a file from every machine holding it, or an older copy
+        would show again; a folder another machine holds at the name is
+        left alone.
+
+        Args:
+            path (PathSpec): the file.
+        """
+        held = await place.existing_holders(self.accessor, path)
         shown = place.chosen(self.accessor, held)
         await _unlink(self.accessor, shown.machine, path)
         for one in held:
-            if one is not shown and not one.folder:
+            if one is not shown and not one.is_folder:
                 await _unlink(self.accessor, one.machine, path)
 
     async def rmdir(self, path: PathSpec) -> None:
-        held = await self._everywhere(path)
+        """Remove an empty folder from every machine holding it. Every
+        machine is asked before any removes its copy, so a folder one of
+        them still fills is left whole on all of them.
+
+        Args:
+            path (PathSpec): the folder.
+        """
+        held = await place.existing_holders(self.accessor, path)
         shown = place.chosen(self.accessor, held)
-        folders = [one.machine for one in held if one.folder]
-        # Asked of every machine before any removes its copy, so a folder
-        # one of them still fills is left whole on all of them.
+        folders = [one.machine for one in held if one.is_folder]
         if (
-            shown.folder
+            shown.is_folder
             and len(folders) > 1
             and await _readdir(self.accessor, folders, path)
         ):
             raise enotempty(path)
         await _rmdir(self.accessor, shown.machine, path)
         for one in held:
-            if one is not shown and one.folder:
+            if one is not shown and one.is_folder:
                 await _rmdir(self.accessor, one.machine, path)
 
     async def rm_r(self, path: PathSpec) -> None:
-        for one in await self._everywhere(path):
+        for one in await place.existing_holders(self.accessor, path):
             await _rm_r(self.accessor, one.machine, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
-        held = await self._everywhere(src)
+        """Rename a name where it is. A folder is renamed on every
+        machine holding it, each keeping its own entries; a file on the
+        machine whose copy is shown, the other machines' copies of the
+        old name going with it. Every machine's copy of the new name is
+        judged before any machine moves, so a refusal leaves the folder
+        under one name.
+
+        Args:
+            src (PathSpec): the name as it is.
+            dst (PathSpec): the new name.
+        """
+        held = await place.existing_holders(self.accessor, src)
         moved = place.chosen(self.accessor, held)
-        # A folder is renamed on every machine holding it, each keeping
-        # its own entries; a file on the machine whose copy it is, the
-        # other machines' copies of the old name going with it.
         movers = (
-            [one.machine for one in held if one.folder]
-            if moved.folder
+            [one.machine for one in held if one.is_folder]
+            if moved.is_folder
             else [moved.machine]
         )
         several = self.accessor.several
         there = await place.holders(self.accessor, dst) if several else []
         replaced = [one for one in there if one.machine not in movers]
-        # Every machine's copy of the new name is judged before any
-        # machine moves, so a refusal leaves the folder under one name.
         for one in there:
-            if one.folder is not moved.folder:
-                raise enotdir(dst) if moved.folder else eisdir(dst)
-            if moved.folder and await _readdir(
+            if one.is_folder is not moved.is_folder:
+                raise enotdir(dst) if moved.is_folder else eisdir(dst)
+            if moved.is_folder and await _readdir(
                 self.accessor, [one.machine], dst
             ):
                 raise enotempty(dst)
-        lacking = await self._lacking_folder(movers, dst)
+        lacking = await place.machines_lacking_folder(
+            self.accessor, movers, dst
+        )
         for machine in movers:
             await _rename(
                 self.accessor,
@@ -288,49 +304,57 @@ class MachineVFS(BaseVFS):
                 make_parent=machine in lacking,
             )
         for one in replaced:
-            if moved.folder:
+            if moved.is_folder:
                 await _rmdir(self.accessor, one.machine, dst)
             else:
                 await _unlink(self.accessor, one.machine, dst)
         for one in held:
-            if one.machine not in movers and not one.folder:
+            if one.machine not in movers and not one.is_folder:
                 await _unlink(self.accessor, one.machine, src)
 
     async def copy(self, src: PathSpec, dst: PathSpec) -> None:
-        # A copy never crosses: it is made where the source is, and is
-        # then the newest copy of its name.
-        machine = await place.holder(self.accessor, src)
-        await self._refuse_hidden(machine, dst)
+        """Copy a file on the machine holding it: a copy never crosses,
+        and is then the newest copy of its name. It replaces the name,
+        so another machine's copy of it goes: one kept would show again
+        once the new copy takes its source's older time (``cp -p``).
+
+        Args:
+            src (PathSpec): the file.
+            dst (PathSpec): the copy's name.
+        """
+        machine = await place.holding_machine(self.accessor, src)
+        await place.refuse_hidden(self.accessor, machine, dst)
+        lacking = await place.machines_lacking_folder(
+            self.accessor, [machine], dst
+        )
         await _copy(
-            self.accessor,
-            machine,
-            src,
-            dst,
-            make_parent=bool(await self._lacking_folder([machine], dst)),
+            self.accessor, machine, src, dst, make_parent=bool(lacking)
         )
         if not self.accessor.several:
             return
-        # The copy replaces the name, so another machine's copy of it
-        # goes: one kept would show again once the new copy takes its
-        # source's older time (``cp -p``).
         for one in await place.holders(self.accessor, dst):
-            if one.machine != machine and not one.folder:
+            if one.machine != machine and not one.is_folder:
                 await _unlink(self.accessor, one.machine, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
-        held = await self._everywhere(src)
+        """Copy a folder one machine holds, on that machine. A folder
+        several machines hold is refused, so each name under it is
+        copied where it is, one by one, and stays the copy it was.
+
+        Args:
+            src (PathSpec): the folder.
+            dst (PathSpec): the copy's name.
+        """
+        held = await place.existing_holders(self.accessor, src)
         if len(held) > 1:
-            # Each name under a folder several machines hold is copied
-            # where it is, one by one, so each stays the copy it was.
             raise enotsup(self.name, "dir_copy", src)
         machine = held[0].machine
-        await self._refuse_hidden(machine, dst)
+        await place.refuse_hidden(self.accessor, machine, dst)
+        lacking = await place.machines_lacking_folder(
+            self.accessor, [machine], dst
+        )
         await _dir_copy(
-            self.accessor,
-            machine,
-            src,
-            dst,
-            make_parent=bool(await self._lacking_folder([machine], dst)),
+            self.accessor, machine, src, dst, make_parent=bool(lacking)
         )
 
     async def setattr(
@@ -343,7 +367,7 @@ class MachineVFS(BaseVFS):
         atime: str | None = None,
         mtime: str | None = None,
     ) -> dict[str, int | str]:
-        machine = await place.holder(self.accessor, path)
+        machine = await place.holding_machine(self.accessor, path)
         return await _set_attrs(
             self.accessor,
             machine,
@@ -358,7 +382,7 @@ class MachineVFS(BaseVFS):
     async def capacity(self) -> CapacityResult:
         return await _capacity(
             self.accessor,
-            self.acts_on() or self.accessor.default_machine,
+            self.call_machine() or self.accessor.default_machine,
             PathSpec.from_str_path(self.config.root),
         )
 
@@ -370,55 +394,3 @@ class MachineVFS(BaseVFS):
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)
-
-    async def _everywhere(self, path: PathSpec) -> list[Holder]:
-        """The machines holding a name, every one of which a removal or a
-        rename reaches.
-
-        Args:
-            path (PathSpec): the name.
-
-        Raises:
-            FileNotFoundError: no machine holds it.
-        """
-        held = await place.holders(self.accessor, path)
-        if not held:
-            raise enoent(path)
-        return held
-
-    async def _refuse_hidden(self, machine: str, path: PathSpec) -> None:
-        """Refuse a name a machine's own links lead to one the session
-        hides, before a program of the machine's writes through them.
-
-        Args:
-            machine (str): the machine the write runs on.
-            path (PathSpec): the name written.
-
-        Raises:
-            FileNotFoundError: the name leads to a hidden one there.
-        """
-        if machine in await _hidden_on(self.accessor, path):
-            raise enoent(path)
-
-    async def _lacking_folder(
-        self, machines: list[str], path: PathSpec
-    ) -> list[str]:
-        """The machines a new name lands on that must make its folder
-        first, since only other machines hold it; none where no machine
-        holds the folder, whose lack the op reports.
-
-        Args:
-            machines (list[str]): the machines the name lands on.
-            path (PathSpec): the new name.
-
-        Raises:
-            NotADirectoryError: the copy shown of the folder is a file,
-                whatever an older folder on another machine is.
-        """
-        if not self.accessor.several:
-            return []
-        held = await place.holders(self.accessor, _folder_of(path))
-        if held and not place.chosen(self.accessor, held).folder:
-            raise enotdir(path)
-        folders = [one.machine for one in held if one.folder]
-        return [m for m in machines if folders and m not in folders]

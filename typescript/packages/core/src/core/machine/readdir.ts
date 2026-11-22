@@ -18,14 +18,14 @@ import type { FsError } from '../../errors/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { PosixEntry } from '../posix/types.ts'
-import { chosen, kernelView } from './place.ts'
+import { chosen, kernelViewMachine } from './place.ts'
 import { entries, holderStat } from './stat.ts'
 import { Holder } from './types.ts'
 
 /**
  * Every machine's entries below one directory as one listing, each name
  * once: the copy every look at the name goes to (`chosen`). A kernel's view
- * of its machine is the one machine's it answers for (`kernelView`), and
+ * of its machine is the one machine's it answers for (`kernelViewMachine`), and
  * nothing is listed below a name whose copy shown is a file, whatever an
  * older folder there holds.
  *
@@ -34,7 +34,7 @@ import { Holder } from './types.ts'
  * @param listed what each printed, the directory's own entry left out.
  * @param scope the directory.
  */
-function merged(
+function chosenByName(
   accessor: MachineAccessor,
   machines: string[],
   listed: PosixEntry[][],
@@ -53,12 +53,12 @@ function merged(
   const picked = new Map<string, Holder>()
   const over = new Set<string>()
   for (const [rel, all] of held) {
-    const own = several ? kernelView(accessor, scope, rel) : null
+    const own = several ? kernelViewMachine(accessor, scope, rel) : null
     const copies = own === null ? all : all.filter((one) => one.machine === own)
     if (copies.length === 0) continue
     const shown = chosen(accessor, copies)
     picked.set(rel, shown)
-    if (!shown.folder && copies.some((one) => one.folder)) over.add(rel)
+    if (!shown.isFolder && copies.some((one) => one.isFolder)) over.add(rel)
   }
   if (over.size === 0) return picked
   for (const rel of [...picked.keys()]) {
@@ -115,8 +115,8 @@ export async function readdir(
     listed.push(below)
   }
   if (listing.length === 0) throw failure ?? enotdir(scope)
-  if (!chosen(accessor, tops).folder) throw enotdir(scope)
-  return [...merged(accessor, listing, listed, scope)]
+  if (!chosen(accessor, tops).isFolder) throw enotdir(scope)
+  return [...chosenByName(accessor, listing, listed, scope)]
     .sort(([a], [b]) => compareCodePoints(a, b))
     .map(([name, one]) => holderStat(name, one))
 }
@@ -149,5 +149,5 @@ export async function tree(
     if (top?.kind !== 'd') return null
     listed.push(below)
   }
-  return merged(accessor, machines, listed, path)
+  return chosenByName(accessor, machines, listed, path)
 }

@@ -17,7 +17,7 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
 import { lineCount as posixLineCount } from '../posix/read.ts'
-import { checked, remote } from './utils.ts'
+import { runChecked, machinePath } from './utils.ts'
 
 /**
  * The line that prints a file's bytes from `offset`, `size` of them or all.
@@ -52,10 +52,10 @@ export async function read(
   size: number | null = null,
 ): Promise<Uint8Array> {
   const timer = startOp()
-  const data = await checked(
+  const data = await runChecked(
     accessor,
     machine,
-    readCommand(remote(accessor, path), offset, size),
+    readCommand(machinePath(accessor, path), offset, size),
     path,
     null,
     true,
@@ -78,8 +78,8 @@ export function firstLines(
   path: PathSpec,
   n: number,
 ): Promise<Uint8Array> {
-  const target = singleQuote(remote(accessor, path))
-  return checked(accessor, machine, `head -n ${String(n)} -- ${target}`, path, null, true)
+  const target = singleQuote(machinePath(accessor, path))
+  return runChecked(accessor, machine, `head -n ${String(n)} -- ${target}`, path, null, true)
 }
 
 /**
@@ -96,8 +96,8 @@ export function lastLines(
   path: PathSpec,
   n: number,
 ): Promise<Uint8Array> {
-  const target = singleQuote(remote(accessor, path))
-  return checked(accessor, machine, `tail -n ${String(n)} -- ${target}`, path, null, true)
+  const target = singleQuote(machinePath(accessor, path))
+  return runChecked(accessor, machine, `tail -n ${String(n)} -- ${target}`, path, null, true)
 }
 
 /**
@@ -112,5 +112,5 @@ export function lineCount(
   machine: string,
   path: PathSpec,
 ): Promise<number | null> {
-  return posixLineCount(accessor.runner(machine), remote(accessor, path))
+  return posixLineCount(accessor.runner(machine), machinePath(accessor, path))
 }

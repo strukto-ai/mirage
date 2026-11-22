@@ -17,10 +17,10 @@ import { currentCaller } from '../../context/session_context.ts'
 import { enoent, enotdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { KERNEL_VIEWS } from './constants.ts'
-import { hiddenOn, statEntry } from './stat.ts'
+import { hiddenMachines, statEntry } from './stat.ts'
 import { Holder } from './types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
-import { folderOf, remote } from './utils.ts'
+import { folderOf, machinePath } from './utils.ts'
 
 /**
  * The machine the running command's program runs on, when it is one of the
@@ -60,9 +60,13 @@ export function commandMachine(accessor: MachineAccessor): string | null {
  * @param below the name's path under `path`, as a listing of the folder
  *   gives it; empty for `path` itself.
  */
-export function kernelView(accessor: MachineAccessor, path: PathSpec, below = ''): string | null {
+export function kernelViewMachine(
+  accessor: MachineAccessor,
+  path: PathSpec,
+  below = '',
+): string | null {
   if (!accessor.several) return null
-  const base = remote(accessor, path)
+  const base = machinePath(accessor, path)
   const real = below === '' ? base : `${rstripSlash(base)}/${below}`
   if (!KERNEL_VIEWS.some((at) => real === at || real.startsWith(`${at}/`))) return null
   return commandMachine(accessor) ?? accessor.defaultMachine
@@ -72,27 +76,27 @@ export function kernelView(accessor: MachineAccessor, path: PathSpec, below = ''
  * The machines asked about a name, in the order `machines:` lists them:
  * every machine of the mount, less each whose own links lead the name to
  * one the session hides, and for a kernel's view of its machine only the
- * one it answers for (`kernelView`).
+ * one it answers for (`kernelViewMachine`).
  *
  * @param accessor the mount's machines.
  * @param path the name.
  */
-export async function asked(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
-  const hidden = await hiddenOn(accessor, path)
-  const own = kernelView(accessor, path)
+export async function askedMachines(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
+  const hidden = await hiddenMachines(accessor, path)
+  const own = kernelViewMachine(accessor, path)
   return accessor.names().filter((name) => !hidden.includes(name) && (own === null || own === name))
 }
 
 /**
  * The machines that hold a name, each with its entry there, asked in
- * parallel (`asked`); a mount on one machine asks nothing and lets the op
+ * parallel (`asked_machines`); a mount on one machine asks nothing and lets the op
  * itself report a missing name.
  *
  * @param accessor the mount's machines.
  * @param path the name.
  */
 export async function holders(accessor: MachineAccessor, path: PathSpec): Promise<Holder[]> {
-  const names = await asked(accessor, path)
+  const names = await askedMachines(accessor, path)
   if (!accessor.several) return names.map((machine) => new Holder(machine))
   const found = await Promise.allSettled(names.map((m) => statEntry(accessor, m, path)))
   const held: Holder[] = []
@@ -120,8 +124,8 @@ export function chosen(accessor: MachineAccessor, held: Holder[]): Holder {
   const [first] = held
   if (first === undefined) throw new Error('machine: no machine holds the name')
   if (held.length === 1) return first
-  const last = Math.max(...held.map((one) => one.written))
-  const latest = held.filter((one) => one.written === last)
+  const last = Math.max(...held.map((one) => one.writtenMs))
+  const latest = held.filter((one) => one.writtenMs === last)
   const about = commandMachine(accessor)
   return latest.find((one) => one.machine === about) ?? latest[0] ?? first
 }
@@ -134,10 +138,65 @@ export function chosen(accessor: MachineAccessor, held: Holder[]): Holder {
  * @param path the name.
  * @throws ENOENT when no machine holds it.
  */
-export async function holder(accessor: MachineAccessor, path: PathSpec): Promise<string> {
+export async function holdingMachine(accessor: MachineAccessor, path: PathSpec): Promise<string> {
+  return chosen(accessor, await existingHolders(accessor, path)).machine
+}
+
+/**
+ * The machines holding a name that must exist, every one of which a removal
+ * or a rename reaches.
+ *
+ * @param accessor the mount's machines.
+ * @param path the name.
+ * @throws ENOENT when no machine holds it.
+ */
+export async function existingHolders(
+  accessor: MachineAccessor,
+  path: PathSpec,
+): Promise<Holder[]> {
   const held = await holders(accessor, path)
   if (held.length === 0) throw enoent(path)
-  return chosen(accessor, held).machine
+  return held
+}
+
+/**
+ * Refuse a name a machine's own links lead to one the session hides, before
+ * a program of the machine's writes through them.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the write runs on.
+ * @param path the name written.
+ * @throws ENOENT when the name leads to a hidden one there.
+ */
+export async function refuseHidden(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<void> {
+  if ((await hiddenMachines(accessor, path)).includes(machine)) throw enoent(path)
+}
+
+/**
+ * The machines a new name lands on that must make its folder first, since
+ * only other machines hold it; none where no machine holds the folder,
+ * whose lack the op reports.
+ *
+ * @param accessor the mount's machines.
+ * @param machines the machines the name lands on.
+ * @param path the new name.
+ * @throws ENOTDIR when the copy shown of the folder is a file, whatever an
+ *   older folder on another machine is.
+ */
+export async function machinesLackingFolder(
+  accessor: MachineAccessor,
+  machines: string[],
+  path: PathSpec,
+): Promise<string[]> {
+  if (!accessor.several) return []
+  const held = await holders(accessor, folderOf(path))
+  if (held.length > 0 && !chosen(accessor, held).isFolder) throw enotdir(path)
+  const folders = held.filter((one) => one.isFolder).map((one) => one.machine)
+  return machines.filter((m) => folders.length > 0 && !folders.includes(m))
 }
 
 /**
@@ -165,8 +224,8 @@ export async function newNameMachine(
   let folders: Holder[] = []
   for (;;) {
     const held = await holders(accessor, above)
-    if (held.length > 0 && !chosen(accessor, held).folder) throw enotdir(path)
-    folders = held.filter((one) => one.folder)
+    if (held.length > 0 && !chosen(accessor, held).isFolder) throw enotdir(path)
+    folders = held.filter((one) => one.isFolder)
     if (folders.length > 0 || !parents || above.vfsPath === '') break
     above = folderOf(above)
   }
@@ -198,6 +257,6 @@ export async function writeMachine(
     if (held.length > 0) return chosen(accessor, held).machine
   }
   const target = running ?? (await newNameMachine(accessor, path, opts.parents === true))
-  if ((await hiddenOn(accessor, path)).includes(target)) throw enoent(path)
+  await refuseHidden(accessor, target, path)
   return target
 }
