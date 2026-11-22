@@ -67,8 +67,8 @@ from mirage.commands.cli.builtin.git.seen import check_rules, ruled_under
 from mirage.commands.cli.builtin.git.session import opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
+    blob_bytes,
     commit_entries,
-    contents,
     tree_entries,
     valid_path,
 )
@@ -437,9 +437,6 @@ async def restore_paths(
             state.conflicts.pop(name.encode(), None)
         await write_index(vfs, location.gitdir, state)
     if worktree:
-        blobs = await asyncio.to_thread(
-            contents, repo, [tree[name.encode()][1] for name in replacing]
-        )
         # Removals first, because the two sets can name the same
         # place: restoring a directory over a file writes
         # ``slot/child`` where the file ``slot`` still sits, and the
@@ -498,7 +495,8 @@ async def restore_paths(
                     await remove_tree(vfs, where)
                 elif info is not None and above is None:
                     current = await read_optional(vfs, where)
-            if current != blobs[sha]:
+            blob = await asyncio.to_thread(blob_bytes, repo, sha)
+            if current != blob:
                 updated += 1
-            await restore_entry(vfs, where, mode, blobs[sha])
+            await restore_entry(vfs, where, mode, blob)
     return notes, updated

@@ -109,8 +109,8 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import index_locked, opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
+    blob_bytes,
     commit_entries,
-    contents,
     valid_path,
 )
 from mirage.commands.cli.builtin.git.types import (
@@ -393,9 +393,6 @@ async def switch_to(
         location.worktree,
         [path.decode("utf-8", errors="replace") for path in replacing],
     )
-    blobs = await asyncio.to_thread(
-        contents, repo, [after[path][1] for path in replacing]
-    )
     # Removals first, and the emptied directories with them, because
     # the two sets name the same place whenever a branch records a file
     # where the other records a directory: writing ``slot/child`` while
@@ -445,7 +442,8 @@ async def switch_to(
             info = await stat_of(vfs, where)
             if info is not None and info.type is FileType.DIRECTORY:
                 await remove_tree(vfs, where)
-        await restore_entry(vfs, where, mode, blobs[sha])
+        blob = await asyncio.to_thread(blob_bytes, repo, sha)
+        await restore_entry(vfs, where, mode, blob)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it

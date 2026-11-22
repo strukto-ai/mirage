@@ -12,10 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+const BYTE_HEX: readonly string[] = Array.from({ length: 256 }, (_, byte) =>
+  byte.toString(16).padStart(2, '0'),
+)
+
+/**
+ * The bytes as lowercase hex, two digits a byte. Joined into one flat string:
+ * one grown by `+=` stays a tree of its pieces, about 825 bytes for a 20-byte
+ * object id where the flat one takes 65, and a checkout keeps one per file.
+ */
 export function toHex(bytes: Uint8Array): string {
-  let s = ''
-  for (const b of bytes) s += b.toString(16).padStart(2, '0')
-  return s
+  const digits = new Array<string>(bytes.length)
+  for (let i = 0; i < bytes.length; i++) digits[i] = BYTE_HEX[bytes[i] ?? 0] ?? '00'
+  return digits.join('')
 }
 
 /** The bytes a run of hex digits spells, two digits a byte. */

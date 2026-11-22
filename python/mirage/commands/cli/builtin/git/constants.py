@@ -39,6 +39,9 @@ OWNER_EXECUTE = 0o100
 # entry's own bits are set from, the object type above it being the
 # mount's business rather than the tree's.
 PERMISSION_BITS = 0o777
+# The bits a file renders with while none are set on it, 0666 under the
+# default umask.
+UNSET_PERMISSIONS = 0o644
 
 # The object types git knows, in its own order.
 OBJECT_TYPES = ("blob", "tree", "commit", "tag")
@@ -71,8 +74,8 @@ FANOUT_LEN = 2
 # stored pack's indexing keeps, past which the furthest are let go and
 # rebuilt when next needed.
 PACK_BLOCK = 1 << 16
-PACK_BLOCKS = 32
-PACK_CACHE_BYTES = 8 * 1024 * 1024
+PACK_BLOCKS = 16
+PACK_CACHE_BYTES = 2 * 1024 * 1024
 
 # The commits a shallow repository holds without their parents, and
 # the label git decorates each of them with.
