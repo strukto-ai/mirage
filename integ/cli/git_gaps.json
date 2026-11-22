@@ -1321,13 +1321,14 @@
       "session": "sealed-numbers",
       "session_profiles": {
         "sealed-numbers": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/numbers.txt"
-              ]
+          "mounts": {
+            "/repo/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -1363,14 +1364,22 @@
       "session": "sealed-clone",
       "session_profiles": {
         "sealed-clone": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/sealed/numbers.txt",
-                "/repo/sealed/fresh.txt"
-              ]
+          "mounts": {
+            "/repo/sealed/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
+            },
+            "/repo/sealed/fresh.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -1392,14 +1401,22 @@
       "session": "sealed-clone",
       "session_profiles": {
         "sealed-clone": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/sealed/numbers.txt",
-                "/repo/sealed/fresh.txt"
-              ]
+          "mounts": {
+            "/repo/sealed/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
+            },
+            "/repo/sealed/fresh.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -1421,14 +1438,22 @@
       "session": "sealed-clone",
       "session_profiles": {
         "sealed-clone": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/sealed/numbers.txt",
-                "/repo/sealed/fresh.txt"
-              ]
+          "mounts": {
+            "/repo/sealed/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
+            },
+            "/repo/sealed/fresh.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -1450,14 +1475,22 @@
       "session": "sealed-clone",
       "session_profiles": {
         "sealed-clone": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/sealed/numbers.txt",
-                "/repo/sealed/fresh.txt"
-              ]
+          "mounts": {
+            "/repo/sealed/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
+            },
+            "/repo/sealed/fresh.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -1479,14 +1512,22 @@
       "session": "sealed-clone",
       "session_profiles": {
         "sealed-clone": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/repo/sealed/numbers.txt",
-                "/repo/sealed/fresh.txt"
-              ]
+          "mounts": {
+            "/repo/sealed/numbers.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
+            },
+            "/repo/sealed/fresh.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
