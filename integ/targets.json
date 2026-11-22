@@ -1295,13 +1295,14 @@
           }
         },
         "walled": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "kept off limits",
-              "paths": [
-                "/search/gamma.txt"
-              ]
+          "mounts": {
+            "/search/gamma.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "kept off limits"
+                }
+              }
             }
           }
         }
@@ -1956,13 +1957,14 @@
           }
         },
         "walled": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "kept off limits",
-              "paths": [
-                "/search/gamma.txt"
-              ]
+          "mounts": {
+            "/search/gamma.txt": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "kept off limits"
+                }
+              }
             }
           }
         }
@@ -3627,15 +3629,6 @@
                 "hide": [
                   "*.key"
                 ]
-              },
-              "commands": {
-                "*": {
-                  "decision": "deny",
-                  "reason": "anchored pem",
-                  "paths": [
-                    "*.pem"
-                  ]
-                }
               }
             }
           }
@@ -3653,7 +3646,6 @@
         "auditpat": "auditpat",
         "auditshow": "auditshow",
         "auditrule": "auditrule",
-        "auditrulepat": "auditrulepat",
         "auditask": "auditask"
       },
       "profile": "default",
@@ -4154,19 +4146,6 @@
                   "reason": "audit sealed"
                 }
               }
-            }
-          }
-        },
-        "auditrulepat": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "audit sealed",
-              "paths": [
-                "*secret.txt",
-                "/scratch/a*/hdir",
-                "/vault/a?/hl"
-              ]
             }
           }
         },
