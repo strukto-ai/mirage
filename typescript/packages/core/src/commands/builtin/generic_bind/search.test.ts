@@ -125,11 +125,13 @@ async function run(
   const scoped = hide !== undefined || deny !== undefined
   try {
     if (scoped) {
-      const sealed = { decision: 'deny', reason: 'sealed', paths: deny }
+      const sealed = { decision: 'deny', reason: 'sealed' }
       ws.createSession('agent', {
         profile: SessionProfile({
           paths: { hide: hide ?? [] },
-          ...(deny === undefined ? {} : { commands: { '*': sealed } }),
+          mounts: Object.fromEntries(
+            (deny ?? []).map((path) => [path, { commands: { '*': sealed } }]),
+          ),
         }),
       })
     }
@@ -373,7 +375,7 @@ it.each(['grep -r ada /d', 'grep -rc ada /d', 'grep -rl ada /d', 'rg ada /d'])(
 it.each(['grep -r ada /d', 'grep -rn ada /d', 'grep -rl ada /d'])(
   "keeps grep's answer under a path rule below the walk: %s",
   async (line) => {
-    const deny = ['/d/sub/*']
+    const deny = ['/d/sub']
     expect(await run(new SearchRAM(), line, undefined, {}, deny)).toEqual(
       await run(new RAMVFS(), line, undefined, {}, deny),
     )

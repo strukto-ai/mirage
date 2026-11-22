@@ -124,9 +124,8 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
       expect(counts.stdoutText).toBe('/work/d/a:0\n/work/d/sub/b:1\n')
       ws.createSession('agent', {
         profile: SessionProfile({
-          commands: {
-            '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/work/d/a'] }],
-          },
+          commands: { '*': 'allow' },
+          mounts: { '/work/d/a': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
         }),
       })
       const refused = await ws.shell('grep -rilF needle /work/d', { sessionId: 'agent' })

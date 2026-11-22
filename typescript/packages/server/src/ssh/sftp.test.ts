@@ -91,8 +91,8 @@ async function vaultWorkspace(): Promise<Workspace> {
       mode: MountMode.WRITE,
       profiles: {
         guarded: SessionProfile({
-          commands: {
-            '*': { decision: 'deny', reason: 'the vault is sealed', paths: ['/vault/*'] },
+          mounts: {
+            '/vault': { commands: { '*': { decision: 'deny', reason: 'the vault is sealed' } } },
           },
         }),
       },

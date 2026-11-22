@@ -959,7 +959,7 @@ it('walks a nested mount under the command’s own gate while another session’
   )
   const sealed = ws.createSession('sealed', {
     profile: SessionProfile({
-      commands: { pause: { decision: 'deny', reason: 'sealed', paths: ['/data/sub/box'] } },
+      mounts: { '/data/sub/box': { commands: { pause: { decision: 'deny', reason: 'sealed' } } } },
     }),
   })
   const free = ws.createSession('free')
@@ -1121,7 +1121,7 @@ describe('a line beside another session’s paused line on the fallback storage'
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, onAsk: allowOnce })
     const asker = ws.createSession('asker', {
       profile: SessionProfile({
-        commands: { '*': { decision: 'ask', reason: 'review', paths: ['/data/review/*'] } },
+        mounts: { '/data/review': { commands: { '*': { decision: 'ask', reason: 'review' } } } },
       }),
     })
     const other = ws.createSession('other')

@@ -33,7 +33,7 @@ const PYODIDE = {
 }
 
 const GUARDED = SessionProfile({
-  commands: { python3: { decision: 'deny', reason: 'protected', paths: ['/secret.py'] } },
+  mounts: { '/secret.py': { commands: { python3: { decision: 'deny', reason: 'protected' } } } },
 })
 
 function guarded(): Workspace {
@@ -48,22 +48,19 @@ function guarded(): Workspace {
 }
 
 describe('python3: a rule on the script', () => {
-  it.each([['python3 ./secret.py', './secret.py']])(
-    'reads %s however it is typed',
-    async (line, shown) => {
-      const ws = guarded()
-      try {
-        await ws.shell("printf 'print(1)\\n' > /secret.py")
-        const io = await ws.shell(line)
-        expect(io.exitCode).toBe(1)
-        expect(stdoutStr(io)).toBe('')
-        expect(stderrStr(io)).toBe(`python3: ${shown}: Permission denied\n`)
-        expect(io.decision?.reason).toBe('protected')
-      } finally {
-        await ws.close()
-      }
-    },
-  )
+  it.each([['python3 ./secret.py']])('reads %s however it is typed', async (line) => {
+    const ws = guarded()
+    try {
+      await ws.shell("printf 'print(1)\\n' > /secret.py")
+      const io = await ws.shell(line)
+      expect(io.exitCode).toBe(126)
+      expect(stdoutStr(io)).toBe('')
+      expect(stderrStr(io)).toBe('python3: Permission denied\n')
+      expect(io.decision?.reason).toBe('protected')
+    } finally {
+      await ws.close()
+    }
+  })
 
   it('reaches its own open', async () => {
     const ws = guarded()

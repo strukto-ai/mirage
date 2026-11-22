@@ -36,14 +36,16 @@ const PROFILES: Record<string, SessionProfile> = {
   veiled: { paths: { hide: ['/repo/secret.txt', '/repo/box/secret.txt'] } },
   boxed: { paths: { hide: ['/repo/box/secret.txt'] } },
   sealed: SessionProfile({
-    commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/repo/secret.txt'] } },
+    mounts: { '/repo/secret.txt': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
   }),
   half: { paths: { hide: ['/repo/a/secret.txt'] } },
   fresh: SessionProfile({
-    commands: { '*': { decision: 'deny', reason: 'fresh', paths: ['/repo/new.txt'] } },
+    mounts: { '/repo/new.txt': { commands: { '*': { decision: 'deny', reason: 'fresh' } } } },
   }),
   walled: SessionProfile({
-    commands: { '*': { decision: 'deny', reason: 'walled', paths: ['/repo/boxf/secret.txt'] } },
+    mounts: {
+      '/repo/boxf/secret.txt': { commands: { '*': { decision: 'deny', reason: 'walled' } } },
+    },
   }),
 }
 

@@ -47,7 +47,7 @@ const ENV = {
 
 const SEALED: Record<string, SessionProfile> = {
   sealed: SessionProfile({
-    commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/repo/a.txt'] } },
+    mounts: { '/repo/a.txt': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
   }),
 }
 

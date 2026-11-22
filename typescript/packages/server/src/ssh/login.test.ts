@@ -125,7 +125,7 @@ describe('key profiles', () => {
     const unsealed = await exec(await connect(h), 'cat /vault/secret')
     const sealed = await exec(await connect(h, 'demo', guarded), 'cat /vault/secret')
     expect(unsealed.stdout).toBe('token\n')
-    expect(sealed.code).toBe(1)
+    expect(sealed.code).toBe(126)
     expect(sealed.stderr).toContain('the vault is sealed')
   })
 

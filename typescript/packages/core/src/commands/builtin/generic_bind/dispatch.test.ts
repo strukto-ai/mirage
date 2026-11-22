@@ -201,12 +201,12 @@ it('refuses the stand-ins through a link to a sealed file', async () => {
     await ws.setSessionProfile(
       ws.defaultSessionId,
       SessionProfile({
-        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/m/f'] } },
+        mounts: { '/m/f': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
       }),
     )
     for (const line of ['head -n 2 /m/l', 'tail -n 1 /m/l', 'wc -l /m/l']) {
       const refused = await ws.shell(line)
-      expect(refused.exitCode).toBe(1)
+      expect(refused.exitCode).toBe(126)
       expect(new TextDecoder().decode(refused.stderr)).toContain('Permission denied')
     }
     expect(vfs.asked).toEqual([])

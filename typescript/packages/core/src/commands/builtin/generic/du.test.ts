@@ -491,7 +491,7 @@ it('du keeps a listed name a profile hides and denies missing', async () => {
     ws.createSession('agent', {
       profile: SessionProfile({
         paths: { hide: ['/d/s'] },
-        commands: { '*': { decision: 'deny', reason: 'no', paths: ['/d/s'] } },
+        mounts: { '/d/s': { commands: { '*': { decision: 'deny', reason: 'no' } } } },
       }),
     })
     const io = await ws.shell('du --files0-from=/d/l', { sessionId: 'agent' })

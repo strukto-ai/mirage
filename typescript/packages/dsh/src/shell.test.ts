@@ -372,9 +372,12 @@ describe('sandbox policy', () => {
             {
               commands: {
                 '*': 'deny',
-                cat: ['allow', { decision: 'deny', reason: 'no notes', paths: ['/data/notes/*'] }],
+                cat: 'allow',
                 ls: 'allow',
                 echo: 'allow',
+              },
+              mounts: {
+                '/data/notes': { commands: { cat: { decision: 'deny', reason: 'no notes' } } },
               },
             },
             'profile scoped',
