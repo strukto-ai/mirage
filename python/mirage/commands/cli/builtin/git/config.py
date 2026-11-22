@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
-import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from io import BytesIO
@@ -22,18 +22,23 @@ from dulwich.config import ConfigFile
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.errors import (
+    FATAL_EXIT,
     BadConfigValueError,
     BadNumericConfigError,
     ConfigKeyError,
     ConfigUsageError,
     GitError,
+    UsageError,
 )
-from mirage.commands.cli.builtin.git.io import read_optional, write_file
+from mirage.commands.cli.builtin.git.io import (
+    exists,
+    read_optional,
+    remove_file,
+    stat_of,
+)
 from mirage.commands.cli.builtin.git.session import inside
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
-    DOTTED_HEADER,
-    QUOTED_HEADER,
     WIDE_INT_BITS,
     command_line_config,
     config_int,
@@ -43,13 +48,21 @@ from mirage.commands.cli.builtin.git.util import (
     require_vfs,
     start_point,
 )
+from mirage.commands.cli.refusal import git_option_refusal
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.commands.spec.types import CommandSpec
+from mirage.errors.fs import strerror_of
+from mirage.errors.posix import posix_phrase
+from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex
 from mirage.shell.bytes import byte_view, encode_text, utf8_locale
-from mirage.types import PathSpec
+from mirage.types import FileType, PathSpec
+from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_CONFIG = "/etc/gitconfig"
 SCOPE_LOCAL = "local"
@@ -68,7 +81,13 @@ READING_ACTIONS = ("list", "get", "get_all", "get_regexp")
 WRITING_ACTIONS = ("add", "unset")
 NOTHING_TO_CHANGE_EXIT = 5
 WRITE_KEY_EXIT = 2
-PLAIN_HEADER = re.compile(rb"\s*\[([A-Za-z0-9-]+)\s*\]")
+INVALID_FILE_EXIT = 3
+LOCK_EXIT = 255
+BOM = b"\xef\xbb\xbf"
+SECTION_CHARS = frozenset(
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-."
+)
+ESCAPED = b'"\\ntb'
 # The value types mirage renders; git's others paint or read dates.
 VALUE_KINDS = ("bool", "int", "bool-or-int", "path")
 OTHER_VALUE_KINDS = ("bool-or-str", "color", "expiry-date")
@@ -211,9 +230,6 @@ async def _local_variables(
 ) -> list[Variable]:
     """The repository's own config.
 
-    git names it from the top of the work tree it moved to, so an
-    ordinary checkout reads ``.git/config`` from anywhere inside it.
-
     Args:
         ctx (Context): the line's context.
         fl (FlagView): parsed flags.
@@ -221,18 +237,10 @@ async def _local_variables(
     """
     path = location.commondir.join("config")
     data = await read_optional(require_vfs(ctx), path)
-    ordinary = (
-        location.commondir.virtual == location.worktree.virtual + "/.git"
-    )
-    start = start_point(fl).virtual
-    inside = start == location.worktree.virtual or start.startswith(
-        location.worktree.virtual + "/"
-    )
-    label = ".git/config" if ordinary and inside else path.raw_path
     return _parsed(
         ConfigFile.from_file(BytesIO(data or b"")),
         SCOPE_LOCAL,
-        f"file:{label}",
+        f"file:{_local_label(fl, location, path)}",
     )
 
 
@@ -452,12 +460,15 @@ class _ConfigLine:
         start (int): its first physical line.
         end (int): one past its last (a value continued by a backslash
             runs on).
-        header (_Block | None): a header's
-            section (lowercased), subsection and whether that compares
-            without case (the older ``[section.sub]`` spelling).
-        noted (bool): a header with more on its line.
-        name (bytes | None): a variable's name, lowercased.
+        header (_Block | None): a header's section (lowercased),
+            subsection and whether that compares without case (the
+            older ``[section.sub]`` spelling).
+        noted (bool): a header with a comment after it on its line.
+        name (bytes | None): a variable's name, lowercased; beside a
+            header when the variable shares its line.
         comment (bool): a comment line.
+        header_end (int): where the header ends on its line, when a
+            variable shares that line.
     """
 
     start: int
@@ -466,64 +477,194 @@ class _ConfigLine:
     noted: bool = False
     name: bytes | None = None
     comment: bool = False
+    header_end: int = 0
 
 
-def _header_of(line: bytes) -> tuple[_Block, bool]:
-    """A header line's block and whether more follows it on the line.
+def _physical_lines(data: bytes) -> list[bytes]:
+    """The file's physical lines, each with its ending; only LF ends one.
 
     Args:
-        line (bytes): the line, ``[`` its first character but spaces.
+        data (bytes): the file.
     """
-    quoted = QUOTED_HEADER.match(line)
-    dotted = DOTTED_HEADER.match(line)
-    plain = PLAIN_HEADER.match(line)
-    block: _Block
-    if quoted is not None:
-        block = (
-            quoted.group(1).lower(),
-            re.sub(rb"\\(.)", rb"\1", quoted.group(2)),
-            False,
-        )
-        end = quoted.end()
-    elif dotted is not None:
-        block = (dotted.group(1).lower(), dotted.group(2).lower(), True)
-        end = dotted.end()
-    elif plain is not None:
-        block = (plain.group(1).lower(), None, False)
-        end = plain.end()
-    else:
-        return (b"", None, False), True
-    return block, bool(line[end:].strip())
+    parts = data.split(b"\n")
+    lines = [part + b"\n" for part in parts[:-1]]
+    return lines + [parts[-1]] if parts[-1] else lines
 
 
-def _config_lines_of(raw: list[bytes]) -> list[_ConfigLine]:
-    """The file's lines, a continued value joined to the line it opens.
+def _line_text(line: bytes) -> bytes:
+    """A physical line without its ending, LF or CR LF.
 
     Args:
-        raw (list[bytes]): the physical lines, each with its ending.
+        line (bytes): the line.
+    """
+    return line[:-1].removesuffix(b"\r") if line.endswith(b"\n") else line
+
+
+def _header_at(text: bytes, at: int) -> tuple[_Block, int] | bytes:
+    """The header whose ``[`` is at ``text[at]`` and where it ends, or
+    the name git read before refusing it.
+
+    Args:
+        text (bytes): the line.
+        at (int): where the ``[`` is.
+    """
+    end = at + 1
+    while end < len(text) and text[end] in SECTION_CHARS:
+        end += 1
+    name = text[at + 1 : end].lower()
+    if text[end : end + 1] == b"]":
+        if not name:
+            return name
+        section, dot, sub = name.partition(b".")
+        return ((section, sub, True) if dot else (name, None, False)), end + 1
+    spaced = end
+    while text[end : end + 1] in (b" ", b"\t"):
+        end += 1
+    if not name or end == spaced or text[end : end + 1] != b'"':
+        return name
+    sub = b""
+    end += 1
+    while end < len(text) and text[end : end + 1] != b'"':
+        if text[end : end + 1] == b"\\":
+            end += 1
+        sub += text[end : end + 1]
+        end += 1
+    if text[end + 1 : end + 2] != b"]":
+        return name + b"." + sub
+    return (name, sub, False), end + 2
+
+
+def _value_end(raw: list[bytes], at: int, start: int) -> tuple[int, bool]:
+    """Where the value at ``raw[at][start:]`` ends and whether git can
+    read it.
+
+    A backslash ending a line runs the value on, unless a comment holds
+    it; ``\\"``, ``\\\\``, ``\\n``, ``\\t`` and ``\\b`` are the only
+    other escapes, and a quote must close on its line.
+
+    Args:
+        raw (list[bytes]): the physical lines.
+        at (int): the value's first line.
+        start (int): where it starts on that line.
+
+    Returns:
+        tuple[int, bool]: one past the last line read, and whether git
+        reads the value.
+    """
+    quoted = False
+    while True:
+        ended = raw[at].endswith(b"\n")
+        text = _line_text(raw[at])
+        index = start
+        runs_on = False
+        while index < len(text):
+            char = text[index : index + 1]
+            if char == b"\\":
+                if index + 1 == len(text):
+                    runs_on = True
+                    break
+                if text[index + 1 : index + 2] not in ESCAPED:
+                    return at + 1, False
+                index += 2
+                continue
+            if char == b'"':
+                quoted = not quoted
+            elif not quoted and char in (b"#", b";"):
+                break
+            index += 1
+        if runs_on and ended and at + 1 < len(raw):
+            at, start = at + 1, 0
+            continue
+        return at + 1, not quoted or runs_on
+
+
+def _skipping(text: bytes, at: int, skipped: bytes) -> int:
+    """Where the text from ``at`` resumes past the bytes ``skipped`` holds.
+
+    Args:
+        text (bytes): the line.
+        at (int): where to start.
+        skipped (bytes): the bytes to pass over.
+    """
+    index = at
+    while index < len(text) and text[index] in skipped:
+        index += 1
+    return index
+
+
+def _config_lines_of(
+    raw: list[bytes], shown: str
+) -> list[_ConfigLine] | IOResult:
+    """The file's lines as git reads them, or its refusal of the file.
+
+    A header can share its line with a comment or with one variable,
+    and a value continued by a backslash takes the lines it runs on. A
+    header git cannot read is refused by name; any other line git
+    cannot read, by number (pinned against git 2.47.3).
+
+    Args:
+        raw (list[bytes]): the physical lines.
+        shown (str): the file as git names it.
     """
     out: list[_ConfigLine] = []
     at = 0
     while at < len(raw):
-        line = raw[at]
-        text = line.strip()
-        if text.startswith(b"["):
-            block, noted = _header_of(line)
-            out.append(_ConfigLine(at, at + 1, header=block, noted=noted))
+        text = _line_text(raw[at])
+        index = _skipping(
+            text,
+            len(BOM) if at == 0 and text.startswith(BOM) else 0,
+            b" \t\r\v\f",
+        )
+        header: _Block | None = None
+        header_end = 0
+        while text[index : index + 1] == b"[":
+            found = _header_at(text, index)
+            if isinstance(found, bytes):
+                return IOResult(
+                    exit_code=INVALID_FILE_EXIT,
+                    stderr=b"error: invalid section name '"
+                    + found
+                    + b"'\n"
+                    + encode_text(f"error: invalid config file {shown}\n"),
+                )
+            header, header_end = found
+            index = _skipping(text, header_end, b" \t")
+        rest = text[index:]
+        if not rest or rest[:1] in (b"#", b";"):
+            out.append(
+                _ConfigLine(
+                    at,
+                    at + 1,
+                    header=header,
+                    noted=header is not None and bool(rest),
+                    comment=header is None and bool(rest),
+                )
+            )
             at += 1
             continue
-        if not text or text.startswith((b"#", b";")):
-            out.append(_ConfigLine(at, at + 1, comment=bool(text)))
-            at += 1
-            continue
-        end = at + 1
-        body = line.rstrip(b"\r\n")
-        while body.endswith(b"\\") and end < len(raw):
-            body = raw[end].rstrip(b"\r\n")
+        end = index
+        while text[end : end + 1].isalnum() or text[end : end + 1] == b"-":
             end += 1
-        name = text.partition(b"=")[0].strip().lower()
-        out.append(_ConfigLine(at, end, name=name))
-        at = end
+        name = text[index:end].lower()
+        after = _skipping(text, end, b" \t")
+        finish, readable = at + 1, rest[:1].isalpha()
+        if readable and after < len(text):
+            readable = text[after : after + 1] == b"="
+            if readable:
+                finish, readable = _value_end(raw, at, after + 1)
+        if not readable:
+            return IOResult(
+                exit_code=FATAL_EXIT,
+                stderr=encode_text(
+                    f"fatal: bad config line {finish} in file {shown}\n"
+                ),
+            )
+        out.append(
+            _ConfigLine(
+                at, finish, header=header, name=name, header_end=header_end
+            )
+        )
+        at = finish
     return out
 
 
@@ -531,24 +672,30 @@ def _in_block(
     block: _Block,
     section: bytes,
     subsection: bytes | None,
+    placing: bool = False,
 ) -> bool:
     """Whether a header opens the block a name lives in.
+
+    A name matches the subsection exactly, the older spelling's
+    lowercased one included; placing a new name, that spelling compares
+    without case (pinned against git 2.47.3).
 
     Args:
         block (_Block): the header's block.
         section (bytes): the name's section, lowercased.
         subsection (bytes | None): the name's subsection, as typed.
+        placing (bool): finding the block a new variable goes in.
     """
     name, sub, caseless = block
     if name != section or (sub is None) != (subsection is None):
         return False
     if sub is None or subsection is None:
         return True
-    return sub == (subsection.lower() if caseless else subsection)
+    return sub == (subsection.lower() if caseless and placing else subsection)
 
 
 def _config_edit(
-    data: bytes, key: str, value: str | None, adding: bool
+    data: bytes, key: str, value: str | None, adding: bool, shown: str
 ) -> bytes | IOResult:
     """The config text with one variable set, added or taken out.
 
@@ -556,33 +703,36 @@ def _config_edit(
     goes after the last variable of the last block it belongs in, or in
     a new block at the end, spelled as typed. Taking the last variable
     out of a block takes the block too, with the blank lines around it,
-    unless a comment is there or the next block is the same one (pinned
-    against git 2.47.3).
+    unless a comment is there or the next block is the same one. A file
+    git cannot read is left as it is (pinned against git 2.47.3).
 
     Args:
         data (bytes): the file as it is.
         key (str): the name as typed.
         value (str | None): the value to set or add; None takes it out.
         adding (bool): add a value beside any the variable has.
+        shown (str): the file as git names it.
 
     Returns:
         bytes | IOResult: the new text, or git's refusal.
     """
     section, _, rest = key.partition(".")
     subsection, dot, variable = rest.rpartition(".")
-    sub = subsection.encode() if dot else None
+    sub = encode_text(subsection) if dot else None
     wanted = (section.lower().encode(), variable.lower().encode())
-    raw = data.splitlines(keepends=True)
-    lines = _config_lines_of(raw)
+    raw = _physical_lines(data)
+    lines = _config_lines_of(raw, shown)
+    if isinstance(lines, IOResult):
+        return lines
     block: _Block | None = None
     owners: list[int] = []
     matches: list[int] = []
     for index, line in enumerate(lines):
         if line.header is not None:
             block = line.header
-            if _in_block(block, wanted[0], sub):
+            if _in_block(block, wanted[0], sub, placing=True):
                 owners.append(index)
-        elif (
+        if (
             line.name == wanted[1]
             and block is not None
             and _in_block(block, wanted[0], sub)
@@ -597,7 +747,7 @@ def _config_edit(
                 stderr=encode_text(f"warning: {key} has multiple values\n"),
             )
         return b"".join(_without(raw, lines, matches[0]))
-    entry = f"\t{variable} = {config_value(value)}\n".encode()
+    entry = encode_text(f"\t{variable} = {config_value(value)}\n")
     if matches and not adding:
         if len(matches) > 1:
             return IOResult(
@@ -611,7 +761,12 @@ def _config_edit(
                 ),
             )
         found = lines[matches[0]]
-        return b"".join(raw[: found.start] + [entry] + raw[found.end :])
+        head = (
+            [raw[found.start][: found.header_end] + b"\n"]
+            if found.header is not None
+            else []
+        )
+        return b"".join(raw[: found.start] + head + [entry] + raw[found.end :])
     if owners:
         after = lines[owners[-1]].end
         for line in lines[owners[-1] + 1 :]:
@@ -622,15 +777,17 @@ def _config_edit(
         if not raw[after - 1].endswith(b"\n"):
             entry = b"\n" + entry
         return b"".join(raw[:after] + [entry] + raw[after:])
-    head = (
+    opening = encode_text(
         f"[{section}]\n"
         if sub is None
         else '[{} "{}"]\n'.format(
             section, subsection.replace("\\", "\\\\").replace('"', '\\"')
         )
     )
+    if data == BOM:
+        return opening + entry + data
     text = data if not data or data.endswith(b"\n") else data + b"\n"
-    return text + head.encode() + entry
+    return text + opening + entry
 
 
 def _without(
@@ -639,19 +796,31 @@ def _without(
     """The physical lines with one variable out, and its block if that
     leaves it empty.
 
+    A variable beside its header leaves the header alone on its line. A
+    block taken from the top of a file that opens with a byte order mark
+    leaves the mark and a line end.
+
     Args:
         raw (list[bytes]): the physical lines.
         lines (list[_ConfigLine]): the lines as the writer reads them.
         index (int): the variable's line.
     """
     found = lines[index]
-    head = max(
-        (at for at in range(index) if lines[at].header is not None),
-        default=None,
-    )
-    drop = set(range(found.start, found.end))
+    head: int | None = index
+    if found.header is not None:
+        kept = (
+            raw[: found.start]
+            + [raw[found.start][: found.header_end] + b"\n"]
+            + raw[found.end :]
+        )
+    else:
+        head = max(
+            (at for at in range(index) if lines[at].header is not None),
+            default=None,
+        )
+        kept = raw[: found.start] + raw[found.end :]
     if head is None or lines[head].noted:
-        return [line for at, line in enumerate(raw) if at not in drop]
+        return kept
     after = next(
         (
             at
@@ -660,7 +829,6 @@ def _without(
         ),
         len(lines),
     )
-    block = lines[head].header
     inner = [lines[at] for at in range(head + 1, after) if at != index]
     before = next(
         (
@@ -674,17 +842,41 @@ def _without(
     )
     if (
         any(line.name is not None or line.comment for line in inner)
+        or (head != index and lines[head].name is not None)
         or (before is not None and before.comment)
-        or (after < len(lines) and lines[after].header == block)
+        or (after < len(lines) and lines[after].header == lines[head].header)
     ):
-        return [line for at, line in enumerate(raw) if at not in drop]
+        return kept
     first = before.end if before is not None else 0
     last = lines[after].start if after < len(lines) else len(raw)
-    return raw[:first] + raw[last:]
+    mark = [BOM + b"\n"] if first == 0 and raw[0].startswith(BOM) else []
+    return raw[:first] + mark + raw[last:]
 
 
-async def _config_path(ctx: Context, fl: FlagView) -> PathSpec:
-    """The one file a write changes, as git picks it.
+def _local_label(fl: FlagView, location: RepoLocation, path: PathSpec) -> str:
+    """The repository's own config as git names it.
+
+    git names it from the top of the work tree it moved to, so an
+    ordinary checkout says ``.git/config`` from anywhere inside it.
+
+    Args:
+        fl (FlagView): parsed flags.
+        location (RepoLocation): the discovered repository.
+        path (PathSpec): the file.
+    """
+    ordinary = (
+        location.commondir.virtual == location.worktree.virtual + "/.git"
+    )
+    start = start_point(fl).virtual
+    within = start == location.worktree.virtual or start.startswith(
+        location.worktree.virtual + "/"
+    )
+    return ".git/config" if ordinary and within else path.raw_path
+
+
+async def _config_path(ctx: Context, fl: FlagView) -> tuple[PathSpec, str]:
+    """The one file a write changes, as git picks it, and its name as
+    git says it.
 
     ``--global`` writes ``~/.gitconfig``, or the XDG file when only that
     one exists.
@@ -699,40 +891,77 @@ async def _config_path(ctx: Context, fl: FlagView) -> PathSpec:
     """
     named = fl.as_str("file")
     if named is not None:
-        return start_point(fl).join(named)
+        return start_point(fl).join(named), named
     env = ctx.env or {}
     if fl.as_bool("global"):
         override = env.get("GIT_CONFIG_GLOBAL")
         if override is not None:
-            return PathSpec.from_str_path(override, cwd="/")
+            return PathSpec.from_str_path(override, cwd="/"), override
         home = env.get("HOME", "")
         if not home:
             raise GitError("$HOME not set")
-        target = PathSpec.from_str_path(
-            posixpath.join(home, ".gitconfig"), cwd="/"
-        )
-        xdg = PathSpec.from_str_path(
-            posixpath.join(
-                env.get("XDG_CONFIG_HOME") or posixpath.join(home, ".config"),
-                "git/config",
-            ),
-            cwd="/",
+        target = posixpath.join(home, ".gitconfig")
+        xdg = posixpath.join(
+            env.get("XDG_CONFIG_HOME") or posixpath.join(home, ".config"),
+            "git/config",
         )
         vfs = require_vfs(ctx)
-        if (
-            await read_optional(vfs, target) is None
-            and await read_optional(vfs, xdg) is not None
-        ):
-            return xdg
-        return target
-    if fl.as_bool("system"):
-        return PathSpec.from_str_path(
-            env.get("GIT_CONFIG_SYSTEM", SYSTEM_CONFIG), cwd="/"
+        shown = (
+            xdg
+            if await read_optional(
+                vfs, PathSpec.from_str_path(target, cwd="/")
+            )
+            is None
+            and await read_optional(vfs, PathSpec.from_str_path(xdg, cwd="/"))
+            is not None
+            else target
         )
+        return PathSpec.from_str_path(shown, cwd="/"), shown
+    if fl.as_bool("system"):
+        shown = env.get("GIT_CONFIG_SYSTEM", SYSTEM_CONFIG)
+        return PathSpec.from_str_path(shown, cwd="/"), shown
     location = await inside(ctx, fl)
     if location is None:
         raise GitError("not in a git directory")
-    return location.commondir.join("config")
+    path = location.commondir.join("config")
+    return path, _local_label(fl, location, path)
+
+
+async def _hold_lock(
+    vfs: Files, lock: PathSpec, shown: str
+) -> IOResult | None:
+    """Take a config file's lock and hold it, or git's refusal.
+
+    git refuses when the file's folder is missing, when the lock is
+    already there (another writer holds it) or when it cannot be made,
+    on a read-only mount among others. The look and the create are two
+    ops, since the dispatcher has no exclusive create.
+
+    Args:
+        vfs (Files): the session's files.
+        lock (PathSpec): ``<file>.lock``.
+        shown (str): the file as git names it.
+    """
+    folder = await stat_of(vfs, lock.parent)
+    if folder is None:
+        reason = posix_phrase(FsCondition.ENOENT)
+    elif folder.type is not FileType.DIRECTORY:
+        reason = posix_phrase(FsCondition.ENOTDIR)
+    elif await exists(vfs, lock):
+        reason = posix_phrase(FsCondition.EEXIST)
+    else:
+        try:
+            await vfs.write(lock, b"")
+            return None
+        except OSError as exc:
+            logger.debug("config lock %s refused: %s", lock.virtual, exc)
+            reason = strerror_of(exc)
+    return IOResult(
+        exit_code=LOCK_EXIT,
+        stderr=encode_text(
+            f"error: could not lock config file {shown}: {reason}\n"
+        ),
+    )
 
 
 def _one_file(fl: FlagView) -> None:
@@ -759,15 +988,42 @@ def _one_file(fl: FlagView) -> None:
         raise ConfigUsageError("only one config file at a time")
 
 
+def _no_selector(ctx: Context, fl: FlagView) -> None:
+    """Refuse ``--all`` and ``--value`` on a write outside ``set`` and
+    ``unset``, whose options they are: git does not know them there.
+
+    Args:
+        ctx (Context): the line's context.
+        fl (FlagView): parsed flags.
+
+    Raises:
+        UsageError: either is on the line.
+    """
+    if not fl.as_bool("all") and fl.as_str("value") is None:
+        return
+    argv = ctx.argv
+    tail = argv[argv.index("config") + 1 :] if "config" in argv else argv
+    word = next(
+        (
+            text
+            for text in tail
+            if text == "--all" or text.startswith("--value")
+        ),
+        "--all",
+    )
+    spec = ctx.spec or CommandSpec()
+    raise UsageError(*git_option_refusal(word, spec.name, spec))
+
+
 async def _config_write(
     ctx: Context, fl: FlagView, words: list[str]
 ) -> tuple[ByteSource | None, IOResult] | None:
     """A set, ``--add`` or unset, or None when the line reads.
 
     ``set``, ``unset``, ``--add``, ``--unset`` and the two-word set
-    change one file. What else writes (a value pattern, ``--all``, a
-    type, ``--replace-all``, the section subcommands, ``edit``) stays
-    refused.
+    change one file, holding its lock from the read to the write. What
+    else writes (a value pattern, ``--all``, a type, ``--replace-all``,
+    ``--worktree``, the section subcommands, ``edit``) stays refused.
 
     Args:
         ctx (Context): the line's context.
@@ -797,27 +1053,39 @@ async def _config_write(
             raise ConfigUsageError(_usage_of(count, count))
         if fl.as_bool("all") or fl.as_str("value") is not None:
             return _read_only()
+        if fl.as_bool("fixed_value"):
+            raise GitError(
+                "--fixed-value only applies with --value=<pattern>"
+                if subcommand == "set"
+                else "--fixed-value only applies with 'value-pattern'"
+            )
         value = words[1] if subcommand == "set" else None
     elif subcommand in WRITING_SUBCOMMANDS:
         return _read_only()
-    elif writes == ["add"]:
-        if len(words) != 2:
-            raise ConfigUsageError(_usage_of(2, 2))
-        value = words[1]
-    elif writes == ["unset"]:
-        if not 1 <= len(words) <= 2:
-            raise ConfigUsageError(_usage_of(1, 2))
-        if len(words) == 2:
-            return _read_only()
-        value = None
-    elif len(words) == 2:
-        value = words[1]
-    elif len(words) > 2:
-        return _read_only()
-    else:
+    elif not writes and len(words) < 2:
         return None
+    else:
+        _no_selector(ctx, fl)
+        if writes == ["add"]:
+            if len(words) != 2:
+                raise ConfigUsageError(_usage_of(2, 2))
+            value = words[1]
+        elif writes == ["unset"]:
+            if not 1 <= len(words) <= 2:
+                raise ConfigUsageError(_usage_of(1, 2))
+            if len(words) == 2:
+                return _read_only()
+            value = None
+        elif len(words) == 2:
+            value = words[1]
+        else:
+            return _read_only()
+        if fl.as_bool("fixed_value"):
+            raise ConfigUsageError(
+                "--fixed-value only applies with 'value-pattern'"
+            )
     _one_file(fl)
-    if _value_kind(fl) is not None:
+    if _value_kind(fl) is not None or fl.as_bool("worktree"):
         return _read_only()
     key = words[0]
     try:
@@ -829,15 +1097,26 @@ async def _config_write(
             exit_code=WRITE_KEY_EXIT,
             stderr=encode_text(f"error: {refusal}\n"),
         )
-    path = await _config_path(ctx, fl)
+    path, shown = await _config_path(ctx, fl)
     vfs = require_vfs(ctx)
-    data = await read_optional(vfs, path)
-    if data is None and value is None:
-        return None, IOResult(exit_code=NOTHING_TO_CHANGE_EXIT)
-    edited = _config_edit(data or b"", key, value, writes == ["add"])
-    if isinstance(edited, IOResult):
-        return None, edited
-    await write_file(vfs, path, edited)
+    lock = PathSpec.from_str_path(
+        f"{path.dotted or path.virtual}.lock", cwd="/"
+    )
+    refused = await _hold_lock(vfs, lock, shown)
+    if refused is not None:
+        return None, refused
+    try:
+        data = await read_optional(vfs, path)
+        if data is None and value is None:
+            return None, IOResult(exit_code=NOTHING_TO_CHANGE_EXIT)
+        edited = _config_edit(
+            data or b"", key, value, writes == ["add"], shown
+        )
+        if isinstance(edited, IOResult):
+            return None, edited
+        await vfs.write(path, edited)
+    finally:
+        await remove_file(vfs, lock)
     return None, IOResult()
 
 

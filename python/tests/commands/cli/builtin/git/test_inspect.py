@@ -219,6 +219,129 @@ async def test_config_writes_lines_as_git_does(git_rw, repo_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "before, form, after",
+    [
+        (
+            b"[user] email = old\n",
+            "user.email new",
+            b"[user]\n\temail = new\n",
+        ),
+        (
+            b"[user] email = old\n\tname = x\n",
+            "--unset user.email",
+            b"[user]\n\tname = x\n",
+        ),
+        (
+            b"[core] bare\n[x]\n\ty = 1\n",
+            "--unset core.bare",
+            b"[x]\n\ty = 1\n",
+        ),
+        (
+            b"[core]\n\tpath = foo\\\\\n\tbare = false\n",
+            "core.path bar",
+            b"[core]\n\tpath = bar\n\tbare = false\n",
+        ),
+        (
+            b"[core]\n\tpath = foo ; c\\\n\tbare = false\n",
+            "core.path x",
+            b"[core]\n\tpath = x\n\tbare = false\n",
+        ),
+        (
+            b"[core]\n\tpath = foo\\\n bar\n\tbare = false\n",
+            "core.path x",
+            b"[core]\n\tpath = x\n\tbare = false\n",
+        ),
+        (
+            b'[user]\n\tname = "a\rb"\n',
+            "user.name x",
+            b"[user]\n\tname = x\n",
+        ),
+        (
+            b"\xef\xbb\xbf[user]\n\temail = old\n",
+            "--unset user.email",
+            b"\xef\xbb\xbf\n",
+        ),
+        (b"", "a.b $'x\\r'", b'[a]\n\tb = "x\r"\n'),
+        (
+            b"[user.s]\n\temail = a\n",
+            "user.S.email x",
+            b"[user.s]\n\temail = a\n\temail = x\n",
+        ),
+    ],
+)
+async def test_config_reads_the_file_as_git_does(
+    git_rw, repo_path, before, form, after
+):
+    # git 2.47.3 on debian:stable-slim: a variable can share its
+    # header's line, a backslash continues a value only unescaped and
+    # outside a comment, only LF ends a line, a byte order mark stays,
+    # a carriage return is quoted, and a new name is placed in the
+    # older [section.sub] block without case but matched with it.
+    (repo_path / "f").write_bytes(before)
+    result = await git_rw.shell("git -C /repo config -f f " + form)
+    assert result.exit_code == 0, result.stderr
+    assert (repo_path / "f").read_bytes() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "before, form, code, err",
+    [
+        (
+            b"[user ]\n",
+            "-f f user.email x",
+            3,
+            b"error: invalid section name 'user'\n"
+            b"error: invalid config file f\n",
+        ),
+        (
+            b'[user]\n\n\temail = "x\n',
+            "-f f --unset user.email",
+            128,
+            b"fatal: bad config line 3 in file f\n",
+        ),
+        (
+            b"[user]\n\tname = a\\q\n",
+            "-f f user.email x",
+            128,
+            b"fatal: bad config line 2 in file f\n",
+        ),
+        (
+            b"",
+            "-f missing/f a.b c",
+            255,
+            b"error: could not lock config file missing/f: "
+            b"No such file or directory\n",
+        ),
+    ],
+)
+async def test_config_write_refuses_a_file_as_git_does(
+    git_rw, repo_path, before, form, code, err
+):
+    (repo_path / "f").write_bytes(before)
+    result = await git_rw.shell("git -C /repo config " + form)
+    assert (result.exit_code, result.stderr) == (code, err)
+    assert (repo_path / "f").read_bytes() == before
+    assert not (repo_path / "f.lock").exists()
+    assert not (repo_path / "missing").exists()
+
+
+@pytest.mark.asyncio
+async def test_config_write_waits_for_no_lock(git_rw, repo_path):
+    # git 2.47.3: a lock already there is another writer's.
+    (repo_path / ".git/config.lock").write_bytes(b"")
+    before = (repo_path / ".git/config").read_bytes()
+    result = await git_rw.shell("cd /repo && git config a.b c")
+    assert (result.exit_code, result.stderr) == (
+        255,
+        b"error: could not lock config file .git/config: File exists\n",
+    )
+    assert (repo_path / ".git/config").read_bytes() == before
+    assert (repo_path / ".git/config.lock").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "form, code, err",
     [
         (
@@ -243,6 +366,26 @@ async def test_config_writes_lines_as_git_does(git_rw, repo_path):
             129,
             b"error: options '--unset' and '--add' cannot be used together\n",
         ),
+        (
+            "--unset --value=x user.email",
+            129,
+            b"error: unknown option `value=x'\nusage: ",
+        ),
+        (
+            "--fixed-value user.email x",
+            129,
+            b"error: --fixed-value only applies with 'value-pattern'\n",
+        ),
+        (
+            "set --fixed-value user.email x",
+            128,
+            b"fatal: --fixed-value only applies with --value=<pattern>\n",
+        ),
+        (
+            "$'a.b\\nc.d' x",
+            1,
+            b"error: invalid key (newline): a.b\nc.d\n",
+        ),
     ],
 )
 async def test_config_write_refusals_match_git(
@@ -266,6 +409,7 @@ async def test_config_write_refusals_match_git(
         "--unset user.name old",
         "--bool core.bare yes",
         "rename-section core other",
+        "--worktree x.y z",
     ],
 )
 async def test_config_writes_mirage_lacks_are_refused(git_rw, repo_path, form):

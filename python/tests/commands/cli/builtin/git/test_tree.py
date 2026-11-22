@@ -130,8 +130,8 @@ def test_status_only_reads():
 
 
 def test_every_verb_that_can_change_the_repository_is_a_write():
-    # A verb that writes only under some of its options (branch,
-    # symbolic-ref, hash-object -w) still counts, since policy and the
+    # A verb that writes only under some of its options or operands
+    # (branch, config, symbolic-ref, hash-object -w) still counts, since policy and the
     # cache read one answer for the whole verb.
     assert {
         path for path, handler in GIT.handlers.items() if handler.write
@@ -141,6 +141,7 @@ def test_every_verb_that_can_change_the_repository_is_a_write():
         "checkout",
         "clone",
         "commit",
+        "config",
         "fetch",
         "hash-object",
         "init",

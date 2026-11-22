@@ -776,9 +776,9 @@ it('matches native remote URLs and tracking branches', async () => {
   }
 })
 
-// A verb that writes only under some of its options (branch, symbolic-ref,
-// hash-object -w) still counts, since policy and the cache read one answer
-// for the whole verb.
+// A verb that writes only under some of its options or operands (branch,
+// config, symbolic-ref, hash-object -w) still counts, since policy and the
+// cache read one answer for the whole verb.
 it('declares every verb that can change the repository a write', () => {
   const writes = Object.entries(GIT.handlers)
     .filter(([, handler]) => handler.write)
@@ -790,6 +790,7 @@ it('declares every verb that can change the repository a write', () => {
     'checkout',
     'clone',
     'commit',
+    'config',
     'fetch',
     'hash-object',
     'init',

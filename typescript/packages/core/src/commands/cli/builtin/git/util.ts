@@ -61,8 +61,8 @@ const VALUE_ESCAPES: Readonly<Record<string, string>> = {
   '"': '\\"',
   '\\': '\\\\',
 }
-export const QUOTED_HEADER = /^\s*\[([A-Za-z0-9.-]+)\s+"((?:[^"\\\n]|\\.)*)"\s*\]/
-export const DOTTED_HEADER = /^\s*\[([A-Za-z0-9-]+)\.([^\]\s]*)\]/
+const QUOTED_HEADER = /^\s*\[([A-Za-z0-9.-]+)\s+"((?:[^"\\\n]|\\.)*)"\s*\]/
+const DOTTED_HEADER = /^\s*\[([A-Za-z0-9-]+)\.([^\]\s]*)\]/
 
 const ENC = new TextEncoder()
 
@@ -432,6 +432,7 @@ export function parseConfigKey(
   if (name === '') throw new error(`key does not contain variable name: ${key}`)
   if (!/^[A-Za-z0-9-]+$/.test(section) || !/^[A-Za-z][A-Za-z0-9-]*$/.test(name))
     throw new error(`invalid key: ${key}`)
+  if (key.slice(first + 1, last).includes('\n')) throw new error(`invalid key (newline): ${key}`)
   return `${section.toLowerCase()}${key.slice(first, last)}.${name.toLowerCase()}`
 }
 
@@ -543,7 +544,7 @@ export function configSection(
  */
 export function configValue(value: string): string {
   const body = value.replace(/[\n\t"\\]/g, (ch) => VALUE_ESCAPES[ch] ?? ch)
-  return value.startsWith(' ') || value.endsWith(' ') || /[;#]/.test(value) ? `"${body}"` : body
+  return value.startsWith(' ') || value.endsWith(' ') || /[;#\r]/.test(value) ? `"${body}"` : body
 }
 
 /**

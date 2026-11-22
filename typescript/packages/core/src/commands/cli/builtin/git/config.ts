@@ -17,24 +17,29 @@ import { IOResult } from '../../../../io/types.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { type PosixRegex, posixRegex } from '../../../../rs/regex.ts'
 import { byteView, decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
-import { PathSpec } from '../../../../types.ts'
+import { strerrorOf } from '../../../../errors/fs.ts'
+import { posixPhrase } from '../../../../errors/posix.ts'
+import { FileType, PathSpec } from '../../../../types.ts'
+import type { Files } from '../../../../workspace/files.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
+import { CommandSpec } from '../../../spec/types.ts'
+import { gitOptionRefusal } from '../../refusal.ts'
 import {
   BadConfigValueError,
   BadNumericConfigError,
   ConfigKeyError,
   ConfigUsageError,
+  FATAL_EXIT,
   GitError,
+  UsageError,
 } from './errors.ts'
 import { configLines } from './fs.ts'
-import { readOptional, writeFile } from './io.ts'
+import { exists, readOptional, removeFile, statOf } from './io.ts'
 import { inside } from './session.ts'
 import type { RepoLocation } from './types.ts'
 import {
   commandLineConfig,
-  DOTTED_HEADER,
-  QUOTED_HEADER,
   WIDE_INT_BITS,
   configInt,
   configValue,
@@ -55,7 +60,11 @@ const READING_ACTIONS = ['list', 'get', 'get_all', 'get_regexp']
 const WRITING_ACTIONS = ['add', 'unset']
 const NOTHING_TO_CHANGE_EXIT = 5
 const WRITE_KEY_EXIT = 2
-const PLAIN_HEADER = /^\s*\[([A-Za-z0-9-]+)\s*\]/
+const INVALID_FILE_EXIT = 3
+const LOCK_EXIT = 255
+const BOM = '\ufeff'
+const SECTION_CHARS = /[A-Za-z0-9.-]/
+const ESCAPED = '"\\ntb'
 // The value types mirage renders; git's others paint or read dates.
 const VALUE_KINDS = ['bool', 'int', 'bool-or-int', 'path']
 const OTHER_VALUE_KINDS = ['bool-or-str', 'color', 'expiry-date']
@@ -145,12 +154,7 @@ async function localVariables(
 ): Promise<Variable[]> {
   const path = location.commondir.join('config')
   const data = await readOptional(requireVfs(ctx), path)
-  const ordinary = location.commondir.virtual === `${location.worktree.virtual}/.git`
-  const start = startPoint(fl).virtual
-  const inside =
-    start === location.worktree.virtual || start.startsWith(`${location.worktree.virtual}/`)
-  const label = ordinary && inside ? '.git/config' : path.rawPath
-  return parsed(data ?? new Uint8Array(), SCOPE_LOCAL, `file:${label}`)
+  return parsed(data ?? new Uint8Array(), SCOPE_LOCAL, `file:${localLabel(fl, location, path)}`)
 }
 
 /**
@@ -307,73 +311,188 @@ function regexRefused(message: string): CommandFnResult {
  * without case (the older `[section.sub]` spelling). */
 type Block = readonly [string, string | null, boolean]
 
-/** One line of a config file, as the writer reads it: `end` is one past its
- * last physical line, since a value continued by a backslash runs on. */
+/**
+ * One line of a config file, as the writer reads it: `end` is one past its
+ * last physical line, since a value continued by a backslash runs on. A
+ * variable can share a header's line, and `headerEnd` is where that header
+ * ends on it; `noted` is a header with a comment after it.
+ */
 interface ConfigLine {
   readonly start: number
   readonly end: number
-  readonly header?: Block
+  readonly header?: Block | undefined
   readonly noted?: boolean
   readonly name?: string
   readonly comment?: boolean
+  readonly headerEnd?: number
 }
 
-/** A header line's block and whether more follows it on the line. */
-function headerOf(line: string): [Block, boolean] {
-  const quoted = QUOTED_HEADER.exec(line)
-  const dotted = DOTTED_HEADER.exec(line)
-  const plain = PLAIN_HEADER.exec(line)
-  let block: Block
-  let end: number
-  if (quoted !== null) {
-    block = [(quoted[1] ?? '').toLowerCase(), (quoted[2] ?? '').replace(/\\(.)/g, '$1'), false]
-    end = quoted[0].length
-  } else if (dotted !== null) {
-    block = [(dotted[1] ?? '').toLowerCase(), (dotted[2] ?? '').toLowerCase(), true]
-    end = dotted[0].length
-  } else if (plain !== null) {
-    block = [(plain[1] ?? '').toLowerCase(), null, false]
-    end = plain[0].length
-  } else return [['', null, false], true]
-  return [block, line.slice(end).trim() !== '']
+/** The file's physical lines, each with its ending; only LF ends one. */
+function physicalLines(text: string): string[] {
+  const parts = text.split('\n')
+  const lines = parts.slice(0, -1).map((part) => `${part}\n`)
+  const last = parts.at(-1) ?? ''
+  return last === '' ? lines : [...lines, last]
 }
 
-/** The file's lines, a continued value joined to the line it opens. */
-function configLinesOf(raw: readonly string[]): ConfigLine[] {
+/** A physical line without its ending, LF or CR LF. */
+function lineText(line: string): string {
+  if (!line.endsWith('\n')) return line
+  const body = line.slice(0, -1)
+  return body.endsWith('\r') ? body.slice(0, -1) : body
+}
+
+/** The header whose `[` is at `text[at]` and where it ends, or the name git
+ * read before refusing it. */
+function headerAt(text: string, at: number): [Block, number] | string {
+  let end = at + 1
+  while (end < text.length && SECTION_CHARS.test(text[end] ?? '')) end += 1
+  const name = text.slice(at + 1, end).toLowerCase()
+  if (text[end] === ']') {
+    if (name === '') return name
+    const dot = name.indexOf('.')
+    return [
+      dot === -1 ? [name, null, false] : [name.slice(0, dot), name.slice(dot + 1), true],
+      end + 1,
+    ]
+  }
+  const spaced = end
+  while (text[end] === ' ' || text[end] === '\t') end += 1
+  if (name === '' || end === spaced || text[end] !== '"') return name
+  let sub = ''
+  end += 1
+  while (end < text.length && text[end] !== '"') {
+    if (text[end] === '\\') end += 1
+    sub += text[end] ?? ''
+    end += 1
+  }
+  if (text[end + 1] !== ']') return `${name}.${sub}`
+  return [[name, sub, false], end + 2]
+}
+
+/**
+ * Where the value at `raw[at]` from `start` ends, one past the last line read,
+ * and whether git reads it. A backslash ending a line runs the value on,
+ * unless a comment holds it; `\"`, `\\`, `\n`, `\t` and `\b` are the only other
+ * escapes, and a quote must close on its line.
+ */
+function valueEnd(raw: readonly string[], at: number, start: number): [number, boolean] {
+  let quoted = false
+  for (;;) {
+    const line = raw[at] ?? ''
+    const ended = line.endsWith('\n')
+    const text = lineText(line)
+    let index = start
+    let runsOn = false
+    while (index < text.length) {
+      const char = text[index]
+      if (char === '\\') {
+        if (index + 1 === text.length) {
+          runsOn = true
+          break
+        }
+        if (!ESCAPED.includes(text[index + 1] ?? '')) return [at + 1, false]
+        index += 2
+        continue
+      }
+      if (char === '"') quoted = !quoted
+      else if (!quoted && (char === '#' || char === ';')) break
+      index += 1
+    }
+    if (runsOn && ended && at + 1 < raw.length) {
+      at += 1
+      start = 0
+      continue
+    }
+    return [at + 1, !quoted || runsOn]
+  }
+}
+
+/** Where the text from `at` resumes past the characters `skipped` holds. */
+function skipping(text: string, at: number, skipped: string): number {
+  let index = at
+  while (index < text.length && skipped.includes(text[index] ?? '')) index += 1
+  return index
+}
+
+/**
+ * The file's lines as git reads them, or its refusal of the file. A header can
+ * share its line with a comment or with one variable, and a value continued by
+ * a backslash takes the lines it runs on. A header git cannot read is refused
+ * by name; any other line git cannot read, by number (pinned against git
+ * 2.47.3).
+ */
+function configLinesOf(raw: readonly string[], shown: string): ConfigLine[] | IOResult {
   const out: ConfigLine[] = []
   let at = 0
   while (at < raw.length) {
-    const line = raw[at] ?? ''
-    const text = line.trim()
-    if (text.startsWith('[')) {
-      const [header, noted] = headerOf(line)
-      out.push({ start: at, end: at + 1, header, noted })
+    const text = lineText(raw[at] ?? '')
+    let index = skipping(text, at === 0 && text.startsWith(BOM) ? BOM.length : 0, ' \t\r\v\f')
+    let header: Block | undefined
+    let headerEnd = 0
+    while (text[index] === '[') {
+      const found = headerAt(text, index)
+      if (typeof found === 'string')
+        return new IOResult({
+          exitCode: INVALID_FILE_EXIT,
+          stderr: encodeText(
+            `error: invalid section name '${found}'\nerror: invalid config file ${shown}\n`,
+          ),
+        })
+      ;[header, headerEnd] = found
+      index = skipping(text, headerEnd, ' \t')
+    }
+    const rest = text.slice(index)
+    if (rest === '' || rest.startsWith('#') || rest.startsWith(';')) {
+      out.push({
+        start: at,
+        end: at + 1,
+        header,
+        noted: header !== undefined && rest !== '',
+        comment: header === undefined && rest !== '',
+      })
       at += 1
       continue
     }
-    if (text === '' || text.startsWith('#') || text.startsWith(';')) {
-      out.push({ start: at, end: at + 1, comment: text !== '' })
-      at += 1
-      continue
+    let end = index
+    while (end < text.length && /[A-Za-z0-9-]/.test(text[end] ?? '')) end += 1
+    const name = text.slice(index, end).toLowerCase()
+    const after = skipping(text, end, ' \t')
+    let finish = at + 1
+    let readable = /^[A-Za-z]/.test(rest)
+    if (readable && after < text.length) {
+      readable = text[after] === '='
+      if (readable) [finish, readable] = valueEnd(raw, at, after + 1)
     }
-    let end = at + 1
-    let body = line.replace(/\r?\n$/, '')
-    while (body.endsWith('\\') && end < raw.length) {
-      body = (raw[end] ?? '').replace(/\r?\n$/, '')
-      end += 1
-    }
-    out.push({ start: at, end, name: (text.split('=')[0] ?? '').trim().toLowerCase() })
-    at = end
+    if (!readable)
+      return new IOResult({
+        exitCode: FATAL_EXIT,
+        stderr: encodeText(`fatal: bad config line ${String(finish)} in file ${shown}\n`),
+      })
+    out.push({ start: at, end: finish, header, name, headerEnd })
+    at = finish
   }
   return out
 }
 
-/** Whether a header opens the block a name lives in. */
-function inBlock(block: Block, section: string, subsection: string | null): boolean {
+/**
+ * Whether a header opens the block a name lives in. A name matches the
+ * subsection exactly, the older spelling's lowercased one included; placing a
+ * new name, that spelling compares without case (pinned against git 2.47.3).
+ */
+function inBlock(
+  block: Block,
+  section: string,
+  subsection: string | null,
+  placing = false,
+): boolean {
   const [name, sub, caseless] = block
   if (name !== section || (sub === null) !== (subsection === null)) return false
   if (sub === null || subsection === null) return true
-  return sub === (caseless ? subsection.toLowerCase() : subsection)
+  return (
+    sub ===
+    (caseless && placing ? subsection.replace(/[A-Z]/g, (ch) => ch.toLowerCase()) : subsection)
+  )
 }
 
 /**
@@ -382,13 +501,15 @@ function inBlock(block: Block, section: string, subsection: string | null): bool
  * variable of the last block it belongs in, or in a new block at the end,
  * spelled as typed. Taking the last variable out of a block takes the block
  * too, with the blank lines around it, unless a comment is there or the next
- * block is the same one (pinned against git 2.47.3).
+ * block is the same one. A file git cannot read is left as it is (pinned
+ * against git 2.47.3).
  */
 function configEdit(
   text: string,
   key: string,
   value: string | null,
   adding: boolean,
+  shown: string,
 ): string | IOResult {
   const dot = key.indexOf('.')
   const section = key.slice(0, dot)
@@ -398,18 +519,20 @@ function configEdit(
   const variable = rest.slice(last + 1)
   const wanted = section.toLowerCase()
   const name = variable.toLowerCase()
-  const raw = text.split(/(?<=\n)/).filter((line) => line !== '')
-  const lines = configLinesOf(raw)
-  let block: Block | null = null
+  const raw = physicalLines(text)
+  const lines = configLinesOf(raw, shown)
+  if (lines instanceof IOResult) return lines
+  let block: Block | undefined
   const owners: number[] = []
   const matches: number[] = []
-  lines.forEach((line, index) => {
+  for (const [index, line] of lines.entries()) {
     if (line.header !== undefined) {
       block = line.header
-      if (inBlock(block, wanted, subsection)) owners.push(index)
-    } else if (line.name === name && block !== null && inBlock(block, wanted, subsection))
+      if (inBlock(block, wanted, subsection, true)) owners.push(index)
+    }
+    if (line.name === name && block !== undefined && inBlock(block, wanted, subsection))
       matches.push(index)
-  })
+  }
   if (value === null) {
     if (matches.length === 0) return new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })
     if (matches.length > 1)
@@ -432,7 +555,11 @@ function configEdit(
       })
     const found = lines[matches[0] ?? 0]
     if (found === undefined) return text
-    return [...raw.slice(0, found.start), entry, ...raw.slice(found.end)].join('')
+    const head =
+      found.header !== undefined
+        ? [`${(raw[found.start] ?? '').slice(0, found.headerEnd ?? 0)}\n`]
+        : []
+    return [...raw.slice(0, found.start), ...head, entry, ...raw.slice(found.end)].join('')
   }
   const owner = owners.at(-1)
   if (owner !== undefined) {
@@ -444,23 +571,38 @@ function configEdit(
     if (!(raw[after - 1] ?? '\n').endsWith('\n')) entry = `\n${entry}`
     return [...raw.slice(0, after), entry, ...raw.slice(after)].join('')
   }
-  const head =
+  const opening =
     subsection === null
       ? `[${section}]\n`
       : `[${section} "${subsection.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"]\n`
-  return (text === '' || text.endsWith('\n') ? text : `${text}\n`) + head + entry
+  if (text === BOM) return opening + entry + text
+  return (text === '' || text.endsWith('\n') ? text : `${text}\n`) + opening + entry
 }
 
-/** The physical lines with one variable out, and its block if that leaves it
- * empty. */
+/**
+ * The physical lines with one variable out, and its block if that leaves it
+ * empty. A variable beside its header leaves the header alone on its line. A
+ * block taken from the top of a file that opens with a byte order mark leaves
+ * the mark and a line end.
+ */
 function without(raw: readonly string[], lines: readonly ConfigLine[], index: number): string[] {
   const found = lines[index]
   if (found === undefined) return [...raw]
-  const kept = (): string[] => raw.filter((_, at) => at < found.start || at >= found.end)
-  let head = -1
-  for (let at = 0; at < index; at++) if (lines[at]?.header !== undefined) head = at
+  let head = index
+  let kept: string[]
+  if (found.header !== undefined)
+    kept = [
+      ...raw.slice(0, found.start),
+      `${(raw[found.start] ?? '').slice(0, found.headerEnd ?? 0)}\n`,
+      ...raw.slice(found.end),
+    ]
+  else {
+    head = -1
+    for (let at = 0; at < index; at++) if (lines[at]?.header !== undefined) head = at
+    kept = [...raw.slice(0, found.start), ...raw.slice(found.end)]
+  }
   const opening = lines[head]
-  if (opening === undefined || opening.noted === true) return kept()
+  if (opening === undefined || opening.noted === true) return kept
   let after = lines.length
   for (let at = head + 1; at < lines.length; at++)
     if (lines[at]?.header !== undefined) {
@@ -486,45 +628,89 @@ function without(raw: readonly string[], lines: readonly ConfigLine[], index: nu
     next.every((part, at) => part === opening.header?.[at])
   if (
     inner.some((line) => line.name !== undefined || line.comment === true) ||
+    (head !== index && opening.name !== undefined) ||
     before?.comment === true ||
     same
   )
-    return kept()
+    return kept
   const first = before?.end ?? 0
   const lastLine = lines[after]?.start ?? raw.length
-  return [...raw.slice(0, first), ...raw.slice(lastLine)]
+  const mark = first === 0 && (raw[0] ?? '').startsWith(BOM) ? [`${BOM}\n`] : []
+  return [...raw.slice(0, first), ...mark, ...raw.slice(lastLine)]
 }
 
 /**
- * The one file a write changes, as git picks it. `--global` writes
- * `~/.gitconfig`, or the XDG file when only that one exists.
+ * The repository's own config as git names it: from the top of the work tree
+ * it moved to, so an ordinary checkout says `.git/config` from anywhere inside
+ * it.
  */
-async function configPath(ctx: Context, fl: FlagView): Promise<PathSpec> {
+function localLabel(fl: FlagView, location: RepoLocation, path: PathSpec): string {
+  const ordinary = location.commondir.virtual === `${location.worktree.virtual}/.git`
+  const start = startPoint(fl).virtual
+  const within =
+    start === location.worktree.virtual || start.startsWith(`${location.worktree.virtual}/`)
+  return ordinary && within ? '.git/config' : path.rawPath
+}
+
+/**
+ * The one file a write changes, as git picks it, and its name as git says it.
+ * `--global` writes `~/.gitconfig`, or the XDG file when only that one exists.
+ */
+async function configPath(ctx: Context, fl: FlagView): Promise<[PathSpec, string]> {
   const named = fl.asStr('file')
-  if (named !== undefined) return startPoint(fl).join(named)
+  if (named !== undefined) return [startPoint(fl).join(named), named]
   const env = ctx.env ?? {}
   if (fl.asBool('global')) {
     const override = env.GIT_CONFIG_GLOBAL
-    if (override !== undefined) return PathSpec.fromStrPath(override, undefined, '/')
+    if (override !== undefined) return [PathSpec.fromStrPath(override, undefined, '/'), override]
     const home = env.HOME ?? ''
     if (!home) throw new GitError('$HOME not set')
-    const target = PathSpec.fromStrPath(`${home}/.gitconfig`, undefined, '/')
+    const target = `${home}/.gitconfig`
     const configured = env.XDG_CONFIG_HOME ?? ''
-    const xdg = PathSpec.fromStrPath(
-      `${configured === '' ? `${home}/.config` : configured}/git/config`,
-      undefined,
-      '/',
-    )
+    const xdg = `${configured === '' ? `${home}/.config` : configured}/git/config`
     const vfs = requireVfs(ctx)
-    if ((await readOptional(vfs, target)) === null && (await readOptional(vfs, xdg)) !== null)
-      return xdg
-    return target
+    const shown =
+      (await readOptional(vfs, PathSpec.fromStrPath(target, undefined, '/'))) === null &&
+      (await readOptional(vfs, PathSpec.fromStrPath(xdg, undefined, '/'))) !== null
+        ? xdg
+        : target
+    return [PathSpec.fromStrPath(shown, undefined, '/'), shown]
   }
-  if (fl.asBool('system'))
-    return PathSpec.fromStrPath(env.GIT_CONFIG_SYSTEM ?? SYSTEM_CONFIG, undefined, '/')
+  if (fl.asBool('system')) {
+    const shown = env.GIT_CONFIG_SYSTEM ?? SYSTEM_CONFIG
+    return [PathSpec.fromStrPath(shown, undefined, '/'), shown]
+  }
   const location = await inside(ctx, fl)
   if (location === null) throw new GitError('not in a git directory')
-  return location.commondir.join('config')
+  const path = location.commondir.join('config')
+  return [path, localLabel(fl, location, path)]
+}
+
+/**
+ * Take a config file's lock and hold it, or git's refusal. git refuses when
+ * the file's folder is missing, when the lock is already there (another writer
+ * holds it) or when it cannot be made, on a read-only mount among others. The
+ * look and the create are two ops, since the dispatcher has no exclusive
+ * create.
+ */
+async function holdLock(vfs: Files, lock: PathSpec, shown: string): Promise<IOResult | null> {
+  const folder = await statOf(vfs, lock.parent)
+  let reason: string
+  if (folder === null) reason = posixPhrase('ENOENT')
+  else if (folder.type !== FileType.DIRECTORY) reason = posixPhrase('ENOTDIR')
+  else if (await exists(vfs, lock)) reason = posixPhrase('EEXIST')
+  else {
+    try {
+      await vfs.write(lock, new Uint8Array())
+      return null
+    } catch (err) {
+      reason = strerrorOf(err)
+    }
+  }
+  return new IOResult({
+    exitCode: LOCK_EXIT,
+    stderr: encodeText(`error: could not lock config file ${shown}: ${reason}\n`),
+  })
 }
 
 /** Refuse a line naming more than one config file. */
@@ -534,11 +720,25 @@ function oneFile(fl: FlagView): void {
     throw new ConfigUsageError('only one config file at a time')
 }
 
+/** Refuse `--all` and `--value` on a write outside `set` and `unset`, whose
+ * options they are: git does not know them there. */
+function noSelector(ctx: Context, fl: FlagView): void {
+  if (!fl.asBool('all') && fl.asStr('value') === undefined) return
+  const argv = ctx.argv ?? []
+  const word =
+    argv
+      .slice(argv.indexOf('config') + 1)
+      .find((text) => text === '--all' || text.startsWith('--value')) ?? '--all'
+  const spec = ctx.spec ?? new CommandSpec({ name: '' })
+  throw new UsageError(...gitOptionRefusal(word, spec.name, spec))
+}
+
 /**
  * A set, `--add` or unset, or null when the line reads. `set`, `unset`,
- * `--add`, `--unset` and the two-word set change one file. What else writes
- * (a value pattern, `--all`, a type, `--replace-all`, the section subcommands,
- * `edit`) stays refused.
+ * `--add`, `--unset` and the two-word set change one file, holding its lock
+ * from the read to the write. What else writes (a value pattern, `--all`, a
+ * type, `--replace-all`, `--worktree`, the section subcommands, `edit`) stays
+ * refused.
  */
 async function configWrite(
   ctx: Context,
@@ -557,26 +757,38 @@ async function configWrite(
   if (actions.length > 0 && writes.length === 0) return null
   const subcommand = actions.length === 0 ? words[0] : undefined
   if (subcommand === 'list' || subcommand === 'get') return null
+  const adding = writes.length === 1 && writes[0] === 'add'
   let value: string | null
   if (subcommand === 'set' || subcommand === 'unset') {
     words = words.slice(1)
     const count = subcommand === 'set' ? 2 : 1
     if (words.length !== count) throw new ConfigUsageError(usageOf(count, count))
     if (fl.asBool('all') || fl.asStr('value') !== undefined) return readOnly()
+    if (fl.asBool('fixed_value'))
+      throw new GitError(
+        subcommand === 'set'
+          ? '--fixed-value only applies with --value=<pattern>'
+          : "--fixed-value only applies with 'value-pattern'",
+      )
     value = subcommand === 'set' ? (words[1] ?? '') : null
   } else if (subcommand !== undefined && WRITING_SUBCOMMANDS.includes(subcommand)) return readOnly()
-  else if (writes.length === 1 && writes[0] === 'add') {
-    if (words.length !== 2) throw new ConfigUsageError(usageOf(2, 2))
-    value = words[1] ?? ''
-  } else if (writes.length === 1 && writes[0] === 'unset') {
-    if (words.length < 1 || words.length > 2) throw new ConfigUsageError(usageOf(1, 2))
-    if (words.length === 2) return readOnly()
-    value = null
-  } else if (words.length === 2) value = words[1] ?? ''
-  else if (words.length > 2) return readOnly()
-  else return null
+  else if (writes.length === 0 && words.length < 2) return null
+  else {
+    noSelector(ctx, fl)
+    if (adding) {
+      if (words.length !== 2) throw new ConfigUsageError(usageOf(2, 2))
+      value = words[1] ?? ''
+    } else if (writes.length === 1 && writes[0] === 'unset') {
+      if (words.length < 1 || words.length > 2) throw new ConfigUsageError(usageOf(1, 2))
+      if (words.length === 2) return readOnly()
+      value = null
+    } else if (words.length === 2) value = words[1] ?? ''
+    else return readOnly()
+    if (fl.asBool('fixed_value'))
+      throw new ConfigUsageError("--fixed-value only applies with 'value-pattern'")
+  }
   oneFile(fl)
-  if (valueKind(fl) !== null) return readOnly()
+  if (valueKind(fl) !== null || fl.asBool('worktree')) return readOnly()
   const key = words[0] ?? ''
   try {
     parseConfigKey(key)
@@ -588,15 +800,21 @@ async function configWrite(
       new IOResult({ exitCode: WRITE_KEY_EXIT, stderr: encodeText(`error: ${err.message}\n`) }),
     ]
   }
-  const path = await configPath(ctx, fl)
+  const [path, shown] = await configPath(ctx, fl)
   const vfs = requireVfs(ctx)
-  const data = await readOptional(vfs, path)
-  if (data === null && value === null)
-    return [null, new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })]
-  const adding = writes.length === 1 && writes[0] === 'add'
-  const edited = configEdit(data === null ? '' : decodeText(data), key, value, adding)
-  if (edited instanceof IOResult) return [null, edited]
-  await writeFile(vfs, path, encodeText(edited))
+  const lock = PathSpec.fromStrPath(`${path.dotted ?? path.virtual}.lock`, undefined, '/')
+  const refused = await holdLock(vfs, lock, shown)
+  if (refused !== null) return [null, refused]
+  try {
+    const data = await readOptional(vfs, path)
+    if (data === null && value === null)
+      return [null, new IOResult({ exitCode: NOTHING_TO_CHANGE_EXIT })]
+    const edited = configEdit(data === null ? '' : decodeText(data), key, value, adding, shown)
+    if (edited instanceof IOResult) return [null, edited]
+    await vfs.write(path, encodeText(edited))
+  } finally {
+    await removeFile(vfs, lock)
+  }
   return [null, new IOResult()]
 }
 

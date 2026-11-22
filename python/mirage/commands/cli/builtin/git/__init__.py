@@ -2468,7 +2468,7 @@ GIT = CLI(
         "stash show": CLIHandler(fn=verb(stash_show)),
         "version": CLIHandler(fn=verb(version)),
         "remote": CLIHandler(fn=verb(remote)),
-        "config": CLIHandler(fn=verb(config)),
+        "config": CLIHandler(fn=verb(config), write=True),
         "merge-base": CLIHandler(fn=verb(merge_base)),
         "show-ref": CLIHandler(fn=verb(show_ref)),
         "symbolic-ref": CLIHandler(

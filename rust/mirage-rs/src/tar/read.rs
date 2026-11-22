@@ -790,7 +790,7 @@ impl Run<'_, '_> {
             .map(<[u8]>::to_vec)
             .collect();
         match &self.config.top {
-            Some(top) if !parts.is_empty() => {
+            Some(top) => {
                 let top: Vec<Vec<u8>> = top
                     .split(|&b| b == b'/')
                     .filter(kept)

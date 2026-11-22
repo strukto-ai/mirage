@@ -1704,7 +1704,7 @@ export const GIT = new CLI({
     'stash show': new CLIHandler({ fn: verb(stashShow) }),
     version: new CLIHandler({ fn: verb(version) }),
     remote: new CLIHandler({ fn: verb(remote) }),
-    config: new CLIHandler({ fn: verb(config) }),
+    config: new CLIHandler({ fn: verb(config), write: true }),
     'merge-base': new CLIHandler({ fn: verb(mergeBase) }),
     'show-ref': new CLIHandler({ fn: verb(showRef) }),
     'symbolic-ref': new CLIHandler({ fn: verb(symbolicRef, symbolicRefReadOnly), write: true }),

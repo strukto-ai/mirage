@@ -205,6 +205,31 @@ fn one_top_level_puts_members_under_one_folder() {
 }
 
 #[test]
+fn one_top_level_takes_a_name_left_empty() {
+    // GNU tar 1.35 on debian:stable-slim: `./`, or a name
+    // --strip-components empties, is the folder itself.
+    let mut host = Host::default();
+    let members = json!([{"name": "./", "kind": "dir", "mtime": 978_307_200}]);
+    let config = json!({"archive": "a.tar", "output": "a.tar", "members": members});
+    assert_eq!(run(&mut host, config), (0, String::new(), String::new()));
+    let tar = host.files["a.tar"].clone();
+    let typed = json!([["extract", ""], ["one_top_level", "top"]]);
+    let options = json!({"mode": "extract", "typed": typed});
+    assert_eq!(read(&mut host, &tar, options).0, 0);
+    assert_eq!(host.mtimes["/out/top"], 978_307_200);
+    let mut host = Host::default();
+    let typed = json!([
+        ["extract", ""],
+        ["one_top_level", "top"],
+        ["strip_components", "2"]
+    ]);
+    let tar = archive("x/f", (0, b""));
+    let options = json!({"mode": "extract", "typed": typed});
+    assert_eq!(read(&mut host, &tar, options).0, 0);
+    assert_eq!(host.files["/out/top"], b"hello\n");
+}
+
+#[test]
 fn one_top_level_names_the_folder_after_the_archive() {
     // GNU tar 1.35 on debian:stable-slim, `tar -xf NAME --one-top-level`.
     for (name, top) in [

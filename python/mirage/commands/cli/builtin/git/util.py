@@ -418,6 +418,8 @@ def parse_config_key(key: str, error: type[GitError] = ConfigKeyError) -> str:
         )
     ):
         raise error(f"invalid key: {key}")
+    if "\n" in subsection:
+        raise error(f"invalid key (newline): {key}")
     middle = f".{subsection}" if dot else ""
     return f"{section.lower()}{middle}.{name.lower()}"
 
@@ -629,7 +631,8 @@ def config_value(value: str) -> str:
     """A value the way git's config writer spells it.
 
     ``"``, ``\\``, newline and tab are escaped, and the whole is quoted
-    when it starts or ends with a space or holds ``;`` or ``#``.
+    when it starts or ends with a space or holds ``;``, ``#`` or a
+    carriage return, which git would otherwise read as a line end.
 
     Args:
         value (str): the value.
@@ -638,7 +641,7 @@ def config_value(value: str) -> str:
     if (
         value.startswith(" ")
         or value.endswith(" ")
-        or any(ch in value for ch in ";#")
+        or any(ch in value for ch in ";#\r")
     ):
         return f'"{body}"'
     return body
