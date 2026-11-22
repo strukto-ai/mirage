@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import posixpath
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -36,6 +35,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     decoded,
     pathspec_patterns,
     pathspec_selects,
+    pattern_roots,
     repo_relative,
     visible_entries,
 )
@@ -446,9 +446,9 @@ async def grep(
     mounts = mounts_of(ctx)
     # The work tree's files no line can match in, as its mount's search
     # rules them out for grep: one that lists the files without a match,
-    # or selects the lines that do not, reads every file. The search is
-    # asked about the deepest directory every selected file sits under, so
-    # a narrow pathspec searches no more than its own folder.
+    # or selects the lines that do not, reads every file. As grep's
+    # operands are, a directory a pathspec names is what the search is
+    # asked about, and a file one names is read whatever a search says.
     misses: Callable[[PathSpec], Awaitable[bool]] | None = None
     if (
         not sources[0][0]
@@ -459,27 +459,20 @@ async def grep(
         asked = search_terms(
             None, flags.needles, False, False, False, False, flags.ignore_case
         )
-        above: list[str] = []
-        for path, (mode, _) in sources[0][1].items() if asked else ():
-            chosen = path.decode("utf-8", "surrogateescape")
-            if mode in (REGULAR, EXECUTABLE) and (
-                not chosen or pathspec_selects(chosen, specs)
-            ):
-                above.append(posixpath.dirname(chosen))
-        shared = posixpath.commonpath(above) if above else ""
-        scope = [
-            location.worktree.join(shared) if shared else location.worktree
-        ]
-        if (
-            asked is not None
-            and above
-            and await is_directory(ctx.vfs, scope[0])
-        ):
+        scopes: list[PathSpec] = []
+        named: set[str] = set()
+        for root in (pattern_roots(specs) or ("",)) if asked else ():
+            at = location.worktree.join(root) if root else location.worktree
+            if await is_directory(ctx.vfs, at):
+                scopes.append(at)
+            else:
+                named.add(at.virtual)
+        if asked is not None:
             misses = await ruled_out(
-                command_files(ctx, scope),
+                command_files(ctx, scopes),
                 ctx,
-                scope,
-                set(),
+                scopes,
+                named,
                 SearchTerms(
                     asked[0],
                     False,

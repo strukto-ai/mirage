@@ -541,12 +541,13 @@ describe('searches narrowed by the database', () => {
   })
 
   // The database is asked about the folder the search covers, no wider, and
-  // no file it rules out is opened.
+  // not at all for a file the line names; no file it rules out is opened.
   it.each([
-    ['git grep -n needle', ['b.txt', 'src/two.ts'], '/w/repo'],
-    ['git grep -n needle -- src', ['src/two.ts'], '/w/repo/src'],
-    ['git grep -n alpha', ['b.txt', 'd/c.txt', 'src/one.ts'], '/w/repo'],
-    ["ast-grep run -p 'needle($A)' .", ['src/two.ts'], '/w/repo'],
+    ['git grep -n needle', ['b.txt', 'src/two.ts'], ['/w/repo']],
+    ['git grep -n needle -- src', ['src/two.ts'], ['/w/repo/src']],
+    ['git grep -n needle -- a.txt', ['b.txt'], []],
+    ['git grep -n alpha', ['b.txt', 'd/c.txt', 'src/one.ts'], ['/w/repo']],
+    ["ast-grep run -p 'needle($A)' .", ['src/two.ts'], ['/w/repo']],
   ])('read only the files the database names: %s', async (line, skipped, scope) => {
     const vfs = new SqlVFS({ driver: new SqliteDriver() })
     const [ws] = await searched(vfs)
@@ -556,7 +557,7 @@ describe('searches narrowed by the database', () => {
       const ran = await ws.shell(`cd /w/repo && ${line}`)
       expect([ran.stderrText, ran.exitCode]).toEqual(['', 0])
       expect(ran.stdoutText).not.toBe('')
-      expect([...new Set(containing.mock.calls.map(([path]) => path.virtual))]).toEqual([scope])
+      expect([...new Set(containing.mock.calls.map(([path]) => path.virtual))]).toEqual(scope)
       const opened = new Set(read.mock.calls.map(([path]) => path.virtual))
       expect(skipped.filter((name) => opened.has(`/w/repo/${name}`))).toEqual([])
     } finally {

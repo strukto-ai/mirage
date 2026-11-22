@@ -1066,15 +1066,17 @@ async def test_a_search_narrowed_by_the_database_answers_as_a_full_read():
     [
         ("git grep -n needle", {"b.txt", "src/two.ts"}, "/w/repo"),
         ("git grep -n needle -- src", {"src/two.ts"}, "/w/repo/src"),
+        ("git grep -n needle -- a.txt", {"b.txt"}, None),
         ("git grep -n alpha", {"b.txt", "d/c.txt", "src/one.ts"}, "/w/repo"),
         ("ast-grep run -p 'needle($A)' .", {"src/two.ts"}, "/w/repo"),
     ],
 )
 async def test_a_search_reads_only_the_files_the_database_names(
-    line: str, skipped: set[str], scope: str
+    line: str, skipped: set[str], scope: str | None
 ):
     # The database is asked about the folder the search covers, no wider,
-    # and no file it rules out is opened.
+    # and not at all for a file the line names; no file it rules out is
+    # opened.
     vfs = SqlVFS(":memory:")
     ws, _ = await _searched(vfs)
     try:
@@ -1097,7 +1099,7 @@ async def test_a_search_reads_only_the_files_the_database_names(
         ran = await ws.shell(f"cd /w/repo && {line}")
         assert ran.exit_code == 0, ran.stderr
         assert ran.stdout
-        assert set(asked) == {scope}
+        assert set(asked) == ({scope} if scope else set())
         assert not {f"/w/repo/{name}" for name in skipped} & set(opened)
     finally:
         await ws.close()
