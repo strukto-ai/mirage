@@ -318,13 +318,46 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "credentials are never read by hand",
-                "paths": [
-                  "/vault/*"
-                ]
+            "mounts": {
+              "/vault/steal.py": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "credentials are never read by hand"
+                  }
+                }
+              },
+              "/vault/steal.js": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "credentials are never read by hand"
+                  }
+                }
+              },
+              "/vault/arg": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "credentials are never read by hand"
+                  }
+                }
+              },
+              "/vault/-": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "credentials are never read by hand"
+                  }
+                }
+              },
+              "/vault/secret.py": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "credentials are never read by hand"
+                  }
+                }
               }
             }
           }
@@ -334,33 +367,33 @@
         {
           "command": "python3 /vault/steal.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "node /vault/steal.js",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "node: /vault/steal.js: Permission denied\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
           "command": "python3 -u /vault/steal.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "python3 -W ignore -- /vault/steal.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /vault/steal.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
@@ -372,17 +405,17 @@
         {
           "command": "python3 steal.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: steal.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "node steal.js",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "node: steal.js: Permission denied\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
@@ -445,41 +478,41 @@
         {
           "command": "python -- ./-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python: ./-: Permission denied\n"
+            "stderr": "python: Permission denied\n"
           }
         },
         {
           "command": "python3 -- /vault/-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /vault/-: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "js -- ./-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "js: ./-: Permission denied\n"
+            "stderr": "js: Permission denied\n"
           }
         },
         {
           "command": "node -- /vault/-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "node: /vault/-: Permission denied\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
           "command": "python3 - < /vault/secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /vault/secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         }
       ]

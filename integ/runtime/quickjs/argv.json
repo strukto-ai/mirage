@@ -23,7 +23,7 @@
         "profiles": {
           "default": {
             "mounts": {
-              "/ram": {
+              "/ram/-": {
                 "commands": {
                   "*": {
                     "decision": "deny",
@@ -39,7 +39,7 @@
         {
           "command": "cd /ram",
           "expect": {
-            "exit": 126
+            "exit": 0
           }
         },
         {

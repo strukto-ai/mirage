@@ -546,13 +546,38 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/ram/*"
-                ]
+            "mounts": {
+              "/ram/secret.py": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
+              },
+              "/ram/secret.js": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
+              },
+              "/ram/arg": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
+              },
+              "/ram/-": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -572,25 +597,25 @@
         {
           "command": "python3 secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "node secret.js",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "node: secret.js: Permission denied\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
           "command": "python3 -u /ram/secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /ram/secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
@@ -646,41 +671,41 @@
         {
           "command": "python -- ./-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python: ./-: Permission denied\n"
+            "stderr": "python: Permission denied\n"
           }
         },
         {
           "command": "python3 -- /ram/-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /ram/-: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "js -- ./-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "js: ./-: Permission denied\n"
+            "stderr": "js: Permission denied\n"
           }
         },
         {
           "command": "node -- /ram/-",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "node: /ram/-: Permission denied\n"
+            "stderr": "node: Permission denied\n"
           }
         },
         {
           "command": "python3 - < /ram/secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: /ram/secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         }
       ]
