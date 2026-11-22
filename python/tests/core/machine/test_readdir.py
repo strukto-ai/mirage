@@ -138,7 +138,7 @@ async def test_tree_merges_every_machine_and_leaves_a_failure_to_the_walk():
     found = await tree(accessor, ["a", "b"], spec("/d"))
     assert found is not None
     assert sorted(found) == ["s/both", "x", "y"]
-    assert (found["s/both"].name, found["s/both"].size) == ("both", 2)
+    assert (found["s/both"].machine, found["s/both"].written) == ("b", 9000)
     gone = ScriptedMachine("gone", lambda line, data: failed(b"find: lost\n"))
     assert await tree(bound(a, gone), ["a", "gone"], spec("/d")) is None
 
@@ -172,7 +172,7 @@ async def test_tree_lists_nothing_below_a_name_whose_copy_shown_is_a_file():
     found = await tree(bound(a, b), ["a", "b"], spec("/d"))
     assert found is not None
     assert sorted(found) == ["x", "z"]
-    assert found["x"].size == 2
+    assert found["x"].machine == "b"
 
 
 @pytest.mark.asyncio
@@ -201,7 +201,7 @@ async def test_a_kernel_s_view_lists_as_the_command_s_machine_has_it():
     found = await tree(accessor, ["a", "b"], root)
     assert found is not None
     assert sorted(found) == ["proc", "proc/uptime"]
-    assert found["proc/uptime"].size == 1
+    assert found["proc/uptime"].machine == "a"
     token = bind_caller(current_caller().changed({"preferred_machine": "b"}))
     try:
         found = await tree(accessor, ["a", "b"], root)

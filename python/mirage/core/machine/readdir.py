@@ -17,7 +17,7 @@ import logging
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.place import chosen, kernel_view
-from mirage.core.machine.stat import entries, entry_stat
+from mirage.core.machine.stat import entries, holder_stat
 from mirage.core.machine.types import Holder
 from mirage.core.posix.types import PosixEntry
 from mirage.errors.fs import enotdir
@@ -118,29 +118,17 @@ async def readdir(
     if not chosen(accessor, tops).folder:
         raise enotdir(scope)
     merged = _merged(accessor, listing, listed, scope)
-    return [
-        entry_stat(name, _listed_entry(merged[name]))
-        for name in sorted(merged)
-    ]
+    return [holder_stat(name, merged[name]) for name in sorted(merged)]
 
 
-def _listed_entry(one: Holder) -> PosixEntry:
-    """The entry a listed copy was listed with.
-
-    Args:
-        one (Holder): a copy a listing found.
-    """
-    assert one.entry is not None
-    return one.entry
-
-
-async def _trees(
+async def tree(
     accessor: MachineAccessor, machines: list[str], path: PathSpec
 ) -> dict[str, Holder] | None:
     """The copy shown of every entry under a directory on the machines
-    that hold it, by its path there, from one find on each; None when a
-    machine's find fails or finds no directory, which leaves the walk to
-    readdir.
+    that hold it, by its path there, merged as a listing merges them,
+    from one find on each, where a walk sends a listing per directory.
+    None when a machine's find fails or finds no directory, which leaves
+    the walk to readdir, which reports it.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -166,42 +154,3 @@ async def _trees(
             return None
         listed.append(result[1:])
     return _merged(accessor, machines, listed, path)
-
-
-async def tree(
-    accessor: MachineAccessor, machines: list[str], path: PathSpec
-) -> dict[str, FileStat] | None:
-    """Every entry under a directory on the machines that hold it, merged
-    by path as a listing merges them, from one find on each, where a walk
-    sends a listing per directory. A machine whose find fails leaves the
-    walk to readdir, which reports it.
-
-    Args:
-        accessor (MachineAccessor): the mount's machines.
-        machines (list[str]): the machines holding the directory.
-        path (PathSpec): the directory.
-    """
-    merged = await _trees(accessor, machines, path)
-    if merged is None:
-        return None
-    return {
-        rel: entry_stat(rel.rsplit("/", 1)[-1], _listed_entry(one))
-        for rel, one in merged.items()
-    }
-
-
-async def tree_machines(
-    accessor: MachineAccessor, machines: list[str], path: PathSpec
-) -> dict[str, str] | None:
-    """The machine whose copy of each entry under a directory is the one
-    shown, by the entry's path there; None as ``tree`` answers it.
-
-    Args:
-        accessor (MachineAccessor): the mount's machines.
-        machines (list[str]): the machines holding the directory.
-        path (PathSpec): the directory.
-    """
-    merged = await _trees(accessor, machines, path)
-    if merged is None:
-        return None
-    return {rel: one.machine for rel, one in merged.items()}

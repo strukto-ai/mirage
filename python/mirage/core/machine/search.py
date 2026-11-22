@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.readdir import tree_machines
+from mirage.core.machine.readdir import tree
 from mirage.core.posix.search import (
     files_containing as posix_files_containing,
 )
@@ -51,13 +51,14 @@ async def files_containing(
         return []
     shown = None
     if len(machines) > 1:
-        shown = await tree_machines(accessor, machines, path)
+        shown = await tree(accessor, machines, path)
         if shown is None:
             return None
     under = path.virtual.rstrip("/") + "/"
     hits: dict[str, PathSpec] = {}
     for machine, matched in zip(machines, found):
         for p in matched:
-            if shown is None or shown.get(p.virtual[len(under) :]) == machine:
+            one = None if shown is None else shown.get(p.virtual[len(under) :])
+            if shown is None or (one is not None and one.machine == machine):
                 hits[p.virtual] = p
     return [hits[name] for name in sorted(hits)]

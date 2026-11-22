@@ -115,7 +115,7 @@ describe('tree', () => {
     )
     const found = await tree(bound([a, b]), ['a', 'b'], spec('/d'))
     expect([...(found?.keys() ?? [])].sort()).toEqual(['s/both', 'x', 'y'])
-    expect([found?.get('s/both')?.name, found?.get('s/both')?.size]).toEqual(['both', 2])
+    expect([found?.get('s/both')?.machine, found?.get('s/both')?.written]).toEqual(['b', 9000])
     const gone = new ScriptedMachine('gone', () => failed('find: lost\n'))
     expect(await tree(bound([a, gone]), ['a', 'gone'], spec('/d'))).toBeNull()
   })
@@ -130,7 +130,7 @@ describe('tree', () => {
     const b = new ScriptedMachine('b', () => ok(DEC.decode(DIR) + 'f 644 2 9 0 0 0 1 0 x\0'))
     const found = await tree(bound([a, b]), ['a', 'b'], spec('/d'))
     expect([...(found?.keys() ?? [])].sort()).toEqual(['x', 'z'])
-    expect(found?.get('x')?.size).toBe(2)
+    expect(found?.get('x')?.machine).toBe('b')
   })
 
   it("lists a kernel's view as the command's machine has it", async () => {
@@ -152,7 +152,7 @@ describe('tree', () => {
     ])
     const found = await tree(accessor, ['a', 'b'], root)
     expect([...(found?.keys() ?? [])].sort()).toEqual(['proc', 'proc/uptime'])
-    expect(found?.get('proc/uptime')?.size).toBe(1)
+    expect(found?.get('proc/uptime')?.machine).toBe('a')
     await bindCaller({ ...currentCaller(), preferredMachine: 'b' }, async () => {
       const from = await tree(accessor, ['a', 'b'], root)
       expect([...(from?.keys() ?? [])].sort()).toEqual(['proc', 'proc/only-b', 'proc/uptime'])

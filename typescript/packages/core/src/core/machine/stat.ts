@@ -20,12 +20,12 @@ import { refusal } from '../posix/errors.ts'
 import { parseEntries, treeCommand } from '../posix/stat.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
-import { checked, mountBase, remote, virtualOf } from './utils.ts'
+import type { Holder } from './types.ts'
+import { checked, leaf, mountBase, remote, virtualOf } from './utils.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import { hiddenUnder, pathVisible } from '../../utils/hidden.ts'
 import { norm } from '../../utils/path.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { rstripSlash } from '../../utils/slash.ts'
 
 /**
  * A machine's entry as `stat` renders it: its kind, mode, times and owners
@@ -55,13 +55,15 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
 }
 
 /**
- * The last name of a path on the mount, `/` for its root.
+ * A machine's copy of a name as `stat` renders it, from the entry the
+ * machine was asked for.
  *
- * @param path the path.
+ * @param name the entry's name.
+ * @param one the machine and the entry it reported.
  */
-export function leaf(path: PathSpec): string {
-  const last = rstripSlash(path.mountPath).split('/').pop() ?? ''
-  return last === '' ? '/' : last
+export function holderStat(name: string, one: Holder): FileStat {
+  if (one.entry === null) throw new Error(`${one.machine}: no entry was asked for ${name}`)
+  return entryStat(name, one.entry)
 }
 
 /**

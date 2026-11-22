@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { failed, ok, ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { bound, ROW, spec } from '../../../tests/fixtures/machine_files.ts'
 import { FileType } from '../../types.ts'
-import { entryStat, leaf, stat } from './stat.ts'
+import { entryStat, stat } from './stat.ts'
 
 describe('entryStat', () => {
   it("keeps the machine's kind, mode, times and owners", () => {
@@ -89,12 +89,5 @@ describe('stat', () => {
     await expect(stat(bound([machine]), 'box', spec('/x'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-  })
-})
-
-describe('leaf', () => {
-  it('names the last part and the root', () => {
-    expect(leaf(spec('/d/x.txt'))).toBe('x.txt')
-    expect(leaf(spec(''))).toBe('/')
   })
 })

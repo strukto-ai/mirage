@@ -14,7 +14,7 @@
 
 import pytest
 
-from mirage.core.machine.stat import entry_stat, leaf, stat
+from mirage.core.machine.stat import entry_stat, stat
 from mirage.core.posix.types import PosixEntry
 from mirage.types import FileType
 from tests.fixtures.machine import ScriptedMachine, failed, ok
@@ -82,8 +82,3 @@ async def test_stat_of_a_missing_path_is_enoent():
     box = ScriptedMachine("box", lambda line, data: failed(said))
     with pytest.raises(FileNotFoundError):
         await stat(bound(box), "box", spec("/x"))
-
-
-def test_leaf_names_the_last_part_and_the_root():
-    assert leaf(spec("/d/x.txt")) == "x.txt"
-    assert leaf(spec("")) == "/"

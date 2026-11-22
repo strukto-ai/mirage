@@ -19,7 +19,7 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { chosen, kernelView } from './place.ts'
-import { entries, entryStat } from './stat.ts'
+import { entries, holderStat } from './stat.ts'
 import { Holder } from './types.ts'
 
 /**
@@ -72,16 +72,6 @@ function merged(
 }
 
 /**
- * The entry a listed copy was listed with.
- *
- * @param one a copy a listing found.
- */
-function listedEntry(one: Holder): PosixEntry {
-  if (one.entry === null) throw new Error(`${one.machine}: a listed copy has no entry`)
-  return one.entry
-}
-
-/**
  * A directory's children on every machine that holds it, each name once,
  * from one find on each machine. A machine that lacks it, or holds a file
  * there or above it, is passed over; any other failure fails the listing,
@@ -128,19 +118,21 @@ export async function readdir(
   if (!chosen(accessor, tops).folder) throw enotdir(scope)
   return [...merged(accessor, listing, listed, scope)]
     .sort(([a], [b]) => compareCodePoints(a, b))
-    .map(([name, one]) => entryStat(name, listedEntry(one)))
+    .map(([name, one]) => holderStat(name, one))
 }
 
 /**
  * The copy shown of every entry under a directory on the machines that
- * hold it, by its path there, from one find on each; null when a machine's
- * find fails or finds no directory, which leaves the walk to readdir.
+ * hold it, by its path there, merged as a listing merges them, from one
+ * find on each, where a walk sends a listing per directory. Null when a
+ * machine's find fails or finds no directory, which leaves the walk to
+ * readdir, which reports it.
  *
  * @param accessor the mount's machines.
  * @param machines the machines holding the directory.
  * @param path the directory.
  */
-async function trees(
+export async function tree(
   accessor: MachineAccessor,
   machines: string[],
   path: PathSpec,
@@ -158,45 +150,4 @@ async function trees(
     listed.push(below)
   }
   return merged(accessor, machines, listed, path)
-}
-
-/**
- * Every entry under a directory on the machines that hold it, merged by
- * path as a listing merges them, from one find on each, where a walk sends
- * a listing per directory. A machine whose find fails leaves the walk to
- * readdir, which reports it.
- *
- * @param accessor the mount's machines.
- * @param machines the machines holding the directory.
- * @param path the directory.
- */
-export async function tree(
-  accessor: MachineAccessor,
-  machines: string[],
-  path: PathSpec,
-): Promise<Map<string, FileStat> | null> {
-  const shown = await trees(accessor, machines, path)
-  if (shown === null) return null
-  const stats = new Map<string, FileStat>()
-  for (const [rel, one] of shown)
-    stats.set(rel, entryStat(rel.split('/').pop() ?? rel, listedEntry(one)))
-  return stats
-}
-
-/**
- * The machine whose copy of each entry under a directory is the one shown,
- * by the entry's path there; null as `tree` answers it.
- *
- * @param accessor the mount's machines.
- * @param machines the machines holding the directory.
- * @param path the directory.
- */
-export async function treeMachines(
-  accessor: MachineAccessor,
-  machines: string[],
-  path: PathSpec,
-): Promise<Map<string, string> | null> {
-  const shown = await trees(accessor, machines, path)
-  if (shown === null) return null
-  return new Map([...shown].map(([rel, one]) => [rel, one.machine]))
 }

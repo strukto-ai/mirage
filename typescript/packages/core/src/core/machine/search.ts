@@ -17,7 +17,7 @@ import type { PathSpec } from '../../types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { filesContaining as posixFilesContaining } from '../posix/search.ts'
-import { treeMachines } from './readdir.ts'
+import { tree } from './readdir.ts'
 
 /**
  * The files under a directory holding `text`, by grep on each machine that
@@ -51,13 +51,13 @@ export async function filesContaining(
     found.push(matched)
   }
   if (found.every((matched) => matched.length === 0)) return []
-  const shown = machines.length > 1 ? await treeMachines(accessor, machines, path) : null
+  const shown = machines.length > 1 ? await tree(accessor, machines, path) : null
   if (machines.length > 1 && shown === null) return null
   const under = `${rstripSlash(path.virtual)}/`
   const hits = new Map<string, PathSpec>()
   for (const [at, matched] of found.entries()) {
     for (const p of matched) {
-      if (shown === null || shown.get(p.virtual.slice(under.length)) === machines[at])
+      if (shown === null || shown.get(p.virtual.slice(under.length))?.machine === machines[at])
         hits.set(p.virtual, p)
     }
   }

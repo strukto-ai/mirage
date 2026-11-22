@@ -49,6 +49,16 @@ export function folderOf(path: PathSpec): PathSpec {
 }
 
 /**
+ * The last name of a path on the mount, `/` for its root.
+ *
+ * @param path the path.
+ */
+export function leaf(path: PathSpec): string {
+  const last = rstripSlash(path.mountPath).split('/').pop() ?? ''
+  return last === '' ? '/' : last
+}
+
+/**
  * The virtual name a path on the machines has on the mount `path` is on;
  * null for one outside the mount's root. Mirrors Python's `virtual_of`.
  *

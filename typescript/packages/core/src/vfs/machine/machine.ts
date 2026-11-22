@@ -39,17 +39,11 @@ import { rmR as machineRmR } from '../../core/machine/rm.ts'
 import { rmdir as machineRmdir } from '../../core/machine/rmdir.ts'
 import { filesContaining as machineFilesContaining } from '../../core/machine/search.ts'
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
-import {
-  entryStat,
-  hiddenOn,
-  leaf,
-  restricted,
-  stat as machineStat,
-} from '../../core/machine/stat.ts'
+import { hiddenOn, holderStat, restricted, stat as machineStat } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
 import type { Holder } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
-import { folderOf } from '../../core/machine/utils.ts'
+import { folderOf, leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
 import { eisdir, enoent, enotdir, enotempty, enotsup } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
@@ -145,7 +139,7 @@ export class MachineVFS extends BaseVFS {
   override async stat(path: PathSpec): Promise<FileStat> {
     const one = chosen(this.accessor, await this.everywhere(path))
     if (one.entry === null) return machineStat(this.accessor, one.machine, path)
-    return entryStat(leaf(path), one.entry)
+    return holderStat(leaf(path), one)
   }
 
   override async read(
@@ -176,11 +170,15 @@ export class MachineVFS extends BaseVFS {
   override async readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     if (restricted(path)) return null
     const held = await this.everywhere(path)
-    return machineTree(
+    const shown = await machineTree(
       this.accessor,
       held.map((one) => one.machine),
       path,
     )
+    if (shown === null) return null
+    const stats = new Map<string, FileStat>()
+    for (const [rel, one] of shown) stats.set(rel, holderStat(rel.split('/').pop() ?? rel, one))
+    return stats
   }
 
   override async filesContaining(

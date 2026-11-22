@@ -15,8 +15,10 @@
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
+from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import (
     checked,
+    leaf,
     mount_base,
     remote,
     virtual_of,
@@ -59,13 +61,16 @@ def entry_stat(name: str, entry: PosixEntry) -> FileStat:
     )
 
 
-def leaf(path: PathSpec) -> str:
-    """The last name of a path on the mount, ``/`` for its root.
+def holder_stat(name: str, one: Holder) -> FileStat:
+    """A machine's copy of a name as ``stat`` renders it, from the entry
+    the machine was asked for.
 
     Args:
-        path (PathSpec): the path.
+        name (str): the entry's name.
+        one (Holder): the machine and the entry it reported.
     """
-    return path.mount_path.rstrip("/").rsplit("/", 1)[-1] or "/"
+    assert one.entry is not None
+    return entry_stat(name, one.entry)
 
 
 async def entries(

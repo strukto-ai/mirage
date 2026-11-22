@@ -34,15 +34,15 @@ from mirage.core.machine.rm import rm_r as _rm_r
 from mirage.core.machine.rmdir import rmdir as _rmdir
 from mirage.core.machine.search import files_containing as _files_containing
 from mirage.core.machine.set_attrs import set_attrs as _set_attrs
-from mirage.core.machine.stat import entry_stat as _entry_stat
 from mirage.core.machine.stat import hidden_on as _hidden_on
-from mirage.core.machine.stat import leaf as _leaf
+from mirage.core.machine.stat import holder_stat as _holder_stat
 from mirage.core.machine.stat import restricted as _restricted
 from mirage.core.machine.stat import stat as _stat
 from mirage.core.machine.truncate import truncate as _truncate
 from mirage.core.machine.types import Holder
 from mirage.core.machine.unlink import unlink as _unlink
 from mirage.core.machine.utils import folder_of as _folder_of
+from mirage.core.machine.utils import leaf as _leaf
 from mirage.core.machine.write import write as _write
 from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, enotsup
 from mirage.execution.machine.table import MachineTable
@@ -136,7 +136,7 @@ class MachineVFS(BaseVFS):
         one = place.chosen(self.accessor, await self._everywhere(path))
         if one.entry is None:
             return await _stat(self.accessor, one.machine, path)
-        return _entry_stat(_leaf(path), one.entry)
+        return _holder_stat(_leaf(path), one)
 
     async def read(
         self,
@@ -167,7 +167,13 @@ class MachineVFS(BaseVFS):
         if _restricted(path):
             return None
         held = await self._everywhere(path)
-        return await _tree(self.accessor, [h.machine for h in held], path)
+        shown = await _tree(self.accessor, [h.machine for h in held], path)
+        if shown is None:
+            return None
+        return {
+            rel: _holder_stat(rel.rsplit("/", 1)[-1], one)
+            for rel, one in shown.items()
+        }
 
     async def files_containing(
         self,

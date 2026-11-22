@@ -54,6 +54,15 @@ def folder_of(path: PathSpec) -> PathSpec:
     return PathSpec(virtual=virtual, directory=parent(virtual), vfs_path=key)
 
 
+def leaf(path: PathSpec) -> str:
+    """The last name of a path on the mount, ``/`` for its root.
+
+    Args:
+        path (PathSpec): the path.
+    """
+    return path.mount_path.rstrip("/").rsplit("/", 1)[-1] or "/"
+
+
 def virtual_of(
     accessor: MachineAccessor, path: PathSpec, real: str
 ) -> str | None:
