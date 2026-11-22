@@ -21,28 +21,7 @@ from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.machine import ScriptedMachine, failed, table_of
-from tests.fixtures.machine_files import FakeFiles, spec
-
-
-def two(a: FakeFiles, b: FakeFiles, **kwargs) -> Workspace:
-    return Workspace(
-        kwargs.pop("mounts", {}),
-        mode=MountMode.WRITE,
-        machines={
-            "a": ScriptedMachine("a", a.answer),
-            "b": ScriptedMachine("b", b.answer),
-        },
-        **kwargs,
-    )
-
-
-async def run(ws: Workspace, line: str) -> tuple[int, str, str]:
-    result = await ws.shell(line)
-    return (
-        result.exit_code,
-        await result.stdout_str(),
-        await result.stderr_str(),
-    )
+from tests.fixtures.machine_files import FakeFiles, run, spec, two
 
 
 @pytest.mark.asyncio

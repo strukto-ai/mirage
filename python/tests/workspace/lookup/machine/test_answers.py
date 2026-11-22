@@ -22,22 +22,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.machine.constants import RUN_PROGRAM_AT, is_run
 from mirage.runtime.types import RunAnswer, RunResult
 from tests.fixtures.machine import ScriptedMachine, failed, ok
-from tests.fixtures.machine_files import FakeFiles
-
-TOOLS = ("ls", "cat", "grep", "wc")
-
-
-def one(files: FakeFiles, mounts=None, **kwargs) -> Workspace:
-    return Workspace(
-        mounts or {},
-        mode=kwargs.pop("mode", MountMode.WRITE),
-        machines={"box": ScriptedMachine("box", files.answer)},
-        **kwargs,
-    )
-
-
-async def out(ws: Workspace, line: str) -> str:
-    return await (await ws.shell(line)).stdout_str()
+from tests.fixtures.machine_files import FakeFiles, out
 
 
 def _bash_line(line: str) -> str | None:

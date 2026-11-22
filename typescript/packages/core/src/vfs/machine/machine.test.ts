@@ -20,32 +20,15 @@ import {
   tableOf,
   type Answer,
 } from '../../../tests/fixtures/machine.ts'
-import { FakeFiles, spec } from '../../../tests/fixtures/machine_files.ts'
+import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
-import type { MountSpec } from '../../workspace/workspace/types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-
-function two(
-  a: FakeFiles,
-  b: FakeFiles,
-  mounts: Record<string, MountSpec | string> = {},
-): Workspace {
-  return new Workspace(mounts, {
-    mode: MountMode.WRITE,
-    machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
-  })
-}
-
-async function run(ws: Workspace, line: string): Promise<[number, string, string]> {
-  const result = await ws.shell(line)
-  return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
-}
 
 /** A mount of /tmp over machines a, b, c, ... holding `files`. */
 function shared(...files: FakeFiles[]): MachineVFS {
@@ -55,10 +38,6 @@ function shared(...files: FakeFiles[]): MachineVFS {
     'a',
   )
   return vfs
-}
-
-function texts(files: FakeFiles): Record<string, string> {
-  return Object.fromEntries([...files.files].map(([k, v]) => [k, DEC.decode(v)]))
 }
 
 describe('MachineVFS', () => {

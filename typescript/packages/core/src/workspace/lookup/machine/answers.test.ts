@@ -21,7 +21,7 @@ import {
   on,
   captured,
 } from '../../../../tests/fixtures/machine.ts'
-import { FakeFiles } from '../../../../tests/fixtures/machine_files.ts'
+import { FakeFiles, out } from '../../../../tests/fixtures/machine_files.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { RUN_PROGRAM_AT, isRun } from '../../../machine/constants.ts'
 import type { OutputFn, RunResult } from '../../../runtime/types.ts'
@@ -30,10 +30,6 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-
-async function out(ws: Workspace, line: string): Promise<string> {
-  return DEC.decode((await ws.shell(line)).stdout)
-}
 
 /** The command a lookup runs in the machine's bash, null for a line the
  * machine runs as it is. */

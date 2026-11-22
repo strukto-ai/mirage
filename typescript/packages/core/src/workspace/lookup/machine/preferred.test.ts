@@ -13,35 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
-import { FakeFiles } from '../../../../tests/fixtures/machine_files.ts'
+import { FakeFiles, two, run, texts } from '../../../../tests/fixtures/machine_files.ts'
 import type { Action } from '../../../policy/types.ts'
-import { MountMode } from '../../../types.ts'
 import { MachineVFS } from '../../../vfs/machine/machine.ts'
-import type { MountSpec } from '../../workspace/types.ts'
-import { Workspace } from '../../workspace/workspace.ts'
-
-const DEC = new TextDecoder()
-
-function two(
-  a: FakeFiles,
-  b: FakeFiles,
-  mounts: Record<string, MountSpec | string> = {},
-): Workspace {
-  return new Workspace(mounts, {
-    mode: MountMode.WRITE,
-    machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
-  })
-}
-
-async function run(ws: Workspace, line: string): Promise<[number, string, string]> {
-  const result = await ws.shell(line)
-  return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
-}
-
-function texts(files: FakeFiles): Record<string, string> {
-  return Object.fromEntries([...files.files].map(([k, v]) => [k, DEC.decode(v)]))
-}
 
 describe('preferredMachine', () => {
   it('gives a named machine the new names Mirage makes', async () => {

@@ -14,31 +14,10 @@
 
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
-import { FakeFiles } from '../../../../tests/fixtures/machine_files.ts'
+import { FakeFiles, TOOLS, one, out } from '../../../../tests/fixtures/machine_files.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import type { MountSpec, WorkspaceOptions } from '../../workspace/types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-
-const TOOLS = ['ls', 'cat', 'grep', 'wc']
-
-const DEC = new TextDecoder()
-
-function one(
-  files: FakeFiles,
-  mounts: Record<string, MountSpec> = {},
-  options: WorkspaceOptions = {},
-): Workspace {
-  return new Workspace(mounts, {
-    mode: MountMode.WRITE,
-    machines: { box: new ScriptedMachine('box', files.answer) },
-    ...options,
-  })
-}
-
-async function out(ws: Workspace, line: string): Promise<string> {
-  return DEC.decode((await ws.shell(line)).stdout)
-}
 
 describe('link routing', () => {
   it("makes and reads a link in the machine's folder there", async () => {
