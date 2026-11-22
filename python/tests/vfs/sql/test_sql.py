@@ -288,16 +288,14 @@ async def test_recursive_grep_keeps_file_diagnostics_and_zero_counts():
         ws.create_session(
             "agent",
             profile={
-                "commands": {
-                    "*": [
-                        "allow",
-                        {
-                            "decision": "deny",
-                            "reason": "sealed",
-                            "paths": ["/work/d/a"],
-                        },
-                    ]
-                }
+                "commands": {"*": "allow"},
+                "mounts": {
+                    "/work/d/a": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
+                    }
+                },
             },
         )
         refused = await ws.shell(
