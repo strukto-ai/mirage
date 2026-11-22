@@ -629,7 +629,7 @@ async function* judgeWords(
     unread,
     ctx,
     session,
-    defined: !intrinsic && item.pipeline?.functions.has(name) === true,
+    defined: !intrinsic && item.pipeline?.defined.has(name) === true,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -731,11 +731,16 @@ function seeded(
   return forked
 }
 
+/**
+ * `functions` holds the functions defined before the walk's place,
+ * `defined` every one the line defines anywhere, a body's included.
+ */
 interface PipelineWalk {
   readonly wholeLine: boolean
   readonly background: boolean
   optionsMayChange: boolean
   functions: ReadonlySet<string>
+  defined: ReadonlySet<string>
 }
 
 /** Detect option edits the walk cannot assume ran, or successfully changed the shell. */
@@ -791,6 +796,7 @@ function pipelineWalk(wholeLine = false): PipelineWalk {
     // A runtime taking a raw line does not receive the workspace shell's options.
     optionsMayChange: wholeLine,
     functions: new Set(),
+    defined: new Set(),
   }
 }
 
@@ -1186,6 +1192,7 @@ function* walkedLine(
   pipeline = pipelineWalk(),
   homes: Readonly<Record<string, string>> = tildeHomes(session),
 ): Generator<Walked> {
+  pipeline.defined = new Set([...pipeline.defined, ...definedFunctions(root)])
   for (const item of walkNode(
     root,
     session,
@@ -1671,6 +1678,17 @@ async function verdictRefuses(
  * not be read as the node's own: judging it would refuse a line that
  * only stores text, and the read walks already charge nothing for it.
  */
+/** The name of every function the node defines anywhere in its tree. */
+function definedFunctions(node: TSNodeLike): Set<string> {
+  const names = new Set<string>()
+  const stack = [node]
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    if (current.type === 'function_definition') names.add(getFunctionName(current))
+    for (const child of current.namedChildren) stack.push(child)
+  }
+  return names
+}
+
 function definesFunction(node: TSNodeLike): boolean {
   const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {

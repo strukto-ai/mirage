@@ -414,7 +414,8 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
             b"",
             b"echo: Permission denied\n",
         ),
-        ("f; f() { ls; }", 126, b"", b"f: Permission denied\n"),
+        ("f; f() { ls; }", 0, b"", b"f: Permission denied\n"),
+        ("g() { f; }; f() { ls; }; g", 0, b"f.txt\n", b""),
         ("(f() { ls; }); f", 126, b"", b"f: Permission denied\n"),
     ],
 )
