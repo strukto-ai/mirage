@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { line, trees } from '../../test-utils.ts'
+import { line, resolvedPath, trees } from '../../test-utils.ts'
 import { Outcome } from '../types.ts'
-import { decide, sourceOf } from './decide.ts'
+import { decide, redirectRuling, sourceOf } from './decide.ts'
 
 // Mirrors python/tests/policy/match/test_decide.py.
 
@@ -119,5 +119,23 @@ describe('decide', () => {
     const inside = decide(line(['cp', '/a/x']), rules).rule
     expect(top !== null && sourceOf(top)).toBe('top')
     expect(inside !== null && sourceOf(inside)).toBe('mounts./a')
+  })
+
+  it("a redirect inside a folder meets the folder's star", () => {
+    const rules = trees({ '*': 'allow' }, { '/d/keep': { '*': 'deny' } })
+    const ruling = redirectRuling([resolvedPath('/d/out'), resolvedPath('/d/keep/f.txt')], rules)
+    expect(ruling.outcome).toBe(Outcome.DENY)
+    expect(ruling.matchedPath).toBe('/d/keep/f.txt')
+    expect(ruling.source).toBe('mounts./d/keep')
+    expect(redirectRuling([resolvedPath('/d/out')], rules).outcome).toBe(Outcome.ALLOW)
+    const asks = trees(null, { '/d/keep': { '*': 'ask' } })
+    const asked = redirectRuling([resolvedPath('/d/keep/f.txt')], asks)
+    expect(asked.outcome).toBe(Outcome.ASK)
+    expect(asked.asks).toHaveLength(1)
+  })
+
+  it('a redirect meets no named command of a folder', () => {
+    const rules = trees(null, { '/d/keep': { cat: 'deny', echo: 'deny' } })
+    expect(redirectRuling([resolvedPath('/d/keep/f.txt')], rules).outcome).toBe(Outcome.ALLOW)
   })
 })

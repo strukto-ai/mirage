@@ -756,6 +756,38 @@
    ]
   },
   {
+   "id": "a_folder_entrys_star_answers_a_redirect_no_command_owns",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "session", "id": "asks", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "ask", "reason": "keep needs a nod"}}}}}},
+    {"op": "session", "id": "listing", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": "deny", "ls": "allow"}}}}},
+    {"op": "session", "id": "named", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"cat": "deny", "echo": "deny"}}}}},
+    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": ">> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": "{ echo x; } >> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "cat /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "{ echo x; } > /data/out; cat /data/out", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
+    {"op": "explain", "session": "kept", "command": "> /data/keep/f.txt", "expect": {"value": {"outcome": "deny", "reason": "kept", "decision": "deny", "exit_code": 1, "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "commands": []}}},
+    {"op": "explain", "session": "asks", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"outcome": "ask", "reason": "keep needs a nod", "decision": "pending", "exit_code": 1, "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "commands": [{"command": "cat", "outcome": "allow"}]}}},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "keep needs a nod"}}},
+    {"op": "answer", "outcome": "deny", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "keep needs a nod"}}},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "keep needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "asks", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "asks", "command": "> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "keep needs a nod"}}},
+    {"op": "exec", "command": "cat /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "listing", "command": "{ ls /data; } > /data/keep/listing", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/listing: Permission denied\n", "decision": "denied by policy"}}},
+    {"op": "exec", "session": "listing", "command": "ls /data > /data/keep/listing", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "named", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "named", "command": "> /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "explain_sums_a_line_up_at_its_strictest_part_and_the_runs_exit",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

@@ -230,9 +230,11 @@ impl AdmissionMatcher {
     /// Judge the files a redirect opens that no command owns: a compound
     /// statement's (`{ cat; } < f`, a loop, a subshell) or a bare one
     /// (`> f`). There is no command to walk, so only a root leaf scoped
-    /// to a path the redirect opens speaks; a root leaf with no paths
-    /// is about commands and says nothing here. Each tree that applies
-    /// is judged on its own and the strictest wins, as in `decide`.
+    /// to a path the redirect opens speaks: one with paths, or one of a
+    /// mount tree, whose scope is its mount. A top-level root leaf with
+    /// no paths is about commands and says nothing here. Each tree that
+    /// applies is judged on its own and the strictest wins, as in
+    /// `decide`.
     pub fn redirect(&self, paths: &[Text]) -> Ruling {
         let read = Read::new(&[], None);
         let line = read.line(true);
@@ -249,7 +251,8 @@ impl AdmissionMatcher {
                     continue;
                 }
                 let verdict = resolve(&branches, &self.table, &|id| {
-                    !self.rules[id].paths.is_empty() && self.covers(id, path)
+                    (scoped.mount.is_some() || !self.rules[id].paths.is_empty())
+                        && self.covers(id, path)
                 });
                 for &id in &verdict.asks {
                     if !asks.contains(&id) {
@@ -845,5 +848,27 @@ mod tests {
         let ruling = asks.redirect(&[text("/d/secret.txt")]);
         assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 2));
         assert_eq!(asks.redirect(&[text("/e/x")]).outcome, Allow);
+    }
+
+    #[test]
+    fn a_redirect_inside_a_folder_meets_the_folders_root_leaf() {
+        let sealed = matcher(json!({"*": "allow"}), &[("/d/keep", json!({"*": "deny"}))]);
+        let ruling = sealed.redirect(&[text("/d/out"), text("/d/keep/f.txt")]);
+        assert_eq!(ruling.outcome, Deny);
+        assert_eq!(ruling.matched_path, Some(text("/d/keep/f.txt")));
+        assert_eq!(
+            sealed.rules()[ruling.rule.unwrap()].mount,
+            Some(text("/d/keep"))
+        );
+        assert_eq!(sealed.redirect(&[text("/d/out")]).outcome, Allow);
+        assert_eq!(sealed.redirect(&[text("/d/keeper")]).outcome, Allow);
+        let asks = matcher(json!({}), &[("/d/keep", json!({"*": "ask"}))]);
+        let ruling = asks.redirect(&[text("/d/keep/f.txt")]);
+        assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 1));
+        let named = matcher(
+            json!({}),
+            &[("/d/keep", json!({"cat": "deny", "echo": "deny"}))],
+        );
+        assert_eq!(named.redirect(&[text("/d/keep/f.txt")]).outcome, Allow);
     }
 }
