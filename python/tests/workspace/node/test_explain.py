@@ -51,6 +51,7 @@ from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.console import ConsoleStore
 from mirage.shell.parse import parse
+from mirage.shell.variable import VarAttr
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.node.explain import (
@@ -60,6 +61,7 @@ from mirage.workspace.node.explain import (
     line_judgments,
     may_prejudge,
 )
+from mirage.workspace.session.state import seed_var, set_attr
 
 
 async def _judged(
@@ -1189,6 +1191,224 @@ async def test_a_policy_refuses_what_a_whole_line_gate_cannot_read(scripted):
         await ws.close()
 
 
+ANOTHER_SPELLING = (
+    "env -C tmp hostname",
+    "env --chdir tmp hostname",
+    "env --chd tmp hostname",
+    "env -a x hostname",
+    "env --argv0 x hostname",
+    "env -vC tmp hostname",
+    "trap hostname EXIT",
+    "trap 'hostname' DEBUG; :",
+    "coproc hostname",
+    "PS4='$(hostname)'; set -x; :",
+    "export PS4='$(hostname)'; set -x; :",
+    "BASH_ENV=/data/e bash -c :",
+    "ENV=/data/e sh -i",
+    "env PS4='$(hostname)' bash -xc :",
+    "eval \"PS4='\\$(hostname)'\"; set -x; :",
+    "hash -p /bin/hostname ls; ls",
+    "enable -f /data/x.so hostname",
+    "alias x=hostname\nx",
+    "read PS4 <<< '$(hostname)'; set -x; :",
+    "printf -v PS4 '$(hostname)'; set -x; :",
+    "mapfile -t PS4 <<< x; set -x; :",
+    "for PS4 in x; do set -x; :; done",
+    "declare -n r=PS4; r=x; set -x; :",
+    "read BASH_ENV <<< /data/e; bash -c :",
+    "env 'BASH_FUNC_ls%%=() { hostname; }' bash -c ls",
+    "bash -ic :",
+    "bash -lc :",
+    "sh --login -c :",
+    "PS4[0]='$(hostname)'; set -x; :",
+    "read 'PS4[0]' <<< x; set -x; :",
+    "read -a PS4 <<< x; set -x; :",
+    "command -p printf -v PS4 '$(hostname)'; set -x; :",
+    "empty=; printf $empty -v PS4 '$(hostname)'; set -x; :",
+    "v=p; command -$v printf -v PS4 '$(hostname)'; set -x; :",
+    "v=p; command -$v hostname",
+    "unset PS4; : ${PS4:='$(hostname)'}; set -x; :",
+    "declare -n r; r=PS4; r=x; set -x; :",
+    'v=PS4; printf -v "$v" x; set -x; :',
+    "BASH_CMDS[ls]=/bin/hostname; ls",
+    "BASH_ALIASES[x]=hostname\nx",
+    "bash -c -l :",
+    "bash -c -x hostname",
+    "env -a -bash bash -c :",
+    "exec -l bash -c :",
+    "exec -a -bash bash -c :",
+    'a=x=hostname; alias "$a"\nx',
+    "v='PS4=$(hostname)'; declare \"$v\"; set -x; :",
+    "declare PS4\\='$(hostname)'; set -x; :",
+    "o=l; exec -$o bash -c :",
+    "o=l; env -$o bash -c :",
+    "o=p; hash -$o /bin/hostname ls; ls",
+    "o='-p /bin/hostname'; hash $o ls; ls",
+    "builtin declare 'PS4=$(hostname)'; set -x; :",
+    "command typeset 'PS4=$(hostname)'; set -x; :",
+    "builtin export 'PS4=$(hostname)'; set -x; :",
+    "export -p 'PS4=$(hostname)'; set -x; :",
+    'n=-bash; exec -a "$n" bash -c :',
+    'n=-bash; env -a "$n" bash -c :',
+    'k=BASH_ENV; env "$k=/data/e" bash -c :',
+    "declare PS4='$(hostname)' -p; set -x; :",
+    "declare -p x=$(read PS4 <<< x); set -x; :",
+    "p=r; read -$p PS4 <<< '$(hostname)'; set -x; :",
+    "bash -oe nounset -i -c :",
+    "empty=; trap --$empty hostname EXIT",
+)
+
+STILL_RUNS = (
+    "trap 'rm -f /data/t' EXIT; echo hi",
+    "trap - EXIT; trap -p",
+    "coproc echo hi",
+    "hash -r; alias",
+    "ENV=production echo hi",
+    "printf PS4",
+    "bash -c 'echo hi'",
+    "bash -c ': -l'",
+    "exec -a name echo hi",
+    "printf '%s\\n' -v PS4",
+    "command -v read PS4",
+)
+
+# Lines a rule leaves alone (a coded policy refuses their `$` words).
+STILL_RUNS_UNDER_RULES = (
+    "read -r line < /data/f",
+    "printf -v x %s y",
+    "for f in a b; do echo hi; done",
+    "declare -i n=1",
+    "g() { local x=1; }; g",
+    'read -p "Name: $USER " ans < /data/f',
+    'getopts ":ab:" opt "$@"',
+    "export -n FOO",
+    'g() { local x="$1"; }; g a',
+    "declare -p PS4",
+    "typeset -F PS4",
+    "declare -n -p PS4",
+    "declare -p PS4=after",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_whole_line_gate_reads_what_another_spelling_runs(coded):
+    # Each line runs hostname on the machine by a spelling the gate
+    # follows, so a deny of hostname refuses it, in code or as a rule.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else {"commands": {"hostname": "deny"}}},
+        policies=[_NoHostname()] if coded else [],
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        for line in ANOTHER_SPELLING:
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code == 126, line
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            )
+        assert box.lines == []
+        still = STILL_RUNS + (() if coded else STILL_RUNS_UNDER_RULES)
+        for line in still:
+            assert (await ws.shell(line, session_id="s")).exit_code == 0, line
+        assert box.lines == list(still)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, allowed",
+    [
+        ("trap hostname EXIT", ("trap", "echo")),
+        ("PS4='$(hostname)'; set -x; echo hi", ("set", "echo", ":")),
+        ("coproc hostname", ("coproc",)),
+    ],
+)
+async def test_an_allow_list_holds_against_a_line_another_spelling_runs(
+    line, allowed
+):
+    # A trap's action, a coproc's command and a PS4 the trace expands are
+    # what the line runs: a closed list that names none of them refuses.
+    box = _LineBox()
+    commands = {"*": "deny", **{name: "allow" for name in allowed}}
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {"commands": commands}},
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        said = await ws.explain(line, "s")
+        ran = await ws.shell(line, session_id="s")
+        assert ran.exit_code == 126
+        assert (said.exit_code, said.stderr) == (126, await ran.stderr_str())
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["PS4", "BASH_FUNC_ls%%"])
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_hook_the_session_exports_holds_a_whole_line(name, coded):
+    # The machine's shell gets the session's exported environment, so a
+    # hook an earlier line exported runs there on a line that reads clean.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else {"commands": {"hostname": "deny"}}},
+        policies=[_NoHostname()] if coded else [],
+        machines=[box],
+    )
+    try:
+        session = ws.create_session("s", profile="r")
+        seed_var(session, name, "$(hostname)")
+        assert (await ws.shell("set -x; :", session_id="s")).exit_code == 0
+        set_attr(session, name, VarAttr.EXPORT)
+        said = await ws.explain("set -x; :", "s")
+        ran = await ws.shell("set -x; :", session_id="s")
+        assert ran.exit_code == 126
+        assert (said.exit_code, said.stderr) == (126, await ran.stderr_str())
+        assert box.lines == ["set -x; :"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_env_option_cluster_hands_its_value_the_rest_of_it():
+    # GNU getopt gives `-Cu` the value `u`, so env runs `tmp`: an allow
+    # list naming env and hostname refuses it and admits `-C tmp hostname`.
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={
+            "r": {
+                "commands": {"*": "deny", "env": "allow", "hostname": "allow"}
+            }
+        },
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        refused = await ws.shell("env -Cu tmp hostname", session_id="s")
+        assert refused.exit_code == 126
+        admitted = await ws.shell("env -C tmp hostname", session_id="s")
+        assert admitted.exit_code == 0
+        assert box.lines == ["env -C tmp hostname"]
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_whole_line_runs_as_typed_with_no_policy_at_pre_command():
     # Mirage's own pre_command policies and a policy with no say at
@@ -1362,6 +1582,84 @@ class _SealedSecret(Policy):
         if any(p.virtual == "/data/secret.txt" for p in ctx.paths):
             return Deny("sealed")
         return None
+
+
+SEALED_RULE = {
+    "commands": {
+        "*": [
+            "allow",
+            {
+                "decision": "deny",
+                "reason": "sealed",
+                "paths": ["/data/secret.txt"],
+            },
+        ]
+    }
+}
+
+# What a path check reads must be the file the machine opens: its shell
+# expands `~` with its own HOME and user database, and `//` is `/`.
+MACHINE_PATHS = (
+    "HOME=/data; cat ~/secret.txt",
+    "export HOME=/data; cat ~/secret.txt",
+    "HOME=/data; eval 'cat ~/secret.txt'",
+    "cat ~backup/secret.txt",
+    "cat //data/secret.txt",
+    "diff --from-file=/data/secret.txt /data/pub",
+    "diff --to-file=/data/secret.txt /data/pub",
+    "read HOME <<< /data; cat ~/secret.txt",
+    "printf -v HOME /data; cat ~/secret.txt",
+    "dd if=~/secret.txt",
+    "env -C /data cat secret.txt",
+    "env --chdir=/data cat secret.txt",
+    "HOME[0]=/data; cat ~/secret.txt",
+    "bash -c 'HOME=/data; cat ~/secret.txt'",
+    "declare -n h; h=HOME; h=/data; cat ~/secret.txt",
+    "env -C /tmp HOME=/data bash -c 'cat ~/secret.txt'",
+    "env -v HOME=/data bash -c 'cat ~/secret.txt'",
+)
+MACHINE_WRITES = (
+    "find /data/pub -fprint /data/secret.txt",
+    "find /data/pub -fprint0 /data/secret.txt",
+    "find /data/pub -fls /data/secret.txt",
+    "find -O3 /data/pub -fprint /data/secret.txt",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("coded", [False, True])
+async def test_a_path_check_reads_the_file_a_whole_line_opens(coded):
+    box = _LineBox()
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": {} if coded else SEALED_RULE},
+        policies=[_SealedSecret()] if coded else [],
+        machines=[box],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        lines = MACHINE_PATHS + (MACHINE_WRITES if coded else ())
+        for line in lines:
+            said = await ws.explain(line, "s")
+            ran = await ws.shell(line, session_id="s")
+            assert ran.exit_code != 0, line
+            assert (said.exit_code, said.stderr) == (
+                ran.exit_code,
+                await ran.stderr_str(),
+            ), line
+        assert box.lines == []
+        still = (
+            "cat ~/secret.txt",
+            "cat ~root/secret.txt",
+            "env -C /data cat other.txt",
+            'echo x="a:~"',
+        )
+        for line in still:
+            assert (await ws.shell(line, session_id="s")).exit_code == 0
+        assert box.lines == list(still)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -2612,7 +2910,8 @@ async def test_a_usr_bin_path_keeps_the_operands_xargs_appends_unread():
 @pytest.mark.asyncio
 async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
     # Read against the directory the pass last knew, ./python3 named the
-    # /usr/bin program and refused a harmless script in /data.
+    # /usr/bin program, which a closed tree refuses, and refused a harmless
+    # script in /data.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -2622,7 +2921,12 @@ async def test_a_relative_path_after_a_cd_the_pass_lost_is_the_gate_s():
         ws.create_session(
             "s",
             profile={
-                "commands": {"python3": {"decision": "deny", "reason": "no"}}
+                "commands": {
+                    "*": "deny",
+                    "cd": "allow",
+                    "echo": "allow",
+                    "printf": "allow",
+                }
             },
         )
         await ws.shell(

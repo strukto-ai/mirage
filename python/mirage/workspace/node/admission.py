@@ -111,7 +111,7 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     WRITING_PROGRAMS,
 )
-from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.lookup import lookup, path_program
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.inner_lines import (
@@ -500,6 +500,33 @@ def _writes(
     return False
 
 
+def _program_named(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    namespace: Namespace | None,
+) -> str | None:
+    """The name a path-spelled command's program is judged by too: a
+    machine execs the path, so a rule or a coded check naming the program
+    speaks for it there. None for a word with no slash, and for a
+    ``/usr/bin`` path Mirage runs as its program by name
+    (``path_program``), judged by that name when it is dispatched.
+
+    Args:
+        name (str): the command word, as typed.
+        session (SessionState): the session running it.
+        registry (MountRegistry): mount registry (the ``/usr/bin`` view).
+        namespace (Namespace | None): the link table.
+    """
+    if "/" not in name:
+        return None
+    base = name.rsplit("/", 1)[1]
+    links = None if namespace is None else namespace.session_links(session)
+    if not base or path_program(name, session, registry, links) is not None:
+        return None
+    return base
+
+
 async def gate(
     name: str,
     args: list[str],
@@ -578,20 +605,15 @@ async def gate(
     await budget.run()
     facts = line_facts(name, [name, *operands], session.cwd)
     follows = facts.follows is not Follow.NONE
+    links = (
+        namespace.session_links(session)
+        if namespace is not None and namespace.nodes
+        else None
+    )
     paths = _seen(
         session,
         line_paths(
-            name,
-            reading,
-            follows,
-            (
-                namespace.session_links(session)
-                if namespace is not None and namespace.nodes
-                else None
-            ),
-            session.cwd,
-            implied,
-            redirects,
+            name, reading, follows, links, session.cwd, implied, redirects
         ),
         unread,
     )
@@ -634,6 +656,68 @@ async def gate(
     said = await registry.policies.answers(
         "pre_command", ctx, every, rules_only
     )
+    named = _program_named(name, session, registry, namespace)
+    if named is not None:
+        # Only a named entry speaks (no tree root), so a name grants nothing;
+        # the path's run is placed by its own words, so a route of the name
+        # does not move it.
+        # Its words are classified by the program's own grammar.
+        classified = await classified_words(named, args, session, registry)
+        own = read_line(
+            registry, named, args, classified[1:], session.cwd, env
+        )
+        own_implied = (
+            default_cwd_operand(
+                [named, *classified[1:]], named, registry, session.cwd, stdin
+            )
+            if named in CWD_DEFAULT_RAW
+            else None
+        )
+        own_facts = line_facts(named, [named, *classified[1:]], session.cwd)
+        program_ctx = dataclasses.replace(
+            ctx,
+            command=named,
+            tool=False,
+            tokens=own.tokens,
+            program=own.program,
+            read=own.read,
+            walks=own_facts.walks,
+            write=_writes(
+                named,
+                args,
+                classified[1:],
+                own,
+                own_facts,
+                session,
+                registry,
+                namespace,
+                own_implied,
+            ),
+            subtree=own_facts.subtree,
+            move_target=own_facts.move_target,
+            paths=_seen(
+                session,
+                line_paths(
+                    named,
+                    own,
+                    # The path's program never reaches Mirage's own link
+                    # resolution, so it follows links as the path does.
+                    follows,
+                    links,
+                    session.cwd,
+                    own_implied,
+                    redirects,
+                ),
+                unread,
+            ),
+            words=_seen_words(
+                session, context_words(named, own, redirects), unread
+            ),
+        )
+        by_name = await registry.policies.answers(
+            "pre_command", program_ctx, every, rules_only
+        )
+        said = (*said, *(a for a in by_name if isinstance(a, (Deny, Ask))))
     answers = tuple(a for a in said if isinstance(a, (Deny, Ask, Route)))
     if unlisted_service(ctx, registry, session):
         refused = Deny(

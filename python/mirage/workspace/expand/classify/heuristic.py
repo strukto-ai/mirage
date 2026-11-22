@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import posixpath
 import re
 
 from mirage.context import extglob_active
@@ -20,7 +19,7 @@ from mirage.types import PathSpec
 from mirage.utils.fnmatch import pattern_shape
 from mirage.utils.glob_walk import has_glob, unmark_globs
 from mirage.utils.key_prefix import mount_key
-from mirage.utils.path import dotted_spelling
+from mirage.utils.path import dotted_spelling, posix_normpath
 from mirage.workspace.expand.classify.relative import relative_spec
 from mirage.workspace.mount import MountRegistry
 
@@ -64,7 +63,7 @@ def classify_word(
         if mount is None:
             return word
         is_dir = word.endswith("/")
-        path = posixpath.normpath(word)
+        path = posix_normpath(word)
         if not is_dir and unmark_globs(path) + "/" == mount.prefix:
             is_dir = True
         vfs_path = mount_key(path, mount.prefix.rstrip("/"))

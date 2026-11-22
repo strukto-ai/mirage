@@ -72,7 +72,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { tildeHomes } from '../session/shell_dirs.ts'
-import { envIsReadonly, seedVar, setAttr } from '../session/state.ts'
+import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
 import {
   admitRedirect,
   classifiedWords,
@@ -88,7 +88,9 @@ import {
   type Refused,
 } from './admission.ts'
 import {
+  HOOK_VARS,
   innerLines,
+  isHook,
   programLines,
   innerReadable,
   readWord,
@@ -115,6 +117,20 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 // Why the gate refuses, under a rule, a command that runs lines it cannot
 // see into: a sourced file, a script, a bash option mirage does not read.
 export const UNREADABLE_LINES = 'runs lines the gate cannot read'
+export const HOME_VAR: ReadonlySet<string> = new Set(['HOME'])
+// Builtins that store into the variables they name, with their options that
+// take a value.
+const STORES: ReadonlyMap<string, string> = new Map([
+  ['read', 'adinNptu'],
+  ['mapfile', 'dnOsuCc'],
+  ['readarray', 'dnOsuCc'],
+  ['getopts', ''],
+])
+// The declarations whose `-n` makes a nameref (`export -n` unexports).
+const NAMEREFS: ReadonlySet<string> = new Set(['declare', 'typeset', 'local'])
+const DECLARES: ReadonlySet<string> = new Set([...NAMEREFS, 'export', 'readonly'])
+// An unquoted `~` bash expands after an assignment-shaped word's `=` or `:`.
+const ASSIGNED_TILDE = /^[A-Za-z_][A-Za-z0-9_]*=(?:[^~'"\\]*[:=])?~/
 
 /**
  * Commands that move the shell's cwd where the walk cannot follow: a line
@@ -504,10 +520,8 @@ async function* judgeWords(
   reparse: (line: string) => TSNodeLike,
 ): AsyncGenerator<Judged> {
   const {
-    words,
     occurrence,
     session,
-    redirects: redirectWords,
     stated = true,
     intrinsic = false,
     lost = false,
@@ -515,6 +529,8 @@ async function* judgeWords(
     open = false,
   } = item
   const wholeLine = takesWholeLine(mode)
+  const words = wholeLine ? item.words.map(machineWord) : item.words
+  const redirectWords = wholeLine ? item.redirects.map(machineWord) : item.redirects
   const head = words[0]
   if (head === undefined) return
   const rules = session.commands
@@ -557,17 +573,19 @@ async function* judgeWords(
     occurrence.source,
   )
   // After a lost cd, a relative path names no file the pass can place.
-  const inners = runsFunction(name, session, registry)
-    ? []
-    : lost && !name.startsWith('/')
-      ? innerLines(name, words.slice(1))
-      : programLines(
-          words,
-          session,
-          registry,
-          namespace === null ? null : namespace.sessionLinks(session),
-          open,
-        )
+  // Mirage's shell judges a trap's action when it fires.
+  const inners =
+    runsFunction(name, session, registry) || (name === 'trap' && !wholeLine)
+      ? []
+      : lost && !name.startsWith('/')
+        ? innerLines(name, words.slice(1))
+        : programLines(
+            words,
+            session,
+            registry,
+            namespace === null ? null : namespace.sessionLinks(session),
+            open,
+          )
   const coded =
     wholeLine && (await registry.policies.wantsFor('preCommand', session.sessionId, true))
   const refused =
@@ -642,14 +660,19 @@ async function* judgeWords(
       )
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
+      // `env -C` runs its command where `cd` would have gone.
+      const [place, moved] =
+        inner.chdir === undefined || inner.chdir === null
+          ? [innerSession, lost]
+          : afterCd([{ raw: 'cd', text: 'cd' }, inner.chdir], innerSession, lost, [])
       yield* judgeWords(
         {
           words: inner.argv,
           redirects: [],
           occurrence: within,
-          session: innerSession,
+          session: place,
           stated: literal && !inner.open,
-          lost,
+          lost: moved,
           open: inner.open,
           pipeline,
         },
@@ -1153,8 +1176,8 @@ function* walkedLine(
   lost = false,
   opens = false,
   pipeline = pipelineWalk(),
+  homes: Readonly<Record<string, string>> = tildeHomes(session),
 ): Generator<Walked> {
-  const homes = tildeHomes(session)
   for (const item of walkNode(
     root,
     session,
@@ -2563,7 +2586,35 @@ async function* judgeLine(
       namespace,
       reparse,
     )
-  for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline)) {
+  // What the machine's shell runs on its own: a hook set on the line, or one
+  // the session's environment hands it.
+  const hooked = takesWholeLine(mode) ? written(root, HOOK_VARS) : null
+  const carried = takesWholeLine(mode)
+    ? (Object.keys(envSnapshot(session)).find(isHook) ?? null)
+    : null
+  if (
+    (hooked !== null || carried !== null) &&
+    (hasRules(session.commands) ||
+      (await registry.policies.wantsFor('preCommand', session.sessionId, true)))
+  ) {
+    const [node, name] = hooked ?? [root, carried ?? '']
+    yield {
+      judgment: denied(name, UNREADABLE_LINES),
+      occurrence: occurrenceIn(node, frame),
+      stated: false,
+    }
+    return
+  }
+  let homes = tildeHomes(session)
+  if (
+    takesWholeLine(mode) &&
+    (written(root, HOME_VAR) !== null ||
+      written(typedLine(root, frame, reparse), HOME_VAR) !== null)
+  ) {
+    // The machine's shell expands a later `~` with the HOME it was set.
+    homes = Object.fromEntries(Object.entries(homes).filter(([name]) => name !== ''))
+  }
+  for (const item of walkedLine(root, session, reparse, frame, lost, false, pipeline, homes)) {
     const elsewhere = item.elsewhere ?? []
     if (!takesWholeLine(mode) || elsewhere.length === 0) {
       yield* judged(item, item.session)
@@ -2577,6 +2628,210 @@ async function* judgeLine(
     }
     yield* strictest(places)
   }
+}
+
+/**
+ * The parse of the line a frame's text was typed in: `root` itself for a typed
+ * line, else the outermost line it was evaluated from.
+ */
+function typedLine(
+  root: TSNodeLike,
+  frame: Frame,
+  reparse: (line: string) => TSNodeLike,
+): TSNodeLike {
+  let at = frame.parent
+  if (at === null) return root
+  while (at.parent !== null) at = at.parent
+  return reparse(at.source)
+}
+
+/**
+ * A word as a whole line's gate reads it: a leading `~` the gate left
+ * unexpanded (a user it does not know, `~+`, or `~` once the line set HOME)
+ * names what only the machine's shell can say.
+ */
+function machineWord(word: Word): Word {
+  if (word.text === null) return word
+  if ((word.raw.startsWith('~') && word.text.startsWith('~')) || ASSIGNED_TILDE.test(word.raw)) {
+    return { ...word, text: null }
+  }
+  return word
+}
+
+/**
+ * The first node anywhere on a line (a function body or a substitution's
+ * included) that sets one of `names`, with the name: an assignment, a loop
+ * variable, a `declare -n` aimed at one, or a builtin storing into one (`read`,
+ * `mapfile`, `readarray`, `getopts`, `printf -v`); null when there is none.
+ */
+function written(
+  root: TSNodeLike,
+  names: ReadonlySet<string>,
+): readonly [TSNodeLike, string] | null {
+  const stack: TSNodeLike[] = [root]
+  while (stack.length > 0) {
+    const node = stack.pop()
+    if (node === undefined) break
+    const name = sets(node, names)
+    if (name !== null) return [node, name]
+    // A declaration read its assignments' names; only their values are left
+    // to walk.
+    const kids =
+      node.type === NodeType.DECLARATION_COMMAND
+        ? node.children.flatMap((kid) =>
+            kid.type === NodeType.VARIABLE_ASSIGNMENT ? [...kid.children] : [kid],
+          )
+        : [...node.children]
+    stack.push(...kids.reverse())
+  }
+  return null
+}
+
+/**
+ * The one of `names` a declaration builtin's words set, as `sets` answers;
+ * none when `declare`, `typeset` or `local` only prints (`-p`, `-f`, `-F`).
+ */
+function declared(head: string, words: readonly Word[], names: ReadonlySet<string>): string | null {
+  if (NAMEREFS.has(head)) {
+    for (const word of words) {
+      if (word.text === null || !word.text.startsWith('-') || word.text === '--') break
+      if (/[pfF]/.test(word.text)) return null
+    }
+  }
+  for (const word of words) {
+    if (word.text === null) return head
+    if (NAMEREFS.has(head) && word.text.startsWith('-') && word.text.includes('n')) return head
+    const name = word.text.split('=', 1)[0]?.split('[', 1)[0] ?? ''
+    if (names.has(name)) return name
+  }
+  return null
+}
+
+/**
+ * The one of `names` a node sets itself (an element of it included), null
+ * when it sets none. A node setting a variable the gate cannot name (a
+ * `declare -n` nameref, a store into a word only the run expands) answers with
+ * its command's name.
+ */
+function sets(node: TSNodeLike, names: ReadonlySet<string>): string | null {
+  const kids = node.children
+  if (node.type === NodeType.EXPANSION && !kids.some((k) => k.type === ':=' || k.type === '=')) {
+    return null
+  }
+  if (
+    node.type === NodeType.VARIABLE_ASSIGNMENT ||
+    node.type === NodeType.FOR_STATEMENT ||
+    node.type === NodeType.EXPANSION
+  ) {
+    for (let kid of kids.slice(0, 3)) {
+      if (kid.type === NodeType.SUBSCRIPT && kid.children[0] !== undefined) kid = kid.children[0]
+      if (kid.type === NodeType.VARIABLE_NAME && names.has(getText(kid))) return getText(kid)
+    }
+    return null
+  }
+  if (node.type === NodeType.DECLARATION_COMMAND) {
+    const head = kids[0] === undefined ? '' : getText(kids[0])
+    // An assignment is read by its name, the value aside; any other word is
+    // a flag or a NAME[=VALUE] the builtin parses at run time.
+    const words = kids.slice(1).map((k): Word => {
+      if (k.type === NodeType.VARIABLE_ASSIGNMENT) {
+        const name = `${k.children[0] === undefined ? '' : getText(k.children[0])}=`
+        return { raw: name, text: name }
+      }
+      if (k.type === NodeType.VARIABLE_NAME) return { raw: getText(k), text: getText(k) }
+      return readWord(k, null)
+    })
+    return declared(head, words, names)
+  }
+  if (node.type !== NodeType.COMMAND) return null
+  let words = wordsOf(node, null)
+  while (words[0] !== undefined && ['command', 'builtin'].includes(wordValue(words[0]))) {
+    words = words.slice(1)
+    while (words[0] !== undefined) {
+      const option = wordValue(words[0])
+      if (!option.startsWith('-') || option === '-') break
+      words = words.slice(1)
+      if (option === '--') break
+      // `command -v`/`-V` only looks names up.
+      if (option.includes('v') || option.includes('V')) return null
+    }
+  }
+  if (words[0] === undefined) return null
+  const head = wordValue(words[0])
+  if (DECLARES.has(head)) return declared(head, words.slice(1), names)
+  let targets: Word[]
+  if (head === 'printf') {
+    targets = printfTarget(words.slice(1))
+  } else if (STORES.has(head)) {
+    targets = stored(head, words.slice(1))
+  } else {
+    return null
+  }
+  for (const word of targets) {
+    if (word.text === null) return head
+    const name = word.text.split('[', 1)[0] ?? ''
+    if (names.has(name)) return name
+  }
+  return null
+}
+
+/**
+ * The variable `printf -v` stores into, read off its options before the
+ * format; none when it prints.
+ */
+function printfTarget(args: readonly Word[]): Word[] {
+  for (let at = 0; at < args.length; at++) {
+    const word = args[at]
+    if (word === undefined) break
+    // The run may expand an unknown word to an option, `-v NAME` among them.
+    if (word.text === null) return [word]
+    const value = wordValue(word)
+    if (!value.startsWith('-') || value === '-' || value === '--') return []
+    if (value === '-v') return args.slice(at + 1, at + 2)
+    if (value.startsWith('-v')) {
+      const rest = value.slice(2)
+      return [{ raw: rest, text: rest }]
+    }
+  }
+  return []
+}
+
+/**
+ * The words a storing builtin stores into: `read`'s operands and its `-a`
+ * array, `mapfile`'s array, `getopts`'s name after its optstring; an option's
+ * value is no target.
+ */
+function stored(head: string, args: readonly Word[]): Word[] {
+  const valued = STORES.get(head) ?? ''
+  const targets: Word[] = []
+  let i = 0
+  while (i < args.length) {
+    const word = args[i]
+    if (word === undefined) break
+    const value = wordValue(word)
+    if (!value.startsWith('-') || value === '-') break
+    i += 1
+    // The run may expand it to options that store into anything.
+    if (word.text === null) return [word]
+    if (value === '--') break
+    for (let at = 1; at < value.length; at++) {
+      if (!valued.includes(value[at] ?? '')) continue
+      const rest = value.slice(at + 1)
+      let given: Word | null = null
+      if (rest !== '') {
+        given = { raw: rest, text: rest }
+      } else {
+        given = args[i] ?? null
+        i += 1
+      }
+      if (value[at] === 'a' && given !== null) targets.push(given)
+      break
+    }
+  }
+  let operands = args.slice(i)
+  if (head === 'getopts') operands = operands.slice(1, 2)
+  else if (head !== 'read') operands = operands.slice(0, 1)
+  return [...targets, ...operands]
 }
 
 /**

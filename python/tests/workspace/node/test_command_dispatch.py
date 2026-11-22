@@ -547,6 +547,11 @@ class NoPython(Policy):
         return Deny("no python") if ctx.command == "python3" else None
 
 
+class NoWriter(Policy):
+    def pre_command(self, ctx):
+        return Deny("writes") if ctx.write else None
+
+
 SPELLED = [
     "nice /usr/bin/python3 -c 1",
     "nohup /usr/bin/python3 -c 1",
@@ -642,18 +647,163 @@ async def test_a_wrapper_s_route_yields_to_its_path_spelled_program_s():
         await ws.close()
 
 
+class NoSuch(Policy):
+    def pre_command(self, ctx):
+        return Deny("no") if ctx.command == "nosuch" else None
+
+
+UNLISTED = [
+    "/usr/bin/nosuch -c 1",
+    "/bin/nosuch -c 1",
+    "nice /usr/bin/nosuch -c 1",
+    "timeout 1 nice -n 3 /usr/bin/nosuch -c 1",
+]
+
+
 @pytest.mark.asyncio
-async def test_a_wrapper_leaves_a_path_the_view_does_not_list_to_the_machine():
-    # Only a listed /usr/bin file is a program; any other path is the
-    # machine's own file under a wrapper as on the plain path, which only a
-    # closed tree refuses.
-    deny = {"nosuch": {"decision": "deny", "reason": "no"}}
+@pytest.mark.parametrize(
+    "denies",
+    [
+        {"policies": [NoSuch()]},
+        {"profiles": {"default": {"commands": {"nosuch": "deny"}}}},
+    ],
+)
+async def test_a_path_the_view_does_not_list_is_judged_by_its_name_too(denies):
+    # The machine execs a path Mirage does not list, so a deny of the
+    # program's name, in code or as a rule, refuses the path under any
+    # wrapper, and explain says of it what it says of the name.
+    ws = _spelled(**denies)
+    try:
+        assert (await ws.shell("/usr/bin/other -c 1")).stdout == b"b\n"
+        for line in UNLISTED:
+            r = await ws.shell(line)
+            assert (r.exit_code, r.stdout) == (126, b""), line
+            named = line.replace("/usr/bin/", "").replace("/bin/", "")
+            said = await ws.explain(line)
+            assert said.exit_code == (await ws.explain(named)).exit_code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_the_view_does_not_list_is_asked_by_its_name():
+    ask = {"nosuch": {"decision": "ask", "reason": "nod"}}
+    ws = _spelled(profiles={"default": {"commands": ask}})
+    try:
+        held = await ws.shell("/usr/bin/nosuch -c 1")
+        assert held.exit_code == 126
+        (pending,) = ws.decisions.pending()
+        await ws.decisions.answer(pending.id, Outcome.ALLOW, Scope.ONCE)
+        ran = await ws.shell("/usr/bin/nosuch -c 1")
+        assert (ran.exit_code, ran.stdout) == (0, b"b\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_reads_the_program_s_own_paths():
+    # A bare operand is a path only by the program's grammar, so the name
+    # pass reads `secret.txt` as the file `cat` opens.
+    deny = {
+        "cat": {"decision": "deny", "reason": "r", "paths": ["/secret.txt"]}
+    }
     ws = _spelled(profiles={"default": {"commands": deny}})
     try:
-        bare = await ws.shell("/usr/bin/nosuch -c 1")
-        r = await ws.shell("nice /usr/bin/nosuch -c 1")
-        assert (r.exit_code, r.stdout) == (bare.exit_code, bare.stdout)
-        assert bare.stdout == b"b\n"
+        r = await ws.shell("/opt/cat secret.txt")
+        assert r.exit_code != 0
+        assert r.stdout == b""
+        assert (await ws.shell("/opt/cat other.txt")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_reads_the_folder_its_program_lists_by_default():
+    # `ls` with no operand lists the cwd, so the name pass judges that
+    # folder as `ls` alone would.
+    deny = {"ls": {"decision": "deny", "reason": "r", "paths": ["/secret"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir /secret")
+        r = await ws.shell("cd /secret && /opt/ls")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+        assert (await ws.shell("/opt/ls")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_reaches_the_tree_its_program_removes():
+    # `rm -r` reaches every file under its operand, so the name pass
+    # judges what lies below it as `rm` alone would.
+    deny = {"rm": {"decision": "deny", "reason": "r", "paths": ["/d/k/*"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir -p /d/k && echo x > /d/k/f")
+        r = await ws.shell("/opt/rm -rf /d")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+        assert (await ws.shell("/opt/rm -rf /e")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_judges_the_target_of_a_link_it_is_handed():
+    # Mirage's chmod resolves a link itself, later; the machine's never
+    # reaches that, so the name pass judges the link's target.
+    deny = {"chmod": {"decision": "deny", "reason": "r", "paths": ["/d/s"]}}
+    ws = _spelled(profiles={"default": {"commands": deny}})
+    try:
+        await ws.shell("mkdir /d && echo x > /d/s && ln -s /d/s /d/l")
+        r = await ws.shell("/opt/chmod 600 /d/l")
+        assert (r.exit_code != 0, r.stdout) == (True, b"")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_writes_as_its_program_does():
+    # A coded policy sees the name pass's context as `rm` alone gives it.
+    ws = _spelled(policies=[NoWriter()])
+    try:
+        assert (await ws.shell("/opt/rm /z")).exit_code == 126
+        assert (await ws.shell("/opt/echo z")).stdout == b"b\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_route_of_a_path_s_name_does_not_move_the_path():
+    # The path runs where its own words place it: a route of its file's
+    # name places that name, not the path.
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        machines={
+            "a": Named("a", {"captures": [EXTERNAL_COMMANDS]}),
+            "c": Named("c", {"captures": [EXTERNAL_COMMANDS]}),
+        },
+        policies=[Routes({"nosuch": Route(machine="c")})],
+    )
+    try:
+        assert (await ws.shell("nosuch -c 1")).stdout == b"c\n"
+        assert (await ws.shell("/opt/nosuch -c 1")).stdout == b"a\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_s_name_grants_nothing_a_closed_tree_withholds():
+    # Only a named entry speaks for a path's name: a closed tree's root
+    # does not refuse a script Mirage runs line by line, and naming `ls`
+    # does not admit a path that ends in it.
+    closed = {"commands": {"*": "deny", "echo": "allow", "ls": "allow"}}
+    ws = _spelled(profiles={"default": closed})
+    try:
+        await ws.shell("echo 'echo hi' > /s.sh")
+        ran = await ws.shell("/s.sh")
+        assert (ran.exit_code, ran.stdout) == (0, b"hi\n")
+        assert (await ws.shell("/opt/ls")).exit_code == 126
     finally:
         await ws.close()
 

@@ -18,7 +18,9 @@ import { describe, expect, it } from 'vitest'
 import { diffGeneric, parseFlags, quoteHeaderName, switchWords, type DiffFlags } from './diff.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { parseFlags as parseLineFlags } from '../../../workspace/executor/command/flags.ts'
-import { FileStat, FileType, PathSpec } from '../../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { Context } from '../../config.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { Files } from '../../../workspace/files.ts'
@@ -430,6 +432,128 @@ function lineFlags(argv: string[]): DiffFlags | IOResult {
   return parseFlags(parseLineFlags(argv, specOf('diff'), 'diff', '/').flagKwargs)
 }
 
+// Pinned against GNU diffutils 3.10: one comparison per operand, in order,
+// with no separator, and the worst status of them.
+async function* oneEmptyChunk(): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield new Uint8Array()
+}
+
+async function* aAndB(): AsyncGenerator<Uint8Array> {
+  await Promise.resolve()
+  yield ENC.encode('a\nb\n')
+}
+
+describe('--from-file and --to-file', () => {
+  // Stdin handed in as bytes is read once: -X drains it, so the comparison
+  // reads `-` as empty (diffutils 3.10: `0a1,2`, exit 1).
+  it('shares one stdin cursor between exclusions and comparisons', async () => {
+    const [out, io] = await diffRun(
+      [operand('x', '/d/x')],
+      {
+        flags: { from_file: [DASH], exclude_from: [DASH] },
+        stdin: ENC.encode('a\n'),
+        cwd: PathSpec.fromStrPath('/'),
+      },
+      () => aAndB(),
+      readdir,
+      (p: PathSpec) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE })),
+    )
+    expect([
+      new TextDecoder().decode(await materialize(out ?? new Uint8Array())),
+      io.exitCode,
+    ]).toEqual(['0a1,2\n> a\n> b\n', 1])
+  })
+
+  it('closes the comparisons before one that fails', async () => {
+    let closed = 0
+    let calls = 0
+    const computer: DiffComputer = {
+      compare: () => {
+        calls += 1
+        if (calls > 1) return Promise.reject(new PipeClosed())
+        const kept = new OutputStream(oneEmptyChunk(), () => {
+          closed += 1
+          return Promise.resolve()
+        })
+        return Promise.resolve({ outcome: 'different', status: 1, output: [kept], stderr: [] })
+      },
+    }
+    await expect(
+      diffRun(
+        [operand('y', '/d/y'), operand('z', '/d/z')],
+        {
+          flags: { from_file: [operand('x', '/d/x')] },
+          stdin: null,
+          cwd: PathSpec.fromStrPath('/'),
+          diff: computer,
+        },
+        () => oneEmptyChunk(),
+        readdir,
+        (p: PathSpec) => Promise.resolve(new FileStat({ name: p.virtual, type: FileType.FILE })),
+      ),
+    ).rejects.toBeInstanceOf(PipeClosed)
+    expect(closed).toBe(1)
+  })
+
+  it.each([
+    ['diff --from-file=x y z', '2c2\n< b\n---\n> c\n', '', 1],
+    ['diff --to-file=x y z', '2c2\n< c\n---\n> b\n', '', 1],
+    ['diff --from-file x y', '2c2\n< b\n---\n> c\n', '', 1],
+    ['diff --from=x y', '2c2\n< b\n---\n> c\n', '', 1],
+    ['diff --from-file=x', '', '', 0],
+    ['diff --from-file=x x z', '', '', 0],
+    ['diff -q --from-file=x y z', 'Files x and y differ\n', '', 1],
+    [
+      'diff --from-file=x nope y',
+      '2c2\n< b\n---\n> c\n',
+      'diff: nope: No such file or directory\n',
+      2,
+    ],
+    [
+      'diff --from-file=x y nope',
+      '2c2\n< b\n---\n> c\n',
+      'diff: nope: No such file or directory\n',
+      2,
+    ],
+    ['diff --from-file=nope y', '', 'diff: nope: No such file or directory\n', 2],
+    ['diff --from-file=x --from-file=x y', '2c2\n< b\n---\n> c\n', '', 1],
+    [
+      "printf 'a\\nz\\n' | diff --from-file=- x y",
+      '2c2\n< z\n---\n> b\n',
+      'diff: -: Bad file descriptor\n',
+      2,
+    ],
+    [
+      "printf 'a\\nz\\n' | diff --from-file=x - -",
+      '2c2\n< b\n---\n> z\n',
+      'diff: -: Bad file descriptor\n',
+      2,
+    ],
+    ["printf 'a\\nb\\n' | diff --from-file=- - x", '', '', 0],
+    ["printf 'skip\\n' | diff -r -X - --from-file=d e f", '', '', 0],
+    ["printf 'a\\n' | diff -X - --from-file=- x", '0a1,2\n> a\n> b\n', '', 1],
+    ['diff -X nope --from-file=x y z', '', 'diff: nope: No such file or directory\n', 2],
+  ])('compares one file with each operand: %s', async (line, stdout, stderr, code) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell(
+        "cd /data && printf 'a\\nb\\n' > x && printf 'a\\nc\\n' > y && printf 'a\\nb\\n' > z" +
+          ' && mkdir d e f && printf 1 > d/skip && printf 2 > e/skip && printf 3 > f/skip',
+      )
+      const r = await ws.shell(`cd /data && ${line}`)
+      const dec = new TextDecoder()
+      expect([dec.decode(r.stdout), dec.decode(r.stderr), r.exitCode]).toEqual([
+        stdout,
+        stderr,
+        code,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('parseFlags', () => {
   it.each([
     [['-c', '-u'], `diff: conflicting output style options\n${HINT}`],
@@ -440,6 +564,8 @@ describe('parseFlags', () => {
     [['-W', '40', '-W', '20'], 'diff: conflicting width options\n'],
     [['-C', 'x'], `diff: invalid context length 'x'\n${HINT}`],
     [['-I', '\\('], 'diff: \\(: Unmatched ( or \\(\n'],
+    [['--from-file=x', '--to-file=y'], 'diff: --from-file and --to-file both specified\n'],
+    [['--from-file=x', '--from-file=y'], `diff: conflicting --from-file option value 'y'\n${HINT}`],
   ])('refuses %j as diffutils does', (argv, stderr) => {
     const parsed = lineFlags(argv)
     expect(parsed).toBeInstanceOf(IOResult)

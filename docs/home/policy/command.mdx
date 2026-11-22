@@ -62,9 +62,24 @@ refuses `git push --force`.
 A machine that takes a line whole (`@line`) expands its words itself, so a
 method reads them as typed. While a `pre_command` method is installed, in code
 or in the session's profile, such a line exits 126 when it holds a word only
-the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`), a
-line Mirage cannot read (`sh script.sh`, `source`, `echo cmd | sh`), operands
-the machine adds (`xargs`), or a command after a `cd` Mirage cannot follow.
+the machine can expand (`$cmd`, `eval "$p"`, a wildcard such as `cur?`, a
+`~` once the line sets `HOME`, `~name` for a user Mirage does not know,
+`if=~/f`), a line Mirage cannot read (`sh script.sh`, `bash -i`, `bash -l`,
+`source`, `echo cmd | sh`), operands the machine adds (`xargs`), or a
+command after a `cd` Mirage cannot follow. So does a line that sets what the
+machine's shell runs later in a way Mirage cannot read: an alias definition,
+`hash -p`, `enable -f`, a login shell (`exec -l`, an argv0 starting with
+`-`), any `declare -n`, `PS4`, `BASH_ENV`, `BASH_CMDS` or `BASH_ALIASES`
+set by an assignment (an element of one included), `${NAME:=…}`, `read`,
+`printf -v`, `mapfile`, `getopts` or a loop, or a `BASH_FUNC_` function
+handed through `env`. A line also exits 126 while the session exports
+`PS4` or `BASH_ENV`. A `trap` action and a `coproc` command are judged as
+commands of the line, and `env -C DIR`'s command in `DIR`.
+
+A command typed by its path (`/usr/bin/perl`, `./tools/perl`) is shown to a
+method a second time by its file name (`perl`), so a check on `ctx.command`
+holds however the program is spelled. A deny or an ask by the name holds;
+an allow by the name admits nothing the path was refused.
 
 ## post_command
 

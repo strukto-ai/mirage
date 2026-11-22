@@ -18,6 +18,7 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { hasGlob, markEscapedGlobs } from '../../utils/glob_walk.ts'
 import { patternShape } from '../../utils/fnmatch.ts'
 import { parseBashArgs } from '../executor/builtins/script/bash.ts'
+import { BASH_LONG_OPTIONS } from '../executor/builtins/script/constants.ts'
 import { CondParser, PATTERN_OPS, condLeaves, condTokens } from './test_tokens.ts'
 import { readWrapper } from '../lookup/constants.ts'
 import { lookup, pathProgram } from '../lookup/lookup.ts'
@@ -134,6 +135,8 @@ export interface InnerLine {
   readonly line: string | null
   readonly argv: readonly Word[]
   readonly open: boolean
+  /** The folder the command runs in, as `cd` would take it (`env -C`). */
+  readonly chdir?: Word | null
 }
 
 const UNREADABLE: InnerLine = { line: null, argv: [], open: false }
@@ -149,15 +152,36 @@ export function innerReadable(inner: InnerLine): boolean {
 
 const FIND_EXEC: ReadonlySet<string> = new Set(['-exec', '-execdir', '-ok', '-okdir'])
 const ENV_FLAGS: ReadonlySet<string> = new Set(['-i', '--ignore-environment', '-0', '--null', '-'])
+const ENV_VALUED = ['unset', 'chdir', 'argv0'] as const
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+// Variables a whole line's shell expands or sources on its own.
+export const HOOK_VARS: ReadonlySet<string> = new Set([
+  'PS4',
+  'BASH_ENV',
+  'BASH_CMDS',
+  'BASH_ALIASES',
+])
+
+/**
+ * Whether a variable sets what a whole line's shell runs on its own: one it
+ * expands or sources (`HOOK_VARS`), or a function bash imports from the
+ * environment (`BASH_FUNC_NAME%%`).
+ */
+export function isHook(name: string): boolean {
+  return HOOK_VARS.has(name) || name.startsWith('BASH_FUNC_')
+}
 
 function tail(args: readonly Word[], count: number): Word[] {
   return count > 0 ? args.slice(args.length - count) : []
 }
 
 // `command [-pVv] name [arg ...]`: `-v`/`-V` only report.
+// `command [-pVv] name [arg ...]`: `-v`/`-V` only report; an option only the
+// run expands may be either, so it is unreadable.
 function commandInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length && valueAt(args, i).startsWith('-')) {
+    if (args[i]?.text === null) return [UNREADABLE]
     const word = valueAt(args, i)
     i += 1
     if (word === '--') break
@@ -166,20 +190,25 @@ function commandInner(args: readonly Word[]): InnerLine[] {
   return asArgv(args.slice(i))
 }
 
-// `exec [-cl] [-a name] [command [arg ...]]`.
+// `exec [-cl] [-a name] [command [arg ...]]`; `-l`, or a name starting with
+// `-`, starts a shell as a login shell, which sources rc files the gate cannot
+// read; an option only the run expands may be either, so it is unreadable.
 function execInner(args: readonly Word[]): InnerLine[] {
   let i = 0
   while (i < args.length && valueAt(args, i).startsWith('-')) {
+    if (args[i]?.text === null) return [UNREADABLE]
     const word = valueAt(args, i)
     i += 1
     if (word === '--') break
-    if (word.endsWith('a')) i += 1
+    if (word.includes('l')) return [UNREADABLE]
+    if (word.endsWith('a')) {
+      if (args[i]?.text === null || valueAt(args, i).startsWith('-')) return [UNREADABLE]
+      i += 1
+    }
   }
   return asArgv(args.slice(i))
 }
 
-// `env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]`, read the
-// way the tree's `env` builtin reads it.
 // Whether an `env` word is GNU's `-S` / `--split-string`, whose value env
 // splits into the command line itself.
 function splits(word: string): boolean {
@@ -195,26 +224,93 @@ function splits(word: string): boolean {
   return false
 }
 
+// Whether an `env` option word takes the next word as its value: a detached
+// `--unset`, `--chdir` or `--argv0` (or a prefix of one), or a cluster whose
+// first of `u`, `C`, `a` ends it, since getopt hands such a letter the rest of
+// its cluster when there is one.
+function takesNext(word: string): boolean {
+  if (word.startsWith('--')) {
+    const [name = '', ...value] = word.slice(2).split('=')
+    return value.length === 0 && name !== '' && ENV_VALUED.some((long) => long.startsWith(name))
+  }
+  for (let at = 1; at < word.length; at++) {
+    if ('uCa'.includes(word[at] ?? '')) return at === word.length - 1
+  }
+  return false
+}
+
+// The options an `env` option word sets, as short letters: a cluster's up to
+// its first of `u`, `C`, `a` (the rest is that one's value), or the letter a
+// long option or its prefix stands for (`-` for one only GNU's env takes).
+function envLetters(word: string): Set<string> {
+  if (word.startsWith('--')) {
+    const name = word.slice(2).split('=', 1)[0] ?? ''
+    const longs: [string, string][] = [
+      ['ignore-environment', 'i'],
+      ['unset', 'u'],
+      ['null', '0'],
+    ]
+    return new Set([longs.find(([long]) => long.startsWith(name))?.[1] ?? '-'])
+  }
+  const end = word.search(/[uCa]/)
+  return new Set(word.slice(1, end < 0 ? word.length : end + 1))
+}
+
+// The folder an `env` option word sends its command to: `-C`'s or
+// `--chdir`'s value, attached or the next word; null for any other option.
+function valueOf(word: Word, after: Word | null, letter: string, long: string): Word | null {
+  const value = wordValue(word)
+  let attached: string
+  if (value.startsWith('--')) {
+    const [name = '', ...rest] = value.slice(2).split('=')
+    if (name === '' || !long.startsWith(name)) return null
+    if (rest.length === 0) return after
+    attached = rest.join('=')
+  } else {
+    let at = 0
+    while (at < value.length && !'uCa'.includes(value[at] ?? '')) at += 1
+    if (at === 0 || at === value.length || value[at] !== letter) return null
+    attached = value.slice(at + 1)
+    if (attached === '') return after
+  }
+  return { raw: attached, text: word.text === null ? null : attached }
+}
+
+// `env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]`, read the way
+// the tree's `env` builtin reads it; an option only the run expands may be any
+// of them, so it is unreadable.
 function envInner(args: readonly Word[]): InnerLine[] {
+  let chdir: Word | null = null
+  let changed = false
+  let foreign = false
   let i = 0
   while (i < args.length) {
     const word = valueAt(args, i)
+    if (word.startsWith('-') && args[i]?.text === null) return [UNREADABLE]
     if (word === '--') {
       i += 1
       break
     }
     if (splits(word)) return [UNREADABLE]
-    if (ENV_FLAGS.has(word) || word.startsWith('--unset=')) {
+    if (ENV_FLAGS.has(word)) {
+      changed ||= word !== '-0' && word !== '--null'
       i += 1
       continue
     }
-    if (word === '-u' || word === '--unset') {
-      i += 2
-      continue
-    }
     if (word.startsWith('-') && word.length > 1) {
-      // A cluster ending in `u` takes the next word as the name.
-      i += word.endsWith('u') ? 2 : 1
+      const letters = envLetters(word)
+      changed ||= letters.has('i') || letters.has('u')
+      foreign ||= [...letters].some((f) => !'iu0'.includes(f))
+      const current = args[i]
+      if (current !== undefined) {
+        chdir = valueOf(current, args[i + 1] ?? null, 'C', 'chdir') ?? chdir
+        const argv0 = valueOf(current, args[i + 1] ?? null, 'a', 'argv0')
+        // A leading `-` in argv0 makes a shell a login shell.
+        if (argv0 !== null && (argv0.text === null || wordValue(argv0).startsWith('-'))) {
+          return [UNREADABLE]
+        }
+      }
+      i += takesNext(word) ? 2 : 1
       continue
     }
     break
@@ -222,9 +318,17 @@ function envInner(args: readonly Word[]): InnerLine[] {
   while (i < args.length) {
     const word = valueAt(args, i)
     if (!word.includes('=') || word.startsWith('=')) break
+    const name = word.split('=', 1)[0] ?? ''
+    // A name only the run expands may be a hook's.
+    if (isHook(name) || (args[i]?.text === null && !ENV_NAME.test(name))) return [UNREADABLE]
+    changed = true
     i += 1
   }
-  return asArgv(args.slice(i))
+  // The tree's env refuses an option the machine's takes, so the
+  // environment its command runs in is not one the gate can build.
+  if (changed && foreign) return [UNREADABLE]
+  const rest = args.slice(i)
+  return rest.length > 0 ? [{ line: null, argv: rest, open: false, chdir }] : []
 }
 
 // The operands of a shell builtin with a spec, as Words; null when the
@@ -308,6 +412,32 @@ function argvInner(args: readonly Word[]): InnerLine[] {
 // parse refuses are lines the gate cannot read, since a real bash takes
 // options mirage does not (`--restricted`, `-O extglob`) and still runs the
 // program.
+/**
+ * Whether a shell's startup options make it interactive or a login shell
+ * (`-i`, `-l`, `--login`), which sources rc files (`ENV`, `~/.bashrc`,
+ * `~/.profile`) the gate cannot read.
+ */
+function startsRc(words: readonly string[]): boolean {
+  let skip = 0
+  for (const word of words) {
+    if (skip > 0) {
+      // Each `o` or `O` in a group takes the next word.
+      skip -= 1
+      continue
+    }
+    // bash reads `+` words as options too, and `+l` still logs in.
+    if (word === '-' || word === '--' || !['-', '+'].includes(word[0] ?? '')) return false
+    if (word.startsWith('--')) {
+      if (word === '--login') return true
+      skip = BASH_LONG_OPTIONS.get(word.slice(2)) === true ? 1 : 0
+      continue
+    }
+    if (word.includes('i') || word.includes('l')) return true
+    skip = (word.match(/[oO]/g) ?? []).length
+  }
+  return false
+}
+
 function shellInner(args: readonly Word[]): InnerLine[] {
   // Expansion can erase or split a word, shifting an option's value
   // onto --version or -c. Only a literal prefix can establish what
@@ -317,10 +447,38 @@ function shellInner(args: readonly Word[]): InnerLine[] {
     if (word.text === null || word.glob) break
     literal.push(word.text)
   }
+  if (startsRc(literal)) return [UNREADABLE]
   const parsed = parseBashArgs(literal)
   if (parsed.help || parsed.version) return []
   if (parsed.script !== null) return [{ line: parsed.script, argv: [], open: false }]
   return [UNREADABLE]
+}
+
+// `trap [-lp] [[ACTION] CONDITION...]`: the action is a line the shell runs
+// when a condition fires. `-` or a number first resets the conditions, a lone
+// operand resets it, and an option only lists.
+function trapInner(args: readonly Word[]): InnerLine[] {
+  const first = args.length > 0 ? valueAt(args, 0) : ''
+  // The run may expand it to `--`, leaving an action to run.
+  if (first.startsWith('-') && args[0]?.text === null) return [UNREADABLE]
+  if (first.startsWith('-') && first !== '-' && first !== '--') return []
+  const rest = first === '--' ? args.slice(1) : args
+  const action = rest.length > 0 ? valueAt(rest, 0) : ''
+  if (rest.length < 2 || action === '-' || /^[0-9]+$/.test(action)) return []
+  return [{ line: action, argv: [], open: false }]
+}
+
+// A builtin whose option `letter` loads what a later word runs from a file
+// the gate cannot read (`hash -p`, `enable -f`).
+function loads(args: readonly Word[], letter: string): InnerLine[] {
+  for (const arg of args) {
+    // The run may expand it to the loading option.
+    if (arg.text === null) return [UNREADABLE]
+    const word = wordValue(arg)
+    if (word === '--' || !word.startsWith('-')) break
+    if (word.slice(1).includes(letter)) return [UNREADABLE]
+  }
+  return []
 }
 
 /**
@@ -373,6 +531,23 @@ export function innerLines(head: string, args: readonly Word[]): InnerLine[] {
       return wrapperInner(head, args)
     case 'time':
       return timeInner(args)
+    case 'trap':
+      return trapInner(args)
+    case 'coproc':
+      return asArgv(args)
+    case 'hash':
+      return loads(args, 'p')
+    case 'enable':
+      return loads(args, 'f')
+    case 'alias':
+      // A whole line's shell expands a later word to the value.
+      return args.some(
+        (w) =>
+          w.text === null ||
+          (w.text.includes('=') && !w.text.startsWith('=') && !w.text.startsWith('-')),
+      )
+        ? [UNREADABLE]
+        : []
     default:
       return []
   }
