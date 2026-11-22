@@ -485,17 +485,13 @@ async def test_a_rule_scoped_to_a_cli_reaches_its_own_reads():
         mode=MountMode.WRITE,
         profiles={
             "sealed": {
-                "commands": {
-                    "peek": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/data/secret.txt"],
-                    },
-                    "later": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/data/secret.txt"],
-                    },
+                "mounts": {
+                    "/data/secret.txt": {
+                        "commands": {
+                            "peek": {"decision": "deny", "reason": "sealed"},
+                            "later": {"decision": "deny", "reason": "sealed"},
+                        }
+                    }
                 }
             }
         },
@@ -783,11 +779,11 @@ async def test_a_cli_calling_a_custom_function_meets_hides_and_its_rules():
                 "commands": {"*": "allow", "shelf": "allow"},
             },
             "sealed": {
-                "commands": {
-                    "shelf": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/data"],
+                "mounts": {
+                    "/data": {
+                        "commands": {
+                            "shelf": {"decision": "deny", "reason": "sealed"}
+                        }
                     }
                 }
             },
