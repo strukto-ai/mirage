@@ -14,6 +14,7 @@
 
 import asyncio
 import importlib
+import os
 import resource
 import uuid
 from unittest.mock import AsyncMock
@@ -29,6 +30,27 @@ from mirage.workspace import Workspace
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 if _soft < 8192:
     resource.setrlimit(resource.RLIMIT_NOFILE, (min(8192, _hard), _hard))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Turn off the tidying the real git starts behind a test.
+
+    A commit starts ``git maintenance run --auto``, and on a recent git
+    (seen on 2.56) its ``.git/objects/maintenance.lock`` is still there
+    when the commit returns and goes a moment later, while the test is
+    reading that repository. Set before any test module is imported, since
+    several build the environment they give git as they load.
+
+    Args:
+        config (pytest.Config): the run's configuration.
+    """
+    os.environ.update(
+        {
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "maintenance.auto",
+            "GIT_CONFIG_VALUE_0": "false",
+        }
+    )
 
 
 async def _close_pools(pools: list[SessionPool]) -> None:

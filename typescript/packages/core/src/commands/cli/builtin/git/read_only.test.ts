@@ -81,6 +81,7 @@ it.each(forms)('matches native Git: %s', async (form) => {
       LANG: 'C',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_COUNT: '0',
     },
     encoding: 'utf8',
   })
