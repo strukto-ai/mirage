@@ -212,7 +212,7 @@ from mirage.workspace.expand.globs import GlobOptions, resolve_globs
 from mirage.workspace.files import Files, WorkspaceFiles
 from mirage.workspace.lookup import program, program_note, programs
 from mirage.workspace.lookup.lookup import lookup
-from mirage.workspace.lookup.machine import lookup_machine
+from mirage.workspace.lookup.machine.answers import lookup_machine
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountEntry, MountRegistry
 from mirage.workspace.mount.namespace import Namespace

@@ -174,14 +174,14 @@ from mirage.workspace.lookup.lookup import (
     runs_wrapper,
     target_consumer,
 )
-from mirage.workspace.lookup.machine import (
-    bin_program,
-    link_machine,
+from mirage.workspace.lookup.machine.answers import bin_program
+from mirage.workspace.lookup.machine.command import (
     operand_machine,
-    preferred_machine,
     program_machine,
-    several_machines,
 )
+from mirage.workspace.lookup.machine.links import link_machine
+from mirage.workspace.lookup.machine.mounts import several_machines
+from mirage.workspace.lookup.machine.preferred import preferred_machine
 from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace

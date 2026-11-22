@@ -51,7 +51,7 @@ from mirage.workspace.lookup.constants import (
     PROGRAM_WRAPPERS,
 )
 from mirage.workspace.lookup.lookup import routed_consumer, runs_wrapper
-from mirage.workspace.lookup.machine import stated_machine
+from mirage.workspace.lookup.machine.command import stated_machine
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
