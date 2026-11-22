@@ -997,10 +997,10 @@ async def admit_redirect(
     compound statement's (``{ cat; } < f``, a loop, a subshell, an
     ``if``) or a bare one (``> f``, ``exec 3< f``). A command's own
     redirects are judged with the command; these have no command, so
-    the session's trees alone are asked, and only a root leaf scoped to
-    a path the redirect opens, by its paths or by its mount entry's
-    folder, speaks (``redirect_ruling``). A coded
-    policy is not asked: it judges the open itself, at the dispatcher.
+    the session's trees alone are asked, and only the root leaf of a
+    folder entry holding a path the redirect opens speaks
+    (``redirect_ruling``). A coded policy is not asked: it judges the
+    open itself, at the dispatcher.
 
     A hidden target is dropped first, so the open answers ENOENT; links
     are followed as a command's redirect targets are. A deny, or an ask

@@ -628,9 +628,9 @@ class SessionProfile(BaseModel):
     _v_mounts = field_validator("mounts", mode="before")(parse_profile_mounts)
 
     @model_validator(mode="after")
-    def _v_absolute(self) -> "SessionProfile":
-        # `paths` checks its own entries, so only the mount boundaries
-        # are left to this one.
+    def _v_entry_paths_under_mount(self) -> "SessionProfile":
+        """Refuse a folder entry's ``paths.hide`` or ``paths.show`` entry
+        that lies outside the entry's own folder."""
         for prefix, entry in (self.mounts or {}).items():
             if entry.paths is not None:
                 where = f"mounts[{prefix}]"
