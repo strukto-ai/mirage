@@ -188,7 +188,7 @@
   },
   {
    "id": "a_walk_over_a_folders_parent_runs_and_meets_the_folder_entry_by_entry",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/n": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "star", "profile": {"mounts": {"/data/w/hdir": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
     {"op": "session", "id": "named", "profile": {"mounts": {"/data/w/hdir": {"commands": {"find": {"decision": "deny", "reason": "kept"}, "grep": {"decision": "deny", "reason": "kept"}, "du": {"decision": "deny", "reason": "kept"}, "ls": {"decision": "deny", "reason": "kept"}, "tree": {"decision": "deny", "reason": "kept"}, "rm": {"decision": "deny", "reason": "kept"}}}}}},
@@ -211,6 +211,10 @@
     {"op": "exec", "session": "asks", "command": "grep -r TODO /data/w", "expect": {"value": {"exit_code": 2, "stdout": "/data/w/open/t:TODO b\n", "stderr": "grep: /data/w/hdir: Permission denied\n", "decision": "nod"}}},
     {"op": "exec", "session": "asks", "command": "find /data/w", "expect": {"value": {"exit_code": 1, "stdout": "/data/w\n/data/w/hdir\n/data/w/open\n/data/w/open/t\n", "stderr": "find: '/data/w/hdir': Permission denied\n", "decision": "nod"}}},
     {"op": "exec", "command": "cat /data/w/hdir/s", "expect": {"value": {"exit_code": 0, "stdout": "TODO a\n", "stderr": "", "decision": null}}},
+    {"op": "session", "id": "nested", "profile": {"mounts": {"/data/n/hdir": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "exec", "command": "mkdir -p /data/n/hdir && echo TODO c > /data/n/hdir/s && echo TODO d > /data/n/t", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "nested", "command": "grep -r TODO /data", "expect": {"value": {"exit_code": 2, "stdout": "/data/w/hdir/s:TODO a\n/data/w/open/t:TODO b\n/data/n/t:TODO d\n", "stderr": "grep: /data/n/hdir: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "nested", "command": "tree /data", "expect": {"value": {"exit_code": 2, "stdout": "/data\n|-- n\n|   |-- hdir  [error opening dir]\n|   `-- t\n`-- w\n    |-- hdir\n    |   `-- s\n    `-- open\n        `-- t\n\n6 directories, 3 files\n", "stderr": "", "decision": "kept"}}},
     {"op": "asks", "expect": {"value": []}}
    ]
   },

@@ -91,7 +91,9 @@ def test_a_walk_over_a_folder_leaves_it_to_its_entries():
     assert walk.walks and walk.walks_into == ()
     assert decide(walk, rules).outcome is Outcome.ALLOW
     into = dataclasses.replace(walk, walks_into=("/d/w",))
-    assert decide(into, rules).outcome is Outcome.DENY
+    assert decide(into, rules).outcome is Outcome.ALLOW
+    at_root = dataclasses.replace(walk, walks_into=("/d/w/keep",))
+    assert decide(at_root, rules).outcome is Outcome.DENY
     inside = line("grep", "-r", "x", "/d/w/keep/a")
     assert decide(inside, rules).outcome is Outcome.DENY
     assert decide(line("rm", "-r", "/d"), rules).outcome is Outcome.DENY

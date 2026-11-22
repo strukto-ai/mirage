@@ -368,17 +368,17 @@ fn basename(path: &[u32]) -> &[u32] {
 }
 
 /// Whether a mount entry's tree judges the line: one working inside
-/// it, or a walk into the mount root it lies at or under
-/// (`walks_into`), whose fan-out admits nothing again. A walk over a
-/// folder in the same mount reaches it entry by entry (`io_refusal`),
-/// as a path rule's scope is reached, and moving or removing an
-/// ancestor takes the folder whole.
+/// it, or a walk into the mount root it is keyed at (`walks_into`),
+/// whose fan-out admits nothing again. A walk over a folder, in the
+/// walked mount or inside one it enters, reaches it entry by entry
+/// (`io_refusal`), and moving or removing an ancestor takes the folder
+/// whole.
 pub(crate) fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
     if under(&facts.cwd, mount) || facts.paths.iter().any(|p| under(&p.virtual_path, mount)) {
         return true;
     }
     if facts.walks {
-        return facts.walks_into.iter().any(|root| under(mount, root));
+        return facts.walks_into.iter().any(|root| root == mount);
     }
     if !facts.subtree {
         return false;
@@ -565,7 +565,8 @@ mod tests {
         let folder = text("/d/w/keep");
         assert!(!touches(&folder, &walk(&[])));
         assert!(!touches(&folder, &walk(&["/d/other"])));
-        assert!(touches(&folder, &walk(&["/d/w"])));
+        assert!(!touches(&folder, &walk(&["/d/w"])));
+        assert!(touches(&folder, &walk(&["/d/w/keep"])));
         assert!(touches(&text("/d/w"), &walk(&["/d/w"])));
         assert!(touches(
             &folder,
@@ -581,7 +582,8 @@ mod tests {
             &[("/d/w/keep", json!({"*": "deny"}))],
         );
         assert_eq!(m.decide(&walk(&[])).outcome, Allow);
-        assert_eq!(m.decide(&walk(&["/d/w"])).outcome, Deny);
+        assert_eq!(m.decide(&walk(&["/d/w"])).outcome, Allow);
+        assert_eq!(m.decide(&walk(&["/d/w/keep"])).outcome, Deny);
     }
 
     #[test]

@@ -788,9 +788,10 @@ export interface CommandContext {
   walks?: boolean
   /**
    * The roots of the mounts below the paths a walking command enters,
-   * empty for any other. A mount entry at or under one judges the line
-   * whole; one over a folder its walk stays in judges each entry it
-   * reaches. Absent reads as empty.
+   * empty for any other. A mount entry keyed at one judges the line
+   * whole; one over a folder the walk reaches, in the walked mount or
+   * under one it enters, judges each entry it reaches. Absent reads as
+   * empty.
    */
   walksInto?: readonly string[]
   /**

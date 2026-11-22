@@ -1029,8 +1029,9 @@ class CommandContext:
             no admission fires again there.
         walks_into (tuple[str, ...]): the roots of the mounts below the
             paths a walking command enters, empty for any other. A mount
-            entry at or under one judges the line whole; one over a
-            folder its walk stays in judges each entry it reaches.
+            entry keyed at one judges the line whole; one over a folder
+            the walk reaches, in the walked mount or under one it
+            enters, judges each entry it reaches.
         write (bool): whether the handler this command resolves to
             declares that it may change state (``CLIHandler.write``,
             ``Command.write``): an installed CLI's or a mount tree's
