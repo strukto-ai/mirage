@@ -20,6 +20,7 @@ from mirage.commands.builtin.generic_bind.files import (
     dir_aware_stream,
     file_size,
     resolve_or_empty,
+    stat_size,
 )
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
@@ -41,6 +42,7 @@ async def wc(
         dir_aware_stream(files, ctx),
         (files.line_count if files.answers("line_count") else None),
         file_size(files, ctx),
+        stat_size(files),
     )
 
 

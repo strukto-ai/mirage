@@ -117,6 +117,43 @@ describe('wc asks the mount for a line count', () => {
     expect(reads).toEqual(['/bb', '/a', '/bb'])
   })
 
+  // Mirrors test_lines_the_mount_counted_pad_by_the_files_sizes.
+  it("pads lines the mount counted by the files' sizes", async () => {
+    const asked: string[] = []
+    // eslint-disable-next-line require-yield
+    const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      throw new Error(`read ${p.virtual}`)
+    }
+    const lineCount = (p: PathSpec): Promise<number | null> =>
+      Promise.resolve(p.virtual === '/a' ? 2 : 1)
+    const statSize = (p: PathSpec): Promise<number | null> => {
+      asked.push(p.virtual)
+      return Promise.resolve(p.virtual === '/a' ? 23 : 14)
+    }
+    const noSize = (): Promise<number | null> => Promise.resolve(null)
+    const paths = [PathSpec.fromStrPath('/a'), PathSpec.fromStrPath('/bb')]
+    const ctx = {
+      stdin: null,
+      flags: { lines: true },
+      cwd: PathSpec.fromStrPath('/'),
+    } as unknown as Context
+    const text = async (
+      operands: PathSpec[],
+      size: (p: PathSpec) => Promise<number | null>,
+    ): Promise<string> => {
+      const result = await wcGeneric(operands, [], ctx, stream, lineCount, undefined, size)
+      return new TextDecoder().decode(await materialize(result?.[0] ?? null))
+    }
+    // coreutils 9.7: the width is the digits of the files' total size.
+    expect(await text(paths, statSize)).toBe(' 2 /a\n 1 /bb\n 3 total\n')
+    expect(asked).toEqual(['/a', '/bb'])
+    expect(await text(paths, noSize)).toBe('2 /a\n1 /bb\n3 total\n')
+    asked.length = 0
+    expect(await text(paths.slice(0, 1), statSize)).toBe('2 /a\n')
+    expect(asked).toEqual([])
+  })
+
   // Mirrors test_a_listed_file_is_read_whatever_the_mount_counts.
   it('reads a listed file whatever the mount counts', async () => {
     const files: Record<string, string> = { '/l': '/a\0', '/a': 'x\ny\n' }

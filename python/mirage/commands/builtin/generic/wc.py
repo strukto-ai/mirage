@@ -300,6 +300,7 @@ async def format_multi(
     total: str = "auto",
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    stat_size: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     listed_from: str | None = None,
 ) -> tuple[bytes, list[tuple[int, bytes]], list[PathRecord]]:
     """Format wc output for multiple already-resolved paths.
@@ -313,9 +314,11 @@ async def format_multi(
     ``0 total`` when none did). Lines counted alone are asked of
     ``line_count`` first, so a mount that can count a file's lines on
     its own (a ``COUNT(*)`` on a table) does not send it; a row counted
-    that way has no byte size, so the columns are as wide as the
-    printed numbers. Bytes counted alone are asked of ``size_of``
-    first, as GNU takes a regular file's size from its stat.
+    that way brings no byte size, so beside other operands its size is
+    asked of ``stat_size`` for the column width, and where a row has
+    none the columns are as wide as the printed numbers. Bytes counted
+    alone are asked of ``size_of`` first, as GNU takes a regular file's
+    size from its stat.
 
     Args:
         paths (list[PathSpec]): Resolved paths; only ``.virtual`` is read.
@@ -327,6 +330,11 @@ async def format_multi(
         size_of (Callable[[PathSpec], Awaitable[int | None]] | None):
             a regular file's size, called as ``size_of(path)``; None, or
             an answer of None, reads the file.
+        stat_size (Callable[[PathSpec], Awaitable[int | None]] | None):
+            a regular file's size for the column width alone, called as
+            ``stat_size(path)`` for a row ``line_count`` counted when
+            there are several operands; None, or an answer of None,
+            leaves the width to the printed numbers.
         listed_from (str | None): the ``--files0-from`` list the paths
             were read from, as typed (``-`` for stdin), which names an
             empty entry by its number and pads nothing when it is stdin.
@@ -365,7 +373,7 @@ async def format_multi(
         and size_of is not None
         else None
     )
-    pushed = False
+    unsized = False
     for run, path in enumerate(paths):
         if listed_from is not None:
             refusal = _listed_refusal(listed_from, path, run)
@@ -383,9 +391,12 @@ async def format_multi(
                 if sized is not None and not is_stdin(path)
                 else None
             )
+            known: int | None = None
             if found is not None:
                 counts = WCCounts(lines=found)
-                pushed = True
+                if stat_size is not None and len(paths) > 1:
+                    known = await stat_size(path)
+                unsized = unsized or known is None
             elif size is not None:
                 counts = WCCounts(bytes_=size)
             else:
@@ -410,11 +421,17 @@ async def format_multi(
             continue
         rows.append((counts, path.raw_path))
         named.append((path, run))
-        sizes.append(None if is_stdin(path) else counts.bytes_)
+        sizes.append(
+            None
+            if is_stdin(path)
+            else known
+            if found is not None
+            else counts.bytes_
+        )
         totals.merge(counts)
     width = (
         None
-        if pushed
+        if unsized
         else 1
         if listed_from == "-"
         else number_width(sizes, len(paths), shown_counts(flags))
@@ -499,6 +516,7 @@ async def wc_generic(
     stream: PolymorphicReadFn,
     line_count: Callable[[PathSpec], Awaitable[int | None]] | None = None,
     size_of: Callable[[PathSpec], Awaitable[int | None]] | None = None,
+    stat_size: Callable[[PathSpec], Awaitable[int | None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Run wc over resolved operands, GNU semantics; mirrors wcGeneric.
 
@@ -520,6 +538,9 @@ async def wc_generic(
             ``format_multi``).
         size_of (Callable[[PathSpec], Awaitable[int | None]] | None):
             a regular file's size, asked for ``-c`` alone.
+        stat_size (Callable[[PathSpec], Awaitable[int | None]] | None):
+            a regular file's size for the column width, asked for a row
+            ``line_count`` counted (see ``format_multi``).
     """
     try:
         parsed = parse_flags(ctx.flags)
@@ -563,6 +584,7 @@ async def wc_generic(
             total=parsed.total,
             line_count=counted,
             size_of=size_of,
+            stat_size=stat_size,
             listed_from=listed_from,
         )
         io = IOResult(exit_code=1 if notes else 0)

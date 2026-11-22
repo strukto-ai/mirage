@@ -531,6 +531,14 @@
           }
         },
         {
+          "command": "wc -l $d/a.txt $d/same.txt $d/c.txt | sed \"s|$d/||\"",
+          "expect": {
+            "exit": 0,
+            "stdout": " 1 a.txt\n 2 same.txt\n 1 c.txt\n 4 total\n",
+            "stderr": ""
+          }
+        },
+        {
           "command": "cp -p $d/a.txt $d/same.txt && cat $d/same.txt",
           "expect": {
             "exit": 0,

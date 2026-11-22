@@ -251,6 +251,49 @@ async def test_format_multi_asks_line_count_for_lines_alone():
 
 
 @pytest.mark.asyncio
+async def test_lines_the_mount_counted_pad_by_the_files_sizes():
+    paths = [PathSpec.from_str_path("/a"), PathSpec.from_str_path("/bb")]
+    asked: list[str] = []
+
+    async def read(path):
+        raise AssertionError(f"read {path.virtual}")
+
+    async def line_count(path):
+        return 2 if path.virtual == "/a" else 1
+
+    async def stat_size(path):
+        asked.append(path.virtual)
+        return 23 if path.virtual == "/a" else 14
+
+    async def no_size(path):
+        return None
+
+    # coreutils 9.7: the width is the digits of the files' total size.
+    out, _, _ = await format_multi(
+        paths,
+        read=read,
+        lines=True,
+        line_count=line_count,
+        stat_size=stat_size,
+    )
+    assert out == b" 2 /a\n 1 /bb\n 3 total\n"
+    assert asked == ["/a", "/bb"]
+    out, _, _ = await format_multi(
+        paths, read=read, lines=True, line_count=line_count, stat_size=no_size
+    )
+    assert out == b"2 /a\n1 /bb\n3 total\n"
+    asked.clear()
+    out, _, _ = await format_multi(
+        paths[:1],
+        read=read,
+        lines=True,
+        line_count=line_count,
+        stat_size=stat_size,
+    )
+    assert (out, asked) == (b"2 /a\n", [])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags,sized,read",
     [
