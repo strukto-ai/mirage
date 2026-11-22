@@ -717,19 +717,23 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
 }
 
 /**
- * Refuse a `mode` on a `mounts` key that is not a mount. A mode caps a
- * whole mount and a session looks it up by the mount's prefix, so on a
- * folder inside a mount it would load and cap nothing. A key that is not
- * a mount may still carry `commands` and `paths`.
+ * Refuse a `mode` on a `mounts` key that is a folder inside a mount. A
+ * mode caps a whole mount and a session looks it up by the mount's
+ * prefix, so on a folder inside a mount it would load and cap nothing. A
+ * key that is no mount here, or lies only under the root, stays legal: it
+ * may name a mount not attached yet, one since unmounted, or one of
+ * another workspace sharing the profile table. Any key may still carry
+ * `commands` and `paths`.
  */
 export function checkMountModes(profile: SessionProfile, mounts: Iterable<string>): void {
   const prefixes = new Set([...mounts].map((prefix) => norm(prefix)))
   for (const [key, entry] of profile.mounts ?? []) {
     if (entry.mode == null || prefixes.has(key)) continue
-    let owner = '/'
+    let owner: string | null = null
     for (const p of prefixes) {
-      if ((p === '/' || key.startsWith(`${p}/`)) && p.length > owner.length) owner = p
+      if (p !== '/' && key.startsWith(`${p}/`) && p.length > (owner?.length ?? 0)) owner = p
     }
+    if (owner === null) continue
     throw new PolicyError(
       `mounts[${key}]: a mode applies to a whole mount and ${key} is not one; ` +
         `put the mode on the mount ${owner}, or give the folder a mode with ` +

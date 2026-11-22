@@ -700,28 +700,35 @@ class SessionProfile(BaseModel):
 
 
 def check_mount_modes(profile: SessionProfile, mounts: Iterable[str]) -> None:
-    """Refuse a ``mode`` on a ``mounts`` key that is not a mount.
+    """Refuse a ``mode`` on a ``mounts`` key that is a folder inside a
+    mount.
 
     A mode caps a whole mount and a session looks it up by the mount's
     prefix, so on a folder inside a mount it would load and cap nothing.
-    A key that is not a mount may still carry ``commands`` and ``paths``.
+    A key that is no mount here, or lies only under the root, stays
+    legal: it may name a mount not attached yet, one since unmounted, or
+    one of another workspace sharing the profile table. Any key may
+    still carry ``commands`` and ``paths``.
 
     Args:
         profile (SessionProfile): the document.
         mounts (Iterable[str]): the workspace's mount prefixes.
 
     Raises:
-        PolicyError: a key with a mode is not a mount.
+        PolicyError: a key with a mode lies inside a mount other than the
+            root and is not a mount itself.
     """
     prefixes = {norm(prefix) for prefix in mounts}
     for key, entry in (profile.mounts or {}).items():
         if entry.mode is None or key in prefixes:
             continue
         owner = max(
-            (p for p in prefixes if p == "/" or key.startswith(p + "/")),
+            (p for p in prefixes if p != "/" and key.startswith(p + "/")),
             key=len,
-            default="/",
+            default=None,
         )
+        if owner is None:
+            continue
         raise PolicyError(
             f"mounts[{key}]: a mode applies to a whole mount and {key} is "
             f"not one; put the mode on the mount {owner}, or give the "

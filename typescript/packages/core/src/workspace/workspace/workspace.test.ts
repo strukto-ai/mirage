@@ -704,15 +704,15 @@ describe('profile modes', () => {
 
   it('holds a mode on every mount the workspace has', async () => {
     const ws = new Workspace(
-      { '/data': new RAMVFS() },
+      { '/data': new RAMVFS(), '/data/sub': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         profiles: {
           agent: SessionProfile({
             mounts: {
               '/': 'read',
-              '/data': 'read',
               '/usr/bin': 'read',
+              '/data/sub': 'read',
               '/data/keep': { commands: { rm: 'deny' } },
             },
           }),
@@ -720,9 +720,44 @@ describe('profile modes', () => {
       },
     )
     open.push(ws)
+    ws.createSession('a', { profile: 'agent' })
+    expect((await ws.shell('echo x > /data/sub/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect((await ws.shell('echo x > /data/f', { sessionId: 'a' })).exitCode).toBe(0)
+  })
+
+  it('waits for a mount added later', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { agent: SessionProfile({ mounts: { '/later': 'read' } }) },
+      },
+    )
+    open.push(ws)
+    ws.createSession('a', { profile: 'agent' })
+    const before = await ws.shell('mkdir -p /later && echo x > /later/f', { sessionId: 'a' })
+    expect(before.exitCode).toBe(0)
     ws.addMount('/later', new RAMVFS(), MountMode.WRITE)
-    ws.setProfile('later', SessionProfile({ mounts: { '/later': 'read' } }))
-    ws.createSession('a', { profile: 'later' })
-    expect((await ws.shell('echo x > /later/f', { sessionId: 'a' })).exitCode).toBe(1)
+    expect((await ws.shell('echo x > /later/g', { sessionId: 'a' })).exitCode).toBe(1)
+  })
+
+  it('serves one profile table to workspaces with other mounts', async () => {
+    const shared = { agent: SessionProfile({ mounts: { '/a': 'read', '/b': 'read' } }) }
+    for (const prefix of ['/a', '/b']) {
+      const ws = new Workspace({ [prefix]: new RAMVFS() }, { profiles: shared })
+      await ws.close()
+    }
+  })
+
+  it('reloads a snapshot after its profile mount is unmounted', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    ws.addMount('/later', new RAMVFS(), MountMode.WRITE)
+    ws.setProfile('agent', SessionProfile({ mounts: { '/later': 'read' } }))
+    await ws.unmount('/later')
+    const tar = await ws.snapshot()
+    const loaded = await Workspace.load(tar)
+    open.push(loaded)
+    expect(loaded.profiles.agent?.mounts?.get('/later')?.mode).toBe(MountMode.READ)
   })
 })

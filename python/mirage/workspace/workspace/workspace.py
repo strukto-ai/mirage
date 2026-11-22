@@ -3021,7 +3021,7 @@ class Workspace:
                 None standing for a profile already defined.
 
         Raises:
-            PolicyError: a ``mode`` on a key that is not a mount.
+            PolicyError: a ``mode`` on a folder inside a mount.
         """
         prefixes = [entry.prefix for entry in self._registry.mounts()]
         for doc in docs:

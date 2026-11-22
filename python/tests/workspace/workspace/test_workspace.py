@@ -1157,24 +1157,69 @@ async def test_a_profile_mode_on_a_folder_is_refused_at_every_entry():
 @pytest.mark.asyncio
 async def test_a_profile_mode_holds_on_every_mount_the_workspace_has():
     ws = Workspace(
-        {"/data": RAMVFS()},
+        {"/data": RAMVFS(), "/data/sub": RAMVFS()},
         mode=MountMode.WRITE,
         profiles={
             "agent": {
                 "mounts": {
                     "/": "read",
-                    "/data": "read",
                     "/usr/bin": "read",
+                    "/data/sub": "read",
                     "/data/keep": {"commands": {"rm": "deny"}},
                 }
             }
         },
     )
     try:
+        ws.create_session("a", profile="agent")
+        io = await ws.shell("echo x > /data/sub/f", session_id="a")
+        assert io.exit_code == 1
+        io = await ws.shell("echo x > /data/f", session_id="a")
+        assert io.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_mode_waits_for_a_mount_added_later():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={"agent": {"mounts": {"/later": "read"}}},
+    )
+    try:
+        ws.create_session("a", profile="agent")
+        io = await ws.shell(
+            "mkdir -p /later && echo x > /later/f", session_id="a"
+        )
+        assert io.exit_code == 0
         ws.add_mount("/later", RAMVFS(), MountMode.WRITE)
-        ws.set_profile("later", {"mounts": {"/later": "read"}})
-        ws.create_session("a", profile="later")
-        io = await ws.shell("echo x > /later/f", session_id="a")
+        io = await ws.shell("echo x > /later/g", session_id="a")
         assert io.exit_code == 1
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_table_serves_workspaces_with_other_mounts():
+    shared = {"agent": {"mounts": {"/a": "read", "/b": "read"}}}
+    for prefix in ("/a", "/b"):
+        ws = Workspace({prefix: RAMVFS()}, profiles=shared)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_reloads_after_its_profiles_mount_is_unmounted():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws.add_mount("/later", RAMVFS(), MountMode.WRITE)
+    ws.set_profile("agent", {"mounts": {"/later": "read"}})
+    await ws.unmount("/later")
+    buf = io.BytesIO()
+    await ws.snapshot(buf)
+    await ws.close()
+    buf.seek(0)
+    loaded = await Workspace.load(buf)
+    try:
+        assert loaded.profiles["agent"].mounts["/later"].mode == MountMode.READ
+    finally:
+        await loaded.close()

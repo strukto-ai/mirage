@@ -267,12 +267,15 @@ def test_a_mode_on_a_key_that_is_not_a_mount_is_refused():
         check_mount_modes(profile, ["/", "/data/", "/other/"])
 
 
-def test_a_key_that_is_not_a_mount_may_carry_commands_and_paths():
+def test_a_mode_outside_every_mount_but_the_root_is_kept():
     profile = SessionProfile.model_validate(
         {
             "mounts": {
                 "/": "read",
                 "/data": "read",
+                "/data/sub": "read",
+                "/later": "read",
+                "/later/deep": "read",
                 "/data/keep": {
                     "commands": {"rm": "deny"},
                     "paths": {"hide": ["/data/keep/x"]},
@@ -280,7 +283,7 @@ def test_a_key_that_is_not_a_mount_may_carry_commands_and_paths():
             }
         }
     )
-    check_mount_modes(profile, ["/", "/data/"])
+    check_mount_modes(profile, ["/", "/data/", "/data/sub/"])
 
 
 def test_profile_rejects_unknown_and_unshipped_fields():
@@ -761,7 +764,7 @@ def test_workspace_names_a_default_role_by_name():
     assert ws.create_session("agent").mount_modes["/a"] == MountMode.READ
     with pytest.raises(PolicyError, match="unknown profile 'gone'"):
         Workspace(
-            {"/a": (RAMVFS(), MountMode.WRITE), "/b": RAMVFS()},
+            {"/a": (RAMVFS(), MountMode.WRITE)},
             profiles=PROFILES,
             profile="gone",
         )

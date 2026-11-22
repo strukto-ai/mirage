@@ -319,16 +319,19 @@ describe('checkMountModes', () => {
     )
   })
 
-  it('lets a key that is not a mount carry commands and paths', () => {
+  it('keeps a mode outside every mount but the root', () => {
     const profile = SessionProfile({
       mounts: {
         '/': 'read',
         '/data': 'read',
+        '/data/sub': 'read',
+        '/later': 'read',
+        '/later/deep': 'read',
         '/data/keep': { commands: { rm: 'deny' }, paths: { hide: ['/data/keep/x'] } },
       },
     })
     expect(() => {
-      checkMountModes(profile, ['/', '/data/'])
+      checkMountModes(profile, ['/', '/data/', '/data/sub/'])
     }).not.toThrow()
   })
 })
