@@ -31,13 +31,13 @@
     "                                                      the same pattern, anchored to /repo, reaches no further",
     "oncall     ls /vault                                  [0] aws.token",
     "                                                      a deny leaves the name where it is",
-    "oncall     cat /vault/aws.token                       [1] cat: /vault/aws.token: Permission denied",
-    "                                                      and refuses the read: cat decides for /vault",
+    "oncall     cat /vault/aws.token                       [126] cat: Permission denied",
+    "                                                      and refuses the read: /vault denies cat",
     "oncall     rm /runbook/steps.md                       [126] rm: Permission denied",
     "                                                      rm asks under /runbook",
-    "oncall     rm /runbook/frozen/rollback.md             [1] rm: cannot remove '/runbook/frozen/rollback.md': Permission denied",
-    "                                                      the mount's tree denies, and the stricter wins",
-    "oncall     cp /vault/aws.token /runbook/steps.md      [1] cp: cannot open '/vault/aws.token' for reading: Permission denied",
+    "oncall     rm /runbook/frozen/rollback.md             [126] rm: Permission denied",
+    "                                                      the folder's tree denies, and the stricter wins",
+    "oncall     cp /vault/aws.token /runbook/steps.md      [126] cp: Permission denied",
     "                                                      every path is judged: the source's deny wins",
     "oncall     rm /repo/service.py                        [1] rm: cannot remove '/repo/service.py': Read-only file system",
     "                                                      the mount section narrowed the mode",
@@ -51,9 +51,9 @@
     "                                                      no root deny, so every tool runs",
     "commander  wc -l /runbook/steps.md                    [0] 1 /runbook/steps.md",
     "                                                      including the ones no other role names",
-    "commander  cat /vault/aws.token                       [1] cat: /vault/aws.token: Permission denied",
+    "commander  cat /vault/aws.token                       [126] cat: Permission denied",
     "                                                      and it is still not unrestricted: the deny runs",
     "commander  rm /repo/service.py                        [0]",
-    "                                                      no mount section, so /repo keeps the workspace's write mode"
+    "                                                      no /repo entry, so /repo keeps the workspace's write mode"
   ]
 }
