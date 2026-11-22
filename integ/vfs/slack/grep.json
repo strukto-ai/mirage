@@ -135,20 +135,21 @@
       ],
       "command": "grep -rw runway /slack/channels/leadership__C5/ 2>/dev/null; echo grepw=$?; grep -r runway /slack/channels/leadership__C5/ 2>/dev/null; echo grep=$?",
       "expect": {
-        "exit": 0,
-        "stdout": "grepw=2\ngrep=2\n",
-        "stderr": ""
+        "exit": 126,
+        "stdout": "",
+        "stderr": "grep: Permission denied\n"
       },
       "session": "slack-deny",
       "session_profiles": {
         "slack-deny": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/slack/channels/leadership__C5/*"
-              ]
+          "mounts": {
+            "/slack/channels/leadership__C5": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }

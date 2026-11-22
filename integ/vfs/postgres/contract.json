@@ -502,20 +502,21 @@
       ],
       "command": "head -n 1 /tmp/books",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "head: cannot open '/tmp/books' for reading: Permission denied\n"
+        "stderr": "head: Permission denied\n"
       },
       "session": "pg-deny-books",
       "session_profiles": {
         "pg-deny-books": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/pg/public/tables/books/rows.jsonl"
-              ]
+          "mounts": {
+            "/pg/public/tables/books/rows.jsonl": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -529,20 +530,21 @@
       ],
       "command": "tail -n 1 /tmp/books",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "tail: cannot open '/tmp/books' for reading: Permission denied\n"
+        "stderr": "tail: Permission denied\n"
       },
       "session": "pg-deny-books",
       "session_profiles": {
         "pg-deny-books": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/pg/public/tables/books/rows.jsonl"
-              ]
+          "mounts": {
+            "/pg/public/tables/books/rows.jsonl": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
@@ -556,20 +558,21 @@
       ],
       "command": "wc -l /tmp/books",
       "expect": {
-        "exit": 1,
+        "exit": 126,
         "stdout": "",
-        "stderr": "wc: /tmp/books: Permission denied\n"
+        "stderr": "wc: Permission denied\n"
       },
       "session": "pg-deny-books",
       "session_profiles": {
         "pg-deny-books": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/pg/public/tables/books/rows.jsonl"
-              ]
+          "mounts": {
+            "/pg/public/tables/books/rows.jsonl": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }

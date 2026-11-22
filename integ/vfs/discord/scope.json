@@ -214,20 +214,21 @@
       ],
       "command": "grep -rw released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo grepw=$?; rg -w released '/discord/Mirage HQ__100000000000000001/channels' 2>/dev/null; echo rgw=$?",
       "expect": {
-        "exit": 0,
-        "stdout": "grepw=2\nrgw=2\n",
-        "stderr": ""
+        "exit": 126,
+        "stdout": "",
+        "stderr": "grep: Permission denied\n"
       },
       "session": "discord-deny",
       "session_profiles": {
         "discord-deny": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002/*"
-              ]
+          "mounts": {
+            "/discord/Mirage HQ__100000000000000001/channels/releases__200000000000000002": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }

@@ -701,20 +701,21 @@
       ],
       "command": "grep -rlw Budget /mail/INBOX 2>/dev/null; echo grepw=$?; find /mail/INBOX -name '*Budget*' 2>/dev/null; echo find=$?",
       "expect": {
-        "exit": 0,
-        "stdout": "grepw=2\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001\n/mail/INBOX/2026-01-05/Q2_Budget_Review__msg0001.gmail.json\nfind=1\n",
-        "stderr": ""
+        "exit": 126,
+        "stdout": "",
+        "stderr": "grep: Permission denied\n"
       },
       "session": "gmail-deny",
       "session_profiles": {
         "gmail-deny": {
-          "commands": {
-            "*": {
-              "decision": "deny",
-              "reason": "sealed",
-              "paths": [
-                "/mail/INBOX/2026-01-05/*"
-              ]
+          "mounts": {
+            "/mail/INBOX/2026-01-05": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "sealed"
+                }
+              }
             }
           }
         }
