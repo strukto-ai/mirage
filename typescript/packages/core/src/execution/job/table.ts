@@ -906,15 +906,14 @@ export class JobTable {
     // has something to join a microtask later.
     queueMicrotask(() => {
       void process.join().then(async (record) => {
-        started?.delete(process)
-        if (this.substitutions.get(pid) !== process) return
-        // Its status stands once it ends; a `wait` still finds it until what
-        // it wrote has gone where it writes.
-        if (record.exit !== null)
+        // Its status stands once it ends; a `wait`, its request's included,
+        // still finds it until what it wrote has gone where it writes.
+        if (this.substitutions.get(pid) === process && record.exit !== null)
           this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
         await settled?.catch((err: unknown) => {
           console.debug('process substitution settled with an error:', err)
         })
+        started?.delete(process)
         if (this.substitutions.get(pid) !== process) return
         this.substitutions.delete(pid)
         this.settled.delete(pid)

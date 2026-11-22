@@ -584,7 +584,7 @@ export async function handleBackground(
   const heldInputs = holdInputs(bgSession.openInputs())
   const heldSubstitutions = session.holdSubstitutions(bgSession)
   const dropHolds = async (): Promise<void> => {
-    await letGoHeld(heldSubstitutions.splice(0))
+    letGoHeld(heldSubstitutions.splice(0))
     let failure: { error: unknown } | undefined
     while (heldInputs.length > 0) {
       try {

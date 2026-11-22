@@ -167,8 +167,8 @@ async def _wait_for(
         parts (list[str]): the command words, `wait` first.
         session (SessionState | None): shell session state, for `-p`.
         view (SessionView | None): the gated session view.
-        said (list[str] | None): takes the refusals of operands before
-            it blocks, for a wait a signal cuts short to report.
+        said (list[str] | None): takes each operand's refusal as it is
+            found, for a wait a signal cuts short to report.
     """
     cmd_str = " ".join(parts)
     sid = session_of(session)
@@ -280,9 +280,9 @@ async def _wait_for(
                 refusal = f"{spec}: {AMBIGUOUS_SPEC}"
         if answered is None:
             errors.append(f"{shell_voice()}wait: {refusal}")
+            if said is not None:
+                said.append(errors[-1] + "\n")
     err_text = ("\n".join(errors) + "\n") if errors else ""
-    if said is not None:
-        said.append(err_text)
     if next_job:
         candidates = picked if specs else visible
         if not candidates:

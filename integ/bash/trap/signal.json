@@ -874,6 +874,41 @@
         "stdout": "got fromfile\nafter\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "signal_trap_cut_wait_on_a_substitution_keeps_errors",
+      "seq": 512225,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'trap \"echo t\" USR1; exec 3> >(sleep 1); p=$!; (sleep 0.2; kill -USR1 $$) & wait bogus $p; echo rc=$?'",
+      "expect": {
+        "exit": 0,
+        "stdout": "t\nrc=138\n",
+        "stderr": "bash: line 1: wait: `bogus': not a pid or valid job spec\n"
+      }
     }
   ]
 }

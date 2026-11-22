@@ -2309,4 +2309,35 @@ describe('JobTable.waitSubstitution', () => {
       expect([...jt.savedStatuses('s', own.record.id.pid).values()]).toEqual([7])
     })
   })
+
+  it('waits for an ended substitution until its output settles', async () => {
+    const jt = new JobTable()
+    let settle = (): void => undefined
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    await inRequest(async () => {
+      const process = jt.processes.start({
+        sessionId: 's',
+        command: 'sub',
+        cwd: PathSpec.fromStrPath('/'),
+        cancel: () => undefined,
+        run: () => Promise.resolve(0),
+        started: (started) => {
+          jt.trackSubstitution(started, settled)
+        },
+      })
+      await process.join()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      let waited = false
+      const waiting = jt.waitSubstitution('s', null).then(() => {
+        waited = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      expect(waited).toBe(false)
+      settle()
+      await waiting
+      expect(waited).toBe(true)
+    })
+  })
 })

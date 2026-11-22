@@ -271,10 +271,12 @@ async function waitFor(
       answered = saved
       if (ambiguous) refusal = `${spec}: ${AMBIGUOUS_SPEC}`
     }
-    if (answered === null) errors.push(`${shellVoice()}wait: ${refusal}`)
+    if (answered === null) {
+      errors.push(`${shellVoice()}wait: ${refusal}`)
+      said?.push(`${shellVoice()}wait: ${refusal}\n`)
+    }
   }
   const errText = errors.length > 0 ? errors.join('\n') + '\n' : ''
-  said?.push(errText)
   const errBytes = errText !== '' ? encodeText(errText) : null
   if (nextJob) {
     const candidates = specs.length > 0 ? picked : visible

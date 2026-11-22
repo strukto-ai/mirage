@@ -428,11 +428,10 @@ function endPipe(child: Substitution): void {
 }
 
 /**
- * End a kept process substitution, wait for it to run out and give its path
- * back. Mirrors Python's _settle.
+ * Give a kept process substitution's path back once it has run out. Mirrors
+ * Python's _settle.
  */
 async function settle(child: Substitution): Promise<void> {
-  endPipe(child)
   try {
     await runCancellable(child.task, child.signal)
   } catch (error) {
@@ -444,14 +443,18 @@ async function settle(child: Substitution): Promise<void> {
 }
 
 /**
- * A job's end lets go of the substitutions it held
+ * A holder's end lets go of the substitutions it held
  * (`SessionState.holdSubstitutions`): the last holder of one its shell let go
- * of ends it. Mirrors Python's let_go_held.
+ * of ends its pipe, and goes on without waiting for its command, as bash's
+ * job does not wait for a `<( )` it inherited. Mirrors Python's let_go_held.
  */
-export async function letGoHeld(held: Substitution[]): Promise<void> {
+export function letGoHeld(held: Substitution[]): void {
   for (const child of held) {
     child.holds -= 1
-    if (child.holds === 0 && child.letGo) await settle(child)
+    if (child.holds === 0 && child.letGo) {
+      endPipe(child)
+      void settle(child)
+    }
   }
 }
 
@@ -1186,10 +1189,11 @@ export class SessionState {
    * substitution it kept. Mirrors Python's _names.
    */
   /**
-   * The process substitutions this shell kept that a job's copied
-   * descriptors name (`exec 3< <(cmd); cat <&3 &`), each held open until the
-   * job lets go of it (`letGoHeld`), as a forked child's copy keeps a pipe
-   * open. Mirrors Python's hold_substitutions.
+   * The process substitutions this shell kept that a child's copied
+   * descriptors name (`exec 3< <(cmd); cat <&3 &`, a later `>( )` writing to
+   * `&3`), each held open until the child lets go of it (`letGoHeld`), as a
+   * forked child's copy keeps a pipe open. Mirrors Python's
+   * hold_substitutions.
    */
   holdSubstitutions(job: SessionState): Substitution[] {
     const held = this.substitutions.filter((child) => job.names(child))

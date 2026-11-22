@@ -19,6 +19,7 @@ from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
 from typing import Any, TypeVar
 
+from mirage.bridge.sync import soon
 from mirage.cache.versions import VersionHistory
 from mirage.core.dev.pipe import DevicePipe
 from mirage.execution.job.table import JobTable
@@ -122,30 +123,30 @@ def _end_pipe(child: Substitution) -> None:
 
 
 async def _settle(child: Substitution) -> None:
-    """End a kept process substitution, wait for it to run out and give
-    its path back.
+    """Give a kept process substitution's path back once it has run out.
 
     Args:
-        child (Substitution): the substitution.
+        child (Substitution): the substitution, its pipe ended.
     """
-    _end_pipe(child)
     await asyncio.gather(child.task, return_exceptions=True)
     await close_readers(child.endpoint)
     child.release()
 
 
-async def let_go_held(held: list[Substitution]) -> None:
-    """A job's end lets go of the substitutions it held
+def let_go_held(held: list[Substitution]) -> None:
+    """A holder's end lets go of the substitutions it held
     (``SessionState.hold_substitutions``): the last holder of one its shell
-    let go of ends it.
+    let go of ends its pipe, and goes on without waiting for its command,
+    as bash's job does not wait for a ``<( )`` it inherited.
 
     Args:
-        held (list[Substitution]): what the job held.
+        held (list[Substitution]): what the holder held.
     """
     for child in held:
         child.holds -= 1
         if not child.holds and child.let_go:
-            await _settle(child)
+            _end_pipe(child)
+            soon(asyncio.get_running_loop(), _settle(child))
 
 
 # The file-creation mask a fresh shell starts with, as bash's.
@@ -792,13 +793,13 @@ class SessionState:
         self.substitutions.append(child)
 
     def hold_substitutions(self, job: "SessionState") -> list[Substitution]:
-        """The process substitutions this shell kept that a job's copied
-        descriptors name (``exec 3< <(cmd); cat <&3 &``), each held open
-        until the job lets go of it (``let_go_held``), as a forked child's
-        copy keeps a pipe open.
+        """The process substitutions this shell kept that a child's copied
+        descriptors name (``exec 3< <(cmd); cat <&3 &``, a later ``>( )``
+        writing to ``&3``), each held open until the child lets go of it
+        (``let_go_held``), as a forked child's copy keeps a pipe open.
 
         Args:
-            job (SessionState): the job's shell.
+            job (SessionState): the child's shell: a job's, a substitution's.
         """
         held = [child for child in self.substitutions if job._names(child)]
         for child in held:

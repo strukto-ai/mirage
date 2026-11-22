@@ -730,7 +730,7 @@ async def handle_background(
 
     async def drop_holds() -> None:
         held, held_substitutions[:] = list(held_substitutions), []
-        await let_go_held(held)
+        let_go_held(held)
         failure: Exception | None = None
         while held_inputs:
             try:

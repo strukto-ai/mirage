@@ -1573,6 +1573,36 @@
         "stdout": "c=x rc=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "procsub_exec_job_ends_without_its_producer",
+      "seq": 1346160,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "timeout 2 bash -c 'exec 3< <(sleep 5); sleep .1 & j=$!; exec 3<&-; wait \"$j\"; echo job=$?'; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "job=0\nrc=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_kept_open_for_another_substitution",
+      "seq": 1346161,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "bash -c 'exec 3> >(cat); exec 4> >(sleep .3; echo via4 >&3); exec 3>&-; exec 4>&-; sleep 1'",
+      "expect": {
+        "exit": 0,
+        "stdout": "via4\n",
+        "stderr": ""
+      }
     }
   ]
 }
