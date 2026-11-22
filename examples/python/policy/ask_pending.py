@@ -18,21 +18,25 @@ from mirage import MountMode, Outcome, Scope, Workspace
 from mirage.vfs.ram import RAMVFS
 
 # Two places that ask: `cat` on one path, and `rm` whatever it names.
-# A list holds several decisions for one place, and the strictest that
-# applies wins, so `cat` runs everywhere but asks for the secret.
+# A `mounts` entry is judged beside the top-level tree, and the
+# strictest answer wins, so `cat` runs everywhere but asks for the
+# secret.
 ROLE = {
     "commands": {
         "*": "deny",
         "ls": "allow",
-        "cat": [
-            "allow",
-            {
-                "decision": "ask",
-                "reason": "secrets are reviewed",
-                "paths": ["/data/secret.txt"],
-            },
-        ],
+        "cat": "allow",
         "rm": {"decision": "ask", "reason": "deletes are reviewed"},
+    },
+    "mounts": {
+        "/data/secret.txt": {
+            "commands": {
+                "cat": {
+                    "decision": "ask",
+                    "reason": "secrets are reviewed",
+                },
+            },
+        },
     },
 }
 

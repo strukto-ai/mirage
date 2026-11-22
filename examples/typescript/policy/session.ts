@@ -45,13 +45,16 @@ import type {
 const PROFILES = {
   reviewer: { paths: { hide: ["/repo/secrets"] } },
   editor: {
-    commands: {
-      // The root `*` is every command the tree does not name, and this
-      // decision speaks only for the paths it lists.
-      "*": {
-        decision: "deny",
-        reason: "keys are never read by hand",
-        paths: ["/repo/secrets/*"],
+    mounts: {
+      "/repo/secrets": {
+        commands: {
+          // The folder entry's `*` denies every command that works
+          // inside /repo/secrets.
+          "*": {
+            decision: "deny",
+            reason: "keys are never read by hand",
+          },
+        },
       },
     },
   },

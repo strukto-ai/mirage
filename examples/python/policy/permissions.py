@@ -22,21 +22,18 @@ from mirage.vfs.ram import RAMVFS
 # oncall works from, and the credentials nobody reads by hand.
 #
 # Three roles read the same three mounts and see three different
-# filesystems. A role's command tree is read in three steps, and every
+# filesystems. A role's command tree is read in two steps, and every
 # refusal below comes from one of them:
 #
 #   the name     the tree maps command names to decisions. The root `*`
 #                is every command it does not name, so a root deny
 #                leaves a role only the commands the tree names.
-#   the paths    a decision that lists paths speaks only for those
-#                paths. A list holds several decisions for one command,
-#                and the strictest that covers a path wins: deny, then
-#                ask, then allow.
-#   the mount    a mount section's tree is judged beside the role's own
-#                for a line that works inside the mount, and the
-#                stricter answer wins, so it only tightens.
+#   the mount    a mount or folder entry's tree is judged beside the
+#                role's own for a line that works inside that path, and
+#                the strictest answer wins (deny, then ask, then allow),
+#                so it only tightens.
 #
-# Hiding is none of these: it is not a refusal at all. A hidden path
+# Hiding is neither of these: it is not a refusal at all. A hidden path
 # answers ENOENT, so the role never learns the name; a denied path stays
 # in the listing and fails when read. /vault is denied for the oncall
 # and hidden for the auditor, which is the same three files seen two
@@ -44,17 +41,15 @@ from mirage.vfs.ram import RAMVFS
 #
 # The third role, the commander, states no root deny, which is how a
 # role says "every tool": a command the tree does not decide is allowed.
-# Its one decision still runs.
+# Its /vault entry still runs.
 
 VAULT = {
     "decision": "deny",
     "reason": "credentials are never read by hand",
-    "paths": ["/vault/*"],
 }
 NOD = {
     "decision": "ask",
     "reason": "a runbook edit needs a nod",
-    "paths": ["/runbook/*"],
 }
 
 PROFILES = {
@@ -64,12 +59,10 @@ PROFILES = {
             # `sort: Permission denied`.
             "*": "deny",
             "ls": "allow",
-            # A named command answers for itself, so each one that could
-            # read a credential carries the deny.
-            "cat": ["allow", VAULT],
-            "grep": ["allow", VAULT],
-            "rm": ["allow", NOD],
-            "cp": ["allow", NOD, VAULT],
+            "cat": "allow",
+            "grep": "allow",
+            "rm": "allow",
+            "cp": "allow",
         },
         "mounts": {
             "/repo": {
@@ -81,16 +74,31 @@ PROFILES = {
                 # every .env under /repo and nothing anywhere else.
                 "paths": {"hide": ["*.env"]},
             },
+            "/vault": {
+                # A named command answers for itself, so each one that
+                # could read a credential carries the deny under /vault.
+                "commands": {
+                    "cat": VAULT,
+                    "grep": VAULT,
+                    "cp": VAULT,
+                },
+            },
             "/runbook": {
                 # This tree is asked about a line that works inside
-                # /runbook, beside the role's own. For a frozen file the
-                # role's tree asks and this one denies, and the stricter
+                # /runbook, beside the role's own.
+                "commands": {
+                    "rm": NOD,
+                    "cp": NOD,
+                },
+            },
+            "/runbook/frozen": {
+                # A folder entry inside a mount: for a frozen file
+                # /runbook asks and this one denies, and the stricter
                 # answer wins.
                 "commands": {
                     "rm": {
                         "decision": "deny",
                         "reason": "the rollback plan is frozen",
-                        "paths": ["/runbook/frozen/*"],
                     },
                 },
             },
@@ -110,17 +118,16 @@ PROFILES = {
         "paths": {"hide": ["/vault"]},
     },
     "commander": {
-        "commands": {
-            # No root deny, so every command mirage ships runs, this
-            # role's own `sort` and `wc` included. What that does not
-            # say is "unrestricted": the root `*` here decides for
-            # /vault alone, and denies any command that names a path
-            # there.
-            "*": VAULT,
+        # No root deny, so every command mirage ships runs, this
+        # role's own `sort` and `wc` included. What that does not say
+        # is "unrestricted": the /vault entry's `*` denies any command
+        # that works inside /vault. No entry narrows a mode, so every
+        # mount stays at the mode the workspace declared.
+        "mounts": {
+            "/vault": {
+                "commands": {"*": VAULT},
+            },
         },
-        # No mount section either, so every mount stays at the mode the
-        # workspace declared. A role narrows by naming; naming nothing
-        # narrows nothing.
     },
 }
 
@@ -152,13 +159,13 @@ LINES = [
     (
         "oncall",
         "cat /vault/aws.token",
-        "and refuses the read: cat decides for /vault",
+        "and refuses the read: /vault denies cat",
     ),
     ("oncall", "rm /runbook/steps.md", "rm asks under /runbook"),
     (
         "oncall",
         "rm /runbook/frozen/rollback.md",
-        "the mount's tree denies, and the stricter wins",
+        "the folder's tree denies, and the stricter wins",
     ),
     (
         "oncall",
@@ -191,7 +198,7 @@ LINES = [
     (
         "commander",
         "rm /repo/service.py",
-        "no mount section, so /repo keeps the workspace's write mode",
+        "no /repo entry, so /repo keeps the workspace's write mode",
     ),
 ]
 
