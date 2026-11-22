@@ -21,13 +21,14 @@
       "steps": [
         {
           "profile": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "blocked",
-                "paths": [
-                  "/data/blocked"
-                ]
+            "mounts": {
+              "/data/blocked": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "blocked"
+                  }
+                }
               }
             }
           }
@@ -75,13 +76,14 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "python3": {
-                "decision": "deny",
-                "reason": "protected",
-                "paths": [
-                  "/ram/secret.py"
-                ]
+            "mounts": {
+              "/ram/secret.py": {
+                "commands": {
+                  "python3": {
+                    "decision": "deny",
+                    "reason": "protected"
+                  }
+                }
               }
             }
           }
@@ -97,17 +99,17 @@
         {
           "command": "python3 secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
           "command": "python3 -u -- secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {
@@ -145,13 +147,14 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "python3": {
-                "decision": "deny",
-                "reason": "protected",
-                "paths": [
-                  "/ram/secret.py"
-                ]
+            "mounts": {
+              "/ram/secret.py": {
+                "commands": {
+                  "python3": {
+                    "decision": "deny",
+                    "reason": "protected"
+                  }
+                }
               }
             }
           }
@@ -167,9 +170,9 @@
         {
           "command": "python3 ./secret.py",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "python3: ./secret.py: Permission denied\n"
+            "stderr": "python3: Permission denied\n"
           }
         },
         {

@@ -913,16 +913,17 @@
         "profiles": {
           "default": {
             "commands": {
-              "*": [
-                "allow",
-                {
-                  "decision": "deny",
-                  "reason": "sealed",
-                  "paths": [
-                    "/ram/secret.txt"
-                  ]
+              "*": "allow"
+            },
+            "mounts": {
+              "/ram/secret.txt": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
                 }
-              ]
+              }
             }
           }
         }
@@ -945,8 +946,8 @@
         {
           "command": "cat //ram/secret.txt",
           "expect": {
-            "exit": 1,
-            "stderr": "cat: //ram/secret.txt: Permission denied\n"
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
@@ -959,8 +960,8 @@
         {
           "command": "env -C /ram cat secret.txt",
           "expect": {
-            "exit": 1,
-            "stderr": "cat: secret.txt: Permission denied\n"
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
           }
         },
         {

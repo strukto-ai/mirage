@@ -22,13 +22,14 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/ram/*"
-                ]
+            "mounts": {
+              "/ram": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -38,7 +39,7 @@
         {
           "command": "cd /ram",
           "expect": {
-            "exit": 0
+            "exit": 126
           }
         },
         {

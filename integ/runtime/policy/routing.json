@@ -711,13 +711,14 @@
         ],
         "profiles": {
           "sealed": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/ram/sec/*"
-                ]
+            "mounts": {
+              "/ram/sec": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -728,8 +729,8 @@
         {
           "command": "cat /ram/sec/x",
           "expect": {
-            "exit": 1,
-            "stderr": "cat: /ram/sec/x: Permission denied\n"
+            "exit": 126,
+            "stderr": "cat: Permission denied\n"
           }
         },
         {

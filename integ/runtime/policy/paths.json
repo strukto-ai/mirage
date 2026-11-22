@@ -151,20 +151,18 @@
       "steps": [
         {
           "profile": {
-            "commands": {
-              "python3": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/data/sealed/*"
-                ]
-              },
-              "node": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/data/sealed/*"
-                ]
+            "mounts": {
+              "/data/sealed": {
+                "commands": {
+                  "python3": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  },
+                  "node": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -447,20 +445,18 @@
         },
         {
           "profile": {
-            "commands": {
-              "python3": {
-                "decision": "deny",
-                "reason": "private target",
-                "paths": [
-                  "/data/private/*"
-                ]
-              },
-              "node": {
-                "decision": "deny",
-                "reason": "private target",
-                "paths": [
-                  "/data/private/*"
-                ]
+            "mounts": {
+              "/data/private": {
+                "commands": {
+                  "python3": {
+                    "decision": "deny",
+                    "reason": "private target"
+                  },
+                  "node": {
+                    "decision": "deny",
+                    "reason": "private target"
+                  }
+                }
               }
             }
           }

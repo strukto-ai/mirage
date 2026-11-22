@@ -57,20 +57,18 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "cat": {
-                "decision": "deny",
-                "reason": "protected",
-                "paths": [
-                  "/ram/secret.txt"
-                ]
-              },
-              "grep": {
-                "decision": "deny",
-                "reason": "protected",
-                "paths": [
-                  "/ram/secret.txt"
-                ]
+            "mounts": {
+              "/ram/secret.txt": {
+                "commands": {
+                  "cat": {
+                    "decision": "deny",
+                    "reason": "protected"
+                  },
+                  "grep": {
+                    "decision": "deny",
+                    "reason": "protected"
+                  }
+                }
               }
             }
           }
@@ -86,17 +84,17 @@
         {
           "command": "cat secret.txt",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "cat: secret.txt: Permission denied\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
           "command": "cat s*.txt",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "cat: secret.txt: Permission denied\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
@@ -229,13 +227,14 @@
         },
         "profiles": {
           "default": {
-            "commands": {
-              "grep": {
-                "decision": "deny",
-                "reason": "protected",
-                "paths": [
-                  "/ram/secret.txt"
-                ]
+            "mounts": {
+              "/ram/secret.txt": {
+                "commands": {
+                  "grep": {
+                    "decision": "deny",
+                    "reason": "protected"
+                  }
+                }
               }
             }
           }
@@ -279,9 +278,9 @@
         {
           "command": "grep *.txt",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "grep: secret.txt: Permission denied\n"
+            "stderr": "grep: Permission denied\n"
           }
         },
         {

@@ -104,13 +104,14 @@
       "steps": [
         {
           "profile": {
-            "commands": {
-              "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": [
-                  "/data/secret.txt"
-                ]
+            "mounts": {
+              "/data/secret.txt": {
+                "commands": {
+                  "*": {
+                    "decision": "deny",
+                    "reason": "sealed"
+                  }
+                }
               }
             }
           }
@@ -118,17 +119,17 @@
         {
           "command": "cd /data && cat secret.txt",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "cat: secret.txt: Permission denied\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
           "command": "cd /data && false && cd /tmp; cat secret.txt",
           "expect": {
-            "exit": 1,
+            "exit": 126,
             "stdout": "",
-            "stderr": "cat: secret.txt: Permission denied\n"
+            "stderr": "cat: Permission denied\n"
           }
         },
         {
