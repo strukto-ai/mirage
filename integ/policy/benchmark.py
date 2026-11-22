@@ -26,13 +26,14 @@ def bench_rules(size: int) -> AdmissionRules:
         f"blocked{i}": {"decision": "deny", "reason": f"rule {i}"}
         for i in range(size - 1)
     }
-    tree["cat"] = {
-        "decision": "deny",
-        "reason": "protected path",
-        "paths": ["/private/*"],
-    }
+    private = {"cat": {"decision": "deny", "reason": "protected path"}}
     return AdmissionRules(
-        trees=(ScopedTree(tree=command_tree(tree), mount="", inline=False),)
+        trees=(
+            ScopedTree(tree=command_tree(tree), mount="", inline=False),
+            ScopedTree(
+                tree=command_tree(private), mount="/private", inline=False
+            ),
+        )
     )
 
 
@@ -129,7 +130,7 @@ async def run() -> dict:
                 assert denied["outcome"] == "deny"
                 assert denied["asks"] == []
                 assert denied["rule"] == size - 1
-                assert denied["matched_path"] == units("/private/secret")
+                assert denied["matched"]["command"] == [units("cat")]
 
             await measure(f"match_rules_{size}_paths_{count}", 50, request)
 

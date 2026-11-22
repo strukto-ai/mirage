@@ -13,8 +13,11 @@ function check(condition: boolean): asserts condition {
 function benchRules(size: number): AdmissionRules {
   const tree: Record<string, unknown> = {}
   for (let i = 0; i < size - 1; i++) tree[`blocked${i}`] = { decision: 'deny', reason: `rule ${i}` }
-  tree.cat = { decision: 'deny', reason: 'protected path', paths: ['/private/*'] }
-  return new AdmissionRules([{ tree: commandTree(tree), mount: '', inline: false }])
+  const priv = { cat: { decision: 'deny', reason: 'protected path' } }
+  return new AdmissionRules([
+    { tree: commandTree(tree), mount: '', inline: false },
+    { tree: commandTree(priv), mount: '/private', inline: false },
+  ])
 }
 
 export async function run(factory: (policy: Policy) => Workspace) {
@@ -84,10 +87,10 @@ export async function run(factory: (policy: Policy) => Workspace) {
           outcome: string
           asks: number[]
           rule: number | null
-          matched_path: number[] | null
+          matched: { command: number[][] } | null
         }
         check(denied.outcome === 'deny' && denied.asks.length === 0 && denied.rule === size - 1)
-        check(JSON.stringify(denied.matched_path) === JSON.stringify(units('/private/secret')))
+        check(JSON.stringify(denied.matched?.command) === JSON.stringify([units('cat')]))
       })
     }
   }
