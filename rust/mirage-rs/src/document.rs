@@ -1286,7 +1286,10 @@ mod tests {
             (m(&[("rm", m(&[("*", list())]))]), "commands.rm.*"),
             (m(&[("rm", m(&[("-*", list())]))]), "commands.rm.-*"),
             (m(&[("gh", m(&[("pr", list())]))]), "commands.gh.pr"),
-            (m(&[("rm", m(&[("--force", list())]))]), "commands.rm.--force"),
+            (
+                m(&[("rm", m(&[("--force", list())]))]),
+                "commands.rm.--force",
+            ),
             (
                 m(&[("rm", m(&[("--force", m(&[("*", list())]))]))]),
                 "commands.rm.--force.*",
