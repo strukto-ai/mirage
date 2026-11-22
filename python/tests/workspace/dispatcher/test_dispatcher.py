@@ -4145,11 +4145,11 @@ async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
         ws.create_session(
             "agent",
             profile={
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": [sealed],
+                "mounts": {
+                    sealed: {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
                     }
                 }
             },
@@ -4177,11 +4177,11 @@ async def test_an_approved_ask_keeps_the_one_call_tree_removal():
         ws.create_session(
             "agent",
             profile={
-                "commands": {
-                    "rm": {
-                        "decision": "ask",
-                        "reason": "confirm",
-                        "paths": ["/d/t/*"],
+                "mounts": {
+                    "/d/t": {
+                        "commands": {
+                            "rm": {"decision": "ask", "reason": "confirm"}
+                        }
                     }
                 }
             },

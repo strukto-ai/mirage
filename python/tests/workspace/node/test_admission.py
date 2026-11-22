@@ -52,49 +52,36 @@ from tests.fixtures.command_trees import trees
 DOC = {
     "commands": {
         "*": "deny",
-        "cat": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret*"],
-            },
-        ],
+        "cat": "allow",
         "rm": "allow",
-        "ls": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "private",
-                "paths": ["/data/private"],
-            },
-        ],
+        "ls": "allow",
         "ln": "allow",
         "echo": "allow",
         "head": "allow",
-        "grep": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "private",
-                "paths": ["/data/private"],
-            },
-        ],
-        "rg": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "private",
-                "paths": ["/data/private"],
-            },
-        ],
+        "grep": "allow",
+        "rg": "allow",
         "cd": "allow",
         "xargs": "allow",
         "sh": "allow",
         "mkdir": "allow",
         "eval": "allow",
         "source": "allow",
-    }
+    },
+    "mounts": {
+        "/data/secret": {
+            "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
+        },
+        "/data/secret2": {
+            "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
+        },
+        "/data/private": {
+            "commands": {
+                "ls": {"decision": "deny", "reason": "private"},
+                "grep": {"decision": "deny", "reason": "private"},
+                "rg": {"decision": "deny", "reason": "private"},
+            }
+        },
+    },
 }
 
 
@@ -139,8 +126,8 @@ async def test_admit_line_refuses_the_first_offending_command():
         )
         assert decision is not None
         assert (decision.exit_code, decision.stderr) == (
-            1,
-            b"cat: /data/secret: Permission denied\n",
+            126,
+            b"cat: Permission denied\n",
         )
         # The same gate, one command at a time; a command that gets
         # through comes back as its gate.
@@ -223,12 +210,12 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         # Quotes and escapes read as the text they name: a quoted path
         # is a path, a quoted head is the command.
         assert await line("'cat' \"/data/secret\"") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("cat /data/sec\\ret") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         # A head only the runtime can expand is refused under any rule.
         assert await line("$cmd /data/x") == (
@@ -260,8 +247,8 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
         assert await line('echo "$HOME" $(ls /data)') is None
         # What a word runs is admitted in turn.
         assert await line("eval 'cat /data/secret'") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await line('eval "$p"') == (
             126,
@@ -270,8 +257,8 @@ async def test_admit_line_reads_literal_words_and_refuses_the_unreadable():
             "expands it\n",
         )
         assert await line("echo $(cat /data/secret)") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("ls | xargs cat") == (
             126,
@@ -312,8 +299,8 @@ async def test_admit_line_classifies_bare_operands_with_the_spec():
         )
         assert decision is not None
         assert (decision.exit_code, decision.stderr) == (
-            1,
-            b"cat: secret: Permission denied\n",
+            126,
+            b"cat: Permission denied\n",
         )
         assert (
             await admit_line(parse("cat open"), session, registry, namespace)
@@ -335,12 +322,17 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/data/secret*"],
-                    }
+                "mounts": {
+                    "/data/secret.py": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
+                    },
+                    "/data/secret.js": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
+                    },
                 }
             }
         },
@@ -354,16 +346,16 @@ async def test_admit_line_reads_an_interpreters_script_as_a_path():
         )
         assert decision is not None
         assert (decision.exit_code, decision.stderr) == (
-            1,
-            b"python3: secret.py: Permission denied\n",
+            126,
+            b"python3: Permission denied\n",
         )
         decision = await admit_line(
             parse("node -- secret.js"), session, registry, namespace
         )
         assert decision is not None
         assert (decision.exit_code, decision.stderr) == (
-            1,
-            b"node: secret.js: Permission denied\n",
+            126,
+            b"node: Permission denied\n",
         )
         for text in (
             "python3 -c 'print(1)' secret.py",
@@ -472,13 +464,13 @@ async def test_admit_line_reads_redirect_targets_as_words_of_the_command():
             )
 
         assert await line("cat < /data/secret") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("head -c 1 /data/open > /data/secret2") is None
         assert await line("cat /data/open > /data/secret2") == (
-            1,
-            "cat: /data/secret2: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await line("cat < $F") == (
             126,
@@ -518,8 +510,8 @@ async def test_admit_line_binds_a_hoisted_redirect_to_its_command(text):
         )
         assert decision is not None
         assert (decision.exit_code, _voiced(decision)) == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
     finally:
         await ws.close()
@@ -536,7 +528,7 @@ async def test_a_hoisted_redirect_is_judged_with_its_command_on_the_run(text):
         await ws.shell("echo TOPSECRET > /data/secret")
         io = await ws.shell(text)
         assert "TOPSECRET" not in await io.stdout_str()
-        assert "cat: /data/secret: Permission denied" in await io.stderr_str()
+        assert "cat: Permission denied" in await io.stderr_str()
         assert io.decision is not None and io.decision.reason == "sealed"
     finally:
         await ws.close()
@@ -571,29 +563,28 @@ async def test_a_hidden_path_is_no_path_to_any_policy():
             )
 
         assert await run(plain, "cat", "/data/secret") == (
-            1,
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await run(veiled, "cat", "/data/secret") is None
         assert await run(plain, "ls", "/data/private") == (
-            1,
-            "ls: cannot access '/data/private': Permission denied\n"
-            "policy denied: private\n",
+            126,
+            "ls: Permission denied\npolicy denied: private\n",
         )
         assert await run(veiled, "ls", "/data/private") is None
         # The followed target and the implied operand are dropped too.
         await ws.shell("ln -s /data/secret /data/l")
         assert await run(plain, "cat", "/data/l") == (
-            1,
-            "cat: /data/l: Permission denied\npolicy denied: sealed\n",
+            126,
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await run(veiled, "cat", "/data/l") is None
         # Whatever the session sees is still read as before.
         assert await run(veiled, "cat", "/data/a") is None
         await ws.shell("echo x > /data/private/f")
         assert await run(plain, "grep", "-r", "x", "/data/private") == (
-            1,
-            "grep: /data/private: Permission denied\npolicy denied: private\n",
+            126,
+            "grep: Permission denied\npolicy denied: private\n",
         )
         assert await run(veiled, "grep", "-r", "x", "/data/private") is None
     finally:
@@ -637,19 +628,9 @@ def _gate_ctx(tokens: tuple[str, ...]) -> CommandContext:
 
 def test_the_admitted_gate_judges_what_the_line_did_not_name():
     rules = trees(
-        {
-            "grep": [
-                {
-                    "decision": "deny",
-                    "reason": "sealed",
-                    "paths": ["/data/sealed"],
-                },
-                {
-                    "decision": "ask",
-                    "reason": "nod",
-                    "paths": ["/data/asked/*"],
-                },
-            ]
+        mounts={
+            "/data/sealed": {"grep": {"decision": "deny", "reason": "sealed"}},
+            "/data/asked": {"grep": {"decision": "ask", "reason": "nod"}},
         }
     )
     (ask,) = (r for r in rule_table(rules) if r.reason == "nod")
@@ -694,12 +675,8 @@ def test_the_admitted_gate_scopes_each_start_point_on_its_own():
     # A walk keeps its native op where no rule could reach: the gate of
     # `find /data /other` sets aside only the walk of /data.
     rules = trees(
-        {
-            "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/sealed"],
-            }
+        mounts={
+            "/data/sealed": {"*": {"decision": "deny", "reason": "sealed"}}
         }
     )
     gate = Admitted(
@@ -1027,11 +1004,9 @@ async def test_a_command_reads_as_writing_when_its_handler_says_so():
 # is: a path rule reads a file operand however it is spelled, and an
 # allow list answers each name for itself.
 DENY_SECRET = {
-    "commands": {
-        "*": {
-            "decision": "deny",
-            "reason": "secret",
-            "paths": ["/data/secret.txt"],
+    "mounts": {
+        "/data/secret.txt": {
+            "commands": {"*": {"decision": "deny", "reason": "secret"}}
         }
     }
 }
@@ -1054,15 +1029,15 @@ async def _tested(profile: dict, line: str) -> tuple[int, str, str]:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["test", "[", "[["])
 async def test_a_shell_test_reads_a_file_operand_as_a_path_rule_does(name):
-    for prefix, expr, path in (
-        ("cd /data && ", "-e secret.txt", "secret.txt"),
-        ("", "-e /data/secret.txt", "/data/secret.txt"),
-        ("cd /data && ", "a.txt -nt secret.txt", "secret.txt"),
+    for prefix, expr in (
+        ("cd /data && ", "-e secret.txt"),
+        ("", "-e /data/secret.txt"),
+        ("cd /data && ", "a.txt -nt secret.txt"),
     ):
         assert await _tested(DENY_SECRET, prefix + _spell(name, expr)) == (
-            1,
+            126,
             "",
-            f"{name}: {path}: Permission denied\n",
+            f"{name}: Permission denied\n",
         )
     line = "cd /data && " + _spell(name, "-e a.txt")
     assert await _tested(DENY_SECRET, line) == (0, "0\n", "")
@@ -1082,17 +1057,17 @@ async def test_double_brackets_admit_each_leaf():
     for expr in ("-e a.txt || -e secret.txt", "-e nope || -e secret.txt"):
         line = "cd /data && " + _spell("[[", expr)
         assert await _tested(DENY_SECRET, line) == (
-            1,
+            126,
             "",
-            "[[: secret.txt: Permission denied\n",
+            "[[: Permission denied\n",
         )
     # A leaf only the run can expand is admitted where it is reached,
     # and a branch never reached is never admitted.
     reached = "cd /data && x=secret.txt && [[ -e nope || -e $x ]]"
     assert await _tested(DENY_SECRET, reached) == (
         0,
-        "1\n",
-        "[[: secret.txt: Permission denied\n",
+        "126\n",
+        "[[: Permission denied\n",
     )
     skipped = "cd /data && x=secret.txt && [[ -e a.txt || -e $x ]]"
     assert await _tested(DENY_SECRET, skipped) == (0, "0\n", "")
@@ -1122,15 +1097,10 @@ async def test_a_shell_test_is_answered_by_its_own_name_in_an_allow_list(
 
 
 SEALED = {
-    "commands": {
-        "*": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret.txt"],
-            },
-        ]
+    "mounts": {
+        "/data/secret.txt": {
+            "commands": {"*": {"decision": "deny", "reason": "sealed"}}
+        }
     }
 }
 
@@ -1177,11 +1147,7 @@ async def test_a_redirect_no_command_owns_meets_the_root_path_leaf(line):
 @pytest.mark.asyncio
 async def test_a_redirect_no_command_owns_meets_no_leaf_about_commands():
     closed = {"commands": {"*": "deny", "ls": "allow", "cat": "allow"}}
-    named = {
-        "commands": {
-            "cat": {"decision": "deny", "paths": ["/data/secret.txt"]}
-        }
-    }
+    named = {"mounts": {"/data/secret.txt": {"commands": {"cat": "deny"}}}}
     ws = Workspace(
         {"/data/": (RAMVFS(), MountMode.WRITE)},
         mode=MountMode.WRITE,
@@ -1273,11 +1239,8 @@ async def test_admit_line_judges_a_redirect_no_command_owns():
 
 
 ASKS = {
-    "commands": {
-        "*": [
-            "allow",
-            {"decision": "ask", "reason": "nod", "paths": ["/data/f"]},
-        ]
+    "mounts": {
+        "/data/f": {"commands": {"*": {"decision": "ask", "reason": "nod"}}}
     }
 }
 

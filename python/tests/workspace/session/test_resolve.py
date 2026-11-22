@@ -155,7 +155,7 @@ def test_command_rules_holds_each_mounts_tree_with_its_prefix():
             mounts={
                 "/repo": ProfileMount(
                     commands={
-                        "rm": {"decision": "deny", "paths": ["*.pem"]},
+                        "rm": "deny",
                         "git": {"push": "ask"},
                     }
                 ),
@@ -169,7 +169,6 @@ def test_command_rules_holds_each_mounts_tree_with_its_prefix():
     assert rules is not None
     assert [t.mount for t in rules.trees] == ["", "/repo"]
     leaves = {rule.at: rule for rule in rule_table(rules)}
-    assert leaves["/rm/*"].paths == ("/repo/*.pem",)
     assert leaves["/rm/*"].mount == "/repo"
     assert leaves["/*"].mount == ""
 

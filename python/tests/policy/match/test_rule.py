@@ -78,17 +78,15 @@ def test_a_walking_command_touches_the_mounts_under_its_operands():
 
 def test_io_refusal_judges_a_reached_file_as_one_more_path():
     rules = trees(
-        {
-            "rm": [
-                {"decision": "deny", "reason": "keys", "paths": ["*.key"]},
-                {"decision": "ask", "reason": "nod", "paths": ["/d/*"]},
-            ]
+        mounts={
+            "/d/keys": {"grep": {"decision": "deny", "reason": "keys"}},
+            "/d": {"grep": {"decision": "ask", "reason": "nod"}},
         }
     )
-    ctx = line("rm", "-r", "/d")
+    ctx = line("grep", "-r", "x", "/d")
     nod = decide(ctx, rules).asks
     assert [a.reason for a in nod] == ["nod"]
-    assert _refusal(rules, ctx, "/d/x.key", nod) == "keys"
+    assert _refusal(rules, ctx, "/d/keys/x.key", nod) == "keys"
     assert _refusal(rules, ctx, "/d/a") == "nod"
     assert _refusal(rules, ctx, "/d/a", nod) is None
     assert _refusal(rules, ctx, "/open/a") is None
@@ -99,9 +97,9 @@ def test_io_refusal_judges_a_reached_file_as_one_more_path():
 
 def test_io_reach_reads_each_start_point_on_its_own():
     rules = trees(
-        {
-            "*": {"decision": "deny", "paths": ["/repo/.env"]},
-            "rm": {"decision": "ask", "paths": ["/data/*"]},
+        mounts={
+            "/repo/.env": {"*": "deny"},
+            "/data": {"rm": "ask"},
         }
     )
     find = line("find", "/repo", "/s3", "/data")
@@ -142,47 +140,36 @@ def test_skipped_at_dispatch_names_every_tree():
 
 
 def test_io_reach_skips_an_ask_the_line_holds_a_grant_for():
-    rules = trees({"rm": {"decision": "ask", "paths": ["/data/*"]}})
+    rules = trees(mounts={"/data": {"rm": "ask"}})
     rm = line("rm", "-rf", "/data")
     nod = decide(rm, rules).asks
     assert _reach(rules, rm, "/data")
     assert not _reach(rules, rm, "/data", nod)
     assert not _reach(rules, rm, "/data/sub", nod)
     kept = trees(
-        {
-            "rm": [
-                {"decision": "ask", "paths": ["/data/*"]},
-                {"decision": "deny", "paths": ["*.pem"]},
-            ]
+        mounts={
+            "/data": {"grep": "ask"},
+            "/data/sub/keep": {"grep": "deny"},
         }
     )
-    nod = decide(rm, kept).asks
+    grep = line("grep", "-r", "x", "/data")
+    nod = decide(grep, kept).asks
     assert nod
-    assert _reach(kept, rm, "/data", nod)
-    assert _reach(kept, rm, "/data/sub", nod)
+    assert _reach(kept, grep, "/data", nod)
+    assert _reach(kept, grep, "/data/sub", nod)
 
 
-_PATTERNS = (
-    "/dir/*",
-    "/dir/**",
-    "/dir",
-    "/dir/",
-    "/dir/secret/*",
-    "/dir/secret",
-    "/dir/a/*",
-    "/dir/a",
-    "/dir2/*",
-    "/*",
+_FOLDERS = (
     "/",
-    "*.pem",
-    "secret",
-    "/dir/*/x.pem",
-    "/dir/a/x.pem",
-    "/dir/s*",
-    "*",
-    "/dir/a/b/*",
-    "/other/*",
-    "k.*",
+    "/dir",
+    "/dir/a",
+    "/dir/a/b",
+    "/dir/secret",
+    "/dir/secret/deep",
+    "/dir/s1",
+    "/dir2",
+    "/dir2/secret",
+    "/other",
 )
 _UNIVERSE = (
     "/",
@@ -211,19 +198,15 @@ _DECISIONS = ("allow", "deny", "ask")
 
 def _random_leaf(rnd: random.Random) -> Any:
     decision = rnd.choice(_DECISIONS)
-    if rnd.random() < 0.25:
+    if rnd.random() < 0.5:
         return decision
-    return {
-        "decision": decision,
-        "paths": rnd.sample(_PATTERNS, rnd.choice([1, 1, 2])),
-    }
+    return {"decision": decision, "reason": "r"}
 
 
 def _random_entry(rnd: random.Random) -> Any:
     if rnd.random() < 0.55:
         return _random_leaf(rnd)
-    leaves = [_random_leaf(rnd) for _ in range(rnd.choice([2, 2, 3]))]
-    return [x for x in leaves if isinstance(x, dict)] or _random_leaf(rnd)
+    return [_random_leaf(rnd) for _ in range(rnd.choice([2, 2, 3]))]
 
 
 def _random_block(rnd: random.Random) -> dict[str, Any]:
@@ -253,12 +236,12 @@ def test_io_reach_covers_every_entry_io_refusal_refuses_below_it(seed):
     checks = 0
     violations = []
     for _ in range(300):
-        commands = _random_block(rnd)
-        mounts = {}
-        if rnd.random() < 0.3:
-            mounts[rnd.choice(["/dir", "/dir2", "/dir/secret"])] = (
-                _random_block(rnd)
-            )
+        commands = _random_block(rnd) if rnd.random() < 0.5 else {}
+        mounts = {
+            folder: _random_block(rnd)
+            for folder in rnd.sample(_FOLDERS, rnd.choice([1, 2, 3]))
+        }
+        mounts = {k: v for k, v in mounts.items() if v}
         if not commands and not mounts:
             continue
         operand = rnd.choice(_UNIVERSE)

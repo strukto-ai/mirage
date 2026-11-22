@@ -612,11 +612,11 @@ def test_a_command_rule_on_a_hidden_remnant_keeps_the_refusal():
     ws = _boxed(
         {
             "paths": {"hide": ["/repo/only/h"]},
-            "commands": {
-                "rmdir": {
-                    "decision": "deny",
-                    "reason": "kept",
-                    "paths": ["/repo/only/h"],
+            "mounts": {
+                "/repo/only/h": {
+                    "commands": {
+                        "rmdir": {"decision": "deny", "reason": "kept"}
+                    }
                 }
             },
         }

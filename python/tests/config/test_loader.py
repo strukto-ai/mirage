@@ -749,7 +749,6 @@ clis:
 PROTECTED = {
     "decision": "deny",
     "reason": "production data is protected",
-    "paths": ["/repo/prod/*"],
 }
 
 
@@ -772,16 +771,16 @@ profiles:
     env: {PAGER: cat}
     mounts:
       /repo: r
+      /repo/prod:
+        commands:
+          rm:
+            decision: deny
+            reason: production data is protected
+          mv:
+            decision: deny
+            reason: production data is protected
       /scratch: rwx
     commands:
-      rm:
-        decision: deny
-        reason: production data is protected
-        paths: ["/repo/prod/*"]
-      mv:
-        decision: deny
-        reason: production data is protected
-        paths: ["/repo/prod/*"]
       python3: deny
     paths:
       hide: ["/scratch/finance"]
@@ -805,15 +804,12 @@ profiles:
         env={"PAGER": "cat"},
         mounts={
             "/repo": ProfileMount(mode=MountMode.READ),
+            "/repo/prod": ProfileMount(
+                commands=command_tree({"rm": PROTECTED, "mv": PROTECTED})
+            ),
             "/scratch": ProfileMount(mode=MountMode.EXEC),
         },
-        commands=command_tree(
-            {
-                "rm": PROTECTED,
-                "mv": PROTECTED,
-                "python3": "deny",
-            }
-        ),
+        commands=command_tree({"python3": "deny"}),
         paths=PathsBlock(hide=("/scratch/finance",)),
     )
     assert kwargs["profiles"]["reviewer"] == SessionProfile(
@@ -843,11 +839,10 @@ profiles:
       /repo:
         paths:
           hide: ["/repo/.env"]
-    commands:
-      rm:
-        decision: deny
-        reason: no deletes in the repo
-        paths: ["/repo"]
+        commands:
+          rm:
+            decision: deny
+            reason: no deletes in the repo
   reviewer:
     cwd: /repo
     mounts: {/repo: r}
@@ -865,10 +860,8 @@ profiles:
 
     hidden, refused, where, readonly = asyncio.run(run())
     assert hidden.exit_code != 0
-    assert refused.exit_code == 1
-    assert (
-        refused.stderr == b"rm: cannot remove '/repo/f': Permission denied\n"
-    )
+    assert refused.exit_code == 126
+    assert refused.stderr == b"rm: Permission denied\n"
     assert refused.decision is not None
     assert refused.decision.reason == "no deletes in the repo"
     assert where == "/repo\n"

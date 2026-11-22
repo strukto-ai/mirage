@@ -45,13 +45,11 @@ def test_an_option_tightens_its_command():
 
 
 def test_a_mount_tree_reports_where_it_was_written():
-    rules = trees(
-        mounts={"/a": {"rm": {"decision": "deny", "paths": ["b/*"]}}}
-    )
+    rules = trees(mounts={"/a/b": {"rm": "deny"}})
     ruling = decide(line("rm", "/a/b/x"), rules)
     assert ruling.outcome is Outcome.DENY
-    assert ruling.rule is not None and ruling.rule.paths == ("/a/b/*",)
-    assert ruling.source == "mounts./a"
+    assert ruling.rule is not None and ruling.rule.mount == "/a/b"
+    assert ruling.source == "mounts./a/b"
     assert decide(line("rm", "/c/x"), rules).outcome is Outcome.ALLOW
 
 

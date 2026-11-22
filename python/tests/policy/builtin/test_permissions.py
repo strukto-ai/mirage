@@ -34,15 +34,13 @@ class _Sessions:
 
 
 FULL = trees(
-    {
-        "rm": {
-            "decision": "deny",
-            "reason": "no repo deletes",
-            "paths": ["/repo/*"],
-        },
-        "cp": {"decision": "ask", "reason": "sign-off"},
+    {"cp": {"decision": "ask", "reason": "sign-off"}},
+    mounts={
+        "/repo": {
+            "cp": {"decision": "deny", "reason": "read-only"},
+            "rm": {"decision": "deny", "reason": "no repo deletes"},
+        }
     },
-    mounts={"/repo": {"cp": {"decision": "deny", "reason": "read-only"}}},
 )
 REVIEWER = trees({"*": "deny", "ls": "allow", "cat": "allow"})
 
@@ -87,8 +85,10 @@ async def test_a_leaf_speaks_by_its_paths_and_by_where_it_was_written():
     assert ask.rules == (ask.rule,)
     refused = await _judge(policy, "rm", "/repo/x")
     assert isinstance(refused, Deny)
-    assert refused.path == "/repo/x"
+    assert refused.path is None
+    assert refused.reason == "no repo deletes"
     assert refused.rule is not None and refused.rule.decision is Outcome.DENY
+    assert refused.rule.mount == "/repo"
     assert await _judge(policy, "rm", "/scratch/x") is None
 
 

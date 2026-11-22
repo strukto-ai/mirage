@@ -452,11 +452,11 @@ async def test_a_wrappers_pattern_is_no_path_to_a_path_rule():
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {
-                    "fgrep": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/private/*"],
+                "mounts": {
+                    "/private": {
+                        "commands": {
+                            "fgrep": {"decision": "deny", "reason": "sealed"}
+                        }
                     }
                 }
             }
@@ -470,9 +470,9 @@ async def test_a_wrappers_pattern_is_no_path_to_a_path_rule():
         assert (io.exit_code, io.stdout) == (0, b"/private/token\ndone\n")
         io = await ws.shell("fgrep s /private/token; echo done")
         assert (io.exit_code, io.stdout, io.stderr) == (
-            1,
+            126,
             b"",
-            b"fgrep: /private/token: Permission denied\n",
+            b"fgrep: Permission denied\n",
         )
     finally:
         await ws.close()

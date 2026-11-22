@@ -142,13 +142,15 @@ DOCUMENT = {
                     "push": {
                         "decision": "ask",
                         "reason": "sign-off",
-                        "paths": ["/repo"],
                     },
                     "rebase": "deny",
                 }
             },
         },
-        "/scratch": {"mode": "exec"},
+        "/scratch": {
+            "mode": "exec",
+            "commands": {"rm": {"decision": "ask", "reason": "shared"}},
+        },
     },
     "paths": {
         "hide": ["/repo/secrets", "*.pem"],
@@ -160,10 +162,7 @@ DOCUMENT = {
         "ls": "allow",
         "cat": "allow",
         "git": {"push": "allow"},
-        "rm": [
-            "allow",
-            {"decision": "ask", "reason": "shared", "paths": ["/scratch/*"]},
-        ],
+        "rm": "allow",
         "curl": "deny",
     },
 }
@@ -810,7 +809,7 @@ def test_profile_cwd_is_where_the_session_starts():
 # names no path).
 READ_ONLY = {"decision": "deny", "reason": "history is read-only here"}
 REPO_SECTION = {"commands": {"git": {"commit": READ_ONLY, "reset": READ_ONLY}}}
-FROZEN = {"decision": "deny", "reason": "frozen", "paths": ["/repo/locked/*"]}
+FROZEN = {"decision": "deny", "reason": "frozen"}
 COMMANDS_DOC = {
     "commands": {
         "*": "deny",
@@ -831,21 +830,25 @@ COMMANDS_DOC = {
                 "which",
                 "cd",
                 "[",
+                "cat",
+                "find",
+                "rm",
             ),
             "allow",
         ),
-        "cat": ["allow", FROZEN],
-        "find": ["allow", FROZEN],
-        "rm": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "no deletes in the repo",
-                "paths": ["/repo/*"],
-            },
-        ],
     },
-    "mounts": {"/repo": REPO_SECTION},
+    "mounts": {
+        "/repo": {
+            "commands": {
+                **REPO_SECTION["commands"],
+                "rm": {
+                    "decision": "deny",
+                    "reason": "no deletes in the repo",
+                },
+            }
+        },
+        "/repo/locked": {"commands": {"cat": FROZEN, "find": FROZEN}},
+    },
 }
 REVIEWER_COMMANDS = {
     "commands": {
@@ -1014,18 +1017,17 @@ async def test_deny_rules_by_source_scope_and_voice():
         await ws.shell("mkdir -p /repo/d && touch /repo/d/x /scratch/z")
         # Operand-scoped: the GNU voice at 1, the operand as typed.
         assert await _line(ws, "cd /repo/d && rm x") == (
-            1,
+            126,
             "",
-            "rm: cannot remove 'x': Permission denied\n"
-            "policy denied: no deletes in the repo\n",
+            "rm: Permission denied\npolicy denied: no deletes in the repo\n",
         )
         assert (await _line(ws, "rm /scratch/z"))[0] == 0
-        # A leaf with paths refuses its command on a path it covers. A
+        # A folder entry refuses its command on a path it covers. A
         # tree judges lines, so the host's own entry point is not one.
         assert await _line(ws, "cat /repo/locked/y") == (
-            1,
+            126,
             "",
-            "cat: /repo/locked/y: Permission denied\npolicy denied: frozen\n",
+            "cat: Permission denied\npolicy denied: frozen\n",
         )
         assert await ws.vfs.read("/repo/locked/y") == b"y\n"
         # A mount section's tree applies when the line works inside the
@@ -1063,27 +1065,27 @@ async def test_find_delete_is_judged_by_finds_own_leaf_not_by_rms():
         await ws.shell("find /repo/d -name x -delete")
         assert (await _line(ws, "cat /repo/d/x"))[0] != 0
         assert await _line(ws, "find /repo/locked -name y -delete") == (
-            1,
+            126,
             "",
-            "find: cannot delete '/repo/locked/y': Permission denied\n"
-            "policy denied: frozen\n",
+            "find: Permission denied\npolicy denied: frozen\n",
         )
-        assert (await _line(ws, "cat /repo/locked/y"))[0] == 1
+        assert (await _line(ws, "cat /repo/locked/y"))[0] == 126
     finally:
         await ws.close()
 
 
 SEALED_REDIRECT_DOC = {
-    "commands": {
-        "cat": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/secret*"],
+    "mounts": {
+        "/data/secret": {
+            "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
         },
-        "echo": {
-            "decision": "deny",
-            "reason": "audit is append-only",
-            "paths": ["/data/audit.log"],
+        "/data/audit.log": {
+            "commands": {
+                "echo": {
+                    "decision": "deny",
+                    "reason": "audit is append-only",
+                }
+            }
         },
     }
 }
@@ -1105,15 +1107,14 @@ async def test_redirect_targets_are_judged_with_the_line():
             "echo top > /data/secret && printf 'one\\n' > /data/audit.log"
         )
         assert await _line(ws, "cat < /data/secret") == (
-            1,
+            126,
             "",
-            "cat: /data/secret: Permission denied\npolicy denied: sealed\n",
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "echo two > /data/audit.log") == (
-            1,
+            126,
             "",
-            "echo: /data/audit.log: Permission denied\n"
-            "policy denied: audit is append-only\n",
+            "echo: Permission denied\npolicy denied: audit is append-only\n",
         )
         # The refused write did not truncate, and clean redirects run.
         assert await _line(ws, "cat /data/audit.log") == (0, "one\n", "")
@@ -1292,17 +1293,13 @@ async def test_a_command_rule_reaches_what_chmod_r_walks_into():
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {
-                    "chmod": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/a/b/secret"],
-                    },
-                    "chown": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/a/b/secret"],
-                    },
+                "mounts": {
+                    "/a/b/secret": {
+                        "commands": {
+                            "chmod": {"decision": "deny", "reason": "sealed"},
+                            "chown": {"decision": "deny", "reason": "sealed"},
+                        }
+                    }
                 }
             }
         },
@@ -1375,16 +1372,14 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         assert await _line(ws, "sort /repo/x") == (126, "", refused)
         assert await _line(ws, "cat /repo/a | sort") == (126, "", refused)
         assert await _line(ws, "rm /repo/x") == (
-            1,
+            126,
             "",
-            "rm: cannot remove '/repo/x': Permission denied\n"
-            "policy denied: no deletes in the repo\n",
+            "rm: Permission denied\npolicy denied: no deletes in the repo\n",
         )
         assert await _line(ws, "cat /repo/a; rm -f /repo/x") == (
-            1,
+            126,
             "",
-            "rm: cannot remove '/repo/x': Permission denied\n"
-            "policy denied: no deletes in the repo\n",
+            "rm: Permission denied\npolicy denied: no deletes in the repo\n",
         )
         assert box.lines == []
         assert await _line(ws, "cat /repo/a | wc -l") == (
@@ -1472,13 +1467,13 @@ async def test_a_post_command_program_refuses_a_command_after_it_ran():
 LITERAL_DOC = {
     "commands": {
         "rm": {"decision": "deny", "reason": "no deletes"},
-        "cat": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/repo/secret*"],
-        },
         "git": {"fetch": {"decision": "deny", "reason": "no fetches"}},
-    }
+    },
+    "mounts": {
+        "/repo/secret": {
+            "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
+        }
+    },
 }
 
 
@@ -1656,30 +1651,22 @@ VEILED_DOC = {
         "mkdir": "allow",
         "echo": "allow",
         "touch": "allow",
-        "cat": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "private",
-                "paths": ["/repo/private"],
-            },
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/repo/sealed/*"],
-            },
-        ],
-        "rm": [
-            "allow",
-            {
-                "decision": "ask",
-                "reason": "sign-off",
-                "paths": ["/repo/shared/*"],
-            },
-        ],
+        "cat": "allow",
+        "rm": "allow",
         "ls": "allow",
         "head": ["allow", {"decision": "deny", "reason": "no heads"}],
-    }
+    },
+    "mounts": {
+        "/repo/private": {
+            "commands": {"cat": {"decision": "deny", "reason": "private"}}
+        },
+        "/repo/sealed": {
+            "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
+        },
+        "/repo/shared": {
+            "commands": {"rm": {"decision": "ask", "reason": "sign-off"}}
+        },
+    },
 }
 
 
@@ -1718,9 +1705,9 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
             ),
         )
         assert await _line(ws, "cat /repo/private/k") == (
-            1,
+            126,
             "",
-            "cat: /repo/private/k: Permission denied\npolicy denied: private\n",
+            "cat: Permission denied\npolicy denied: private\n",
         )
         assert await _line(ws, "cat /repo/private/k", "veiled") == (
             1,
@@ -1728,9 +1715,9 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
             "cat: /repo/private/k: No such file or directory\n",
         )
         assert await _line(ws, "cat /repo/sealed/x") == (
-            1,
+            126,
             "",
-            "cat: /repo/sealed/x: Permission denied\npolicy denied: sealed\n",
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cat /repo/sealed/x", "veiled") == (
             1,
@@ -1762,16 +1749,19 @@ async def test_a_hidden_path_reads_as_absent_to_every_rule():
 
 ASK_DOC = {
     "commands": {
-        "rm": [
-            {
-                "decision": "deny",
-                "reason": "no deletes in the repo",
-                "paths": ["/repo/*"],
-            },
-            {"decision": "ask", "reason": "sign-off"},
-        ],
+        "rm": {"decision": "ask", "reason": "sign-off"},
         "head": "ask",
-    }
+    },
+    "mounts": {
+        "/repo": {
+            "commands": {
+                "rm": {
+                    "decision": "deny",
+                    "reason": "no deletes in the repo",
+                }
+            }
+        }
+    },
 }
 
 
@@ -1878,10 +1868,9 @@ async def test_a_session_grant_covers_the_rule_and_a_deny_is_never_reopened():
         # raises no request (nothing for the host to answer; the battery
         # cannot see this, so it is pinned here).
         assert await _line(ws, "cd /repo/d && rm x") == (
-            1,
+            126,
             "",
-            "rm: cannot remove 'x': Permission denied\n"
-            "policy denied: no deletes in the repo\n",
+            "rm: Permission denied\npolicy denied: no deletes in the repo\n",
         )
         assert ws.decisions.pending() == ()
         # The answer is session state: on the record, and not another
@@ -2035,45 +2024,43 @@ async def test_a_compound_line_asked_before_it_runs_is_killable_too():
 
 # A plain document, passed raw: the constructor validates it, so the
 # whole walk battery also pins the raw-doc entry point.
-SEALED = {"decision": "deny", "reason": "sealed", "paths": ["/data/t/sealed"]}
-FROZEN_T = {
-    "decision": "deny",
-    "reason": "frozen",
-    "paths": ["/data/t/locked/*"],
-}
-PRIVATE = {
-    "decision": "deny",
-    "reason": "private",
-    "paths": ["/data/t/private"],
-}
+SEALED = {"decision": "deny", "reason": "sealed"}
+FROZEN_T = {"decision": "deny", "reason": "frozen"}
+PRIVATE = {"decision": "deny", "reason": "private"}
+WALK_COMMANDS = (
+    "mkdir",
+    "echo",
+    "cat",
+    "find",
+    "du",
+    "cp",
+    "tar",
+    "tree",
+    "stat",
+    "rm",
+    "test",
+    "ls",
+    "grep",
+)
 WALK_DOC = {
     "paths": {"hide": ["/data/t/ghost"]},
     "commands": {
         "*": "deny",
-        **{
-            name: ["allow", SEALED, FROZEN_T]
-            for name in (
-                "mkdir",
-                "echo",
-                "cat",
-                "find",
-                "du",
-                "cp",
-                "tar",
-                "tree",
-                "stat",
-                "rm",
-                "test",
-            )
+        **dict.fromkeys(WALK_COMMANDS, "allow"),
+    },
+    "mounts": {
+        "/data/t/sealed": {
+            "commands": dict.fromkeys(WALK_COMMANDS, SEALED),
         },
-        "ls": ["allow", SEALED, FROZEN_T, PRIVATE],
-        "grep": [
-            "allow",
-            SEALED,
-            FROZEN_T,
-            PRIVATE,
-            {"decision": "ask", "reason": "nod", "paths": ["/data/t/asked/*"]},
-        ],
+        "/data/t/locked": {
+            "commands": dict.fromkeys(WALK_COMMANDS, FROZEN_T),
+        },
+        "/data/t/private": {
+            "commands": {"ls": PRIVATE, "grep": PRIVATE},
+        },
+        "/data/t/asked": {
+            "commands": {"grep": {"decision": "ask", "reason": "nod"}},
+        },
     },
 }
 
@@ -2116,17 +2103,18 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         assert code == 2
         assert out == "/data/t/open/o:o\n"
         assert err == (
-            "grep: /data/t/asked/a: Permission denied\n"
-            "grep: /data/t/locked/y: Permission denied\n"
+            "grep: /data/t/asked: Permission denied\n"
+            "grep: /data/t/locked: Permission denied\n"
             "grep: /data/t/private: Permission denied\n"
             "grep: /data/t/sealed: Permission denied\n"
             "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "ls -R /data/t", "g")
         assert code == 1
-        assert "locked:\ny\n" in out and "asked:\na\n" in out
+        assert "asked:\na\n" in out
         assert "ghost" not in out
         assert err == (
+            "ls: cannot open directory '/data/t/locked': Permission denied\n"
             "ls: cannot open directory '/data/t/private': Permission denied\n"
             "ls: cannot open directory '/data/t/sealed': Permission denied\n"
             "policy denied: sealed\n"
@@ -2134,27 +2122,30 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         code, out, err = await _line(ws, "find /data/t -name '*'", "g")
         assert code == 1
         assert "/data/t/sealed\n" in out and "/data/t/sealed/s" not in out
-        assert "/data/t/locked/y\n" in out and "/data/t/private/k\n" in out
+        assert "/data/t/locked\n" in out and "/data/t/locked/y" not in out
+        assert "/data/t/private/k\n" in out
         assert err == (
-            "find: '/data/t/sealed': Permission denied\npolicy denied: sealed\n"
+            "find: '/data/t/locked': Permission denied\n"
+            "find: '/data/t/sealed': Permission denied\n"
+            "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "du -a /data/t", "g")
         assert code == 1
-        assert "4\t/data/t/locked/y\n" in out
+        assert "4\t/data/t/locked\n" in out and "/data/t/locked/" not in out
         # GNU still prints the row of a directory it may not open, at the
         # block it holds of its own.
         assert "4\t/data/t/sealed\n" in out and "/data/t/sealed/" not in out
         assert err == (
+            "du: cannot read directory '/data/t/locked': Permission denied\n"
             "du: cannot read directory '/data/t/sealed': Permission denied\n"
             "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "cp -r /data/t /data/copy", "g")
         assert code == 1
         assert err == (
+            "cp: cannot access '/data/t/locked': Permission denied\n"
             "cp: cannot access '/data/t/sealed': Permission denied\n"
-            "cp: cannot open '/data/t/locked/y' for reading: "
-            "Permission denied\n"
-            "policy denied: frozen\n"
+            "policy denied: sealed\n"
         )
         assert (await _line(ws, "cat /data/copy/private/k", "g"))[1] == "k\n"
         assert (await _line(ws, "test -d /data/copy/sealed", "g"))[0] == 0
@@ -2163,12 +2154,11 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         assert code == 2
         assert err == (
             "tar: Removing leading `/' from member names\n"
+            "tar: /data/t/locked: Cannot open: Permission denied\n"
             "tar: /data/t/sealed: Cannot open: Permission denied\n"
-            "tar: /data/t/locked/y: Cannot open: Permission "
-            "denied\n"
             "tar: Exiting with failure status due to previous "
             "errors\n"
-            "policy denied: frozen\n"
+            "policy denied: sealed\n"
         )
         code, out, err = await _line(ws, "tar -tf /data/a.tar", "g")
         assert "data/t/sealed/\n" in out and "locked/y" not in out
@@ -2176,48 +2166,43 @@ async def test_a_walk_below_the_operand_meets_the_rule_guard():
         code, out, err = await _line(ws, "tree /data/t", "g")
         assert code == 2 and err == "policy denied: sealed\n"
         assert "`-- sealed  [error opening dir]\n" in out
-        assert "|   `-- y\n" in out
+        assert "|-- locked  [error opening dir]\n" in out
     finally:
         await ws.close()
 
 
 RELAY_DOC = {
     "paths": {"hide": ["/data/r/ghost"]},
-    "commands": {
-        "split": {
-            "decision": "deny",
-            "reason": "cut",
-            "paths": ["/data/out/xab"],
+    "mounts": {
+        "/data/out/xab": {
+            "commands": {"split": {"decision": "deny", "reason": "cut"}}
         },
-        "csplit": {
-            "decision": "deny",
-            "reason": "cut",
-            "paths": ["/data/out/xx01"],
+        "/data/out/xx01": {
+            "commands": {"csplit": {"decision": "deny", "reason": "cut"}}
         },
-        "awk": {
-            "decision": "deny",
-            "reason": "cut",
-            "paths": ["/data/out/locked"],
+        "/data/out/locked": {
+            "commands": {"awk": {"decision": "deny", "reason": "cut"}}
         },
-        "mktemp": {
-            "decision": "deny",
-            "reason": "cut",
-            "paths": ["/data/tmpd/*"],
+        "/data/tmpd": {
+            "commands": {"mktemp": {"decision": "deny", "reason": "cut"}}
         },
-        "unzip": {
-            "decision": "deny",
-            "reason": "cut",
-            "paths": ["/data/uz/*"],
+        "/data/uz/src": {
+            "commands": {"unzip": {"decision": "deny", "reason": "cut"}}
         },
-        "tar": {
-            "decision": "deny",
-            "reason": "tarred",
-            "paths": ["/data/r/sec", "/data/r/ghost"],
+        "/data/r/sec": {
+            "commands": {
+                "tar": {"decision": "deny", "reason": "tarred"},
+                "cp": {"decision": "deny", "reason": "copied"},
+            }
         },
-        "cp": {
-            "decision": "deny",
-            "reason": "copied",
-            "paths": ["/data/r/sec", "/data/dst/sec", "/data/r/ghost"],
+        "/data/r/ghost": {
+            "commands": {
+                "tar": {"decision": "deny", "reason": "tarred"},
+                "cp": {"decision": "deny", "reason": "copied"},
+            }
+        },
+        "/data/dst/sec": {
+            "commands": {"cp": {"decision": "deny", "reason": "copied"}}
         },
     },
 }
@@ -2332,21 +2317,17 @@ async def test_a_write_through_the_command_dispatcher_meets_the_rules():
         await ws.close()
 
 
-WALLED = {"decision": "deny", "reason": "walled", "paths": ["/data/w/p.txt"]}
 WARM_DOC = {
     "paths": {"hide": ["/data/w/h.txt"]},
-    "commands": {
-        "*": WALLED,
-        **{
-            name: [
-                {
-                    "decision": "deny",
-                    "reason": "sealed",
-                    "paths": ["/data/w/a.txt"],
-                },
-                WALLED,
-            ]
-            for name in ("grep", "rg", "cat", "cp", "tar")
+    "mounts": {
+        "/data/w/p.txt": {
+            "commands": {"*": {"decision": "deny", "reason": "walled"}}
+        },
+        "/data/w/a.txt": {
+            "commands": dict.fromkeys(
+                ("grep", "rg", "cat", "cp", "tar"),
+                {"decision": "deny", "reason": "sealed"},
+            )
         },
     },
 }
@@ -2431,21 +2412,15 @@ async def test_a_warm_entry_no_rule_refuses_is_still_served_from_cache():
 
 
 FANOUT_DOC = {
-    "commands": {
-        "rg": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/w/a.txt"],
+    "mounts": {
+        "/data/w/a.txt": {
+            "commands": {
+                "rg": {"decision": "deny", "reason": "sealed"},
+                "find": {"decision": "deny", "reason": "sealed"},
+            }
         },
-        "find": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/w/a.txt"],
-        },
-        "tree": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/sub/x"],
+        "/data/sub/x": {
+            "commands": {"tree": {"decision": "deny", "reason": "sealed"}}
         },
     }
 }
@@ -2536,18 +2511,14 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
             "zip -r /other/z.zip src > /dev/null"
         )
         assert await _line(ws, "mktemp -d -p /data/tmpd", "g") == (
-            1,
+            126,
             "",
-            "mktemp: failed to create directory via template "
-            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n"
-            "policy denied: cut\n",
+            "mktemp: Permission denied\npolicy denied: cut\n",
         )
         assert await _line(ws, "mktemp -p /data/tmpd", "g") == (
-            1,
+            126,
             "",
-            "mktemp: failed to create file via template "
-            "'/data/tmpd/tmp.XXXXXXXXXX': Permission denied\n"
-            "policy denied: cut\n",
+            "mktemp: Permission denied\npolicy denied: cut\n",
         )
         refused = (
             "".join(
@@ -2571,17 +2542,13 @@ async def test_a_create_through_the_command_dispatcher_meets_the_rules():
 
 
 LINKED_DOC = {
-    "commands": {
-        "awk": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/secret"],
-        },
-        "sed": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/secret"],
-        },
+    "mounts": {
+        "/data/secret": {
+            "commands": {
+                "awk": {"decision": "deny", "reason": "sealed"},
+                "sed": {"decision": "deny", "reason": "sealed"},
+            }
+        }
     }
 }
 
@@ -2659,11 +2626,9 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
     # removed or moved. The rule on the real path holds there for an op
     # on the name itself (unlink, rename) as for one that follows it.
     doc = {
-        "commands": {
-            "zap": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/real/secret"],
+        "mounts": {
+            "/data/real/secret": {
+                "commands": {"zap": {"decision": "deny", "reason": "sealed"}}
             }
         }
     }
@@ -2700,17 +2665,13 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
     # its walk reaches, so a rule written through a link holds for the
     # command's own ops exactly as it holds for a named operand.
     doc = {
-        "commands": {
-            "sed": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/dalias/secret"],
-            },
-            "cat": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/dalias/secret"],
-            },
+        "mounts": {
+            "/data/dalias/secret": {
+                "commands": {
+                    "sed": {"decision": "deny", "reason": "sealed"},
+                    "cat": {"decision": "deny", "reason": "sealed"},
+                }
+            }
         }
     }
     ws = Workspace(
@@ -2733,9 +2694,9 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
             "policy denied: sealed\n",
         )
         assert await _line(ws, "cat /data/dalias/secret", "g") == (
-            1,
+            126,
             "",
-            "cat: /data/dalias/secret: Permission denied\npolicy denied: sealed\n",
+            "cat: Permission denied\npolicy denied: sealed\n",
         )
         assert await _line(ws, "cat /data/real/secret") == (0, "s\n", "")
     finally:
@@ -2743,11 +2704,9 @@ async def test_a_rule_spelled_through_a_linked_parent_binds_a_dispatched_op():
 
 
 SPELLED_DOC = {
-    "commands": {
-        "sed": {
-            "decision": "deny",
-            "reason": "sealed",
-            "paths": ["/data/real/secret"],
+    "mounts": {
+        "/data/real/secret": {
+            "commands": {"sed": {"decision": "deny", "reason": "sealed"}}
         }
     }
 }
@@ -2824,16 +2783,12 @@ async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
     # the agent's file tool) is held to hides and modes, which a path
     # every command must keep away from belongs in.
     doc = {
-        "commands": {
-            "cat": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/real/secret"],
+        "mounts": {
+            "/data/real/secret": {
+                "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
             },
-            "*": {
-                "decision": "deny",
-                "reason": "walled",
-                "paths": ["/data/real/walled"],
+            "/data/real/walled": {
+                "commands": {"*": {"decision": "deny", "reason": "walled"}}
             },
         }
     }
@@ -2850,7 +2805,7 @@ async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
         handle = await ws.session("g", profile="mixed")
         assert await handle.vfs.read("/data/real/secret") == b"s\n"
         assert await handle.vfs.read("/data/real/walled") == b"w\n"
-        assert (await handle.shell("cat /data/real/secret")).exit_code == 1
+        assert (await handle.shell("cat /data/real/secret")).exit_code == 126
     finally:
         await ws.close()
 
@@ -2859,29 +2814,44 @@ async def test_a_raw_vfs_route_keeps_its_own_policy_scope():
 async def test_an_asked_scope_reached_by_a_walk_is_refused_until_named():
     # A walk gets no nod mid-command: the entry is refused without a
     # request, the agent names the path, the grant covers that line.
-    ws = _walk_ws()
+    ws = Workspace(
+        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "guarded": {
+                "mounts": {
+                    "/data/w/asked": {
+                        "commands": {
+                            "grep": {"decision": "ask", "reason": "nod"}
+                        }
+                    }
+                }
+            }
+        },
+    )
+    ws.create_session("g", profile="guarded")
     try:
-        await _seed_walk_tree(ws)
-        assert await _line(ws, "grep -r a /data/t/asked", "g") == (
+        await ws.shell("mkdir -p /data/w/asked && echo a > /data/w/asked/a")
+        assert await _line(ws, "grep -r a /data/w", "g") == (
             2,
             "",
-            "grep: /data/t/asked/a: Permission denied\npolicy denied: nod\n",
+            "grep: /data/w/asked: Permission denied\npolicy denied: nod\n",
         )
         assert ws.decisions.pending() == ()
-        code, _, err = await _line(ws, "grep a /data/t/asked/a", "g")
+        code, _, err = await _line(ws, "grep a /data/w/asked/a", "g")
         assert code == 126 and err.startswith(
             "grep: Permission denied\nrequires approval: nod"
         )
         (request,) = ws.decisions.pending()
         await ws.decisions.answer(request.id, Outcome.ALLOW)
-        assert await _line(ws, "grep a /data/t/asked/a", "g") == (0, "a\n", "")
+        assert await _line(ws, "grep a /data/w/asked/a", "g") == (0, "a\n", "")
         # A standing grant covers the walk too.
-        code, _, err = await _line(ws, "grep a /data/t/asked/a", "g")
+        code, _, err = await _line(ws, "grep a /data/w/asked/a", "g")
         (request,) = ws.decisions.pending()
         await ws.decisions.answer(request.id, Outcome.ALLOW, Scope.SESSION)
-        assert await _line(ws, "grep -r a /data/t/asked", "g") == (
+        assert await _line(ws, "grep -r a /data/w", "g") == (
             0,
-            "/data/t/asked/a:a\n",
+            "/data/w/asked/a:a\n",
             "",
         )
     finally:
@@ -2902,37 +2872,31 @@ async def test_every_permissions_entry_point_accepts_the_plain_document():
         mode=MountMode.WRITE,
         profiles={
             "default": {
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "walled",
-                        "paths": ["/data/w"],
-                    }
-                },
                 "mounts": {
-                    "/box": {
+                    "/data/w": {
                         "commands": {
-                            "*": {
-                                "decision": "deny",
-                                "reason": "boxed",
-                                "paths": ["/box/top"],
-                            }
+                            "*": {"decision": "deny", "reason": "walled"}
                         }
-                    }
+                    },
+                    "/box/top": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "boxed"}
+                        }
+                    },
                 },
             }
         },
     )
     try:
         assert await _line(ws, "cat /data/w") == (
-            1,
+            126,
             "",
-            "cat: /data/w: Permission denied\npolicy denied: walled\n",
+            "cat: Permission denied\npolicy denied: walled\n",
         )
         assert await _line(ws, "cat /box/top") == (
-            1,
+            126,
             "",
-            "cat: /box/top: Permission denied\npolicy denied: boxed\n",
+            "cat: Permission denied\npolicy denied: boxed\n",
         )
         ws.create_session(
             "i", profile={"commands": {"*": "deny", "echo": "allow"}}
@@ -2941,19 +2905,19 @@ async def test_every_permissions_entry_point_accepts_the_plain_document():
         ws.create_session(
             "d",
             permissions={
-                "commands": {
-                    "cat": {
-                        "decision": "deny",
-                        "reason": "no",
-                        "paths": ["/data/*"],
+                "mounts": {
+                    "/data": {
+                        "commands": {
+                            "cat": {"decision": "deny", "reason": "no"}
+                        }
                     }
                 }
             },
         )
         assert await _line(ws, "cat /data/x", "d") == (
-            1,
+            126,
             "",
-            "cat: /data/x: Permission denied\npolicy denied: no\n",
+            "cat: Permission denied\npolicy denied: no\n",
         )
     finally:
         await ws.close()

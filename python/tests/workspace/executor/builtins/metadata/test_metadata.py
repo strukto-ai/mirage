@@ -143,16 +143,17 @@ async def _sealed_ws(mounted: bool = False) -> Workspace:
         mode=MountMode.WRITE,
         profiles={
             "guarded": {
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": [
-                            "/data/t/secret.txt",
-                            "/data/t/sealed",
-                            "/data/t/sealed/*",
-                        ],
-                    }
+                "mounts": {
+                    "/data/t/secret.txt": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
+                    },
+                    "/data/t/sealed": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
+                    },
                 }
             }
         },

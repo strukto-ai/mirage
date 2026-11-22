@@ -354,9 +354,7 @@ async def test_vfs_md_follows_a_rule_written_for_paths():
         },
         mode=MountMode.WRITE,
         profiles={
-            "default": {
-                "commands": {"rm": {"decision": "deny", "paths": ["/data/*"]}}
-            }
+            "default": {"mounts": {"/data": {"commands": {"rm": "deny"}}}}
         },
     )
     markdown = await ws.vfs_md()

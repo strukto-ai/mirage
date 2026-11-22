@@ -108,32 +108,14 @@ PROFILE = {
     "commands": {
         "*": "deny",
         "ls": "allow",
-        "cat": [
-            "allow",
-            {
-                "decision": "ask",
-                "reason": "secrets need sign-off",
-                "paths": [
-                    "/data/secret.txt",
-                    "/data/secret file",
-                    "/data/secr\u00e9t",
-                ],
-            },
-        ],
+        "cat": "allow",
         "git": {
             "*": "allow",
             "operands": {
                 "push": {"decision": "ask", "reason": "pushes need sign-off"}
             },
         },
-        "rm": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "production data is protected",
-                "paths": ["/data/prod/*"],
-            },
-        ],
+        "rm": "allow",
         "mkdir": "allow",
         "cd": "allow",
         "echo": "allow",
@@ -148,6 +130,31 @@ PROFILE = {
         "alias": "allow",
         "shopt": "allow",
     },
+    "mounts": {
+        "/data/secret.txt": {
+            "commands": {
+                "cat": {"decision": "ask", "reason": "secrets need sign-off"}
+            }
+        },
+        "/data/secret file": {
+            "commands": {
+                "cat": {"decision": "ask", "reason": "secrets need sign-off"}
+            }
+        },
+        "/data/secr\u00e9t": {
+            "commands": {
+                "cat": {"decision": "ask", "reason": "secrets need sign-off"}
+            }
+        },
+        "/data/prod": {
+            "commands": {
+                "rm": {
+                    "decision": "deny",
+                    "reason": "production data is protected",
+                }
+            }
+        },
+    },
 }
 
 # The same world under a rule that speaks on the command name alone, so
@@ -158,6 +165,7 @@ ASK_CAT = {
         **PROFILE["commands"],
         "cat": {"decision": "ask", "reason": "reads need sign-off"},
     },
+    "mounts": {"/data/prod": PROFILE["mounts"]["/data/prod"]},
 }
 
 DENY_CAT = {
@@ -165,6 +173,7 @@ DENY_CAT = {
         **PROFILE["commands"],
         "cat": {"decision": "deny", "reason": "reads are refused"},
     },
+    "mounts": {"/data/prod": PROFILE["mounts"]["/data/prod"]},
 }
 
 
@@ -194,8 +203,8 @@ async def test_explain_answers_each_verb_and_names_the_rule(ws):
     assert denied.outcome is Outcome.DENY
     assert denied.rule is not None
     assert denied.reason == "production data is protected"
-    assert denied.source == "top"
-    assert denied.matched_path == "/data/prod/x.txt"
+    assert denied.source == "mounts./data/prod"
+    assert denied.matched_path is None
 
     (asked,) = await _judged(ws, "git push origin main", "s")
     assert asked.outcome is Outcome.ASK
@@ -331,15 +340,13 @@ async def test_a_denied_command_stops_the_whole_line(ws):
     ran = await ws.shell(
         "rm /data/a.txt && rm /data/prod/x.txt", session_id="s"
     )
-    assert ran.exit_code == 1
-    assert ran.stderr == (
-        b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
-    )
+    assert ran.exit_code == 126
+    assert ran.stderr == b"rm: Permission denied\n"
     assert "/data/a.txt" in await ws.vfs.readdir("/data")
     recorded = await ws.history(session_id="s")
     assert [(e["type"], e.get("exit_code")) for e in recorded] == [
         ("command", None),
-        ("result", 1),
+        ("result", 126),
     ]
 
 
@@ -419,11 +426,9 @@ async def test_an_asked_test_runs_once_on_its_one_nod(test, status):
     ws.create_session(
         "s",
         profile={
-            "commands": {
-                "*": {
-                    "decision": "ask",
-                    "reason": "nod",
-                    "paths": ["/data/secret.txt"],
+            "mounts": {
+                "/data/secret.txt": {
+                    "commands": {"*": {"decision": "ask", "reason": "nod"}}
                 }
             }
         },
@@ -450,11 +455,9 @@ async def test_a_question_the_gate_asks_where_it_runs_holds_no_line():
     ws.create_session(
         "s",
         profile={
-            "commands": {
-                "*": {
-                    "decision": "ask",
-                    "reason": "nod",
-                    "paths": ["/data/secret.txt"],
+            "mounts": {
+                "/data/secret.txt": {
+                    "commands": {"*": {"decision": "ask", "reason": "nod"}}
                 }
             }
         },
@@ -474,8 +477,8 @@ async def test_a_cd_earlier_in_the_line_moves_what_later_rules_read(ws):
     # literal `cd` itself or a rule about /data/prod would answer about
     # whatever directory the session happened to be in.
     ran = await ws.shell("cd /data/prod && rm x.txt", session_id="s")
-    assert ran.exit_code == 1
-    assert ran.stderr == b"rm: cannot remove 'x.txt': Permission denied\n"
+    assert ran.exit_code == 126
+    assert ran.stderr == b"rm: Permission denied\n"
 
 
 @pytest.mark.asyncio
@@ -538,19 +541,19 @@ async def test_a_grant_the_session_holds_shows_the_line_running(ws):
     )
 
 
-_SEALED_PROD = {
-    "decision": "deny",
-    "reason": "sealed until review",
-    "paths": ["/data/prod/*"],
-}
+_SEALED_PROD = {"decision": "deny", "reason": "sealed until review"}
 
 SEALED = {
     "commands": {
         "*": "deny",
-        **{
-            name: ["allow", _SEALED_PROD]
-            for name in ("ls", "cat", "rm", "mkdir", "echo")
-        },
+        **dict.fromkeys(("ls", "cat", "rm", "mkdir", "echo"), "allow"),
+    },
+    "mounts": {
+        "/data/prod": {
+            "commands": dict.fromkeys(
+                ("ls", "cat", "rm", "mkdir", "echo"), _SEALED_PROD
+            )
+        }
     },
 }
 
@@ -946,8 +949,8 @@ async def test_a_cd_in_a_subshell_moves_the_commands_inside_it(ws):
     # the rule about /data/prod reads x.txt as the file it is. Reading a
     # subshell as "no cd applies" judged the command at the session cwd.
     ran = await ws.shell("(cd /data/prod && rm x.txt)", session_id="s")
-    assert ran.exit_code == 1
-    assert ran.stderr == b"rm: cannot remove 'x.txt': Permission denied\n"
+    assert ran.exit_code == 126
+    assert ran.stderr == b"rm: Permission denied\n"
     assert "/data/prod/x.txt" in await ws.vfs.readdir("/data/prod")
 
 
@@ -960,10 +963,8 @@ async def test_a_one_command_line_is_refused_inside_the_shell(ws):
     # pass answers above the redirect layer and would leave it on
     # stderr.
     ran = await ws.shell("rm /data/prod/x.txt 2>&1", session_id="s")
-    assert ran.exit_code == 1
-    assert ran.stdout == (
-        b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
-    )
+    assert ran.exit_code == 126
+    assert ran.stdout == b"rm: Permission denied\n"
     assert ran.stderr in (b"", None)
 
 
@@ -1501,24 +1502,18 @@ async def test_a_rule_refuses_a_command_name_the_runtime_globs():
 SEALED_READS = {
     "commands": {
         "*": "deny",
-        "cat": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret*"],
-            },
-        ],
+        "cat": "allow",
         "cd": "allow",
-        "grep": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret*"],
-            },
-        ],
-    }
+        "grep": "allow",
+    },
+    "mounts": {
+        "/data/secret": {
+            "commands": {
+                "cat": {"decision": "deny", "reason": "sealed"},
+                "grep": {"decision": "deny", "reason": "sealed"},
+            }
+        }
+    },
 }
 
 
@@ -1574,7 +1569,8 @@ async def test_a_whole_line_is_judged_wherever_a_cd_may_leave_it():
                     **SEALED_READS["commands"],
                     "false": "allow",
                     "true": "allow",
-                }
+                },
+                "mounts": SEALED_READS["mounts"],
             }
         },
         machines=[box],
@@ -1613,15 +1609,10 @@ class _SealedSecret(Policy):
 
 
 SEALED_RULE = {
-    "commands": {
-        "*": [
-            "allow",
-            {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret.txt"],
-            },
-        ]
+    "mounts": {
+        "/data/secret.txt": {
+            "commands": {"*": {"decision": "deny", "reason": "sealed"}}
+        }
     }
 }
 
@@ -1747,17 +1738,14 @@ async def test_explain_judges_a_held_line_as_its_runtime_takes_it():
         mode=MountMode.EXEC,
         profiles={
             "r": {
-                "commands": {
-                    "*": "deny",
-                    "grep": [
-                        "allow",
-                        {
-                            "decision": "ask",
-                            "reason": "nod",
-                            "paths": ["/data"],
-                        },
-                    ],
-                }
+                "commands": {"*": "deny", "grep": "allow"},
+                "mounts": {
+                    "/data": {
+                        "commands": {
+                            "grep": {"decision": "ask", "reason": "nod"}
+                        }
+                    }
+                },
             }
         },
         machines=[box],
@@ -2610,16 +2598,13 @@ async def test_same_line_option_changes_defer_relative_prepass_judgments(
         ws.create_session(
             "s",
             profile={
-                "commands": {
-                    "cat": [
-                        "allow",
-                        {
-                            "decision": "deny",
-                            "paths": ["/data/file"],
-                            "reason": "sealed",
-                        },
-                    ],
-                },
+                "mounts": {
+                    "/data/file": {
+                        "commands": {
+                            "cat": {"decision": "deny", "reason": "sealed"}
+                        }
+                    }
+                }
             },
         )
         await ws.shell("cd /data/d; shopt -s lastpipe", session_id="s")
@@ -2693,18 +2678,17 @@ async def test_a_background_pipeline_passes_lastpipe_to_its_child_stages():
 )
 async def test_whole_line_lastpipe_checks_both_guest_cwds(sealed, line):
     box = _LineBox()
-    cat = (
-        "allow"
-        if sealed is None
-        else [
-            "allow",
-            {"decision": "deny", "paths": [sealed], "reason": "sealed"},
-        ]
-    )
+    profile = {"commands": {"cat": "allow", "cd": "allow"}}
+    if sealed is not None:
+        profile["mounts"] = {
+            sealed: {
+                "commands": {"cat": {"decision": "deny", "reason": "sealed"}}
+            }
+        }
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.EXEC,
-        profiles={"r": {"commands": {"cat": cat, "cd": "allow"}}},
+        profiles={"r": profile},
         machines=[box],
     )
     try:
@@ -2744,16 +2728,13 @@ async def test_a_function_can_change_lastpipe_before_the_next_pipeline(
         ws.create_session(
             "s",
             profile={
-                "commands": {
-                    "cat": [
-                        "allow",
-                        {
-                            "decision": "deny",
-                            "paths": ["/data/file"],
-                            "reason": "sealed",
-                        },
-                    ],
-                },
+                "mounts": {
+                    "/data/file": {
+                        "commands": {
+                            "cat": {"decision": "deny", "reason": "sealed"}
+                        }
+                    }
+                }
             },
         )
         await ws.shell("cd /data/d; shopt -s lastpipe", session_id="s")
@@ -2973,17 +2954,16 @@ async def test_a_tilde_names_the_users_home_when_the_line_is_judged(operand):
     # HOME is unset, so `~` is the user's home in the user database, as
     # the run expands it; the whole-line check reads the same path.
     agent = {
-        "commands": {
-            "*": "deny",
-            "echo": "allow",
-            "cat": [
-                "allow",
-                {
-                    "decision": "deny",
-                    "reason": "the secret is refused",
-                    "paths": ["/home/agent/secret"],
-                },
-            ],
+        "commands": {"*": "deny", "echo": "allow", "cat": "allow"},
+        "mounts": {
+            "/home/agent/secret": {
+                "commands": {
+                    "cat": {
+                        "decision": "deny",
+                        "reason": "the secret is refused",
+                    }
+                }
+            }
         },
     }
     ws = Workspace(
@@ -2998,25 +2978,27 @@ async def test_a_tilde_names_the_users_home_when_the_line_is_judged(operand):
         ran = await ws.shell(
             f"echo changed > /data/marker; cat {operand}", session_id="a"
         )
-        assert ran.exit_code == 1
+        assert ran.exit_code == 126
         assert "/data/marker" not in await ws.vfs.readdir("/data")
     finally:
         await ws.close()
 
 
 SUMMARY_SECRET = "/data/secret.txt"
-SUMMARY_CLOSED = {"*": "deny", "ls": "allow"}
+SUMMARY_CLOSED = {"commands": {"*": "deny", "ls": "allow"}}
 SUMMARY_SEALED = {
-    "*": [
-        "allow",
-        {"decision": "deny", "reason": "sealed", "paths": [SUMMARY_SECRET]},
-    ]
+    "mounts": {
+        SUMMARY_SECRET: {
+            "commands": {"*": {"decision": "deny", "reason": "sealed"}}
+        }
+    }
 }
 SUMMARY_NOD = {
-    "*": [
-        "allow",
-        {"decision": "ask", "reason": "nod", "paths": [SUMMARY_SECRET]},
-    ]
+    "mounts": {
+        SUMMARY_SECRET: {
+            "commands": {"*": {"decision": "ask", "reason": "nod"}}
+        }
+    }
 }
 
 SUMMARIES = [
@@ -3158,9 +3140,9 @@ SUMMARIES = [
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("commands", "line", "outcome", "reason"), SUMMARIES)
+@pytest.mark.parametrize(("profile", "line", "outcome", "reason"), SUMMARIES)
 async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
-    commands, line, outcome, reason
+    profile, line, outcome, reason
 ):
     # A command refused where it stands and a redirect no command owns
     # both fail while the rest of the line runs: the summary names the
@@ -3172,7 +3154,7 @@ async def test_the_summary_is_the_strictest_part_at_the_runs_exit(
             "mkdir -p /data/d && printf 'b\\na\\n' > /data/x"
             " && printf 's\\n' > /data/secret.txt"
         )
-        ws.create_session("s", profile={"commands": commands})
+        ws.create_session("s", profile=profile)
         said = await ws.explain(line, "s")
         assert not ws.decisions.pending()
         ran = await ws.shell(line, session_id="s")
@@ -3205,7 +3187,7 @@ async def test_a_function_body_sees_the_functions_defined_when_it_runs(line):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("printf 'b\\na\\n' > /data/x")
-        ws.create_session("s", profile={"commands": SUMMARY_CLOSED})
+        ws.create_session("s", profile=SUMMARY_CLOSED)
         said = await ws.explain(line, "s")
         ran = await ws.shell(line, session_id="s")
         assert ran.decision is not None

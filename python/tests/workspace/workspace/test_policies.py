@@ -77,26 +77,27 @@ async def test_workspace_guards_refuse_before_backend_io():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_profile(
-            commands=command_tree(
-                {
-                    "rm": {
-                        "decision": "deny",
-                        "reason": "production data is protected",
-                        "paths": ["/data/prod/*"],
+        profiles={
+            "default": {
+                "mounts": {
+                    "/data/prod": {
+                        "commands": {
+                            "rm": {
+                                "decision": "deny",
+                                "reason": "production data is protected",
+                            }
+                        }
                     }
                 }
-            )
-        ),
+            }
+        },
     )
     try:
         await ws.shell("mkdir -p /data/prod")
         await ws.vfs.write("/data/prod/x.txt", b"keep\n")
         result = await ws.shell("rm /data/prod/x.txt")
-        assert result.exit_code == 1
-        assert result.stderr == (
-            b"rm: cannot remove '/data/prod/x.txt': Permission denied\n"
-        )
+        assert result.exit_code == 126
+        assert result.stderr == b"rm: Permission denied\n"
         assert result.decision is not None
         assert result.decision.reason == "production data is protected"
         out = await ws.shell("cat /data/prod/x.txt")
@@ -153,18 +154,20 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_profile(
-            commands=command_tree(
-                {
+        profiles={
+            "default": {
+                "commands": {
                     "source": {"decision": "deny", "reason": "disabled"},
-                    "touch": {
-                        "decision": "deny",
-                        "reason": "frozen",
-                        "paths": ["/data/prod/*"],
-                    },
-                }
-            )
-        ),
+                },
+                "mounts": {
+                    "/data/prod": {
+                        "commands": {
+                            "touch": {"decision": "deny", "reason": "frozen"}
+                        }
+                    }
+                },
+            }
+        },
     )
     try:
         result = await ws.shell("source /data/setup.sh")
@@ -177,7 +180,7 @@ async def test_guards_cover_shell_builtins_and_namespace_routes():
             matched=Matched(command=("source",), flags=()),
         )
         result = await ws.shell("touch /data/prod/x")
-        assert result.exit_code == 1
+        assert result.exit_code == 126
         assert result.decision and "frozen" in result.decision.reason
         ok = await ws.shell("touch /data/dev-x && echo done")
         assert b"done" in ok.stdout
@@ -192,22 +195,25 @@ async def test_guards_cover_path_valued_flags():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_profile(
-            commands=command_tree(
-                {
-                    "shuf": {
-                        "decision": "deny",
-                        "reason": "prod is protected",
-                        "paths": ["/data/prod/*"],
+        profiles={
+            "default": {
+                "mounts": {
+                    "/data/prod": {
+                        "commands": {
+                            "shuf": {
+                                "decision": "deny",
+                                "reason": "prod is protected",
+                            }
+                        }
                     }
                 }
-            )
-        ),
+            }
+        },
     )
     try:
         await ws.shell("mkdir -p /data/prod")
         result = await ws.shell("shuf -e a -o /data/prod/out")
-        assert result.exit_code == 1
+        assert result.exit_code == 126
         assert (
             result.decision and "prod is protected" in result.decision.reason
         )
@@ -467,17 +473,17 @@ async def test_path_rules_hold_walks_and_lazy_readers():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_profile(
-            commands=command_tree(
-                {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "sealed",
-                        "paths": ["/data/secret.txt"],
+        profiles={
+            "default": {
+                "mounts": {
+                    "/data/secret.txt": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "sealed"}
+                        }
                     }
                 }
-            )
-        ),
+            }
+        },
     )
     try:
         await Session(
@@ -494,11 +500,8 @@ async def test_path_rules_hold_walks_and_lazy_readers():
         assert b"grep: /data/secret.txt: Permission denied" in walked.stderr
 
         lazy = await ws.shell("head -c 3 /data/secret.txt")
-        assert lazy.exit_code != 0
-        assert (
-            b"head: cannot open '/data/secret.txt' for reading: "
-            b"Permission denied"
-        ) in lazy.stderr
+        assert lazy.exit_code == 126
+        assert lazy.stderr == b"head: Permission denied\n"
         fine = await ws.shell("head -c 3 /data/ok.txt")
         assert fine.exit_code == 0
         assert fine.stdout == b"has"
@@ -506,16 +509,14 @@ async def test_path_rules_hold_walks_and_lazy_readers():
         await ws.close()
 
 
-SEALED_SECRET = SessionProfile(
-    commands=command_tree(
-        {
-            "*": {
-                "decision": "deny",
-                "reason": "sealed",
-                "paths": ["/data/secret.txt"],
+SEALED_SECRET = SessionProfile.model_validate(
+    {
+        "mounts": {
+            "/data/secret.txt": {
+                "commands": {"*": {"decision": "deny", "reason": "sealed"}}
             }
         }
-    )
+    }
 )
 
 
@@ -1327,16 +1328,16 @@ async def test_recursive_commands_enforce_admitted_path_rules(
         await ws.vfs.write("/data/src/public.txt", b"public\n")
         ws.create_session(
             "restricted",
-            profile=SessionProfile(
-                commands=command_tree(
-                    {
-                        "*": {
-                            "decision": "deny",
-                            "reason": "sealed",
-                            "paths": ["/data/src/cache"],
+            profile=SessionProfile.model_validate(
+                {
+                    "mounts": {
+                        "/data/src/cache": {
+                            "commands": {
+                                "*": {"decision": "deny", "reason": "sealed"}
+                            }
                         }
                     }
-                )
+                }
             ),
         )
 
@@ -1622,9 +1623,7 @@ async def test_a_once_nod_lasts_while_the_line_streams_and_no_longer():
         await ws.vfs.write("/data/b", b"b\n" * 3)
         ws.create_session(
             "agent",
-            profile={
-                "commands": {"cat": {"decision": "ask", "paths": ["/data/b"]}}
-            },
+            profile={"mounts": {"/data/b": {"commands": {"cat": "ask"}}}},
         )
         line = "cat /data/a /data/b | tail -c 4"
         held = await ws.shell(line, session_id="agent")

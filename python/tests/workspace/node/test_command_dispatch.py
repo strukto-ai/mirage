@@ -280,11 +280,11 @@ async def test_an_outside_wrapper_reads_its_program_s_operands():
         ws.create_session(
             "s",
             profile={
-                "commands": {
-                    "*": {
-                        "decision": "deny",
-                        "reason": "secret",
-                        "paths": ["/data/secret.py"],
+                "mounts": {
+                    "/data/secret.py": {
+                        "commands": {
+                            "*": {"decision": "deny", "reason": "secret"}
+                        }
                     }
                 }
             },
@@ -704,10 +704,14 @@ async def test_a_path_the_view_does_not_list_is_asked_by_its_name():
 async def test_a_path_s_name_reads_the_program_s_own_paths():
     # A bare operand is a path only by the program's grammar, so the name
     # pass reads `secret.txt` as the file `cat` opens.
-    deny = {
-        "cat": {"decision": "deny", "reason": "r", "paths": ["/secret.txt"]}
+    profile = {
+        "mounts": {
+            "/secret.txt": {
+                "commands": {"cat": {"decision": "deny", "reason": "r"}}
+            }
+        }
     }
-    ws = _spelled(profiles={"default": {"commands": deny}})
+    ws = _spelled(profiles={"default": profile})
     try:
         r = await ws.shell("/opt/cat secret.txt")
         assert r.exit_code != 0
@@ -721,8 +725,14 @@ async def test_a_path_s_name_reads_the_program_s_own_paths():
 async def test_a_path_s_name_reads_the_folder_its_program_lists_by_default():
     # `ls` with no operand lists the cwd, so the name pass judges that
     # folder as `ls` alone would.
-    deny = {"ls": {"decision": "deny", "reason": "r", "paths": ["/secret"]}}
-    ws = _spelled(profiles={"default": {"commands": deny}})
+    profile = {
+        "mounts": {
+            "/secret": {
+                "commands": {"ls": {"decision": "deny", "reason": "r"}}
+            }
+        }
+    }
+    ws = _spelled(profiles={"default": profile})
     try:
         await ws.shell("mkdir /secret")
         r = await ws.shell("cd /secret && /opt/ls")
@@ -736,8 +746,12 @@ async def test_a_path_s_name_reads_the_folder_its_program_lists_by_default():
 async def test_a_path_s_name_reaches_the_tree_its_program_removes():
     # `rm -r` reaches every file under its operand, so the name pass
     # judges what lies below it as `rm` alone would.
-    deny = {"rm": {"decision": "deny", "reason": "r", "paths": ["/d/k/*"]}}
-    ws = _spelled(profiles={"default": {"commands": deny}})
+    profile = {
+        "mounts": {
+            "/d/k": {"commands": {"rm": {"decision": "deny", "reason": "r"}}}
+        }
+    }
+    ws = _spelled(profiles={"default": profile})
     try:
         await ws.shell("mkdir -p /d/k && echo x > /d/k/f")
         r = await ws.shell("/opt/rm -rf /d")
@@ -751,8 +765,14 @@ async def test_a_path_s_name_reaches_the_tree_its_program_removes():
 async def test_a_path_s_name_judges_the_target_of_a_link_it_is_handed():
     # Mirage's chmod resolves a link itself, later; the machine's never
     # reaches that, so the name pass judges the link's target.
-    deny = {"chmod": {"decision": "deny", "reason": "r", "paths": ["/d/s"]}}
-    ws = _spelled(profiles={"default": {"commands": deny}})
+    profile = {
+        "mounts": {
+            "/d/s": {
+                "commands": {"chmod": {"decision": "deny", "reason": "r"}}
+            }
+        }
+    }
+    ws = _spelled(profiles={"default": profile})
     try:
         await ws.shell("mkdir /d && echo x > /d/s && ln -s /d/s /d/l")
         r = await ws.shell("/opt/chmod 600 /d/l")

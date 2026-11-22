@@ -97,30 +97,27 @@ class InProcessPython(PythonRuntime):
 
 
 class _OneTree:
-    """Every session's compiled profile: one command tree."""
+    """Every session's compiled profile: folder command trees."""
 
-    def __init__(self, block: dict) -> None:
-        self.rules = trees(block)
+    def __init__(self, mounts: dict[str, dict]) -> None:
+        self.rules = trees(mounts=mounts)
 
     def commands_of(self, session_id: str) -> AdmissionRules:
         return self.rules
 
 
-def _profile_rule(block: dict) -> PermissionsPolicy:
-    return PermissionsPolicy(_OneTree(block))
+def _profile_rule(mounts: dict[str, dict]) -> PermissionsPolicy:
+    return PermissionsPolicy(_OneTree(mounts))
 
 
-def _protect(*names: str) -> dict:
-    leaf = {
-        "decision": "deny",
-        "reason": "protected",
-        "paths": ["/work/secret.txt"],
-    }
-    return dict.fromkeys(names, leaf)
+def _protect(*names: str) -> dict[str, dict]:
+    leaf = {"decision": "deny", "reason": "protected"}
+    return {"/work/secret.txt": dict.fromkeys(names, leaf)}
 
 
 _PROTECT_WORK = {
-    "*": {"decision": "deny", "reason": "protected", "paths": ["/work/*"]}
+    path: {"*": {"decision": "deny", "reason": "protected"}}
+    for path in ("/work/steal.py", "/work/steal.js", "/work/-", "/work/arg")
 }
 
 
@@ -608,12 +605,9 @@ async def test_interpreter_script_cannot_bypass_path_policy(kind, line):
     ) as ws:
         await ws.shell("cd /work")
         result = await ws.shell(line)
-        name, operand = line.split()[0], line.split()[-1]
-        assert result.exit_code == 1
-        assert (
-            await result.stderr_str()
-            == f"{name}: {operand}: Permission denied\n"
-        )
+        name = line.split()[0]
+        assert result.exit_code == 126
+        assert await result.stderr_str() == f"{name}: Permission denied\n"
         assert result.decision and result.decision.reason == "protected"
         assert not (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
