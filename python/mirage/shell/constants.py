@@ -466,6 +466,7 @@ SIGNAL_DESCRIPTIONS: dict[int, str] = {
 # PIPE end it silently, TERM as "Terminated" alone in the foreground.
 UNREPORTED_SIGNALS = frozenset({2, 13})
 SIGHUP = 1
+SIGINT = 2
 SIGTERM = 15
 SIGKILL = 9
 SIGCHLD = 17

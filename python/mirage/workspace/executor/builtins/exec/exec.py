@@ -238,6 +238,7 @@ async def install_exec_redirects(
         raise
     if err is None:
         await session.release_inputs(before + owned)
+        await session.let_go_substitutions()
         _settle_holds(session)
         return None, IOResult(), ExecutionNode(command="exec", exit_code=0)
     try:
@@ -606,15 +607,23 @@ class ForkRoute(JobOutput):
 
     def _moved(self, channel: Channel) -> Inherited | None:
         """The terminal stream the child was given on ``channel`` once the
-        shell has pointed its own elsewhere; None while it has not, or
-        when the child was given no terminal stream there.
+        shell has pointed its own elsewhere; None while it has not, once it
+        has ended, or when the child was given no terminal stream there.
+        Between the shell's lines no program routes its terminal, which is
+        then where its jobs write (``bash -c 'exec > >(cat); echo b'``
+        draining once its last line ended).
 
         Args:
             channel (Channel): stdout or stderr.
         """
         name = self.given.get(channel)
         fd = FD_STDOUT if channel == Channel.STDOUT else FD_STDERR
-        if name is None or descriptor_name(self.session, fd) == name:
+        if (
+            name is None
+            or self.session.closed
+            or not self.session._line_open
+            or descriptor_name(self.session, fd) == name
+        ):
             return None
         if name == TO_STDOUT:
             return Inherited(self.session.terminal, Channel.STDOUT)

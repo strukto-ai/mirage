@@ -51,7 +51,7 @@ import {
   statementOutput,
   statementStdin,
 } from '../executor/statement.ts'
-import { errTrapArmed, runErrTrap, runExitTrap } from '../executor/traps.ts'
+import { errTrapArmed, runErrTrap, runExitTrap, runSignalTraps } from '../executor/traps.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { LineHistory } from '../history/line.ts'
 import type { SessionState } from '../session/session.ts'
@@ -373,6 +373,12 @@ async function runProgram(
         mergedIo,
       )
       mergedIo = await landLate(recorder, leave, own, sink, allStdout, mergedIo)
+      mergedIo = await land(
+        await runSignalTraps(executeFn, session, stdin, callStack),
+        sink,
+        allStdout,
+        mergedIo,
+      )
     } catch (err) {
       if (!isUnwinding(err)) throw err
       // What it wrote before it left; the ERR action answering it left

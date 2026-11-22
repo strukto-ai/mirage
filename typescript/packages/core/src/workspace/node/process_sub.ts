@@ -16,7 +16,6 @@ import type { JobTable } from '../../execution/job/table.ts'
 import type { Hold } from '../../execution/job/waits.ts'
 import { DevicePipe } from '../../core/dev/pipe.ts'
 import { FD_STDOUT } from '../../shell/constants.ts'
-import type { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import type { BytePipe } from '../../io/pipe.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
@@ -31,6 +30,7 @@ import { captureHold, jobStreams } from '../executor/background.ts'
 import { ForkRoute } from '../executor/builtins/exec/index.ts'
 import type { ProcessSubLine } from '../frame.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { closeReaders } from '../session/session.ts'
 import type { Substitution } from './types.ts'
 
 class SubstitutionConsole extends JobConsole {
@@ -56,17 +56,6 @@ class SubstitutionConsole extends JobConsole {
   }
 }
 
-/**
- * Close the streams readers opened on a pipe that ends with its command: a
- * later read finds the end of input either way, and nothing is left open.
- * Mirrors Python's _close_readers.
- */
-async function closeReaders(endpoint: DevicePipe): Promise<void> {
-  const readers = [...endpoint.readers]
-  endpoint.readers.clear()
-  for (const reader of readers) await reader.deref()?.close()
-}
-
 /** Own the virtual descriptors and auxiliary children of one command node. */
 export class ProcessSubScope {
   private readonly held: Substitution[] = []
@@ -90,13 +79,17 @@ export class ProcessSubScope {
       mergeSignals(this.signal ?? this.context.frame.abortSignal ?? undefined, abort.signal) ??
       abort.signal
     const child: Substitution = {
-      dev,
       path,
-      allocation,
       endpoint,
+      release: () => {
+        dev.releaseInput(path, allocation)
+      },
       abort,
       signal,
       task: Promise.resolve(),
+      begun: Promise.resolve(),
+      done: false,
+      readers: [],
     }
     const session = this.context.session
     // A producer is a child of the shell, as bash forks it: what it writes
@@ -110,6 +103,7 @@ export class ProcessSubScope {
     const begun = new Promise<void>((resolve) => {
       begin = resolve
     })
+    child.begun = begun
     const release = retainPrograms([node])
     // The line starts once the command naming it has, as bash's forked child
     // does and Python's task does: a consumer that reads nothing must not
@@ -124,7 +118,7 @@ export class ProcessSubScope {
             const pid = process.record.id.pid
             if (endpoint.readable) writers.push([path, pid])
             session.lastBgJobId = pid
-            this.jobs.trackSubstitution(process)
+            this.jobs.trackSubstitution(process, child.task)
             shell.holds.push(...holds)
             begin()
           },
@@ -142,6 +136,7 @@ export class ProcessSubScope {
         console.debug('process substitution failed', child.failure)
       })
       .finally(() => {
+        child.done = true
         begin()
         release()
         if (endpoint.readable) endpoint.pipe.end(child.failure)
@@ -171,20 +166,28 @@ export class ProcessSubScope {
   }
 
   private async finish(failed: boolean): Promise<void> {
-    const held = this.heldInputs()
-    const kept = failed ? new Map<string, AsyncLineIterator[]>() : held
+    const session = this.context.session
+    const named = failed ? new Set<string>() : session.namedPipes()
+    const ending = this.held.filter((child) => !named.has(child.path))
+    // A pipe a descriptor of the shell still names (`exec 3< <(cmd)`, `exec >
+    // >(tee log)`, `exec 3<"$1"` in a function given one) goes on with the
+    // shell, which ends it once no descriptor names it. It has started by
+    // then, as bash forks it, so `$!` and `wait` know it.
     for (const child of this.held) {
-      if (kept.has(child.path)) continue
+      if (!named.has(child.path)) continue
+      session.keepSubstitution(child)
+      await child.begun
+    }
+    for (const child of ending) {
       if (failed || child.endpoint.readable) {
         child.endpoint.pipe.closeReader()
         if (failed) child.abort.abort()
       } else child.endpoint.pipe.end()
     }
     try {
-      await Promise.all([
-        ...[...kept.values()].flat().map((lines) => lines.loadRest()),
-        ...this.held
-          .filter((child) => failed || kept.has(child.path) || !child.endpoint.readable)
+      await Promise.all(
+        ending
+          .filter((child) => failed || !child.endpoint.readable)
           .map(async (child) => {
             try {
               await runCancellable(child.task, child.signal)
@@ -196,33 +199,13 @@ export class ProcessSubScope {
             }
             if (child.failure !== undefined) throw child.failure
           }),
-      ])
+      )
     } finally {
-      for (const child of this.held) {
+      for (const child of ending) {
         await closeReaders(child.endpoint)
-        child.dev.releaseInput(child.path, child.allocation)
+        child.release()
       }
     }
-  }
-
-  /**
-   * This scope's input pipes that a shell descriptor still reads after the
-   * command (`exec 3<"$1"`, or a dup), with the line buffers reading each,
-   * which load the rest. The descriptors stop naming them, as the paths are
-   * free once this command ends. Mirrors Python's _held_inputs.
-   */
-  private heldInputs(): Map<string, AsyncLineIterator[]> {
-    const inputs = new Set(this.held.filter((c) => c.endpoint.readable).map((c) => c.path))
-    const held = new Map<string, AsyncLineIterator[]>()
-    for (const descriptor of this.context.session.descriptors.values()) {
-      const source = descriptor.source
-      if (source?.pipe == null || !inputs.has(source.pipe.virtual)) continue
-      const readers = held.get(source.pipe.virtual) ?? []
-      if (!readers.includes(source.lines)) readers.push(source.lines)
-      held.set(source.pipe.virtual, readers)
-      source.pipe = null
-    }
-    return held
   }
 
   own(stdout: ByteSource | null): ByteSource | null {

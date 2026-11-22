@@ -237,7 +237,11 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
                 for session in deps.sessions.list()
                 for source in session.open_inputs()
             ]
-        )
+        ),
+        *(
+            session.end_substitutions(wait=False)
+            for session in deps.sessions.list()
+        ),
     )
     try:
         deps.processes.stop()

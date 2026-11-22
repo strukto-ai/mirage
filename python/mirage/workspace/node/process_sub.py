@@ -21,7 +21,6 @@ from mirage.core.dev.pipe import DevicePipe
 from mirage.execution.job import JobTable
 from mirage.execution.job.waits import Hold
 from mirage.execution.process.handle import ProcessHandle
-from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource, materialize
@@ -41,6 +40,7 @@ from mirage.workspace.frame import ProcessSubLine
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.types import Substitution
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.session import close_readers
 
 logger = logging.getLogger(__name__)
 
@@ -61,25 +61,6 @@ class SubstitutionConsole(JobConsole):
             await self.endpoint.pipe.write(data)
         else:
             await self.target.emit(channel, data)
-
-
-async def _close_readers(endpoint: DevicePipe) -> None:
-    """Close the streams readers opened on a pipe that ends with its
-    command: a later read finds the end of input either way, and nothing
-    is left open for the event loop to finalize.
-
-    Args:
-        endpoint (DevicePipe): the substitution's pipe.
-    """
-    readers = list(endpoint.readers)
-    endpoint.readers.clear()
-    for reader in readers:
-        try:
-            await reader.aclose()
-        except RuntimeError:
-            # A reader still mid-pull in another task (a background job)
-            # finds the end of input once that pull returns.
-            logger.debug("a pipe reader was still reading", exc_info=True)
 
 
 class ProcessSubScope:
@@ -124,7 +105,7 @@ class ProcessSubScope:
             if endpoint.readable:
                 writers.append((path, pid))
             session.last_bg_job_id = pid
-            self.jobs.track_substitution(process)
+            self.jobs.track_substitution(process, task)
             shell.holds.extend(holds)
             if not begun.done():
                 begun.set_result(None)
@@ -145,7 +126,15 @@ class ProcessSubScope:
                 logger.debug("process substitution failed", exc_info=error)
 
         task.add_done_callback(finished)
-        self.held.append(Substitution(dev, path, allocation, endpoint, task))
+        self.held.append(
+            Substitution(
+                path,
+                endpoint,
+                task,
+                begun,
+                partial(dev.release_input, path, allocation),
+            )
+        )
         # Like a job, it holds open a capture (`$( )`, a pipe stage) one of
         # its streams leads into, which waits for it until it ends or its
         # shell points them elsewhere.
@@ -202,11 +191,25 @@ class ProcessSubScope:
         if self.closed:
             return
         self.closed = True
-        held = self._held_inputs()
-        kept = {} if failed else held
+        session = self.context.session
+        kept = (
+            set()
+            if failed
+            else {c.path for c in self.held} & session.named_pipes()
+        )
+        ending = [child for child in self.held if child.path not in kept]
+        # A pipe a descriptor of the shell still names (`exec 3< <(cmd)`,
+        # `exec > >(tee log)`, `exec 3<"$1"` in a function given one) goes
+        # on with the shell, which ends it once no descriptor names it. It
+        # has started by then, as bash forks it, so `$!` and `wait` know it.
         for child in self.held:
             if child.path in kept:
-                continue
+                session.keep_substitution(child)
+                await asyncio.wait(
+                    (child.begun, child.task),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+        for child in ending:
             if failed or child.endpoint.readable:
                 child.endpoint.pipe.close_reader()
                 if failed:
@@ -216,15 +219,9 @@ class ProcessSubScope:
         try:
             results = await asyncio.gather(
                 *(
-                    lines.load_rest()
-                    for readers in kept.values()
-                    for lines in readers
-                ),
-                *(
                     child.task
-                    for child in self.held
+                    for child in ending
                     if failed
-                    or child.path in kept
                     or not child.endpoint.readable
                     or child.task.done()
                 ),
@@ -236,31 +233,9 @@ class ProcessSubScope:
                 ):
                     raise result
         finally:
-            for child in self.held:
-                await _close_readers(child.endpoint)
-                child.dev.release_input(child.path, child.allocation)
-
-    def _held_inputs(self) -> dict[str, list[AsyncLineIterator]]:
-        """This scope's input pipes that a shell descriptor still reads
-        after the command (``exec 3<"$1"``, or a dup), with the line
-        buffers reading each, which load the rest. The descriptors stop
-        naming them, as the paths are free once this command ends.
-        """
-        inputs = {c.path for c in self.held if c.endpoint.readable}
-        held: dict[str, list[AsyncLineIterator]] = {}
-        for descriptor in self.context.session.descriptors.values():
-            source = descriptor.source
-            if (
-                source is None
-                or source.pipe is None
-                or source.pipe.virtual not in inputs
-            ):
-                continue
-            readers = held.setdefault(source.pipe.virtual, [])
-            if all(source.lines is not lines for lines in readers):
-                readers.append(source.lines)
-            source.pipe = None
-        return held
+            for child in ending:
+                await close_readers(child.endpoint)
+                child.release()
 
     def own(self, stdout: ByteSource | None) -> ByteSource | None:
         return self._output(stdout) if self.held else stdout

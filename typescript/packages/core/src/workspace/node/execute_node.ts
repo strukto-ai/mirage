@@ -280,7 +280,17 @@ async function runPipeline(
       right,
       processes,
     )
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack, deps.executeFn)
+    return handleConnection(
+      wrapped,
+      left,
+      op,
+      right,
+      context,
+      stdin,
+      callStack,
+      deps.executeFn,
+      deps.sink ?? null,
+    )
   }
   const targets = stages.commands.filter((_, i) => stages.stderrFlags[i] === true)
   const pipeRecurse = recurseStage.bind(null, bare, recurse, stages, targets, processes)
@@ -393,7 +403,17 @@ async function runRedirected(
       delete bare.sink
     }
     const wrapped = recurseReassociated.bind(null, bare, recurse, redirects, right, processes)
-    return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
+    return handleConnection(
+      wrapped,
+      left,
+      op,
+      right,
+      context,
+      stdin,
+      callStack,
+      executeFn,
+      deps.sink ?? null,
+    )
   }
   if (command !== null && command.type === NT.PIPELINE) {
     let bare = deps
@@ -448,13 +468,13 @@ async function runRedirected(
     if (
       redirects.some((r) => {
         const target = r.targetNode as TSNodeLike | null
-        return target !== null && namesProcessSub(target)
+        return r.kind === RedirectKind.READWRITE && target !== null && namesProcessSub(target)
       })
     ) {
-      // A substitution lives only as long as its command, so it cannot back
-      // a descriptor `exec` keeps (`>(cat)""` too).
+      // bash opens the pipe both ways, so its reader waits on itself for an
+      // end that never comes (`exec 3<> <(cmd)`).
       const err = encodeText(
-        `${shellVoice()}exec: a process substitution as a descriptor: not supported\n`,
+        `${shellVoice()}exec: a process substitution opened for reading and writing: not supported\n`,
       )
       return [
         null,
@@ -1313,7 +1333,17 @@ async function executeNodeBody(
 
   if (kind === NodeKind.LIST) {
     const [left, op, right] = getListParts(node)
-    return handleConnection(stream, left, op, right, context, stdin, callStack, executeFn)
+    return handleConnection(
+      stream,
+      left,
+      op,
+      right,
+      context,
+      stdin,
+      callStack,
+      executeFn,
+      sink ?? null,
+    )
   }
 
   if (kind === NodeKind.REDIRECT) {

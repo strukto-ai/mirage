@@ -381,7 +381,6 @@ async def recurse(
     rest = session.job_output or session.tty.jobs
     if substitution:
         session.terminal_output = False
-        inherit_traps(session)
         # bash runs a substitution without `set -e` unless
         # `shopt -s inherit_errexit` (or POSIX mode) passes it on.
         if not (
@@ -451,6 +450,7 @@ async def recurse(
             done: list[IOResult] = []
 
             async def run() -> int:
+                inherit_traps(session)
                 done.append(await substitute())
                 return done[0].exit_code
 

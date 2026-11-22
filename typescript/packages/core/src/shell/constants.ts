@@ -471,6 +471,7 @@ export const SIGNAL_DESCRIPTIONS: ReadonlyMap<number, string> = new Map([
 // PIPE end it silently, TERM as "Terminated" alone in the foreground.
 export const UNREPORTED_SIGNALS: ReadonlySet<number> = new Set([2, 13])
 export const SIGHUP = 1
+export const SIGINT = 2
 export const SIGTERM = 15
 export const SIGKILL = 9
 export const SIGCHLD = 17

@@ -78,7 +78,7 @@ import {
   reportedCommand,
   statementStdin,
 } from './statement.ts'
-import { inheritTraps } from './traps.ts'
+import { armSignals, inheritTraps, startJobTraps } from './traps.ts'
 import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
 import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
@@ -369,6 +369,7 @@ export async function runProgram(
   sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   currentCaller().process?.programSignaled(null)
+  armSignals(context.session)
   const shell = context.frame.shell
   if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
@@ -593,6 +594,8 @@ export async function handleBackground(
     if (failure !== undefined) throw failure.error
   }
   inheritTraps(bgSession)
+  const body = left.type === NT.NEGATED_COMMAND ? (left.namedChildren[0] ?? left) : left
+  startJobTraps(bgSession, !simpleCommand(body))
   const output = new ForkRoute(session.jobOutput ?? session.tty.jobs, session)
   // A job is a shell of its own: what jobs it starts write into the
   // statement it runs, then where it writes.

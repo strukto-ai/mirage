@@ -868,12 +868,13 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "trap 'echo BAD' TERM; echo status:$?; trap -p",
+      "command": "trap 'echo BAD' DEBUG; echo status:$?; trap -p",
       "expect": {
         "exit": 0,
         "stdout": "status:1\n",
-        "stderr": "bash: line 1: trap: TERM: not supported\n"
-      }
+        "stderr": "bash: line 1: trap: DEBUG: not supported\n"
+      },
+      "note": "Mirage refuses DEBUG rather than accept an action it never runs (GNU bash 5.2.37 runs it before each command and prints \"BAD\\nstatus:0\\nBAD\\ntrap -- 'echo BAD' DEBUG\\n\")."
     },
     {
       "id": "shell_trap_missing_signal",

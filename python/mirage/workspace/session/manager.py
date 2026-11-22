@@ -498,6 +498,7 @@ class SessionManager(SessionOwner):
                     default.exit_trap = stored.exit_trap
                     default.err_trap = stored.err_trap
                     default.return_trap = stored.return_trap
+                    default.signal_traps = stored.signal_traps
                     default.generation = stored.generation
                     # Hydrated sessions start clean: baseline what the
                     # store holds so the next flush skips them.
@@ -740,6 +741,7 @@ class SessionManager(SessionOwner):
                 for source in session.open_inputs()
             ]
             await release_inputs(closing.open_inputs(), keep)
+            await closing.end_substitutions(wait=False)
             del self._sessions[session_id]
         del self._locks[session_id]
         self._line_locks.pop(session_id, None)

@@ -384,7 +384,8 @@ export class ProcessTable {
    * What a signal does to a process Mirage runs itself. It pauses at STOP and
    * goes on at CONT, taking then the signal it was sent while paused, since
    * only KILL ends a stopped program; a kept signal leaves it as it is, and
-   * any other stops it. One of a group leaves what it started to their own
+   * any other stops it unless the shell running a statement in it traps or
+   * ignores it (`catcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
    * if it ignores the signal nothing happens. Mirrors Python's `_signal_own`.
@@ -401,6 +402,13 @@ export class ProcessTable {
       return true
     }
     if (signal !== SIGKILL && this.holdSignal(handle, signal)) return true
+    const catcher = handle.catcher
+    if (signal !== SIGKILL && catcher !== null) {
+      // A shell's ignore of a signal its process ignores anyway leaves it to
+      // that, a group's included.
+      const caught = catcher(signal, handle.record.id.pid)
+      if (caught === true || (caught === false && !handle.ignores.has(signal))) return true
+    }
     let found = true
     if (group) deliver(handle, signal)
     else

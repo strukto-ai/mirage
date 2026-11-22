@@ -327,10 +327,9 @@
       "command": "(exec 3> >(cat)\"\"; echo hi >&3; exec 3>&-; wait; echo end)",
       "expect": {
         "exit": 0,
-        "stdout": "end\n",
-        "stderr": "bash: line 1: exec: a process substitution as a descriptor: not supported\nbash: line 1: 3: Bad file descriptor\n"
-      },
-      "note": "Mirage refuses exec onto a process substitution inside a longer word as it does alone (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
+        "stdout": "hi\nend\n",
+        "stderr": ""
+      }
     },
     {
       "id": "procsub_exit_finishes_output_consumer_in_cmdsub",
@@ -765,10 +764,9 @@
       "command": "(exec 3> >(cat); echo hi >&3; exec 3>&-; wait; echo end)",
       "expect": {
         "exit": 0,
-        "stdout": "end\n",
-        "stderr": "bash: line 1: exec: a process substitution as a descriptor: not supported\nbash: line 1: 3: Bad file descriptor\n"
-      },
-      "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"hi\\nend\\n\"); the later write to the unopened descriptor fails as any write to one does."
+        "stdout": "hi\nend\n",
+        "stderr": ""
+      }
     },
     {
       "id": "procsub_exec_input_descriptor",
@@ -781,10 +779,9 @@
       "command": "(unset x y; exec 3< <(printf 'a\\nb\\n'); read -r x <&3; echo \"$x\"; read -r y <&3; echo \"$y\"; exec 3<&-)",
       "expect": {
         "exit": 0,
-        "stdout": "\n\n",
-        "stderr": "bash: line 1: exec: a process substitution as a descriptor: not supported\nbash: line 1: 3: Bad file descriptor\nbash: line 1: 3: Bad file descriptor\n"
-      },
-      "note": "Mirage refuses exec onto a process substitution, which lives only as long as the command naming it (GNU bash 5.2.37 prints \"a\\nb\\n\"); the later reads of the unopened descriptor fail as any read of one does."
+        "stdout": "a\nb\n",
+        "stderr": ""
+      }
     },
     {
       "id": "procsub_pipefail_early_reader",
@@ -1426,6 +1423,126 @@
         "stderr": ""
       },
       "note": "Divergence: GNU bash 5.2.37 prints the same, but because /dev/fd is a procfs link there, which cp -r copies as a link. Within one Mirage mount cp copies natively, from find's lists of the tree's directories and files, so a FIFO is left out without a word where GNU would report one it cannot make. The pipe keeps its bytes."
+    },
+    {
+      "id": "procsub_exec_input_replaced_by_another",
+      "seq": 1346150,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3< <(echo one); exec 3< <(echo two); cat <&3)",
+      "expect": {
+        "exit": 0,
+        "stdout": "two\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_closed_ends_its_producer",
+      "seq": 1346151,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3< <(yes); head -n2 <&3; exec 3<&-; echo ok)",
+      "expect": {
+        "exit": 0,
+        "stdout": "y\ny\nok\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_status_by_its_pid",
+      "seq": 1346152,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3< <(exit 3); p=$!; wait $p; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=3\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_stdout_through_tee",
+      "seq": 1346153,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 3>&1 > >(tee {mount}/procsub-tee.log) 2>&1; echo hello; exec >&- 2>&-; wait $!; cat {mount}/procsub-tee.log >&3); rm {mount}/procsub-tee.log",
+      "expect": {
+        "exit": 0,
+        "stdout": "hello\nhello\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_stderr_through_a_filter",
+      "seq": 1346154,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(exec 2> >(sed 's/^/E: /'); echo oops >&2; exec 2>&-; wait $!)",
+      "expect": {
+        "exit": 0,
+        "stdout": "E: oops\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_script_output_runs_out_with_it",
+      "seq": 1346155,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "printf '%s\\n' 'exec > >(tr a-z A-Z)' 'echo hello' > {mount}/procsub-s.sh; bash {mount}/procsub-s.sh | cat; rm {mount}/procsub-s.sh",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_input_kept_past_a_function",
+      "seq": 1346156,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "(f() { exec 3< <(echo infn); }; f; cat <&3)",
+      "expect": {
+        "exit": 0,
+        "stdout": "infn\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "procsub_exec_output_stays_in_a_nested_capture",
+      "seq": 1346157,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "out=$(bash -c \"echo a; exec > >(tr a-z A-Z); echo b\"); echo \"[$out]\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "[a\nB]\n",
+        "stderr": ""
+      }
     }
   ]
 }

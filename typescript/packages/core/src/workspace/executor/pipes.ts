@@ -73,7 +73,15 @@ import {
   statementStdin,
   writerForks,
 } from './statement.ts'
-import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
+import {
+  endShell,
+  errTrapArmed,
+  inheritTraps,
+  runErrTrap,
+  runExitTrap,
+  runSignalTraps,
+  startJobTraps,
+} from './traps.ts'
 
 /**
  * Whether a stage is one shell bash runs as the stage itself: a subshell, or
@@ -137,10 +145,11 @@ export async function handlePipe(
     // Each segment is a child shell: bash forks one per stage, which a signal
     // stops on its own, its status 128 plus it, and which hands a QUIT to the
     // program it runs right now (`runProgram`).
+    const backgroundPipeline = currentCaller().process?.pipeline === true
     const inParent = !pipelineStageForks(i === commands.length - 1, {
       lastpipe: session.shopts.lastpipe === true,
       monitor: session.shellOptions.monitor === true,
-      backgroundPipeline: currentCaller().process?.pipeline === true,
+      backgroundPipeline,
     })
     const childEvaluation = inParent ? context : childContext(context, null, i === 0 ? stdin : null)
     const stopped = new AbortController()
@@ -148,6 +157,7 @@ export async function handlePipe(
     const child = childEvaluation.session
     if (!inParent) {
       inheritTraps(child)
+      startJobTraps(child, backgroundPipeline && !simpleCommand(cmd))
       child.terminalOutput = session.terminalOutput && i === commands.length - 1
       childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
     }
@@ -388,7 +398,8 @@ export async function handlePipe(
  * Handle `&&` and `||`. The left command runs where `set -e` is ignored.
  * The right one is the list's own: the ERR action is armed as it starts
  * and answers its failure, which the statement holding the list then does
- * not. Mirrors Python's handle_connection.
+ * not. `sink` is where each side writes as it ends, which a signal's action
+ * between them writes to as well. Mirrors Python's handle_connection.
  */
 export async function handleConnection(
   executeNode: ExecuteNodeFn,
@@ -399,15 +410,32 @@ export async function handleConnection(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   executeFn: ExecuteFn | null = null,
+  sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const bound = fd0Binding(session)
-  const [leftBytes, leftIo, leftExec] = await runProgram(left, context, async () => {
+  const [ranLeft, ranLeftIo, leftExec] = await runProgram(left, context, async () => {
     const [out, io, ran] = await ignoringErrexit(session, () =>
       executeNode(left, context, stdin, callStack),
     )
     return [await finishStatement(out, io, session, left), io, ran]
   })
+  // A trapped signal the left command took is answered before the right one
+  // runs, as bash answers one after each command.
+  const caught: (ByteSource | null)[] = [ranLeft]
+  let leftIo = ranLeftIo
+  try {
+    leftIo = await land(
+      await runSignalTraps(executeFn, session, stdin, callStack),
+      sink,
+      caught,
+      leftIo,
+    )
+  } catch (err) {
+    if (isUnwinding(err)) throw await carried(err, ranLeft, ranLeftIo)
+    throw err
+  }
+  const leftBytes = caught.length > 1 ? asyncChain(caught) : ranLeft
   const children = [leftExec]
   if (!connectionRunsRight(op, leftIo.exitCode)) {
     if (op === NT.AND) session.errexitImmune = true
@@ -632,6 +660,12 @@ export async function handleSubshell(
         mergedIo,
       )
       mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
+      mergedIo = await land(
+        await runSignalTraps(runAction, session, stdin, callStack),
+        sink,
+        allStdout,
+        mergedIo,
+      )
     } catch (err) {
       // The subshell's own write met a closed pipe: SIGPIPE ends it.
       const sig = err instanceof PipeClosed ? new ExitSignal(SIGPIPE_STATUS) : err
@@ -651,6 +685,7 @@ export async function handleSubshell(
     if (errexitActs(child, io.exitCode, session)) break
   }
   const cleanup = await runExitTrap(runAction, session, mergedIo.exitCode, stdin, callStack)
+  await session.endSubstitutions()
   if (cleanup !== null) {
     mergedIo = await land(
       asWritten(await cleanup.materializeStdout(), await cleanup.materializeStderr()),

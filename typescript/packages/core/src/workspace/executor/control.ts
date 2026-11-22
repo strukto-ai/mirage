@@ -53,7 +53,7 @@ import {
   recordStatus,
   writeErrorLine,
 } from './statement.ts'
-import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
+import { errTrapArmed, runErrTrap, runReturnTrap, runSignalTraps } from './traps.ts'
 
 /** Runs a list of statements: `executeBody` bound to the walk. */
 export type BodyRun = (
@@ -149,6 +149,12 @@ export async function executeBody(
       mergedIo = await mergedIo.merge(io)
       mergedIo = await land(
         await runErrTrap(executeFn, cmd, io.exitCode, session, armed, stdin, callStack, execNode),
+        sink,
+        allStdout,
+        mergedIo,
+      )
+      mergedIo = await land(
+        await runSignalTraps(executeFn, session, stdin, callStack),
         sink,
         allStdout,
         mergedIo,

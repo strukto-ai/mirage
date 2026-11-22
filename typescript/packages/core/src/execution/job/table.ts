@@ -133,6 +133,10 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  */
 export class JobTable {
   private readonly substitutions = new Map<number, ProcessHandle>()
+  // What each substitution still does once its process has ended: hand on
+  // the output it returned, which a `wait` waits for too. Mirrors Python's
+  // _settled.
+  private readonly settled = new Map<number, Promise<void>>()
   // The substitutions each edge-runtime request started that still run, on
   // the plane, so a request finds the ones its child shells started too.
   private readonly requestSubstitutions = new WeakMap<IncomingRequest, Set<ProcessHandle>>()
@@ -696,7 +700,10 @@ export class JobTable {
         this.marks.delete(sessionId)
         this.statuses.delete(sessionId)
         for (const [pid, child] of this.substitutions) {
-          if (child.record.sessionId === sessionId) this.substitutions.delete(pid)
+          if (child.record.sessionId === sessionId) {
+            this.substitutions.delete(pid)
+            this.settled.delete(pid)
+          }
         }
         this.processes.revokeSession(sessionId)
         return [...stopped.values()]
@@ -879,12 +886,14 @@ export class JobTable {
 
   /**
    * Keep how a process substitution ends under its pid, which a `wait` from
-   * the session that started it answers. Mirrors Python's
-   * `track_substitution`.
+   * the session that started it answers; `settled` is done once what it wrote
+   * has gone where it writes, which `wait` waits for as well. Mirrors
+   * Python's `track_substitution`.
    */
-  trackSubstitution(process: ProcessHandle): void {
+  trackSubstitution(process: ProcessHandle, settled?: Promise<void>): void {
     const pid = process.record.id.pid
     this.substitutions.set(pid, process)
+    if (settled !== undefined) this.settled.set(pid, settled)
     const request = currentRequest()
     let started: Set<ProcessHandle> | undefined
     if (request !== null) {
@@ -898,6 +907,7 @@ export class JobTable {
         started?.delete(process)
         if (this.substitutions.get(pid) !== process) return
         this.substitutions.delete(pid)
+        this.settled.delete(pid)
         if (record.exit !== null)
           this.saveStatus(record.sessionId, pid, shownMachine(record), record.exit)
       })
@@ -906,7 +916,8 @@ export class JobTable {
 
   /**
    * Wait until the process substitution `pid` the shell `shell` started
-   * ends, or each it started without one. A shell waits only for its own, as
+   * ends, and what it wrote has gone where it writes, or each it started
+   * without one. A shell waits only for its own, as
    * bash does: never for another pipeline stage's.
    */
   async waitSubstitution(sessionId: string, shell: number | null, pid?: number): Promise<void> {
@@ -920,7 +931,9 @@ export class JobTable {
       // would run this waiter inside it: a request waits for its own only.
       if (request !== null && this.plane.requestSubstitutions.get(request)?.has(process) !== true)
         continue
+      const settled = this.settled.get(child)
       await process.join()
+      if (settled !== undefined) await settled
     }
   }
 

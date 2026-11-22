@@ -485,7 +485,9 @@ class ProcessTable:
         """What a signal does to a process Mirage runs itself. It pauses
         at STOP and goes on at CONT, taking then the signal it was sent
         while paused, since only KILL ends a stopped program; a kept
-        signal leaves it as it is, and any other stops it. One of a group
+        signal leaves it as it is, and any other stops it unless the shell
+        running a statement in it traps or ignores it (``catcher``). One of
+        a group
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
         (``_deliver``); one signalled alone stops what it started too,
@@ -509,6 +511,13 @@ class ProcessTable:
             return True
         if signal != SIGKILL and self.hold_signal(handle, signal):
             return True
+        catcher = handle.catcher
+        if signal != SIGKILL and catcher is not None:
+            # A shell's ignore of a signal its process ignores anyway
+            # leaves it to that, a group's included.
+            caught = catcher(signal, handle.record.pid)
+            if caught or (caught is False and signal not in handle.ignores):
+                return True
         if group:
             _deliver(handle, signal)
             found = True

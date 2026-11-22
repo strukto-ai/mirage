@@ -116,7 +116,11 @@ from mirage.workspace.executor.statement import (
     reported_command,
     statement_stdin,
 )
-from mirage.workspace.executor.traps import inherit_traps
+from mirage.workspace.executor.traps import (
+    arm_signals,
+    inherit_traps,
+    start_job_traps,
+)
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
@@ -627,6 +631,7 @@ async def run_program(
     runner = current_caller().process
     if runner is not None:
         runner.program_signaled(None)
+    arm_signals(context.session)
     shell = context.frame.shell
     if shell is None or not _forked(node, context.session):
         return await run()
@@ -739,6 +744,12 @@ async def handle_background(
             soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
+    body = (
+        left.named_children[0]
+        if left.type == NT.NEGATED_COMMAND and left.named_children
+        else left
+    )
+    start_job_traps(bg_session, not simple_command(body))
     output = ForkRoute(session.job_output or session.tty.jobs, session)
     # A job is a shell of its own: what jobs it starts write into the
     # statement it runs, then where it writes.

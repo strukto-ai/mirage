@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SessionState } from '../../../session/session.ts'
+import { startJobTraps } from '../../traps.ts'
 import { eventOf, handleTrap } from './trap.ts'
 import { TrapEvent } from './types.ts'
 
@@ -27,20 +28,20 @@ describe('eventOf', () => {
     ['exit', TrapEvent.Exit],
     ['0', TrapEvent.Exit],
     ['00', TrapEvent.Exit],
-    ['TERM', TrapEvent.Other],
-    ['sigint', TrapEvent.Other],
+    ['TERM', 15],
+    ['sigint', 2],
     ['ERR', TrapEvent.Err],
     ['return', TrapEvent.Return],
-    ['DEBUG', TrapEvent.Other],
-    ['15', TrapEvent.Other],
-    ['RTMIN+3', TrapEvent.Other],
+    ['DEBUG', TrapEvent.Debug],
+    ['15', 15],
+    ['RTMIN+3', 37],
     ['SIGEXIT', null],
     ['65', null],
     ['FOO', null],
     // bash 5.2 takes the names `trap -l` lists and no other: IO and STKFLT,
     // but not the IOT, CLD or POLL timeout also takes.
-    ['IO', TrapEvent.Other],
-    ['sigstkflt', TrapEvent.Other],
+    ['IO', 29],
+    ['sigstkflt', 16],
     ['IOT', null],
     ['SIGCLD', null],
     ['POLL', null],
@@ -52,7 +53,7 @@ describe('eventOf', () => {
     // bash 5.2 reads 5,000 leading zeros as nothing, and 5,000 digits as no
     // signal. Mirrors test_trap.py.
     expect(eventOf('0'.repeat(5000))).toBe(TrapEvent.Exit)
-    expect(eventOf('0'.repeat(5000) + '9')).toBe(TrapEvent.Other)
+    expect(eventOf('0'.repeat(5000) + '9')).toBe(9)
     expect(eventOf('9'.repeat(5000))).toBeNull()
   })
 })
@@ -72,5 +73,60 @@ describe('handleTrap', () => {
   it('treats resetting another event as a no-op', () => {
     const [, io] = handleTrap(['-', 'TERM'], makeSession())
     expect(io.exitCode).toBe(0)
+  })
+
+  it('lists signal actions by number between EXIT and ERR', () => {
+    const session = makeSession()
+    for (const args of [
+      ['t', 'TERM'],
+      ['h', '1'],
+      [':', 'EXIT'],
+      ['e', 'ERR'],
+    ])
+      handleTrap(args, session)
+    const [out, io] = handleTrap(['-p'], session)
+    expect(io.exitCode).toBe(0)
+    expect(new TextDecoder().decode(out as Uint8Array)).toBe(
+      "trap -- ':' EXIT\ntrap -- 'h' SIGHUP\ntrap -- 't' SIGTERM\ntrap -- 'e' ERR\n",
+    )
+  })
+
+  it('keeps a signal ignored as the shell started ignored', () => {
+    const session = makeSession()
+    session.signalTraps = new Map([[2, '']])
+    session.entryIgnored = new Set([2])
+    handleTrap(['echo int', 'INT'], session)
+    handleTrap(['-', 'INT'], session)
+    expect([...session.signalTraps]).toEqual([[2, '']])
+  })
+})
+
+describe('job INT ignore', () => {
+  it('lists until the job resets it', () => {
+    const session = makeSession()
+    startJobTraps(session, true)
+    const [out] = handleTrap(['-p'], session)
+    expect(new TextDecoder().decode(out as Uint8Array)).toBe("trap -- '' SIGINT\n")
+    handleTrap(['-', 'INT'], session)
+    expect([[...session.signalTraps], [...session.jobIgnored]]).toEqual([[], []])
+  })
+})
+
+describe('catchSignal', () => {
+  it('takes caught and ignored signals only', () => {
+    const session = makeSession()
+    session.signalTraps = new Map([
+      [15, 'echo t'],
+      [10, ''],
+    ])
+    expect(session.catchSignal(15, 1)).toBe(true)
+    expect([...session.pendingSignals]).toEqual([15])
+    expect(session.catchSignal(10, 1)).toBe(false)
+    expect(session.catchSignal(2, 1)).toBeNull()
+    session.processId = 7
+    expect(session.catchSignal(15, 1)).toBeNull()
+    session.signalTrapsInherited = true
+    expect(session.catchSignal(15, 7)).toBeNull()
+    expect(session.catchSignal(10, 7)).toBe(false)
   })
 })

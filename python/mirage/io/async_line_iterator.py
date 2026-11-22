@@ -356,24 +356,6 @@ class AsyncLineIterator:
         lines.holders, lines._released = self.holders, self._released
         return lines
 
-    async def load_rest(self) -> None:
-        """Read what the source has left into the buffer, for a descriptor
-        that outlives its pipe: reads go on from memory. Each chunk lands
-        as it arrives, so a reader of the same pipe never waits on the
-        rest."""
-        while not self._exhausted:
-            try:
-                await self._budget.run()
-                chunk = await self._next_chunk()
-                check_memory(len(self._buf) - self._pos + len(chunk))
-            except StopAsyncIteration:
-                self._exhausted = True
-            except BaseException as exc:
-                await self._failed(exc)
-                raise
-            else:
-                self._append(chunk)
-
     async def read_chars(
         self, count: int, delim: bytes | None
     ) -> tuple[bytes, bool]:
@@ -454,10 +436,10 @@ class SharedInput:
     source, since a later command may still read it; whoever opened the
     source closes it, and a failed line discards it.
 
-    One over a live pipe names it in ``pipe`` while the substitution's
-    command runs; when that ends, its scope loads the rest for a
-    descriptor the shell still holds (``f() { exec 3<"$1"; }; f <(cmd)``)
-    and clears the name.
+    One over a live pipe names it in ``pipe``; a process substitution a
+    descriptor of the shell still names when its command ends goes on
+    with the shell (``exec 3< <(cmd)``, ``f() { exec 3<"$1"; }; f
+    <(cmd)``).
 
     Args:
         source (ByteSource | AsyncLineIterator): what the descriptor

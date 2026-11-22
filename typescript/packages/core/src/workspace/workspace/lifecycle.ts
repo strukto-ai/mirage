@@ -92,6 +92,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
   await settle([() => deps.jobTable.killAll()])
   await settle([
     () => releaseInputs(deps.sessions.list().flatMap((session) => session.openInputs())),
+    ...deps.sessions.list().map((session) => () => session.endSubstitutions(false)),
   ])
   try {
     deps.jobTable.processes.stop()

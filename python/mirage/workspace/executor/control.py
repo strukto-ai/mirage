@@ -55,6 +55,7 @@ from mirage.workspace.executor.traps import (
     err_trap_armed,
     run_err_trap,
     run_return_trap,
+    run_signal_traps,
 )
 from mirage.workspace.expand.node import ExpandHost
 from mirage.workspace.node.diagnostics import diagnostic_stderr
@@ -167,6 +168,12 @@ async def execute_body(
                     call_stack,
                     last_exec,
                 ),
+                sink,
+                all_stdout,
+                merged_io,
+            )
+            merged_io = await land(
+                await run_signal_traps(execute_fn, session, stdin, call_stack),
                 sink,
                 all_stdout,
                 merged_io,

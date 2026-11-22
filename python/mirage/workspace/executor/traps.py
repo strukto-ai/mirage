@@ -15,13 +15,18 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import is_program_invocation, voice_name
+from mirage.context import current_caller, is_program_invocation, voice_name
+from mirage.execution.job.constants import IGNORED_SIGNALS
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import ERR_TRAP_EXEMPT_TYPES
+from mirage.shell.constants import (
+    ERR_TRAP_EXEMPT_TYPES,
+    SHELL_IGNORED_SIGNALS,
+    SIGINT,
+)
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.node_kind import NodeKind, node_kind
 from mirage.shell.types import NodeType as NT
@@ -43,15 +48,22 @@ def inherit_traps(session: SessionState) -> None:
     The session's ``exit_trap`` is the ``trap ... EXIT`` action, "" for
     an ignored EXIT. A child shell keeps its parent's with
     ``exit_trap_inherited`` set: it lists it, as bash's ``trap -p`` does
-    there, and runs none of it until it registers its own. It keeps the
-    ERR action hidden unless ``set -E`` and the RETURN action unless
-    ``set -T``, and lists them all the same. It is live shell state,
-    which a session store keeps none of.
+    there, and runs none of it until it registers its own. Its signal
+    actions likewise, while a signal its parent ignores stays ignored. It
+    keeps the ERR action hidden unless ``set -E`` and the RETURN action
+    unless ``set -T``, and lists them all the same. It is live shell
+    state, which a session store keeps none of. A background job's ignore
+    (``job_ignored``) stays only while the child runs in the job's own
+    process (``( trap -p ) &``).
 
     Args:
         session (SessionState): the child's state.
     """
+    process = current_caller().process
+    ignores = frozenset() if process is None else process.ignores
+    _drop_job_ignores(session, session.job_ignored - ignores)
     session.exit_trap_inherited = session.exit_trap is not None
+    session.signal_traps_inherited = any(session.signal_traps.values())
     session._trap_status = None
     if not session.shell_options.get("errtrace"):
         session.err_trap_hidden = True
@@ -59,14 +71,83 @@ def inherit_traps(session: SessionState) -> None:
         session.return_trap_hidden = True
 
 
+def start_job_traps(session: SessionState, lists: bool) -> None:
+    """Start a background job's shell, or a stage of a background
+    pipeline: with job control off, one that runs commands of its own
+    (``{ trap -p; } &``) lists the INT it ignores, as bash's does, and may
+    trap or reset it; one that runs a single command lists nothing, as
+    bash ignores it only in the program that command runs.
+
+    Args:
+        session (SessionState): the job's shell.
+        lists (bool): it runs commands of its own.
+    """
+    _drop_job_ignores(session, session.job_ignored)
+    if lists and not session.shell_options.get("monitor"):
+        session.signal_traps = {**session.signal_traps, SIGINT: ""}
+        session.job_ignored = frozenset({SIGINT})
+
+
+def _drop_job_ignores(session: SessionState, signals: frozenset[int]) -> None:
+    """Stop listing a background job's ignore of ``signals``.
+
+    Args:
+        session (SessionState): the shell.
+        signals (frozenset[int]): the signals.
+    """
+    if not signals:
+        return
+    session.signal_traps = {
+        signal: action
+        for signal, action in session.signal_traps.items()
+        if signal not in signals
+    }
+    session.job_ignored = session.job_ignored - signals
+
+
+def arm_signals(session: SessionState) -> None:
+    """Make the shell the one that answers a signal its process gets, as
+    it runs a statement there: one it traps or ignores, it takes
+    (``SessionState.catch_signal``), any other does what it does. A
+    process hosts each shell that runs in place in it in turn (a script,
+    a job's own subshell), so the innermost shell running answers.
+
+    Args:
+        session (SessionState): the shell.
+    """
+    process = current_caller().process
+    if process is not None:
+        process.catcher = (
+            session.catch_signal if session.signal_traps else None
+        )
+
+
 def clear_traps(session: SessionState) -> None:
-    """Start a new shell (``bash -c``, a script): it has no actions.
+    """Start a new shell (``bash -c``, a script): it has no actions, and
+    ignores for good the signals ignored as it starts: its parent's, and
+    a background job's INT and QUIT (``entry_ignored``).
 
     Args:
         session (SessionState): the new shell's state.
     """
     session.exit_trap = None
     session.exit_trap_inherited = False
+    process = current_caller().process
+    entry = {
+        signal
+        for signal, action in session.signal_traps.items()
+        if not action and signal not in session.job_ignored
+    }
+    session.job_ignored = frozenset()
+    if process is not None:
+        ignored = process.ignores - SHELL_IGNORED_SIGNALS
+        entry |= ignored
+        if ignored & IGNORED_SIGNALS:
+            entry |= IGNORED_SIGNALS
+    session.signal_traps = dict.fromkeys(sorted(entry), "")
+    session.entry_ignored = frozenset(entry)
+    session.signal_traps_inherited = False
+    session.pending_signals = set()
     session._trap_status = None
     session.err_trap = session.return_trap = None
     session.err_trap_hidden = session.return_trap_hidden = False
@@ -203,7 +284,7 @@ async def run_err_trap(
     session.err_trap_running = True
     try:
         return await _run_action(
-            execute_fn, action, "error", session, stdin, call_stack
+            execute_fn, action, "error trap", session, stdin, call_stack
         )
     finally:
         session.err_trap_running = False
@@ -246,10 +327,58 @@ async def run_return_trap(
     session.return_trap_running = True
     try:
         return await _run_action(
-            execute_fn, action, "return", session, stdin, call_stack
+            execute_fn, action, "return trap", session, stdin, call_stack
         )
     finally:
         session.return_trap_running = False
+
+
+async def run_signal_traps(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    stdin: ByteSource | None = None,
+    call_stack: CallStack | None = None,
+) -> list[Written]:
+    """Run the action of each trapped signal that arrived while the last
+    command ran, in signal order, as bash does once that command ends.
+
+    ``$?`` is the command's status while each runs and again after it;
+    an ``exit`` in one ends the shell, a ``return`` the function it runs
+    in. One that arrives while an action runs waits for the next command
+    boundary after it.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs a line in the
+            caller's frames; None where nothing can run one.
+        session (SessionState): the shell the signals reached.
+        stdin (ByteSource | None): the shell's standard input.
+        call_stack (CallStack | None): the frames the actions run in.
+
+    Returns:
+        list[Written]: what the actions wrote, for the caller to land;
+        empty when none runs.
+    """
+    if (
+        execute_fn is None
+        or not session.pending_signals
+        or session.signal_trap_running
+    ):
+        return []
+    written: list[Written] = []
+    session.signal_trap_running = True
+    try:
+        while session.pending_signals:
+            signal = min(session.pending_signals)
+            session.pending_signals.discard(signal)
+            action = session.signal_traps.get(signal)
+            if not action or session.signal_traps_inherited:
+                continue
+            written += await _run_action(
+                execute_fn, action, "trap", session, stdin, call_stack
+            )
+    finally:
+        session.signal_trap_running = False
+    return written
 
 
 async def _run_action(
@@ -268,13 +397,14 @@ async def _run_action(
     answers as it was. A failure ``set -e`` acts on in it ends the shell
     with its status, and an ``exit`` or ``return`` in it leaves with
     what it wrote, for the redirects of its statement to route. A
-    syntax error in it leads with ``bash: <name> trap: ``.
+    syntax error in it leads with ``bash: <name>: ``.
 
     Args:
         execute_fn (Callable[..., Any]): runs a line in the caller's
             frames.
         action (str): the action's text.
-        name (str): the trap as bash names it, ``error`` or ``return``.
+        name (str): the trap as bash names it in an error, ``error
+            trap``, ``return trap`` or ``trap`` for a signal's.
         session (SessionState): the shell running it.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames it runs in.
@@ -282,7 +412,7 @@ async def _run_action(
     held = snapshot_status(session)
     immune = session.errexit_immune
     outer_head = session._parse_head
-    session._parse_head = f"{voice_name(session)}: {name} trap: "
+    session._parse_head = f"{voice_name(session)}: {name}: "
     try:
         io = await execute_fn(
             action,
@@ -404,7 +534,8 @@ async def finish_shell(
     call_stack: CallStack | None = None,
 ) -> IOResult:
     """End a child shell whose line returned ``io``: a ``bash -c``, a
-    script, a ``$( )``. Its EXIT action runs after what it wrote.
+    script, a ``$( )``. Its EXIT action runs after what it wrote, then
+    the process substitutions it kept run out, as its descriptors close.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs the action.
@@ -416,6 +547,7 @@ async def finish_shell(
     cleanup = await run_exit_trap(
         execute_fn, session, io.exit_code, stdin, call_stack
     )
+    await session.end_substitutions()
     if cleanup is None:
         return io
     return IOResult(
@@ -436,9 +568,9 @@ async def end_shell(
     body: Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run the whole of a child shell, a pipeline stage or a job, then
-    its EXIT action. An ``exit`` or a fatal error that ends it carries
-    the action's output and status on out to the boundary containing
-    it.
+    its EXIT action, then let the process substitutions it kept run out.
+    An ``exit`` or a fatal error that ends it carries the action's output
+    and status on out to the boundary containing it.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs the action.
@@ -453,6 +585,7 @@ async def end_shell(
         cleanup = await run_exit_trap(
             execute_fn, session, sig.contained_code, stdin, call_stack
         )
+        await session.end_substitutions()
         if cleanup is not None:
             sig.stdout = async_chain([sig.stdout, cleanup.stdout])
             sig.stderr += await cleanup.materialize_stderr()
@@ -462,17 +595,21 @@ async def end_shell(
         cleanup = await run_exit_trap(
             execute_fn, session, sig.exit_code, stdin, call_stack
         )
+        await session.end_substitutions()
         if cleanup is not None:
             sig.stdout = async_chain([sig.stdout, cleanup.stdout])
             sig.stderr += await cleanup.materialize_stderr()
             sig.exit_code = cleanup.exit_code
         raise
-    if session.exit_trap is None or session.exit_trap_inherited:
+    if (
+        session.exit_trap is None or session.exit_trap_inherited
+    ) and not session.substitutions:
         return stdout, io, exec_node
     stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
     cleanup = await run_exit_trap(
         execute_fn, session, io.exit_code, stdin, call_stack
     )
+    await session.end_substitutions()
     if cleanup is None:
         return stdout, io, exec_node
     io = await io.merge(IOResult(stderr=cleanup.stderr))

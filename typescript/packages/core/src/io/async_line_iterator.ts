@@ -165,52 +165,6 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   /**
-   * Read what the source has left into the buffer, for a descriptor that
-   * outlives its pipe: reads go on from memory. Mirrors Python's load_rest.
-   */
-  async loadRest(): Promise<void> {
-    // `buf` grows in the room left at the end of `store` while it still ends
-    // there, else in a store twice the size, so a long load copies each byte
-    // a bounded number of times. The store lives only as long as the load
-    // and what `buf` still views of it.
-    let store = new Uint8Array(0)
-    let stored = 0
-    try {
-      while (!this.exhausted) {
-        const pending = this.check()
-        if (pending !== undefined) await pending
-        const result = await this.pull()
-        if (result.done === true) {
-          this.exhausted = true
-          continue
-        }
-        const chunk = result.value
-        const buf = this.buf
-        checkMemory(buf.byteLength + chunk.byteLength)
-        const end = stored + chunk.byteLength
-        if (
-          buf.buffer === store.buffer &&
-          buf.byteOffset + buf.byteLength === stored &&
-          end <= store.byteLength
-        ) {
-          store.set(chunk, stored)
-          stored = end
-          this.buf = store.subarray(buf.byteOffset, end)
-        } else {
-          store = new Uint8Array(2 * (buf.byteLength + chunk.byteLength))
-          store.set(buf)
-          store.set(chunk, buf.byteLength)
-          stored = buf.byteLength + chunk.byteLength
-          this.buf = store.subarray(0, stored)
-        }
-      }
-    } catch (error) {
-      await this.failed(error)
-      throw error
-    }
-  }
-
-  /**
    * Close the source after a failed read, unless it was a reader's own abort
    * on a pipe an `exec` keeps, which stays open with `taken`, what the read
    * had taken, put back. Mirrors Python's _failed.
