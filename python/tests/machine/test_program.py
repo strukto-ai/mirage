@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import json
 import os
 import re
 import shlex
@@ -22,6 +23,7 @@ import sys
 import time
 from collections import Counter
 from collections.abc import AsyncIterator
+from importlib.resources import files
 
 import pytest
 
@@ -303,13 +305,13 @@ async def test_a_child_in_a_served_folder_starts_outside_it(
 ):
     # A folder a kernel mount here serves answers on the loop spawning the
     # child, which waits inside the spawn until the child runs, so the
-    # child starts outside and the prelude takes it in.
+    # child starts outside and the script takes it in.
     started = []
     loop = asyncio.get_running_loop()
     real = loop.subprocess_exec
 
     async def subprocess_exec(factory, program, *args, cwd=None, **kwargs):
-        started.append((program, cwd))
+        started.append((program, args, cwd))
         return await real(factory, program, *args, cwd=cwd, **kwargs)
 
     monkeypatch.setattr(loop, "subprocess_exec", subprocess_exec)
@@ -317,16 +319,24 @@ async def test_a_child_in_a_served_folder_starts_outside_it(
         "mirage.machine.program.SERVED",
         Counter([str(tmp_path)] if served else []),
     )
-    ran = await _run(
-        sys.executable,
-        None,
-        ["-c", "import os; print(os.getcwd())"],
-        None,
-        cwd=str(tmp_path),
-    )
-    assert ran.stdout.decode().strip() == os.path.realpath(tmp_path)
+    cwd = tmp_path / "dir [1] $home"
+    cwd.mkdir()
+    program = str(cwd / "tool = 'python'")
+    os.symlink(sys.executable, program)
+    given = ["two words", "", "$HOME", "*", "'"]
+    args = [
+        "-c",
+        "import json, os, sys; print(json.dumps([os.getcwd(), sys.argv[1:]]))",
+        *given,
+    ]
+    ran = await _run(program, None, args, None, cwd=str(cwd))
+    assert ran.exit_code == 0, ran.stderr
+    assert json.loads(ran.stdout) == [os.path.realpath(cwd), given]
+    script = str(files("mirage.machine").joinpath("exec.sh"))
     assert started == [
-        ("/bin/sh", None) if served else (sys.executable, str(tmp_path))
+        ("/bin/sh", (script, str(cwd), program, *args), None)
+        if served
+        else (program, tuple(args), str(cwd))
     ]
 
 

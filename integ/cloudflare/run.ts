@@ -15,8 +15,8 @@
 import assert from 'node:assert/strict'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { generateKeyPairSync, randomUUID } from 'node:crypto'
+import { on } from 'node:events'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { type AddressInfo, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -645,15 +645,6 @@ async function startFakes(dir: string): Promise<ChildProcess> {
   throw new Error('the fakes exited before announcing their URLs')
 }
 
-/** A port no process on this host holds, so no other worker answers for this run's. */
-async function freePort(): Promise<number> {
-  const server = createServer()
-  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
-  const { port } = server.address() as AddressInfo
-  await new Promise<void>((done) => server.close(() => done()))
-  return port
-}
-
 /** The mcp CLI's fake, its URL put in this process's env. */
 async function startMcp(): Promise<ChildProcess> {
   const child = spawn(
@@ -808,8 +799,23 @@ function checkGroups(runnable: Target[], cases: Case[]): void {
   )
 }
 
-/** The Cloudflare test worker under `wrangler dev`, answering on `port`. */
-async function startCloudflare(port: number): Promise<ChildProcess> {
+/** The port Wrangler bound when asked to listen on port zero. */
+async function workerAddress(child: ChildProcess, signal: AbortSignal): Promise<string> {
+  for await (const [message] of on(child, 'message', { signal, close: ['exit'] })) {
+    if (typeof message !== 'string') continue
+    const { event, port } = JSON.parse(message) as { event: string; port: number }
+    if (event !== 'DEV_SERVER_READY') continue
+    assert(
+      Number.isInteger(port) && port > 0 && port <= 65535,
+      'Wrangler announced an invalid port',
+    )
+    return `http://127.0.0.1:${String(port)}`
+  }
+  throw new Error('the Cloudflare worker exited before announcing its address')
+}
+
+/** The Cloudflare test worker under `wrangler dev` and its live address. */
+async function startCloudflare(): Promise<{ child: ChildProcess; base: string }> {
   const child = spawn(
     join(cloudflare, 'node_modules/.bin/wrangler'),
     [
@@ -818,36 +824,41 @@ async function startCloudflare(port: number): Promise<ChildProcess> {
       '--config',
       'tests/wrangler.toml',
       '--port',
-      String(port),
+      '0',
       '--ip',
       '127.0.0.1',
     ],
     {
       cwd: cloudflare,
-      stdio: ['ignore', 'ignore', 'inherit'],
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
     },
   )
   // Two minutes in all, each probe five seconds of it: a worker that fails
   // to build leaves wrangler dev holding the probe.
-  const deadline = Date.now() + 120_000
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      throw new Error('the Cloudflare worker exited before it answered')
-    }
-    try {
-      if ((await cloudflareFetch(`http://127.0.0.1:${String(port)}/v1/health`, {}, 5_000)).ok) {
-        return child
+  const startup = AbortSignal.timeout(120_000)
+  try {
+    const base = await workerAddress(child, startup)
+    while (child.exitCode === null && child.signalCode === null) {
+      const signal = AbortSignal.any([startup, AbortSignal.timeout(5_000)])
+      try {
+        if ((await fetch(`${base}/v1/health`, { signal })).ok) return { child, base }
+      } catch {
+        // Wrangler bound its port, but the worker may still be building.
       }
-    } catch {
-      // Not listening yet, or not built.
+      await delay(500, undefined, { signal: startup })
     }
-    await delay(500)
+    throw new Error('the Cloudflare worker exited before it answered')
+  } catch (error) {
+    child.kill()
+    if (startup.aborted) {
+      throw new Error(
+        'the Cloudflare worker did not start in two minutes; its build is in the log above',
+        { cause: error },
+      )
+    }
+    throw error
   }
-  child.kill()
-  throw new Error(
-    'the Cloudflare worker did not start in two minutes; its build is in the log above',
-  )
 }
 
 async function main(): Promise<void> {
@@ -860,8 +871,6 @@ async function main(): Promise<void> {
   }
   const selected = plan(runnable, loadCases(root), args)
   const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-cloudflare-'))
-  const port = await freePort()
-  const base = `http://127.0.0.1:${String(port)}`
   let fakes: ChildProcess | null = null
   let mcp: ChildProcess | null = null
   let worker: ChildProcess | null = null
@@ -874,7 +883,8 @@ async function main(): Promise<void> {
   try {
     fakes = await startFakes(dir)
     mcp = await startMcp()
-    worker = await startCloudflare(port)
+    const { child, base } = await startCloudflare()
+    worker = child
     for (const { target, cases } of selected) {
       const config = await OPENERS[target.service ?? '']!(target)
       // A session's inline permissions document rides in as a profile of its

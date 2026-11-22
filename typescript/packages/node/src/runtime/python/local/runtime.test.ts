@@ -455,20 +455,28 @@ describe('LocalRuntime', () => {
     },
   )
 
-  it('runs a program named by a relative path from the cwd', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-'))
-    const tool = join(dir, 'mirage-tool')
-    await writeFile(tool, '#!/bin/sh\necho tool\n')
-    await chmod(tool, 0o755)
-    const rt = new LocalRuntime({ captures: ['@external'] })
-    try {
-      const result = await runProcess(rt, ['./mirage-tool'], dir)
-      expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'tool\n'])
-    } finally {
-      await rt.close()
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
+  it.skipIf(process.platform === 'win32').each([false, true])(
+    'keeps a relative program, its cwd and its arguments literal (served %s)',
+    async (inFolder) => {
+      const dir = await realpath(await mkdtemp(join(tmpdir(), 'mirage $cwd-')))
+      const name = "report 'argv';"
+      const args = ['-c', '', 'two words', '$HOME', '*', "a'b", 'line\nbreak']
+      const rt = new LocalRuntime({ captures: ['@external'] })
+      const names = inFolder ? serve(dir) : []
+      try {
+        await writeFile(join(dir, name), '#!/bin/sh\npwd -P\nprintf "%s\\0" "$@"\n', {
+          mode: 0o755,
+        })
+        const result = await runProcess(rt, [`./${name}`, ...args], dir)
+        expect(result.exitCode, DEC.decode(result.stderr)).toBe(0)
+        expect(DEC.decode(result.stdout)).toBe(`${dir}\n${args.join('\0')}\0`)
+      } finally {
+        unserve(names)
+        await rt.close()
+        await rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
 
   it.each([
     ['./missing', 127, 'bash: ./missing: No such file or directory\n'],
