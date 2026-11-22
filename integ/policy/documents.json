@@ -17,8 +17,7 @@
             "decision": [
               {
                 "decision": "allow",
-                "reason": "",
-                "paths": []
+                "reason": ""
               }
             ],
             "subcommands": {},
@@ -27,8 +26,7 @@
                 "decision": [
                   {
                     "decision": "deny",
-                    "reason": "",
-                    "paths": []
+                    "reason": ""
                   }
                 ],
                 "values": {},
