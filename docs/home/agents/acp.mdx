@@ -11,19 +11,24 @@ agent and the two talk JSON-RPC over the agent's stdin and stdout.
 `mirage acp` goes in place of the agent's command and starts the agent itself:
 
 ```text
-ACP client ──▶ mirage acp ──▶ agent
-                   │
-                   └──▶ workspace
+ACP client ◀── ACP ──▶ mirage acp ◀── ACP ──▶ agent
+                           │                    │
+                     file requests          MCP tools
+                           └───▶ workspace ◀────┘
 ```
 
-Every message passes through, with three changes:
+ACP carries the conversation: prompts, replies, tool calls and permission
+requests, which pass through unchanged. The agent reaches the workspace two
+ways underneath:
 
-- `initialize` offers the agent the client's file methods, and each file
-  read or write the agent asks for is answered from the workspace.
-- Each session gets the workspace's [MCP tools](/home/access/mcp#tools), as a
-  `mirage mcp` server.
-- Claude's ACP adapter has its built-in tools turned off, so it works through
-  the workspace's tools alone.
+| When the agent | It goes through |
+| --- | --- |
+| Asks the client for a file (`fs/read_text_file`, `fs/write_text_file`) | `mirage acp`, which answers from the workspace and does not pass the request on |
+| Calls `shell`, `read`, `write`, `edit`, `ls`, `grep` or `glob` | MCP, to the `mirage mcp` server added to its session |
+
+Claude never asks the client for files, and its built-in tools are turned
+off, so it works over MCP alone. Gemini CLI writes and edits files through
+the client, but reads them and runs commands with its own tools.
 
 The agent runs where the client starts it and nothing is uploaded, so no
 [machine](/home/setup/machine/overview) is needed. A workspace on a hosted
@@ -42,16 +47,16 @@ server works the same way, reached with the CLI's
 
 | Agent | Its ACP command, after `--` |
 | --- | --- |
-| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude | `claude-agent-acp`, from npm `@zed-industries/claude-agent-acp` |
-| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Codex | `codex-acp`, from npm `@zed-industries/codex-acp` |
+| <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude | `claude-agent-acp`, from npm `@agentclientprotocol/claude-agent-acp` |
+| <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Codex | `codex-acp`, from npm `@agentclientprotocol/codex-acp` |
 | <img noZoom src="/images/gemini-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Gemini CLI | `gemini --acp` |
 | <img noZoom src="/images/grok-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Grok Build | `grok agent stdio` |
 | <img noZoom src="/images/opencode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenCode | `opencode acp` |
 
-An agent that reads and writes files through the client works on the
-workspace's files. One that also runs tools of its own keeps them on the
-computer beside the workspace's tools; turn them off in the agent's own
-settings to keep it to the workspace.
+Only Claude's own tools are turned off. Another agent's own tools work on
+the computer it runs on, beside the workspace's tools; turn them off in the
+agent's settings to keep it to the workspace, such as `tools.exclude` for
+Gemini CLI or `permission` for OpenCode.
 
 ## Set up
 
@@ -75,6 +80,13 @@ settings to keep it to the workspace.
     ```
     ```bash
     mirage workspace create workspace.yaml --id demo
+    ```
+  </Step>
+  <Step title="Install the agent">
+    Install the agent's ACP command from the [agents](#agents) table, such as
+    Claude's:
+    ```bash
+    npm install -g @agentclientprotocol/claude-agent-acp
     ```
   </Step>
   <Step title="Add the agent to the client">
@@ -104,6 +116,38 @@ settings to keep it to the workspace.
     </CodeGroup>
     Give the full path of `mirage` when the client does not start it from a
     shell that has it on its `PATH`.
+  </Step>
+</Steps>
+
+## Example
+
+Fix a bug in a workspace file from Zed, with Claude.
+
+<Steps>
+  <Step title="Put a file in the workspace">
+    ```bash
+    mirage shell -w demo -c 'mkdir -p /project && printf "def add(a, b):\n    return a - b\n" > /project/calc.py'
+    ```
+  </Step>
+  <Step title="Ask in Zed">
+    Open any folder, start a **Claude on Mirage** thread from the set up
+    above, and ask:
+
+    ```text
+    Fix the bug in /project/calc.py so add returns the sum.
+    ```
+
+    Claude reads the file with the workspace's `read` tool and changes it
+    with `edit`. The folder open in Zed stays as it was.
+  </Step>
+  <Step title="Check the workspace">
+    ```bash
+    mirage shell -w demo -c 'cat /project/calc.py'
+    ```
+    ```text
+    def add(a, b):
+        return a + b
+    ```
   </Step>
 </Steps>
 

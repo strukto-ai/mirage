@@ -121,14 +121,8 @@
                   "home/agents/claude-code",
                   "home/agents/codex",
                   "home/agents/t3code",
-                  {
-                    "group": "Editors over SSH",
-                    "icon": "server",
-                    "pages": [
-                      "home/agents/remote-ssh",
-                      "home/agents/antigravity"
-                    ]
-                  },
+                  "home/agents/antigravity",
+                  "home/agents/remote-ssh",
                   {
                     "group": "ACP",
                     "icon": "arrows-left-right",
