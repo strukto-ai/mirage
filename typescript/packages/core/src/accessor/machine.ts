@@ -72,6 +72,14 @@ export class MachineAccessor extends Accessor {
     return [...(this.config.machines ?? this.machines.names())]
   }
 
+  /**
+   * Whether the mount shows more than one machine, the only case where
+   * several can hold one name.
+   */
+  get several(): boolean {
+    return this.names().length > 1
+  }
+
   /** Where a new name lands when no program decides. */
   get defaultMachine(): string {
     const names = this.names()

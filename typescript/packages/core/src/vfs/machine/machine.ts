@@ -19,11 +19,11 @@ import { copy as machineCopy, dirCopy as machineDirCopy } from '../../core/machi
 import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
 import {
+  asked,
   chosen,
   commandMachine,
   holder,
   holders,
-  kernelView,
   writeMachine,
 } from '../../core/machine/place.ts'
 import { pwrite as machinePwrite } from '../../core/machine/pwrite.ts'
@@ -125,20 +125,14 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async readdir(path: PathSpec): Promise<FileStat[]> {
-    const hidden = await hiddenOn(this.accessor, path)
-    const own = kernelView(this.accessor, path)
-    const machines = this.accessor
-      .names()
-      .filter((m) => !hidden.includes(m) && (own === null || own === m))
+    const machines = await asked(this.accessor, path)
     if (machines.length === 0) throw enoent(path)
     return machineReaddir(this.accessor, machines, path)
   }
 
   override actsOn(): string | null {
     if (!this.accessor.bound) return null
-    const names = this.accessor.names()
-    const [only] = names
-    if (names.length === 1 && only !== undefined) return only
+    if (!this.accessor.several) return this.accessor.defaultMachine
     return commandMachine(this.accessor)
   }
 
@@ -149,9 +143,7 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    const held = await holders(this.accessor, path)
-    if (held.length === 0) throw enoent(path)
-    const one = chosen(this.accessor, held)
+    const one = chosen(this.accessor, await this.everywhere(path))
     if (one.entry === null) return machineStat(this.accessor, one.machine, path)
     return entryStat(leaf(path), one.entry)
   }
@@ -285,7 +277,7 @@ export class MachineVFS extends BaseVFS {
     const movers = folder
       ? held.filter((one) => one.folder).map((one) => one.machine)
       : [moved.machine]
-    const several = this.accessor.names().length > 1
+    const several = this.accessor.several
     const there = several ? await holders(this.accessor, dst) : []
     const replaced = there.filter((one) => !movers.includes(one.machine))
     // Every machine's copy of the new name is judged before any machine
@@ -295,19 +287,9 @@ export class MachineVFS extends BaseVFS {
       if (folder && (await machineReaddir(this.accessor, [one.machine], dst)).length > 0)
         throw enotempty(dst)
     }
-    const parents = several
-      ? (await holders(this.accessor, folderOf(dst)))
-          .filter((one) => one.folder)
-          .map((one) => one.machine)
-      : []
+    const lacking = await this.lackingFolder(movers, dst)
     for (const machine of movers) {
-      await machineRename(
-        this.accessor,
-        machine,
-        src,
-        dst,
-        parents.length > 0 && !parents.includes(machine),
-      )
+      await machineRename(this.accessor, machine, src, dst, lacking.includes(machine))
     }
     for (const one of replaced) {
       if (folder) await machineRmdir(this.accessor, one.machine, dst)
@@ -324,8 +306,9 @@ export class MachineVFS extends BaseVFS {
     // newest copy of its name.
     const machine = await holder(this.accessor, src)
     await this.refuseHidden(machine, dst)
-    await machineCopy(this.accessor, machine, src, dst, await this.lacksFolder(machine, dst))
-    if (this.accessor.names().length === 1) return
+    const lacking = await this.lackingFolder([machine], dst)
+    await machineCopy(this.accessor, machine, src, dst, lacking.length > 0)
+    if (!this.accessor.several) return
     // The copy replaces the name, so another machine's copy of it goes: one
     // kept would show again once the new copy takes its source's older
     // time (`cp -p`).
@@ -347,7 +330,7 @@ export class MachineVFS extends BaseVFS {
       only.machine,
       src,
       dst,
-      await this.lacksFolder(only.machine, dst),
+      (await this.lackingFolder([only.machine], dst)).length > 0,
     )
   }
 
@@ -404,17 +387,20 @@ export class MachineVFS extends BaseVFS {
   }
 
   /**
-   * Whether a new name's folder is on other machines only, so the machine
-   * the name lands on makes the folder first.
+   * The machines a new name lands on that must make its folder first,
+   * since only other machines hold it; none where no machine holds the
+   * folder, whose lack the op reports.
    *
-   * @param machine the machine the name lands on.
+   * @param machines the machines the name lands on.
    * @param path the new name.
+   * @throws ENOTDIR when the copy shown of the folder is a file, whatever
+   *   an older folder on another machine is.
    */
-  private async lacksFolder(machine: string, path: PathSpec): Promise<boolean> {
-    if (this.accessor.names().length === 1) return false
-    const folders = (await holders(this.accessor, folderOf(path)))
-      .filter((one) => one.folder)
-      .map((one) => one.machine)
-    return folders.length > 0 && !folders.includes(machine)
+  private async lackingFolder(machines: string[], path: PathSpec): Promise<string[]> {
+    if (!this.accessor.several) return []
+    const held = await holders(this.accessor, folderOf(path))
+    if (held.length > 0 && !chosen(this.accessor, held).folder) throw enotdir(path)
+    const folders = held.filter((one) => one.folder).map((one) => one.machine)
+    return machines.filter((m) => folders.length > 0 && !folders.includes(m))
   }
 }

@@ -114,13 +114,7 @@ class MachineVFS(BaseVFS):
         )
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
-        hidden = await _hidden_on(self.accessor, path)
-        own = place.kernel_view(self.accessor, path)
-        machines = [
-            m
-            for m in self.accessor.names()
-            if m not in hidden and own in (None, m)
-        ]
+        machines = await place.asked(self.accessor, path)
         if not machines:
             raise enoent(path)
         return await _readdir(self.accessor, machines, path)
@@ -128,9 +122,8 @@ class MachineVFS(BaseVFS):
     def acts_on(self) -> str | None:
         if not self.accessor.bound:
             return None
-        names = self.accessor.names()
-        if len(names) == 1:
-            return names[0]
+        if not self.accessor.several:
+            return self.accessor.default_machine
         return place.command_machine(self.accessor)
 
     def filesystem(self) -> str:
@@ -140,10 +133,7 @@ class MachineVFS(BaseVFS):
         return f"{machine}:{self.config.root.rstrip('/') or '/'}"
 
     async def stat(self, path: PathSpec) -> FileStat:
-        held = await place.holders(self.accessor, path)
-        if not held:
-            raise enoent(path)
-        one = place.chosen(self.accessor, held)
+        one = place.chosen(self.accessor, await self._everywhere(path))
         if one.entry is None:
             return await _stat(self.accessor, one.machine, path)
         return _entry_stat(_leaf(path), one.entry)
@@ -176,9 +166,7 @@ class MachineVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         if _restricted(path):
             return None
-        held = await place.holders(self.accessor, path)
-        if not held:
-            raise enoent(path)
+        held = await self._everywhere(path)
         return await _tree(self.accessor, [h.machine for h in held], path)
 
     async def files_containing(
@@ -272,7 +260,7 @@ class MachineVFS(BaseVFS):
             if moved.folder
             else [moved.machine]
         )
-        several = len(self.accessor.names()) > 1
+        several = self.accessor.several
         there = await place.holders(self.accessor, dst) if several else []
         replaced = [one for one in there if one.machine not in movers]
         # Every machine's copy of the new name is judged before any
@@ -284,22 +272,14 @@ class MachineVFS(BaseVFS):
                 self.accessor, [one.machine], dst
             ):
                 raise enotempty(dst)
-        parents = (
-            [
-                one.machine
-                for one in await place.holders(self.accessor, _folder_of(dst))
-                if one.folder
-            ]
-            if several
-            else []
-        )
+        lacking = await self._lacking_folder(movers, dst)
         for machine in movers:
             await _rename(
                 self.accessor,
                 machine,
                 src,
                 dst,
-                make_parent=bool(parents) and machine not in parents,
+                make_parent=machine in lacking,
             )
         for one in replaced:
             if moved.folder:
@@ -320,9 +300,9 @@ class MachineVFS(BaseVFS):
             machine,
             src,
             dst,
-            make_parent=await self._lacks_folder(machine, dst),
+            make_parent=bool(await self._lacking_folder([machine], dst)),
         )
-        if len(self.accessor.names()) == 1:
+        if not self.accessor.several:
             return
         # The copy replaces the name, so another machine's copy of it
         # goes: one kept would show again once the new copy takes its
@@ -344,7 +324,7 @@ class MachineVFS(BaseVFS):
             machine,
             src,
             dst,
-            make_parent=await self._lacks_folder(machine, dst),
+            make_parent=bool(await self._lacking_folder([machine], dst)),
         )
 
     async def setattr(
@@ -414,19 +394,25 @@ class MachineVFS(BaseVFS):
         if machine in await _hidden_on(self.accessor, path):
             raise enoent(path)
 
-    async def _lacks_folder(self, machine: str, path: PathSpec) -> bool:
-        """Whether a new name's folder is on other machines only, so the
-        machine the name lands on makes the folder first.
+    async def _lacking_folder(
+        self, machines: list[str], path: PathSpec
+    ) -> list[str]:
+        """The machines a new name lands on that must make its folder
+        first, since only other machines hold it; none where no machine
+        holds the folder, whose lack the op reports.
 
         Args:
-            machine (str): the machine the name lands on.
+            machines (list[str]): the machines the name lands on.
             path (PathSpec): the new name.
+
+        Raises:
+            NotADirectoryError: the copy shown of the folder is a file,
+                whatever an older folder on another machine is.
         """
-        if len(self.accessor.names()) == 1:
-            return False
-        folders = [
-            one.machine
-            for one in await place.holders(self.accessor, _folder_of(path))
-            if one.folder
-        ]
-        return bool(folders) and machine not in folders
+        if not self.accessor.several:
+            return []
+        held = await place.holders(self.accessor, _folder_of(path))
+        if held and not place.chosen(self.accessor, held).folder:
+            raise enotdir(path)
+        folders = [one.machine for one in held if one.folder]
+        return [m for m in machines if folders and m not in folders]

@@ -68,7 +68,7 @@ def kernel_view(
         below (str): the name's path under ``path``, as a listing of the
             folder gives it; empty for ``path`` itself.
     """
-    if len(accessor.names()) == 1:
+    if not accessor.several:
         return None
     real = remote(accessor, path)
     if below:
@@ -78,25 +78,37 @@ def kernel_view(
     return command_machine(accessor) or accessor.default_machine
 
 
-async def holders(accessor: MachineAccessor, path: PathSpec) -> list[Holder]:
-    """The machines that hold a name, each with its entry there, asked in
-    parallel and kept in the order ``machines:`` lists them; a mount on
-    one machine asks nothing and lets the op itself report a missing
-    name. A machine whose own links lead the name to one the session
-    hides holds nothing there, and a kernel's view of its machine is held
-    by the one machine it answers for (``kernel_view``).
+async def asked(accessor: MachineAccessor, path: PathSpec) -> list[str]:
+    """The machines asked about a name, in the order ``machines:`` lists
+    them: every machine of the mount, less each whose own links lead the
+    name to one the session hides, and for a kernel's view of its machine
+    only the one it answers for (``kernel_view``).
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the name.
     """
     hidden = await hidden_on(accessor, path)
-    names = [name for name in accessor.names() if name not in hidden]
-    if len(accessor.names()) == 1:
-        return [Holder(name) for name in names]
     own = kernel_view(accessor, path)
-    if own is not None:
-        names = [name for name in names if name == own]
+    return [
+        name
+        for name in accessor.names()
+        if name not in hidden and own in (None, name)
+    ]
+
+
+async def holders(accessor: MachineAccessor, path: PathSpec) -> list[Holder]:
+    """The machines that hold a name, each with its entry there, asked in
+    parallel (``asked``); a mount on one machine asks nothing and lets
+    the op itself report a missing name.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): the name.
+    """
+    names = await asked(accessor, path)
+    if not accessor.several:
+        return [Holder(name) for name in names]
     found = await asyncio.gather(
         *(stat_entry(accessor, m, path) for m in names),
         return_exceptions=True,
@@ -166,10 +178,9 @@ async def new_name_machine(
         NotADirectoryError: the copy shown of the folder is a file,
             whatever an older copy on another machine is.
     """
-    names = accessor.names()
-    if len(names) == 1:
-        return names[0]
     about = command_machine(accessor) or accessor.default_machine
+    if not accessor.several:
+        return about
     above = folder_of(path)
     while True:
         held = await holders(accessor, above)
@@ -212,10 +223,7 @@ async def write_machine(
         held = await holders(accessor, path)
         if held:
             return chosen(accessor, held).machine
-    if len(accessor.names()) == 1:
-        target = accessor.names()[0]
-    else:
-        target = running or await new_name_machine(accessor, path, parents)
+    target = running or await new_name_machine(accessor, path, parents)
     if target in await hidden_on(accessor, path):
         raise enoent(path)
     return target

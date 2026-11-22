@@ -16,6 +16,7 @@ import { splitLines } from '../../commands/builtin/utils/lines.ts'
 import { SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { chosen, holders, newNameMachine } from '../../core/machine/place.ts'
+import type { Holder } from '../../core/machine/types.ts'
 import { folderOf } from '../../core/machine/utils.ts'
 import { findLayout } from '../../rs/find.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -38,14 +39,16 @@ import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { MachineVFS } from '../../vfs/machine/machine.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Argv } from '../expand/argv.ts'
+import type { PipeWriter } from '../frame.ts'
 import type { MountEntry } from '../mount/mount.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { FOLDER_FREE, KEYWORDS } from './constants.ts'
-import { lookupAll } from './lookup.ts'
+import { lookupAll, programHead, programRuntime } from './lookup.ts'
 import { Consumer, MachineAnswer, ProgramLookup, type ExternalTarget } from './types.ts'
 
 /**
@@ -200,9 +203,7 @@ async function machineHolding(
   for (const [at, [path]] of every.entries()) {
     const entry = mounts[at]
     if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return null
-    const held = (
-      await holders(entry.vfs.accessor, PathSpec.fromStrPath(path, mountKey(path, entry.prefix)))
-    ).map((one) => one.machine)
+    const held = (await holders(entry.vfs.accessor, onMount(entry, path))).map((one) => one.machine)
     if (held.length > 1 && at < scopes.length) return null
     candidates = candidates === null ? held : candidates.filter((m) => held.includes(m))
   }
@@ -213,44 +214,101 @@ async function machineHolding(
 }
 
 /**
- * The machine a folder is on, when a mount shows it as one machine's own
- * files (`/srv/gpu` over the gpu machine); null for a folder in a store, and
- * for one a mount shows over several machines. Mirrors Python's
- * `folder_machine`.
+ * The machine a command Mirage runs itself is about
+ * (`Caller.preferredMachine`): the one the line names, else the one whose
+ * program writes the pipe it reads, else the one its folder is on; null when
+ * nothing says, and in a workspace that runs programs on one machine, where
+ * nothing is to choose. Mirrors Python's `preferred_machine`.
  *
- * @param cwd the folder, an absolute virtual path.
+ * A pipe's writer is placed once for the pipe, so a reader that moves
+ * (`gen | (cd /srv; tee log)`) or runs many commands asks no more.
+ *
+ * @param session the session it runs in.
  * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param fedBy the program writing the pipe the command reads.
+ * @param namespace the link table a writer's path is read through.
+ * @param dispatch op dispatcher, which a writer's path is asked of.
  */
-export function folderMachine(cwd: string, registry: MountRegistry): string | null {
-  const entry = registry.tryMountFor(cwd)
-  if (entry === null || !(entry.vfs instanceof MachineVFS)) return null
-  const shown = shownMachines(entry, registry)
+export async function preferredMachine(
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  fedBy: PipeWriter | null,
+  namespace: Namespace,
+  dispatch: DispatchFn,
+): Promise<string | null> {
+  if (routing === undefined || !severalMachines(registry)) return null
+  if (routing.machine !== undefined) return routing.machine
+  if (fedBy !== null && !fedBy.placed) {
+    fedBy.machine = await writerMachine(fedBy, session, registry, routing, namespace, dispatch)
+    fedBy.placed = true
+  }
+  if (fedBy !== null && fedBy.machine !== null) return fedBy.machine
+  const shown = folderMachines(session.cwd, registry)
   const [only] = shown
   return shown.length === 1 && only !== undefined ? only : null
 }
 
 /**
- * The machine whose program writes a pipe, when the program can run from
- * the folder its pipeline started in as far as the mounts tell: the folder
- * is `/`, the machine's own, or Mirage's mounts are served into the machine.
- * Null for a program Mirage runs itself, and for one that would not start
- * there, which writes nothing. Mirrors Python's `writer_machine`.
+ * The machine a pipe's writer runs on, placed as it runs, from the folder
+ * its pipeline started in: by its words, through the wrappers Mirage runs
+ * (`nice gen | tee log`), and one named by its path on the machine holding
+ * that file (`nice /tmp/tool | tee log`). Null for a program Mirage runs
+ * itself, and for one that would not start in that folder as far as the
+ * mounts tell, which writes nothing: it starts where the folder is `/`, the
+ * machine's own, or Mirage's mounts are served into the machine. Mirrors
+ * Python's `_writer_machine`.
  *
- * @param runtime the runtime the program is placed on.
- * @param cwd the folder the program runs from, an absolute virtual path.
+ * A path is looked up only when no file policy speaks for the session: the
+ * lookup asks the dispatcher before the reader is admitted, and a policy
+ * judges a call inside the command that makes it.
+ *
+ * @param fedBy the pipe's writer.
+ * @param session the session its reader runs in.
  * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param namespace the link table the path is read through.
+ * @param dispatch op dispatcher, which the path is asked of.
  */
-export function writerMachine(
-  runtime: Runtime | null | undefined,
-  cwd: string,
+async function writerMachine(
+  fedBy: PipeWriter,
+  session: SessionState,
   registry: MountRegistry,
-): string | null {
+  routing: RouteDecision<Runtime>,
+  namespace: Namespace,
+  dispatch: DispatchFn,
+): Promise<string | null> {
+  const head = programHead(registry, fedBy.words, session, routing)
+  let runtime: Runtime | null | undefined = null
+  if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
+    runtime = await programMachine(
+      PathSpec.fromStrPath(head, undefined, fedBy.cwd).virtual,
+      session,
+      registry,
+      namespace.sessionLinks(session),
+      dispatch,
+      null,
+    )
+  runtime ??= programRuntime(registry, fedBy.words, session, routing)
   if (!(runtime instanceof RemoteRuntime)) return null
   const name = runtime.defaultMachine
-  if (norm(cwd) === '/' || runtime.handle().config.mountType !== undefined) return name
-  const entry = registry.tryMountFor(cwd)
-  if (entry === null || !(entry.vfs instanceof MachineVFS)) return null
-  return shownMachines(entry, registry).includes(name) ? name : null
+  if (norm(fedBy.cwd) === '/' || runtime.handle().config.mountType !== undefined) return name
+  return folderMachines(fedBy.cwd, registry).includes(name) ? name : null
+}
+
+/**
+ * The machines whose own files a folder is, by the mount showing it
+ * (`/srv/gpu` over the gpu machine, `/tmp` over every machine); none for a
+ * folder in a store. Mirrors Python's `_folder_machines`.
+ *
+ * @param folder the folder, an absolute virtual path.
+ * @param registry the workspace's mounts and machines.
+ */
+function folderMachines(folder: string, registry: MountRegistry): string[] {
+  const entry = registry.tryMountFor(folder)
+  if (entry === null || !(entry.vfs instanceof MachineVFS)) return []
+  return shownMachines(entry, registry)
 }
 
 /**
@@ -503,16 +561,9 @@ export async function programMachine(
 }
 
 /**
- * The machine an `ln` runs on whole, when every link lands in a folder a
- * machine holds at its own path and points at that machine's own files: the
- * machine makes the link, so its programs follow it, where Mirage's link
- * table holds links only Mirage sees. In a folder several machines hold
- * (`/tmp`) a link is a new name like any other, made where a new file would
- * land (`newNameMachine`).
- *
- * A symbolic link's target counts when it resolves onto a machine mount at
- * its own path, there or not, since a dangling link is a link all the same;
- * a hard link's source must be one the machine holds.
+ * The machine an `ln` runs on whole, when one machine can make every link
+ * (`linkRuntime`): the machine makes the link, so its programs follow it,
+ * where Mirage's link table holds links only Mirage sees.
  *
  * It runs from the session's folder when the machine holds that folder.
  * From any other folder it runs from `/` when every path it names is
@@ -537,20 +588,7 @@ export async function linkMachine(
   absolute: boolean,
 ): Promise<ExternalTarget | null> {
   if (made.length === 0) return null
-  if (symbolic && made.some(([, target]) => localMount(registry, links, target, false) === null))
-    return null
-  const scopes = new Map<string, readonly [string, boolean]>()
-  const scope = (path: string, writes: boolean): void => {
-    scopes.set(JSON.stringify([path, writes]), [path, writes])
-  }
-  for (const [link] of made) scope(parent(link), true)
-  if (!symbolic) for (const [, target] of made) scope(target, false)
-  let runtime = await machineHolding([...scopes.values()], session, registry, links, null)
-  if (
-    runtime === null ||
-    (symbolic && !(await holdsTargets(runtime, made, session, registry, links)))
-  )
-    runtime = await newNameRuntime(made, symbolic, session, registry, links)
+  const runtime = await linkRuntime(made, symbolic, session, registry, links)
   if (runtime === null || !(await runtime.handle().hasProgram('ln'))) return null
   const cwd = norm(session.cwd)
   if (cwd === '/' || (await holdsFolder(runtime, cwd, session, registry, links)))
@@ -590,56 +628,33 @@ async function holdsFolder(
   const entry = mounts?.[0]
   if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return false
   const held = await holders(entry.vfs.accessor, onMount(entry, folder))
-  return held.some(
-    (one) => one.machine === runtime.defaultMachine && (one.folder || one.entry === null),
-  )
+  return held.some((one) => one.machine === runtime.defaultMachine && folderThere(one))
 }
 
 /**
- * Whether a machine's symbolic links would lead where Mirage reads their
- * targets: the copy shown of each target some machine holds (`chosen`) is
- * that machine's, so none dangles there or leads to an older copy. Mirrors
- * Python's `_holds_targets`.
+ * Whether a machine holds a folder at a name as far as is known: a mount on
+ * one machine asks nothing, so its machine answers for itself. Mirrors
+ * Python's `_folder_there`.
  *
- * @param runtime the machine's runtime.
- * @param made each link's absolute path and its target, resolved as the
- *   link will resolve it.
- * @param session the session it runs in.
- * @param registry the workspace's mounts and machines.
- * @param links the session's link table.
+ * @param one the machine and what it reports for the name.
  */
-async function holdsTargets(
-  runtime: RemoteRuntime,
-  made: readonly (readonly [string, string])[],
-  session: SessionState,
-  registry: MountRegistry,
-  links: NamespaceReader,
-): Promise<boolean> {
-  const aimed = made.map(([, target]): [string, boolean] => [target, false])
-  const mounts = heldMounts(aimed, session, registry, links)
-  if (mounts === null) return false
-  for (const [at, [target]] of aimed.entries()) {
-    const entry = mounts[at]
-    if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return false
-    const held = await holders(entry.vfs.accessor, onMount(entry, target))
-    if (held.length > 0 && chosen(entry.vfs.accessor, held).machine !== runtime.defaultMachine)
-      return false
-  }
-  return true
+function folderThere(one: Holder): boolean {
+  return one.folder || one.entry === null
 }
 
 /**
- * The machine links in folders several machines hold are made on, when one
- * machine takes them all: the machine holding each link's target (`chosen`),
- * so the link leads somewhere on the machine it is made on, when that
- * machine holds the link's folder too. A symbolic link to a name no machine
- * holds is a new name like any other (`newNameMachine`). Null when a path
- * is off a machine mount, the session's rules or a coded file policy speak
- * for the mount, the copy shown of a link's folder is a file, a target's
- * machine lacks the link's folder, another
- * machine holds a link's name already, or the links land on different
- * machines: the link is then Mirage's own, and Mirage's `ln` answers for a
- * name that exists. Mirrors Python's `_new_name_runtime`.
+ * The one machine that makes every link, when one can. A link is made on
+ * the machine holding its target, the copy shown of it (`chosen`), so the
+ * link leads where Mirage reads the target; a symbolic link to a name no
+ * machine holds is a new name like any other (`newNameMachine`). That
+ * machine must hold the link's folder, whose copy shown is a folder, and no
+ * other machine may hold the link's name, which Mirage's own `ln` then
+ * answers for.
+ *
+ * Null when a path is off a machine mount, the session's rules or a coded
+ * file policy speak for the mount, a hard link's target is missing, or the
+ * links land on different machines: the links are then Mirage's own.
+ * Mirrors Python's `_link_runtime`.
  *
  * @param made each link's absolute path and its target, resolved as the
  *   link will resolve it.
@@ -648,7 +663,7 @@ async function holdsTargets(
  * @param registry the workspace's mounts and machines.
  * @param links the session's link table.
  */
-async function newNameRuntime(
+async function linkRuntime(
   made: readonly (readonly [string, string])[],
   symbolic: boolean,
   session: SessionState,
@@ -671,8 +686,9 @@ async function newNameRuntime(
     const spec = onMount(folder, link)
     const held = await holders(aimed.vfs.accessor, onMount(aimed, target))
     let machine: string
-    if (held.length === 0) {
-      if (!symbolic) return null
+    if (held.length > 0) {
+      machine = chosen(aimed.vfs.accessor, held).machine
+    } else if (symbolic) {
       try {
         machine = await newNameMachine(folder.vfs.accessor, spec)
       } catch (error) {
@@ -681,17 +697,19 @@ async function newNameRuntime(
         return null
       }
     } else {
-      machine = chosen(aimed.vfs.accessor, held).machine
-      const above = await holders(folder.vfs.accessor, folderOf(spec))
-      if (above.length === 0 || !chosen(folder.vfs.accessor, above).folder) return null
-      if (!above.some((one) => one.folder && one.machine === machine)) return null
+      return null
     }
-    const named = await holders(folder.vfs.accessor, spec)
-    if (named.some((one) => one.machine !== machine)) return null
+    const above = await holders(folder.vfs.accessor, folderOf(spec))
+    if (above.length === 0 || !folderThere(chosen(folder.vfs.accessor, above))) return null
+    if (!above.some((one) => one.machine === machine && folderThere(one))) return null
+    if (
+      above.length > 1 &&
+      (await holders(folder.vfs.accessor, spec)).some((one) => one.machine !== machine)
+    )
+      return null
     machines.add(machine)
   }
-  if (machines.size !== 1) return null
-  return runtimeOf([...machines], registry)
+  return runtimeOf([...machines].sort(compareCodePoints), registry)
 }
 
 /**

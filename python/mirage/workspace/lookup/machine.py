@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.types import WordKind
 from mirage.core.machine.place import chosen, holders, new_name_machine
+from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import folder_of
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
@@ -41,8 +42,13 @@ from mirage.vfs.bin import BinViewVFS
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
+from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup.constants import FOLDER_FREE, KEYWORDS
-from mirage.workspace.lookup.lookup import lookup_all
+from mirage.workspace.lookup.lookup import (
+    lookup_all,
+    program_head,
+    program_runtime,
+)
 from mirage.workspace.lookup.types import (
     Consumer,
     ExternalTarget,
@@ -51,6 +57,7 @@ from mirage.workspace.lookup.types import (
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.mount import MountEntry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState, env_snapshot
 
 logger = logging.getLogger(__name__)
@@ -233,7 +240,7 @@ async def _machine_holding(
             one.machine
             for one in await holders(
                 entry.vfs.accessor,
-                PathSpec.from_str_path(path, mount_key(path, entry.prefix)),
+                _on_mount(entry, path),
             )
         ]
         if len(held) > 1 and at < len(scopes):
@@ -251,47 +258,117 @@ async def _machine_holding(
     return runtime
 
 
-def folder_machine(cwd: str, registry: MountRegistry) -> str | None:
-    """The machine a folder is on, when a mount shows it as one machine's
-    own files (``/srv/gpu`` over the gpu machine); None for a folder in a
-    store, and for one a mount shows over several machines.
+async def preferred_machine(
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    fed_by: PipeWriter | None,
+    namespace: Namespace,
+    dispatch: DispatchFn,
+) -> str | None:
+    """The machine a command Mirage runs itself is about
+    (``Caller.preferred_machine``): the one the line names, else the one
+    whose program writes the pipe it reads, else the one its folder is
+    on; None when nothing says, and in a workspace that runs programs on
+    one machine, where nothing is to choose.
+
+    A pipe's writer is placed once for the pipe, so a reader that moves
+    (``gen | (cd /srv; tee log)``) or runs many commands asks no more.
 
     Args:
-        cwd (str): the folder, an absolute virtual path.
+        session (SessionState): the session it runs in.
         registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+        fed_by (PipeWriter | None): the program writing the pipe the
+            command reads.
+        namespace (Namespace): the link table a writer's path is read
+            through.
+        dispatch (DispatchFn): op dispatcher, which a writer's path is
+            asked of.
     """
-    entry = registry.try_mount_for(cwd)
-    if entry is None or not isinstance(entry.vfs, MachineVFS):
+    if routing is None or not several_machines(registry):
         return None
-    shown = _shown_machines(entry, registry)
+    if routing.machine is not None:
+        return routing.machine
+    if fed_by is not None and not fed_by.placed:
+        fed_by.machine = await _writer_machine(
+            fed_by, session, registry, routing, namespace, dispatch
+        )
+        fed_by.placed = True
+    if fed_by is not None and fed_by.machine is not None:
+        return fed_by.machine
+    shown = _folder_machines(session.cwd, registry)
     return shown[0] if len(shown) == 1 else None
 
 
-def writer_machine(
-    runtime: RuntimeIdentity | None, cwd: str, registry: MountRegistry
+async def _writer_machine(
+    fed_by: PipeWriter,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity],
+    namespace: Namespace,
+    dispatch: DispatchFn,
 ) -> str | None:
-    """The machine whose program writes a pipe, when the program can run
-    from the folder its pipeline started in as far as the mounts tell:
-    the folder is ``/``, the machine's own, or Mirage's mounts are served
-    into the machine. None for a program Mirage runs itself, and for one
-    that would not start there, which writes nothing.
+    """The machine a pipe's writer runs on, placed as it runs, from the
+    folder its pipeline started in: by its words, through the wrappers
+    Mirage runs (``nice gen | tee log``), and one named by its path on
+    the machine holding that file (``nice /tmp/tool | tee log``). None
+    for a program Mirage runs itself, and for one that would not start in
+    that folder as far as the mounts tell, which writes nothing: it
+    starts where the folder is ``/``, the machine's own, or Mirage's
+    mounts are served into the machine.
+
+    A path is looked up only when no file policy speaks for the session:
+    the lookup asks the dispatcher before the reader is admitted, and a
+    policy judges a call inside the command that makes it.
 
     Args:
-        runtime (RuntimeIdentity | None): the runtime the program is
-            placed on.
-        cwd (str): the folder the program runs from, an absolute virtual
-            path.
+        fed_by (PipeWriter): the pipe's writer.
+        session (SessionState): the session its reader runs in.
         registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision): the line's placement.
+        namespace (Namespace): the link table the path is read through.
+        dispatch (DispatchFn): op dispatcher, which the path is asked of.
     """
+    head = program_head(registry, fed_by.words, session, routing)
+    runtime: RuntimeIdentity | None = None
+    if "/" in head and not (
+        await registry.policies.wants_for("pre_vfs", session.session_id)
+    ):
+        runtime = await program_machine(
+            PathSpec.from_str_path(head, cwd=fed_by.cwd).virtual,
+            session,
+            registry,
+            namespace.session_links(session),
+            dispatch,
+            None,
+        )
+    if runtime is None:
+        runtime = program_runtime(registry, fed_by.words, session, routing)
     if not isinstance(runtime, RemoteRuntime):
         return None
     name = runtime.default_machine
-    if norm(cwd) == "/" or runtime.handle().config.mount_type is not None:
+    if (
+        norm(fed_by.cwd) == "/"
+        or runtime.handle().config.mount_type is not None
+    ):
         return name
-    entry = registry.try_mount_for(cwd)
+    return name if name in _folder_machines(fed_by.cwd, registry) else None
+
+
+def _folder_machines(folder: str, registry: MountRegistry) -> list[str]:
+    """The machines whose own files a folder is, by the mount showing it
+    (``/srv/gpu`` over the gpu machine, ``/tmp`` over every machine);
+    none for a folder in a store.
+
+    Args:
+        folder (str): the folder, an absolute virtual path.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    entry = registry.try_mount_for(folder)
     if entry is None or not isinstance(entry.vfs, MachineVFS):
-        return None
-    return name if name in _shown_machines(entry, registry) else None
+        return []
+    return _shown_machines(entry, registry)
 
 
 def several_machines(registry: MountRegistry) -> bool:
@@ -570,16 +647,10 @@ async def link_machine(
     links: NamespaceReader,
     absolute: bool,
 ) -> ExternalTarget | None:
-    """The machine an ``ln`` runs on whole, when every link lands in a
-    folder a machine holds at its own path and points at that machine's
-    own files: the machine makes the link, so its programs follow it,
-    where Mirage's link table holds links only Mirage sees. In a folder
-    several machines hold (``/tmp``) a link is a new name like any
-    other, made where a new file would land (``new_name_machine``).
-
-    A symbolic link's target counts when it resolves onto a machine mount
-    at its own path, there or not, since a dangling link is a link all
-    the same; a hard link's source must be one the machine holds.
+    """The machine an ``ln`` runs on whole, when one machine can make
+    every link (``_link_runtime``): the machine makes the link, so its
+    programs follow it, where Mirage's link table holds links only
+    Mirage sees.
 
     It runs from the session's folder when the machine holds that folder.
     From any other folder it runs from ``/`` when every path it names is
@@ -598,24 +669,7 @@ async def link_machine(
     """
     if not made:
         return None
-    if symbolic and any(
-        _local_mount(registry, links, target, False) is None
-        for _, target in made
-    ):
-        return None
-    scopes = dict.fromkeys((parent(link), True) for link, _ in made)
-    if not symbolic:
-        scopes.update(dict.fromkeys((target, False) for _, target in made))
-    runtime = await _machine_holding(
-        list(scopes), session, registry, links, None
-    )
-    if runtime is None or (
-        symbolic
-        and not await _holds_targets(runtime, made, session, registry, links)
-    ):
-        runtime = await _new_name_runtime(
-            made, symbolic, session, registry, links
-        )
+    runtime = await _link_runtime(made, symbolic, session, registry, links)
     if runtime is None or not await runtime.handle().has_program("ln"):
         return None
     cwd = norm(session.cwd)
@@ -663,65 +717,40 @@ async def _holds_folder(
     assert isinstance(entry.vfs, MachineVFS)
     held = await holders(entry.vfs.accessor, _on_mount(entry, folder))
     return any(
-        one.machine == runtime.default_machine
-        and (one.folder or one.entry is None)
+        one.machine == runtime.default_machine and _folder_there(one)
         for one in held
     )
 
 
-async def _holds_targets(
-    runtime: RemoteRuntime,
-    made: Sequence[tuple[str, str]],
-    session: SessionState,
-    registry: MountRegistry,
-    links: NamespaceReader,
-) -> bool:
-    """Whether a machine's symbolic links would lead where Mirage reads
-    their targets: the copy shown of each target some machine holds
-    (``chosen``) is that machine's, so none dangles there or leads to an
-    older copy.
+def _folder_there(one: Holder) -> bool:
+    """Whether a machine holds a folder at a name as far as is known: a
+    mount on one machine asks nothing, so its machine answers for itself.
 
     Args:
-        runtime (RemoteRuntime): the machine's runtime.
-        made (Sequence[tuple[str, str]]): each link's absolute path and
-            its target, resolved as the link will resolve it.
-        session (SessionState): the session it runs in.
-        registry (MountRegistry): the workspace's mounts and machines.
-        links (NamespaceReader): the session's link table.
+        one (Holder): the machine and what it reports for the name.
     """
-    aimed = [(target, False) for _, target in made]
-    mounts = _held_mounts(aimed, session, registry, links)
-    if mounts is None:
-        return False
-    for entry, (target, _) in zip(mounts, aimed):
-        assert isinstance(entry.vfs, MachineVFS)
-        held = await holders(entry.vfs.accessor, _on_mount(entry, target))
-        if held and (
-            chosen(entry.vfs.accessor, held).machine != runtime.default_machine
-        ):
-            return False
-    return True
+    return one.folder or one.entry is None
 
 
-async def _new_name_runtime(
+async def _link_runtime(
     made: Sequence[tuple[str, str]],
     symbolic: bool,
     session: SessionState,
     registry: MountRegistry,
     links: NamespaceReader,
 ) -> RemoteRuntime | None:
-    """The machine links in folders several machines hold are made on,
-    when one machine takes them all: the machine holding each link's
-    target (``chosen``), so the link leads somewhere on the machine it is
-    made on, when that machine holds the link's folder too. A symbolic
-    link to a name no machine holds is a new name like any other
-    (``new_name_machine``). None when a path is off a machine mount, the
-    session's rules or a coded file policy speak for the mount, the copy
-    shown of a link's folder is a file, a target's machine lacks the
-    link's folder, another machine holds a
-    link's name already, or the links land on different machines: the
-    link is then Mirage's own, and Mirage's ``ln`` answers for a name
-    that exists.
+    """The one machine that makes every link, when one can. A link is
+    made on the machine holding its target, the copy shown of it
+    (``chosen``), so the link leads where Mirage reads the target; a
+    symbolic link to a name no machine holds is a new name like any
+    other (``new_name_machine``). That machine must hold the link's
+    folder, whose copy shown is a folder, and no other machine may hold
+    the link's name, which Mirage's own ``ln`` then answers for.
+
+    None when a path is off a machine mount, the session's rules or a
+    coded file policy speak for the mount, a hard link's target is
+    missing, or the links land on different machines: the links are then
+    Mirage's own.
 
     Args:
         made (Sequence[tuple[str, str]]): each link's absolute path and
@@ -747,27 +776,29 @@ async def _new_name_runtime(
         assert isinstance(aimed.vfs, MachineVFS)
         spec = _on_mount(folder, link)
         held = await holders(aimed.vfs.accessor, _on_mount(aimed, target))
-        if not held:
-            if not symbolic:
-                return None
+        if held:
+            machine = chosen(aimed.vfs.accessor, held).machine
+        elif symbolic:
             try:
                 machine = await new_name_machine(folder.vfs.accessor, spec)
             except NotADirectoryError:
                 logger.debug("%s: its folder is a file", link, exc_info=True)
                 return None
         else:
-            machine = chosen(aimed.vfs.accessor, held).machine
-            above = await holders(folder.vfs.accessor, folder_of(spec))
-            if not above or not chosen(folder.vfs.accessor, above).folder:
-                return None
-            if machine not in [one.machine for one in above if one.folder]:
-                return None
-        named = await holders(folder.vfs.accessor, spec)
-        if any(one.machine != machine for one in named):
+            return None
+        above = await holders(folder.vfs.accessor, folder_of(spec))
+        if not above or not _folder_there(chosen(folder.vfs.accessor, above)):
+            return None
+        if not any(
+            one.machine == machine and _folder_there(one) for one in above
+        ):
+            return None
+        if len(above) > 1 and any(
+            one.machine != machine
+            for one in await holders(folder.vfs.accessor, spec)
+        ):
             return None
         machines.add(machine)
-    if len(machines) != 1:
-        return None
     return _runtime_of(sorted(machines), registry)
 
 

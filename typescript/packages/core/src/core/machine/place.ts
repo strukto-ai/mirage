@@ -61,7 +61,7 @@ export function commandMachine(accessor: MachineAccessor): string | null {
  *   gives it; empty for `path` itself.
  */
 export function kernelView(accessor: MachineAccessor, path: PathSpec, below = ''): string | null {
-  if (accessor.names().length === 1) return null
+  if (!accessor.several) return null
   const base = remote(accessor, path)
   const real = below === '' ? base : `${rstripSlash(base)}/${below}`
   if (!KERNEL_VIEWS.some((at) => real === at || real.startsWith(`${at}/`))) return null
@@ -69,23 +69,31 @@ export function kernelView(accessor: MachineAccessor, path: PathSpec, below = ''
 }
 
 /**
+ * The machines asked about a name, in the order `machines:` lists them:
+ * every machine of the mount, less each whose own links lead the name to
+ * one the session hides, and for a kernel's view of its machine only the
+ * one it answers for (`kernelView`).
+ *
+ * @param accessor the mount's machines.
+ * @param path the name.
+ */
+export async function asked(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
+  const hidden = await hiddenOn(accessor, path)
+  const own = kernelView(accessor, path)
+  return accessor.names().filter((name) => !hidden.includes(name) && (own === null || own === name))
+}
+
+/**
  * The machines that hold a name, each with its entry there, asked in
- * parallel and kept in the order `machines:` lists them; a mount on one
- * machine asks nothing and lets the op itself report a missing name. A
- * machine whose own links lead the name to one the session hides holds
- * nothing there, and a kernel's view of its machine is held by the one
- * machine it answers for (`kernelView`).
+ * parallel (`asked`); a mount on one machine asks nothing and lets the op
+ * itself report a missing name.
  *
  * @param accessor the mount's machines.
  * @param path the name.
  */
 export async function holders(accessor: MachineAccessor, path: PathSpec): Promise<Holder[]> {
-  const hidden = await hiddenOn(accessor, path)
-  const own = kernelView(accessor, path)
-  const names = accessor
-    .names()
-    .filter((name) => !hidden.includes(name) && (own === null || own === name))
-  if (accessor.names().length === 1) return names.map((machine) => new Holder(machine))
+  const names = await asked(accessor, path)
+  if (!accessor.several) return names.map((machine) => new Holder(machine))
   const found = await Promise.allSettled(names.map((m) => statEntry(accessor, m, path)))
   const held: Holder[] = []
   for (const [at, result] of found.entries()) {
@@ -151,10 +159,8 @@ export async function newNameMachine(
   path: PathSpec,
   parents = false,
 ): Promise<string> {
-  const names = accessor.names()
-  const [only] = names
-  if (names.length === 1 && only !== undefined) return only
   const about = commandMachine(accessor) ?? accessor.defaultMachine
+  if (!accessor.several) return about
   let above = folderOf(path)
   let folders: Holder[] = []
   for (;;) {
@@ -191,11 +197,7 @@ export async function writeMachine(
     const held = await holders(accessor, path)
     if (held.length > 0) return chosen(accessor, held).machine
   }
-  const [only] = accessor.names()
-  const target =
-    accessor.names().length === 1 && only !== undefined
-      ? only
-      : (running ?? (await newNameMachine(accessor, path, opts.parents === true)))
+  const target = running ?? (await newNameMachine(accessor, path, opts.parents === true))
   if ((await hiddenOn(accessor, path)).includes(target)) throw enoent(path)
   return target
 }

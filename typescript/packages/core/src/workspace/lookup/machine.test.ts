@@ -177,6 +177,21 @@ describe('operand routing', () => {
     await ws.close()
   })
 
+  it("runs a command on the machine holding its path from a shared mount's root", async () => {
+    const a = new FakeFiles({}, ['cat'])
+    const b = new FakeFiles({ '/tmp/data/f': 'x' }, ['cat'])
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    expect(await out(ws, 'cd /tmp && cat data/f')).toBe('ran\n')
+    expect([a.ran, b.ran]).toEqual([[], ['cat data/f']])
+    await ws.close()
+  })
+
   it('keeps a name on two machines with Mirage from any folder', async () => {
     const a = new FakeFiles({ '/srv/k': 'k', '/tmp/both': 'old' }, TOOLS)
     const b = new FakeFiles({ '/tmp/both': 'b' }, TOOLS)
@@ -304,6 +319,22 @@ describe('operand routing', () => {
     expect(taken.exitCode).toBe(1)
     expect(new TextDecoder().decode(taken.stderr)).toContain('File exists')
     expect([a.ran, b.ran]).toEqual([[], []])
+    await ws.close()
+  })
+
+  it("makes a hard link into one machine's folder there", async () => {
+    const a = new FakeFiles({ '/tmp/t': 'old' }, ['ln'])
+    const b = new FakeFiles({ '/tmp/t': 't', '/srv/kept': 'k' }, ['ln'])
+    const ws = new Workspace(
+      { '/srv': '@b' },
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    b.answer('cat > /tmp/t', new TextEncoder().encode('newer'))
+    expect((await ws.shell('ln /tmp/t /srv/link')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([[], ['ln /tmp/t /srv/link']])
     await ws.close()
   })
 

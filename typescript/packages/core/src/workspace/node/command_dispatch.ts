@@ -74,7 +74,6 @@ import { stripSlash } from '../../utils/slash.ts'
 import { guardDispatch } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { PipeWriter } from '../frame.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { divertedFile } from '../executor/builtins/exec/index.ts'
 import { flagHelp } from '../executor/builtins/help/index.ts'
@@ -127,7 +126,6 @@ import {
 } from '../lookup/constants.ts'
 import {
   externalTarget,
-  programHead,
   programRuntime,
   resolveTarget,
   runsAs,
@@ -136,12 +134,11 @@ import {
 } from '../lookup/lookup.ts'
 import {
   binProgram,
-  folderMachine,
   linkMachine,
   operandMachine,
+  preferredMachine,
   programMachine,
   severalMachines,
-  writerMachine,
 } from '../lookup/machine.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -1166,7 +1163,7 @@ async function runArgv(
   // admitted: a refused one never reaches a machine. A command of Mirage's
   // own that a machine runs whole (`cat > /tmp/out`) is no program of that
   // machine: what it writes goes where Mirage's own writes go.
-  let machine = stageMachine(name, argv.args, session, registry, context.frame.routing)
+  let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
   if (
     name.includes('/') &&
     (runner !== null || redirects.length > 0) &&
@@ -1177,7 +1174,14 @@ async function runArgv(
     const [held] = await heldMachine(argv, deps, context, stdin)
     if (held?.runtime) machine = held.runtime.machine
   }
-  const preferred = await preferredMachine(deps, context)
+  const preferred = await preferredMachine(
+    session,
+    registry,
+    context.frame.routing,
+    context.frame.stdinWriter,
+    deps.namespace,
+    deps.dispatch,
+  )
   const outer = currentCaller()
   if (
     (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
@@ -1188,77 +1192,10 @@ async function runArgv(
 }
 
 /**
- * The machine a command Mirage runs itself is about
- * (`Caller.preferredMachine`): the one the line names, else the one whose
- * program writes the pipe it reads, else the one its folder is on; null when
- * nothing says, and in a workspace that runs programs on one machine, where
- * nothing is to choose. Mirrors Python's `_preferred_machine`.
- *
- * @param deps the registry, namespace and dispatcher.
- * @param context the session and current placement.
- */
-async function preferredMachine(
-  deps: ExecuteNodeDeps,
-  context: EvaluationContext,
-): Promise<string | null> {
-  const { session } = context
-  const { registry } = deps
-  const routing = context.frame.routing
-  if (routing === undefined || !severalMachines(registry)) return null
-  if (routing.machine !== undefined) return routing.machine
-  const fedBy = context.frame.stdinWriter
-  if (fedBy !== null && !fedBy.placed) {
-    fedBy.machine = await pipeWriterMachine(fedBy, deps, context, routing)
-    fedBy.placed = true
-  }
-  return fedBy?.machine ?? folderMachine(session.cwd, registry)
-}
-
-/**
- * The machine a pipe's writer runs on, placed as it runs, from the folder
- * its pipeline started in: by its words, through the wrappers Mirage runs
- * (`nice gen | tee log`), and one named by its path on the machine holding
- * that file (`nice /tmp/tool | tee log`). Asked once for the pipe, so a reader
- * that moves (`gen | (cd /srv; tee log)`) or runs many commands asks no more.
- * Mirrors Python's `_pipe_writer_machine`.
- *
- * A path is looked up only when no file policy speaks for the session: the
- * lookup asks the dispatcher before the reader is admitted, and a policy
- * judges a call inside the command that makes it.
- *
- * @param fedBy the pipe's writer.
- * @param deps the registry, namespace and dispatcher.
- * @param context the session and current placement.
- * @param routing the line's placement.
- */
-async function pipeWriterMachine(
-  fedBy: PipeWriter,
-  deps: ExecuteNodeDeps,
-  context: EvaluationContext,
-  routing: RouteDecision<Runtime>,
-): Promise<string | null> {
-  const { session } = context
-  const { registry, namespace, dispatch } = deps
-  const head = programHead(registry, fedBy.words, session, routing)
-  let held: Runtime | null | undefined = null
-  if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
-    held = await programMachine(
-      PathSpec.fromStrPath(head, undefined, fedBy.cwd).virtual,
-      session,
-      registry,
-      namespace.sessionLinks(session),
-      dispatch,
-      null,
-    )
-  held ??= programRuntime(registry, fedBy.words, session, routing)
-  return writerMachine(held, fedBy.cwd, registry)
-}
-
-/**
  * The machine a command's program runs on; null for a command Mirage runs
- * itself. Mirrors Python's `_stage_machine`.
+ * itself. Mirrors Python's `_running_machine`.
  */
-function stageMachine(
+function runningMachine(
   name: string,
   args: readonly string[],
   session: SessionState,

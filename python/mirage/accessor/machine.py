@@ -85,6 +85,12 @@ class MachineAccessor(Accessor):
         return list(self.config.machines or self._machines.names())
 
     @property
+    def several(self) -> bool:
+        """Whether the mount shows more than one machine, the only case
+        where several can hold one name."""
+        return len(self.names()) > 1
+
+    @property
     def default_machine(self) -> str:
         """Where a new name lands when no program decides."""
         names = self.names()

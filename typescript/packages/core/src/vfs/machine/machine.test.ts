@@ -47,10 +47,11 @@ async function run(ws: Workspace, line: string): Promise<[number, string, string
   return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
 }
 
-function shared(a: FakeFiles, b: FakeFiles): MachineVFS {
+/** A mount of /tmp over machines a, b, c, ... holding `files`. */
+function shared(...files: FakeFiles[]): MachineVFS {
   const vfs = new MachineVFS({ root: '/tmp' })
   vfs.bindMachines(
-    tableOf(new ScriptedMachine('a', a.answer), new ScriptedMachine('b', b.answer)),
+    tableOf(...files.map((one, at) => new ScriptedMachine('abcdef'.charAt(at), one.answer))),
     'a',
   )
   return vfs
@@ -631,6 +632,18 @@ describe('MachineVFS', () => {
     const b = new FakeFiles({ '/tmp/p': 'file' })
     await expect(shared(a, b).rename(spec('/src'), spec('/p/dst'))).rejects.toThrow()
     expect([a.dirs.has('/tmp/p'), Object.keys(texts(a)).sort()]).toEqual([false, ['/tmp/src']])
+  })
+
+  it('moves nothing under a file shown over an older folder', async () => {
+    const a = new FakeFiles({ '/tmp/src': 'x' })
+    const b = new FakeFiles({ '/tmp/p/kept': 'k' })
+    const c = new FakeFiles({ '/tmp/p': 'file' })
+    c.answer('cat > /tmp/p', ENC.encode('newer'))
+    await expect(shared(a, b, c).rename(spec('/src'), spec('/p/dst'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+    expect([a.dirs.has('/tmp/p'), Object.keys(texts(a)).sort()]).toEqual([false, ['/tmp/src']])
+    expect(Object.keys(texts(b)).sort()).toEqual(['/tmp/p/kept'])
   })
 
   it('removes a folder on no machine when one still fills it', async () => {

@@ -622,11 +622,15 @@ async def test_what_reads_a_path_named_program_s_pipe_writes_on_its_machine():
     await ws.close()
 
 
-def shared(a: FakeFiles, b: FakeFiles) -> MachineVFS:
+def shared(*files: FakeFiles) -> MachineVFS:
+    """A mount of /tmp over machines a, b, c, ... holding ``files``."""
     vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
     vfs.bind_machines(
         table_of(
-            ScriptedMachine("a", a.answer), ScriptedMachine("b", b.answer)
+            *(
+                ScriptedMachine(name, one.answer)
+                for name, one in zip("abcdef", files)
+            )
         ),
         "a",
     )
@@ -651,6 +655,18 @@ async def test_mv_makes_no_folder_where_another_machine_shows_a_file():
     with pytest.raises(OSError):
         await shared(a, b).rename(spec("/src"), spec("/p/dst"))
     assert ("/tmp/p" in a.dirs, sorted(a.files)) == (False, ["/tmp/src"])
+
+
+@pytest.mark.asyncio
+async def test_mv_under_a_file_shown_over_an_older_folder_moves_nothing():
+    a = FakeFiles({"/tmp/src": b"x"})
+    b = FakeFiles({"/tmp/p/kept": b"k"})
+    c = FakeFiles({"/tmp/p": b"file"})
+    c.answer("cat > /tmp/p", b"newer")
+    with pytest.raises(NotADirectoryError):
+        await shared(a, b, c).rename(spec("/src"), spec("/p/dst"))
+    assert ("/tmp/p" in a.dirs, sorted(a.files)) == (False, ["/tmp/src"])
+    assert sorted(b.files) == ["/tmp/p/kept"]
 
 
 @pytest.mark.asyncio

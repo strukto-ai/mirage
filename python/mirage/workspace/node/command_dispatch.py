@@ -153,7 +153,6 @@ from mirage.workspace.expand.globs import (
     glob_options,
     resolve_globs,
 )
-from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
@@ -168,7 +167,6 @@ from mirage.workspace.lookup.constants import (
 from mirage.workspace.lookup.lookup import (
     CliTarget,
     external_target,
-    program_head,
     program_runtime,
     resolve_target,
     runs_as,
@@ -178,12 +176,11 @@ from mirage.workspace.lookup.lookup import (
 )
 from mirage.workspace.lookup.machine import (
     bin_program,
-    folder_machine,
     link_machine,
     operand_machine,
+    preferred_machine,
     program_machine,
     several_machines,
-    writer_machine,
 )
 from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.mount import MountRegistry
@@ -1176,7 +1173,7 @@ async def _run_argv(
     # machine. A command of Mirage's own that a machine runs whole
     # (``cat > /tmp/out``) is no program of that machine: what it
     # writes goes where Mirage's own writes go.
-    machine = _stage_machine(
+    machine = _running_machine(
         name, argv.args, session, registry, context.frame.routing
     )
     if (
@@ -1193,7 +1190,14 @@ async def _run_argv(
             if held is None or held.runtime is None
             else held.runtime.machine
         )
-    preferred = await _preferred_machine(deps, context)
+    preferred = await preferred_machine(
+        session,
+        registry,
+        context.frame.routing,
+        context.frame.stdin_writer,
+        deps.namespace,
+        deps.dispatch,
+    )
     caller = current_caller()
     staged = (
         bind_caller(
@@ -1244,7 +1248,7 @@ async def _matched(
     )
 
 
-def _stage_machine(
+def _running_machine(
     name: str,
     args: Sequence[str],
     session: SessionState,
@@ -1267,79 +1271,6 @@ def _stage_machine(
     if getattr(runtime, "reach", "workspace") == "workspace":
         return None
     return None if runtime is None else runtime.machine
-
-
-async def _preferred_machine(
-    deps: ExecuteNodeDeps, context: EvaluationContext
-) -> str | None:
-    """The machine a command Mirage runs itself is about
-    (``Caller.preferred_machine``): the one the line names, else the one
-    whose program writes the pipe it reads, else the one its folder is
-    on; None when nothing says, and in a workspace that runs programs on
-    one machine, where nothing is to choose.
-
-    Args:
-        deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
-        context (EvaluationContext): the session and current placement.
-    """
-    session = context.session
-    registry = deps.registry
-    routing = context.frame.routing
-    if routing is None or not several_machines(registry):
-        return None
-    if routing.machine is not None:
-        return routing.machine
-    fed_by = context.frame.stdin_writer
-    if fed_by is not None and not fed_by.placed:
-        fed_by.machine = await _pipe_writer_machine(
-            fed_by, deps, context, routing
-        )
-        fed_by.placed = True
-    writer = None if fed_by is None else fed_by.machine
-    return writer or folder_machine(session.cwd, registry)
-
-
-async def _pipe_writer_machine(
-    fed_by: PipeWriter,
-    deps: ExecuteNodeDeps,
-    context: EvaluationContext,
-    routing: RouteDecision[RuntimeIdentity],
-) -> str | None:
-    """The machine a pipe's writer runs on, placed as it runs, from the
-    folder its pipeline started in: by its words, through the wrappers
-    Mirage runs (``nice gen | tee log``), and one named by its path on
-    the machine holding that file (``nice /tmp/tool | tee log``). Asked once
-    for the pipe, so a reader that moves (``gen | (cd /srv; tee log)``)
-    or runs many commands asks no more.
-
-    A path is looked up only when no file policy speaks for the session:
-    the lookup asks the dispatcher before the reader is admitted, and a
-    policy judges a call inside the command that makes it.
-
-    Args:
-        fed_by (PipeWriter): the pipe's writer.
-        deps (ExecuteNodeDeps): the registry, namespace and dispatcher.
-        context (EvaluationContext): the session and current placement.
-        routing (RouteDecision): the line's placement.
-    """
-    session = context.session
-    registry = deps.registry
-    head = program_head(registry, fed_by.words, session, routing)
-    held: RuntimeIdentity | None = None
-    if "/" in head and not (
-        await registry.policies.wants_for("pre_vfs", session.session_id)
-    ):
-        held = await program_machine(
-            PathSpec.from_str_path(head, cwd=fed_by.cwd).virtual,
-            session,
-            registry,
-            deps.namespace.session_links(session),
-            deps.dispatch,
-            None,
-        )
-    if held is None:
-        held = program_runtime(registry, fed_by.words, session, routing)
-    return writer_machine(held, fed_by.cwd, registry)
 
 
 async def _held_machine(
