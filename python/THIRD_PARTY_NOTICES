@@ -3753,9 +3753,11 @@ Apache License 2.0, used by:
 - equivalent 1.0.3 (https://github.com/indexmap-rs/equivalent)
 - fastrand 2.5.0 (https://github.com/smol-rs/fastrand)
 - flate2 1.1.10 (https://github.com/rust-lang/flate2-rs)
+- hashbrown 0.15.5 (https://github.com/rust-lang/hashbrown)
 - hashbrown 0.17.1 (https://github.com/rust-lang/hashbrown)
 - hashify 0.2.9 (https://github.com/stalwartlabs/hashify)
 - heck 0.5.0 (https://github.com/withoutboats/heck)
+- imara-diff 0.2.0 (https://github.com/pascalkuthe/imara-diff)
 - indexmap 2.14.2 (https://github.com/indexmap-rs/indexmap)
 - jpeg-decoder 0.3.2 (https://github.com/image-rs/jpeg-decoder)
 - js-sys 0.3.107 (https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys)
@@ -5979,6 +5981,31 @@ the following restrictions:
     misrepresented as being the original software.
 
  3. This notice may not be removed or altered from any source distribution.
+
+------------------------------------------------------------------------
+
+zlib License, used by:
+- foldhash 0.1.5 (https://github.com/orlp/foldhash)
+
+Copyright (c) 2024 Orson Peters
+
+This software is provided 'as-is', without any express or implied warranty. In
+no event will the authors be held liable for any damages arising from the use of
+this software.
+
+Permission is granted to anyone to use this software for any purpose, including
+commercial applications, and to alter it and redistribute it freely, subject to
+the following restrictions:
+
+1. The origin of this software must not be misrepresented; you must not claim
+    that you wrote the original software. If you use this software in a product,
+    an acknowledgment in the product documentation would be appreciated but is
+    not required.
+
+2. Altered source versions must be plainly marked as such, and must not be
+    misrepresented as being the original software.
+
+3. This notice may not be removed or altered from any source distribution.
 
 ------------------------------------------------------------------------
 

@@ -91,6 +91,9 @@ WORK_HINT_DELETED = (
 DISCARD_HINT = (
     '  (use "git restore <file>..." to discard changes in working directory)'
 )
+EMBEDDED_HINT = (
+    "  (commit or discard the untracked or modified content in submodules)"
+)
 UNTRACKED_HINT = (
     '  (use "git add <file>..." to include in what will be committed)'
 )
@@ -278,6 +281,26 @@ def tracking_lines(upstream: Upstream, ahead_behind: bool = True) -> list[str]:
     ]
 
 
+def gitlink_letters(rows: list[StatusEntry]) -> list[StatusEntry]:
+    """The entries as short status shows them: a gitlink whose repository
+    only has changes of its own reads ``m``, or ``?`` for untracked content
+    alone, where porcelain keeps ``M`` (git 2.47.3). Mirrors TS
+    ``gitlinkLetters``.
+
+    Args:
+        rows (list[StatusEntry]): the status entries.
+    """
+    out = []
+    for row in rows:
+        note = row.embedded
+        if note is None or "new commits" in note or row.tree_status != "M":
+            out.append(row)
+            continue
+        letter = "m" if "modified content" in note else "?"
+        out.append(replace(row, tree_status=letter))
+    return out
+
+
 def short_format(
     rows: list[StatusEntry],
     header: str | None,
@@ -360,9 +383,10 @@ def _work_entries(rows: list[StatusEntry], fully: bool) -> list[str]:
         ):
             continue
         label = WORK_LABELS.get(row.tree_status, "modified:")
-        lines.append(
-            _labelled(label, quote_path(row.path, False, fully), LABEL_WIDTH)
-        )
+        path = quote_path(row.path, False, fully)
+        if row.embedded is not None:
+            path = f"{path} ({row.embedded})"
+        lines.append(_labelled(label, path, LABEL_WIDTH))
     return lines
 
 
@@ -486,10 +510,17 @@ def long_format(
     # only ever describe entries this section actually prints: an
     # unmerged path can also carry a D and is reported elsewhere.
     deleted = any(line.startswith(f"\t{WORK_LABELS['D']}") for line in work)
+    # git adds a line when a gitlink's repository has changes of its own,
+    # which no ``git add`` here records.
+    content = any("content" in (row.embedded or "") for row in rows)
     lines.extend(
         _section(
             WORK_HEADER,
-            (WORK_HINT_DELETED if deleted else WORK_HINT, DISCARD_HINT),
+            (
+                WORK_HINT_DELETED if deleted else WORK_HINT,
+                DISCARD_HINT,
+                *((EMBEDDED_HINT,) if content else ()),
+            ),
             work,
         )
     )

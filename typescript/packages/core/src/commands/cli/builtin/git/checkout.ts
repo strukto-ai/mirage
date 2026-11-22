@@ -82,6 +82,7 @@ import { commitEntries, validPath, type TreeEntry } from './tree.ts'
 import type { HeadRef, IndexEntry, ReadOnlyRefusal, Track } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, splitMarked, startPoint as lineStart, requireVfs } from './util.ts'
+import { GITIGNORE } from './ignore.ts'
 import { scan, UNTRACKED_ALL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { systemNow } from '../../../../utils/clock.ts'
@@ -583,8 +584,20 @@ async function carryAcross(
   // UNTRACKED_ALL, not the mode status uses: "normal" collapses a wholly
   // untracked directory to one `dir/` entry, and a collision has to be
   // decided per file. git names the file inside such a directory, so the
-  // list has to hold it.
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
+  // list has to hold it, an embedded repository's included.
+  const found = await scan(
+    vfs,
+    repo.location,
+    tracked,
+    UNTRACKED_ALL,
+    false,
+    null,
+    null,
+    GITIGNORE,
+    false,
+    new Set(),
+    true,
+  )
   const seen = visibleEntries(repo.location, state.entries)
   const unseen = new Set(
     [...head.keys(), ...state.entries.keys()].filter(

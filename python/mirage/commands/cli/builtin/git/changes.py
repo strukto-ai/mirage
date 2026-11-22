@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from stat import S_IFMT, S_IFREG, S_IXUSR
 
 from dulwich.diff_tree import _similarity_score
@@ -29,11 +29,16 @@ from mirage.commands.cli.builtin.git.constants import (
     HEAD_REF,
     SYMLINK,
 )
+from mirage.commands.cli.builtin.git.embedded import (
+    embedded_head,
+    embedded_location,
+)
 from mirage.commands.cli.builtin.git.errors import UnhashableFileError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
+from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.rows import entry_path
 from mirage.commands.cli.builtin.git.seen import shown_entries
 from mirage.commands.cli.builtin.git.tree import tree_entries
@@ -43,13 +48,20 @@ from mirage.commands.cli.builtin.git.types import (
     StatusEntry,
     WorkTree,
 )
-from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
+from mirage.commands.cli.builtin.git.worktree import (
+    UNTRACKED_NO,
+    UNTRACKED_NORMAL,
+    scan,
+)
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.workspace.files import Files
+from mirage.workspace.files import Files, reader_of
 
 UNCHANGED = " "
+# What git diff adds to the commit of a gitlink whose repository has
+# changes of its own.
+DIRTY = "-dirty"
 MODIFIED = "M"
 ADDED = "A"
 DELETED = "D"
@@ -288,6 +300,10 @@ def staged_letters(
             staged[name] = ADDED
             shas[name] = entry.sha
             kinds[name] = S_IFMT(entry.mode)
+        elif S_IFMT(recorded[0]) != S_IFMT(entry.mode):
+            # A file, a link and a gitlink are kinds of entry; the
+            # executable bit is not one.
+            staged[name] = TYPE_CHANGED
         elif recorded[1] != entry.sha or recorded[0] != entry.mode:
             staged[name] = MODIFIED
     for path, (mode, sha) in tree.items():
@@ -384,32 +400,115 @@ async def _differs(
     return Blob.from_string(data).id != entry.sha
 
 
+@dataclass(frozen=True, slots=True)
+class EmbeddedChange:
+    """What changed in the repository a gitlink records, and the commit
+    it has out.
+
+    Args:
+        note (str): the long format's words for it: ``new commits,
+            modified content``.
+        head (str | None): the embedded repository's HEAD, None on an
+            unborn branch.
+    """
+
+    note: str
+    head: str | None
+
+
+async def _embedded_change(
+    vfs: Files, worktree: PathSpec, name: str, recorded: bytes, mode: str
+) -> EmbeddedChange | None:
+    """What changed in the repository a gitlink records, as git's long
+    format names it: commits past the recorded one, then modified and
+    untracked content. None when nothing did, or no repository is there.
+
+    Args:
+        vfs (Files): the session's files.
+        worktree (PathSpec): the outer working tree's root.
+        name (str): the gitlink's repository-relative path.
+        recorded (bytes): the commit the index records.
+        mode (str): the outer status's untracked mode, which the nested
+            one takes for ``no``.
+    """
+    location = await embedded_location(vfs, worktree.join(name))
+    if location is None:
+        return None
+    head = await embedded_head(vfs, location)
+    # Only what the session sees counts, and a repository nested in this
+    # one reports its content as git's recursive status does.
+    every, _, _ = await collect(
+        vfs,
+        await open_repo(vfs, location),
+        location,
+        UNTRACKED_NO if mode == UNTRACKED_NO else UNTRACKED_NORMAL,
+        embedded={},
+    )
+    rows = [r for r in every if reader_of(vfs).visible(r.path)]
+
+    notes = [
+        *([] if head == recorded.decode() else ["new commits"]),
+        *(
+            ["modified content"]
+            if any(
+                r.index_status != IGNORED and not _untracked(r) for r in rows
+            )
+            else []
+        ),
+        *(
+            ["untracked content"]
+            if any(
+                _untracked(r) or "untracked content" in (r.embedded or "")
+                for r in rows
+            )
+            else []
+        ),
+    ]
+    return EmbeddedChange(", ".join(notes), head) if notes else None
+
+
 async def work_changes(
     vfs: Files,
     worktree: PathSpec,
     entries: dict[bytes, IndexEntry],
     found: WorkTree,
+    embedded: dict[str, EmbeddedChange] | None = None,
+    mode: str = UNTRACKED_NORMAL,
 ) -> dict[str, str]:
     """Compare the index with the working tree: what is not staged yet.
+
+    A 160000 entry records another repository's HEAD, and what stands at
+    the name is a directory. With ``embedded``, a gitlink whose
+    repository is there reads modified when that repository moved past
+    the recorded commit or has changes of its own, as git's status says,
+    and what changed is kept there; without it, or with no repository
+    there (a submodule never checked out), a gitlink reads unchanged,
+    which keeps a branch switch from being refused over a file that was
+    never missing.
 
     Args:
         vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
         entries (dict[bytes, IndexEntry]): the index.
         found (WorkTree): what the walk of the working tree found.
+        embedded (dict[str, EmbeddedChange] | None): where to keep what
+            changed in each gitlink's repository; None reads gitlinks
+            unchanged.
+        mode (str): the untracked mode, which a gitlink's own status takes
+            for ``no``.
     """
     changes: dict[str, str] = {}
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
-        # A 160000 entry records another repository's HEAD, and what
-        # stands at the name is a directory, so the walk never finds a
-        # file there and every submodule read as deleted. git compares
-        # the submodule's own HEAD, which is unreadable from here, and
-        # says nothing at all when there is none; saying nothing is both
-        # the closest this can get and what keeps a branch switch away
-        # from a submodule from being refused over a file that was never
-        # missing.
         if entry.mode == GITLINK:
+            if embedded is None or name not in found.repos:
+                continue
+            change = await _embedded_change(
+                vfs, worktree, name, entry.sha, mode
+            )
+            if change is not None:
+                changes[name] = MODIFIED
+                embedded[name] = change
             continue
         if name not in found.files:
             changes[name] = DELETED
@@ -469,12 +568,24 @@ async def work_entries(
         for path in (set(state.entries) | set(state.conflicts))
     }
     found = await scan(vfs, location, tracked, UNTRACKED_NO, roots=roots)
-    changes = await work_changes(vfs, location.worktree, state.entries, found)
+    embedded: dict[str, EmbeddedChange] = {}
+    changes = await work_changes(
+        vfs, location.worktree, state.entries, found, embedded
+    )
     entries = staged_entries(state)
     store = repo.object_store
     assert isinstance(store, VfsObjectStore)
     for path in [*state.entries, *state.conflicts]:
         name = path.decode("utf-8", errors="replace")
+        # A gitlink reads as the commit its repository has out, marked
+        # dirty when that repository has changes of its own, as git diff
+        # shows it.
+        moved = embedded.get(name)
+        if moved is not None:
+            if moved.head is not None:
+                dirty = DIRTY if "content" in moved.note else ""
+                entries[path] = (GITLINK, f"{moved.head}{dirty}".encode())
+            continue
         info = found.files.get(name)
         if path in state.conflicts:
             code = None if info is None else MODIFIED
@@ -554,6 +665,8 @@ class StatusRow:
         end (tuple[int, bytes] | None): the file-type bits and blob id
             of a staged add or delete, which a rename pairs by.
         unmerged (bool): whether the two letters are a conflict code.
+        embedded (str | None): what changed in the repository a gitlink
+            records, as ``EmbeddedChange.note``.
     """
 
     path: PathSpec
@@ -562,6 +675,18 @@ class StatusRow:
     tree_status: str
     end: tuple[int, bytes] | None = None
     unmerged: bool = False
+    embedded: str | None = None
+
+
+def _untracked(row: StatusRow) -> bool:
+    """Whether a row of an embedded repository's status is untracked
+    content: an untracked path, or a gitlink of its own whose repository
+    has only that.
+
+    Args:
+        row (StatusRow): the row.
+    """
+    return row.index_status == UNTRACKED or row.embedded == "untracked content"
 
 
 def assembled(
@@ -600,14 +725,18 @@ def assembled(
                 unstaged[row.name] = row.tree_status
             if row.end is not None:
                 kinds[row.name], shas[row.name] = row.end
-    rows = merge(
-        pair_renames(store, staged, shas, kinds, threshold)
-        if threshold is not None
-        else {path: (letter, None, 0) for path, letter in staged.items()},
-        unstaged,
-        conflicts,
-        untracked,
-    )
+    notes = {row.name: row.embedded for row in shown if row.embedded}
+    rows = [
+        replace(row, embedded=notes[row.path]) if row.path in notes else row
+        for row in merge(
+            pair_renames(store, staged, shas, kinds, threshold)
+            if threshold is not None
+            else {path: (letter, None, 0) for path, letter in staged.items()},
+            unstaged,
+            conflicts,
+            untracked,
+        )
+    ]
     rows.extend(
         StatusEntry(path, IGNORED, IGNORED) for path in sorted(ignored)
     )
@@ -621,6 +750,7 @@ async def collect(
     mode: str,
     show_ignored: bool = False,
     roots: tuple[str, ...] | None = None,
+    embedded: dict[str, EmbeddedChange] | None = None,
 ) -> tuple[list[StatusRow], IndexState, bool]:
     """Everything ``status`` reports, in one pass over the three sources.
 
@@ -632,6 +762,9 @@ async def collect(
         show_ignored (bool): whether to report ignored files too.
         roots (tuple[str, ...] | None): the paths the walk may reach, a
             tracked file outside them reading as gone. None walks all.
+        embedded (dict[str, EmbeddedChange] | None): where to keep what
+            changed in each gitlink's repository, which the rows name;
+            None reads gitlinks unchanged.
     """
     state = await read_index(vfs, location.gitdir)
     # HEAD's tree is read on a worker thread: it fetches objects through a
@@ -647,8 +780,31 @@ async def collect(
     # untracked, as it would in a checkout of what the session sees.
     tracked = decoded(visible_entries(location, state.entries))
     tracked |= decoded(visible_entries(location, state.conflicts))
-    found = await scan(vfs, location, tracked, mode, show_ignored, roots)
-    unstaged = await work_changes(vfs, location.worktree, state.entries, found)
+    gitlinks = frozenset(
+        path.decode("utf-8", errors="replace")
+        for path, entry in state.entries.items()
+        if entry.mode == GITLINK
+    )
+    found = await scan(
+        vfs, location, tracked, mode, show_ignored, roots, gitlinks=gitlinks
+    )
+    unstaged = await work_changes(
+        vfs, location.worktree, state.entries, found, embedded, mode
+    )
+    # With untracked files not reported, git says nothing of a gitlink
+    # whose repository only has untracked content (git 2.47.3).
+    if embedded is not None and mode == UNTRACKED_NO:
+        for name, change in list(embedded.items()):
+            note = ", ".join(
+                part
+                for part in change.note.split(", ")
+                if part != "untracked content"
+            )
+            if note:
+                embedded[name] = replace(change, note=note)
+            else:
+                del embedded[name]
+                unstaged.pop(name, None)
     conflicts = conflict_codes(state.conflicts)
 
     # The verdicts name a path as text with its undecodable bytes
@@ -676,6 +832,11 @@ async def collect(
             staged.get(name, UNCHANGED),
             unstaged.get(name, UNCHANGED),
             (kinds[name], shas[name]) if name in shas else None,
+            embedded=(
+                embedded[name].note
+                if embedded is not None and name in embedded
+                else None
+            ),
         )
         for name in sorted(set(staged) | set(unstaged))
     )

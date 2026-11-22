@@ -182,6 +182,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "wc" => wc::open(config),
         #[cfg(feature = "gh")]
         "gh" => cli::gh::open(config),
+        "git_diff" => cli::git::diff::open(config),
         "git_pack" => cli::git::pack::open(config),
         "office" => cli::office::stream::open(config),
         #[cfg(feature = "pdf")]

@@ -708,8 +708,11 @@ async def _carry_across(
     # UNTRACKED_ALL, not the mode status uses: "normal" collapses a
     # wholly untracked directory to one ``dir/`` entry, and a
     # collision has to be decided per file. git names the file
-    # inside such a directory, so the list has to hold it.
-    found = await scan(vfs, location, tracked, UNTRACKED_ALL)
+    # inside such a directory, so the list has to hold it, an embedded
+    # repository's included.
+    found = await scan(
+        vfs, location, tracked, UNTRACKED_ALL, through_repos=True
+    )
     seen = visible_entries(location, state.entries)
     unseen = decoded({*(head or {}), *state.entries}) - decoded(
         {*before, *seen}

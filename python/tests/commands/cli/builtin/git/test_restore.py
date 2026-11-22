@@ -688,14 +688,15 @@ async def test_a_file_standing_where_a_gitlink_belongs_is_replaced(
 async def test_a_child_under_a_restored_gitlink_keeps_its_working_copy(
     git_rw, repo_path: Path
 ):
-    # Restoring the gitlink drops the child's index entry and leaves
-    # the file alone: git writes the directory and touches nothing
-    # under it. Removing it here loses content nothing has a copy of,
-    # since the source tree never held it.
+    # Restoring the gitlink leaves a file standing under it alone: git
+    # writes the directory and touches nothing under it. Removing it here
+    # loses content nothing has a copy of, since the source tree never
+    # held it. git refuses to stage the child at all (``is in
+    # submodule``), so the index never holds both.
     await git_rw.shell("mkdir /repo/sub && echo keep > /repo/sub/keep.txt")
     commit_gitlink(repo_path, "sub")
     await git_rw.shell("echo child > /repo/sub/child.txt")
-    assert (await run(git_rw, "add sub/child.txt"))[0] == 0
+    assert (await run(git_rw, "add sub/child.txt"))[0] == 128
     assert await run(git_rw, "restore --staged --worktree sub") == (
         0,
         b"",

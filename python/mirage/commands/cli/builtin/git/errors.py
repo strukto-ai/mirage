@@ -61,6 +61,38 @@ class GitError(Exception):
     report = ""
 
 
+class UnbornEmbeddedError(GitError):
+    """An embedded repository with no commit to record, which ``add``
+    refuses, staging nothing at all (git 2.47.3).
+
+    Args:
+        path (str): the embedded repository's repository-relative path.
+    """
+
+    prefix = None
+
+    def __init__(self, path: str) -> None:
+        super().__init__(
+            f"error: '{path}/' does not have a commit checked out\n"
+            "fatal: adding files failed"
+        )
+
+
+class SubmodulePathspecError(GitError):
+    """A pathspec inside a repository the index records as a gitlink (git
+    2.47.3).
+
+    Args:
+        pathspec (str): the operand as typed.
+        submodule (str): the gitlink's repository-relative path.
+    """
+
+    def __init__(self, pathspec: str, submodule: str) -> None:
+        super().__init__(
+            f"Pathspec '{pathspec}' is in submodule '{submodule}'"
+        )
+
+
 class NotARepositoryError(GitError):
     """No ``.git`` at the start point or above it, up to the mount root.
 

@@ -207,12 +207,16 @@ class StatusEntry:
         tree_status (str): the right column, one character.
         original (str | None): the path renamed from, set only for
             ``R``.
+        embedded (str | None): what changed in the repository a gitlink
+            records, as the long format names it after the path (``new
+            commits, untracked content``); None for any other path.
     """
 
     path: str
     index_status: str
     tree_status: str
     original: str | None = None
+    embedded: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,11 +231,15 @@ class WorkTree:
             the walk has already paid for it.
         untracked (list[str]): paths to report as untracked, already
             collapsed to ``dir/`` where git would collapse them.
+        repos (list[str]): the directories holding a repository of their
+            own (a ``.git`` inside), which the walk never enters: git
+            records one as a gitlink, never its files.
     """
 
     files: dict[str, FileStat] = field(default_factory=dict)
     untracked: list[str] = field(default_factory=list)
     ignored: list[str] = field(default_factory=list)
+    repos: list[str] = field(default_factory=list)
 
 
 class DateKind(StrEnum):

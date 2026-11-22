@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -410,3 +411,139 @@ async def test_a_rooted_path_after_top_magic_reads_nothing_outside(
     assert b"is outside repository" in result.stderr
     with Repo(str(repo_path)) as repo:
         assert Blob.from_string(b"S3CR3T\n").id not in repo.object_store
+
+
+def _embedded(root: Path, checked_out: bool = True) -> str:
+    """A repository of its own at ``root/sub`` with one commit, or with
+    HEAD on a branch that has none yet when told so; that commit."""
+    sub = root / "sub"
+    sub.mkdir()
+    subprocess.run(["git", "-C", str(sub), "init", "-q"], check=True)
+    (sub / "in.txt").write_text("inner\n", encoding="utf-8")
+    git = ["git", "-C", str(sub), "-c", "user.name=a", "-c", "user.email=a@b"]
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "inner"], check=True)
+    head = subprocess.run(
+        [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    if not checked_out:
+        subprocess.run(
+            [*git, "checkout", "-q", "--orphan", "unborn"], check=True
+        )
+    return head
+
+
+@pytest.mark.asyncio
+async def test_an_embedded_repository_stages_as_a_gitlink(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: the repository's HEAD commit at mode 160000, never its
+    # files, and the warning with its advice on stderr.
+    head = _embedded(repo_path)
+    code, _out, err = await run(git_rw, "add -A")
+    assert code == 0
+    assert err.startswith(
+        b"warning: adding embedded git repository: sub\n"
+        b"hint: You've added another git repository inside your current "
+        b"repository.\n"
+    )
+    index = staged(repo_path)
+    assert index[b"sub"] == head.encode()
+    assert not [path for path in index if path.startswith(b"sub/")]
+    code, _out, err = await run(git_rw, "add sub/in.txt")
+    assert (code, err) == (
+        128,
+        b"fatal: Pathspec 'sub/in.txt' is in submodule 'sub'\n",
+    )
+    (repo_path / "sub" / "in.txt").write_text("more\n", encoding="utf-8")
+    code, out, _err = await run(git_rw, "status")
+    assert b"\tnew file:   sub\n" in out
+    assert b"\tmodified:   sub (modified content)\n" in out
+
+
+@pytest.mark.asyncio
+async def test_an_embedded_repository_without_a_commit_is_refused(
+    git_rw, repo_path: Path
+):
+    _embedded(repo_path, checked_out=False)
+    (repo_path / "fresh.txt").write_text("x\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "add -A")
+    assert (code, err) == (
+        128,
+        b"error: 'sub/' does not have a commit checked out\n"
+        b"fatal: adding files failed\n",
+    )
+    assert b"fresh.txt" not in staged(repo_path)
+
+
+@pytest.mark.asyncio
+async def test_short_status_names_what_changed_in_a_gitlink(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: ``m`` for modified content and ``?`` for untracked
+    # content alone in short status, ``M`` in porcelain; a gitlink whose
+    # directory is gone is staged as deleted.
+    _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    (repo_path / "sub" / "u.txt").write_text("u\n", encoding="utf-8")
+    assert (await run(git_rw, "status -s"))[1] == b" ? sub\n"
+    assert (await run(git_rw, "status --porcelain"))[1] == b" M sub\n"
+    assert (await run(git_rw, "status -s -uno"))[1] == b""
+    (repo_path / "sub" / "in.txt").write_text("more\n", encoding="utf-8")
+    assert (await run(git_rw, "status -s"))[1] == b" m sub\n"
+    assert (await git_rw.shell("rm -rf /repo/sub")).exit_code == 0
+    code, _out, err = await run(git_rw, "add -A")
+    assert (code, err) == (0, b"")
+    assert b"sub" not in staged(repo_path)
+
+
+@pytest.mark.asyncio
+async def test_a_gitlink_with_no_repository_there_keeps_its_files_out(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: naming the gitlink stages nothing, a path inside it is
+    # refused, ``-A`` leaves what it holds alone, and status says nothing.
+    head = _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    assert (await git_rw.shell("rm -rf /repo/sub/.git")).exit_code == 0
+    (repo_path / "sub" / "file").write_text("x\n", encoding="utf-8")
+    assert (await run(git_rw, "add sub"))[0] == 0
+    assert (await run(git_rw, "add sub/file"))[0:3:2] == (
+        128,
+        b"fatal: Pathspec 'sub/file' is in submodule 'sub'\n",
+    )
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert staged(repo_path)[b"sub"] == head.encode()
+    assert b"sub/file" not in staged(repo_path)
+    assert (await run(git_rw, "status --porcelain"))[1] == b""
+
+
+@pytest.mark.asyncio
+async def test_naming_an_ignored_embedded_repository_is_refused(
+    git_rw, repo_path: Path
+):
+    _embedded(repo_path)
+    (repo_path / ".gitignore").write_text("sub/\n", encoding="utf-8")
+    code, _out, err = await run(git_rw, "add sub")
+    assert code == 1
+    assert err.startswith(
+        b"The following paths are ignored by one of your .gitignore "
+        b"files:\nsub\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_what_replaces_a_gitlink_is_staged_as_a_type_change(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: a link, even to a directory, or a file standing where a
+    # gitlink was is staged in its place, ``T`` in short status.
+    _embedded(repo_path)
+    assert (await run(git_rw, "add -A"))[0] == 0
+    assert (await run(git_rw, "commit -qm sub"))[0] == 0
+    line = "mkdir /repo/d && rm -rf /repo/sub && ln -s d /repo/sub"
+    assert (await git_rw.shell(line)).exit_code == 0
+    assert await run(git_rw, "add sub") == (0, b"", b"")
+    assert (await run(git_rw, "status -s"))[1] == b"T  sub\n"

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -935,3 +936,34 @@ async def test_history_still_reads_a_branch_naming_such_paths(
     assert (code, out) == (0, b"odd\n")
     code, out, _err = await run(git_rw, "ls-tree -r --name-only odd")
     assert (code, out) == (0, b"../above.txt\na.txt\nsub/.git/config\n")
+
+
+@pytest.mark.asyncio
+async def test_a_switch_checks_the_files_of_an_untracked_embedded_repository(
+    git_rw, repo_path: Path
+):
+    # git 2.47.3: a switch checks an untracked embedded repository's files
+    # as it does any directory's, and its .git is untracked content a file
+    # in its place would lose; a file it does not hold is written beside
+    # them.
+    branch_with_paths(repo_path, "over", {"sub/in.txt": b"theirs\n"})
+    branch_with_paths(repo_path, "beside", {"sub/x.txt": b"theirs\n"})
+    branch_with_paths(repo_path, "file", {"sub": b"theirs\n"})
+    sub = repo_path / "sub"
+    sub.mkdir()
+    git = ["git", "-C", str(sub), "-c", "user.name=a", "-c", "user.email=a@b"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (sub / "in.txt").write_text("mine\n", encoding="utf-8")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-qm", "inner"], check=True)
+    code, _out, err = await run(git_rw, "checkout over")
+    assert code == 1
+    assert b"would be overwritten by checkout:\n\tsub/in.txt\n" in err
+    code, _out, err = await run(git_rw, "checkout file")
+    assert code == 1
+    assert b"would lose untracked files in them:\n\tsub\n" in err
+    (sub / "in.txt").unlink()
+    assert (await run(git_rw, "checkout file"))[0] == 1
+    assert (await run(git_rw, "checkout beside"))[0] == 0
+    assert (sub / "x.txt").read_text(encoding="utf-8") == "theirs\n"
+    assert (sub / ".git" / "HEAD").is_file()

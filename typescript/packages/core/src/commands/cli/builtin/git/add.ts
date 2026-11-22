@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { visibleEntries, matched, patternRoots, repoRelative } from './pathspec.ts'
+import { visibleEntries, matched, patternRoots, repoRelative, under } from './pathspec.ts'
 
 import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -26,19 +26,23 @@ import {
   IgnoredPathsError,
   NothingSpecifiedError,
   PathspecError,
+  SubmodulePathspecError,
+  UnbornEmbeddedError,
   UnindexableFileError,
   UnknownPathspecError,
 } from './errors.ts'
+import { embeddedHead, embeddedLocation } from './embedded.ts'
+import { configValues } from './fs.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
-import { entryBytes, statOf } from './io.ts'
+import { entryBytes, lstat, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
 import { opened } from './session.ts'
-import { EXECUTABLE, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
+import { EXECUTABLE, GITLINK, OWNER_EXECUTE, REGULAR, SYMLINK } from './constants.ts'
 import type { IndexEntry, IndexState, RepoLocation, WorkTree } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { checkSwitches, startPoint, requireVfs } from './util.ts'
+import { checkSwitches, gitBool, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -145,6 +149,7 @@ async function resolve(
   operands: readonly string[],
   found: WorkTree,
   tracked: ReadonlySet<string>,
+  linked: ReadonlySet<string>,
   ignores: IgnoreStack,
   force: boolean,
 ): Promise<[Set<string>, Set<string>]> {
@@ -154,14 +159,37 @@ async function resolve(
   const ignored: string[] = []
   for (const operand of operands) {
     const target = repoRelative(location, start, operand)
-    const gone = [...matched(tracked, target)].filter((path) => !present.has(path))
+    // A path inside an embedded repository is that repository's to stage:
+    // git refuses it under a gitlink the index holds and passes over it
+    // otherwise (git 2.47.3).
+    const holder = found.repos.find((repo) => under(target, repo))
+    const gitlink = [...linked].find((path) => under(target, path))
+    if (gitlink !== undefined) throw new SubmodulePathspecError(operand, gitlink)
+    if (holder !== undefined) {
+      if (tracked.has(holder)) throw new SubmodulePathspecError(operand, holder)
+      continue
+    }
+    // A gitlink with no repository there (a submodule never checked out)
+    // has nothing to stage.
+    if (linked.has(target) && !found.repos.includes(target)) continue
+    const repos = matched(found.repos, target)
+    for (const repo of repos) {
+      if (force || tracked.has(repo) || found.untracked.includes(`${repo}/`)) stage.add(repo)
+      else if (repo === target) ignored.push(target)
+    }
+    const gone = [...matched(tracked, target)].filter(
+      (path) => !present.has(path) && !linked.has(path) && !repos.has(path),
+    )
+    if (repos.has(target)) continue
     if (present.has(target)) {
       if (force || tracked.has(target) || !ignores.isIgnored(target)) stage.add(target)
       else ignored.push(target)
       continue
     }
-    const hits = matched(present, target)
-    if (hits.size > 0 || gone.length > 0) {
+    const hits = new Set(
+      [...matched(present, target)].filter((path) => ![...linked].some((at) => under(path, at))),
+    )
+    if (hits.size > 0 || gone.length > 0 || repos.size > 0) {
       for (const path of force ? hits : keepAddable(hits, tracked, ignores)) stage.add(path)
       for (const path of gone) remove.add(path)
       continue
@@ -195,9 +223,20 @@ export async function stageChanges(
   const changed: [string, string][] = []
   const added: string[] = []
   for (const path of [...stage].sort(compareCodePoints)) {
+    const before = entries.get(path)
+    if (found.repos.includes(path)) {
+      // git records an embedded repository as a gitlink to the commit it
+      // has out, and adds nothing when it has none.
+      const location = await embeddedLocation(vfs, repo.location.worktree.join(path))
+      const head = location === null ? null : await embeddedHead(vfs, location)
+      if (head === null) throw new UnbornEmbeddedError(path)
+      if (before === undefined) added.push(path)
+      else if (before.oid !== head || before.mode !== GITLINK) changed.push([path, 'add'])
+      staged.set(path, { oid: head, mode: GITLINK, size: 0 })
+      continue
+    }
     const info = found.files.get(path)
     if (info === undefined) continue
-    const before = entries.get(path)
     let data: Uint8Array
     try {
       data = await entryBytes(vfs, repo.location.worktree.join(path), info)
@@ -227,6 +266,27 @@ export async function stageChanges(
 }
 
 /**
+ * The gitlinks the index holds whose directory still stands: one with no
+ * repository there (a submodule never checked out) stays as the index has
+ * it, and one whose directory is gone is staged as deleted, as git does.
+ */
+async function standingGitlinks(
+  vfs: Files,
+  location: RepoLocation,
+  state: IndexState,
+  tracked: ReadonlySet<string>,
+): Promise<Set<string>> {
+  const standing = new Set<string>()
+  for (const path of tracked) {
+    if (state.entries.get(path)?.mode !== GITLINK) continue
+    // lstat: a link or a file put in its place is a change to stage.
+    if ((await lstat(vfs, location.worktree.join(path)))?.type === FileType.DIRECTORY)
+      standing.add(path)
+  }
+  return standing
+}
+
+/**
  * Restage every path the index holds from the working tree.
  *
  * What `add -u` does with no pathspec and `commit -a` does first: a modified
@@ -241,9 +301,10 @@ export async function stageTracked(
 ): Promise<[Map<string, StagedEntry>, Set<string>]> {
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
   const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
-  const present = new Set(found.files.keys())
+  const present = new Set([...found.files.keys(), ...found.repos])
+  const linked = await standingGitlinks(vfs, repo.location, state, tracked)
   const kept = new Set([...tracked].filter((path) => present.has(path)))
-  const removed = new Set([...tracked].filter((path) => !present.has(path)))
+  const removed = new Set([...tracked].filter((path) => !present.has(path) && !linked.has(path)))
   const [staged] = await stageChanges(repo, vfs, state.entries, found, kept, removed)
   for (const path of removed) state.entries.delete(path)
   for (const [path, entry] of staged) state.entries.set(path, { path, ...entry, stage: 0 })
@@ -282,9 +343,23 @@ export async function add(
     true,
   )
   // `-f` walks ignored directories too, as git enters them for it.
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, parsed.force, roots)
+  const gitlinks = new Set([...tracked].filter((path) => state.entries.get(path)?.mode === GITLINK))
+  const found = await scan(
+    vfs,
+    repo.location,
+    tracked,
+    UNTRACKED_ALL,
+    parsed.force,
+    roots,
+    null,
+    undefined,
+    false,
+    gitlinks,
+  )
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
-  const present = new Set(found.files.keys())
+  const present = new Set([...found.files.keys(), ...found.repos])
+  const linked = await standingGitlinks(vfs, repo.location, state, tracked)
+  const missing = (path: string): boolean => !present.has(path) && !linked.has(path)
   let stage: Set<string>
   let remove: Set<string>
   if (parsed.update) {
@@ -293,10 +368,14 @@ export async function add(
         ? updateScope(repo.location, startPoint(fl).virtual, texts, tracked, present)
         : tracked
     stage = new Set([...scope].filter((path) => present.has(path)))
-    remove = new Set([...scope].filter((path) => !present.has(path)))
+    remove = new Set([...scope].filter(missing))
   } else if (parsed.every && texts.length === 0) {
-    stage = parsed.force ? new Set(present) : keepAddable(present, tracked, ignores)
-    remove = new Set([...tracked].filter((path) => !present.has(path)))
+    // A file under a gitlink is its repository's, whatever stands there.
+    const own = [...found.files.keys()].filter((path) => ![...linked].some((at) => under(path, at)))
+    stage = parsed.force ? new Set([...own, ...found.repos]) : keepAddable(own, tracked, ignores)
+    for (const path of found.repos)
+      if (parsed.force || tracked.has(path) || found.untracked.includes(`${path}/`)) stage.add(path)
+    remove = new Set([...tracked].filter(missing))
   } else {
     ;[stage, remove] = await resolve(
       vfs,
@@ -305,12 +384,60 @@ export async function add(
       texts,
       found,
       tracked,
+      linked,
       ignores,
       parsed.force,
     )
   }
   const [staged, lines] = await stageChanges(repo, vfs, state.entries, found, stage, remove)
   await updateIndex(repo, staged, remove)
-  if (!parsed.verbose || lines.length === 0) return [null, new IOResult()]
-  return [ENC.encode(lines.map((line) => `${line}\n`).join('')), new IOResult()]
+  const embedded = [...staged]
+    .filter(([path, entry]) => entry.mode === GITLINK && !state.entries.has(path))
+    .map(([path]) => path)
+  const warned = await embeddedWarnings(vfs, repo.location, embedded)
+  const out = parsed.verbose && lines.length > 0 ? lines.map((line) => `${line}\n`).join('') : ''
+  return [
+    out === '' ? null : ENC.encode(out),
+    new IOResult({ stderr: warned === '' ? null : ENC.encode(warned) }),
+  ]
+}
+
+/**
+ * git's warning for each embedded repository `add` records anew, with the
+ * advice after the first unless `advice.addEmbeddedRepo` turns it off, and the
+ * line saying how to turn it off unless that is already set (git 2.47.3).
+ */
+async function embeddedWarnings(
+  vfs: Files,
+  location: RepoLocation,
+  paths: readonly string[],
+): Promise<string> {
+  if (paths.length === 0) return ''
+  const values = await configValues(vfs, location, 'advice.addEmbeddedRepo')
+  const advise = gitBool(values, 'advice.addembeddedrepo', true)
+  return paths
+    .map((path, i) => {
+      const warning = `warning: adding embedded git repository: ${path}\n`
+      if (i > 0 || !advise) return warning
+      const hint = [
+        "You've added another git repository inside your current repository.",
+        'Clones of the outer repository will not contain the contents of',
+        'the embedded repository and will not know how to obtain it.',
+        'If you meant to add a submodule, use:',
+        '',
+        `\tgit submodule add <url> ${path}`,
+        '',
+        'If you added this path by mistake, you can remove it from the',
+        'index with:',
+        '',
+        `\tgit rm --cached ${path}`,
+        '',
+        'See "git help submodule" for more information.',
+        ...(values.length === 0
+          ? ['Disable this message with "git config advice.addEmbeddedRepo false"']
+          : []),
+      ]
+      return warning + hint.map((line) => (line === '' ? 'hint:\n' : `hint: ${line}\n`)).join('')
+    })
+    .join('')
 }

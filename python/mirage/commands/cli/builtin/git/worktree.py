@@ -24,6 +24,7 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
+from mirage.commands.cli.builtin.git.embedded import embedded_location
 from mirage.commands.cli.builtin.git.errors import WorkTreeLimitError
 from mirage.commands.cli.builtin.git.ignore import (
     GITIGNORE,
@@ -33,6 +34,7 @@ from mirage.commands.cli.builtin.git.ignore import (
 from mirage.commands.cli.builtin.git.io import (
     read_names,
     read_optional,
+    stat_of,
 )
 from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
@@ -81,6 +83,11 @@ class Scanner:
         roots (tuple[str, ...] | None): the repository-relative paths
             the walk is narrowed to; None for the whole tree.
         keep_empty (bool): list a directory holding nothing to report.
+        gitlinks (frozenset[str]): the gitlinks the index holds, whose
+            directory the walk never enters.
+        through_repos (bool): walk an untracked embedded repository as a
+            plain directory, its ``.git`` one untracked entry, rather than
+            report it whole.
     """
 
     def __init__(
@@ -93,8 +100,12 @@ class Scanner:
         roots: tuple[str, ...] | None = None,
         per_directory: str | None = GITIGNORE,
         keep_empty: bool = False,
+        gitlinks: frozenset[str] = frozenset(),
+        through_repos: bool = False,
     ) -> None:
         self._vfs = vfs
+        self._gitlinks = gitlinks
+        self._through_repos = through_repos
         self._per_directory = per_directory
         self._keep_empty = keep_empty
         self._worktree = worktree
@@ -276,6 +287,19 @@ class Scanner:
         )
         return ignores if local is None else ignores.push(relative, local)
 
+    async def _embedded(self, relative: str) -> bool:
+        """Whether a directory holds a repository of its own, which git
+        neither enters nor lists file by file, whatever the untracked
+        mode: a ``.git`` inside it that git could open.
+
+        Args:
+            relative (str): repository-relative path of the directory.
+        """
+        path = self._absolute(relative)
+        if await stat_of(self._vfs, path.join(GIT_DIR)) is None:
+            return False
+        return await embedded_location(self._vfs, path) is not None
+
     async def _visit_directory(
         self, relative: str, ignored: bool, ignores: IgnoreStack
     ) -> None:
@@ -344,9 +368,41 @@ class Scanner:
             if info is None:
                 continue
             if info.type is FileType.DIRECTORY:
-                await self._visit_directory(
-                    child, ignored or rules.is_ignored(child, True), rules
+                skipped = ignored or rules.is_ignored(child, True)
+                # An ignored directory the walk passes over is not probed:
+                # nothing about it would be reported either way.
+                needed = (
+                    not skipped
+                    or self._show_ignored
+                    or child in self._tracked
+                    or (self._roots is not None and child in self._roots)
                 )
+                if (
+                    child not in self._directories
+                    and needed
+                    and await self._embedded(child)
+                ):
+                    self.found.repos.append(child)
+                    if child in self._tracked or self._mode == UNTRACKED_NO:
+                        continue
+                    if self._through_repos:
+                        # A switch writes into it as into any directory,
+                        # and its .git is untracked content there too
+                        # (git 2.47.3).
+                        if not skipped:
+                            self.found.untracked.append(f"{child}/{GIT_DIR}")
+                        await self._visit_directory(child, skipped, rules)
+                        continue
+                    if not skipped:
+                        self.found.untracked.append(f"{child}/")
+                    elif self._show_ignored:
+                        self.found.ignored.append(f"{child}/")
+                    continue
+                # A gitlink whose repository is not there: what its
+                # directory holds is not this one's.
+                if child in self._gitlinks:
+                    continue
+                await self._visit_directory(child, skipped, rules)
                 continue
             self._count(child)
             self.found.files[child] = info
@@ -368,6 +424,8 @@ async def scan(
     ignores: IgnoreStack | None = None,
     per_directory: str | None = GITIGNORE,
     keep_empty: bool = False,
+    gitlinks: frozenset[str] = frozenset(),
+    through_repos: bool = False,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -392,6 +450,11 @@ async def scan(
         per_directory (str | None): the exclude file each directory may
             hold, None for none.
         keep_empty (bool): list a directory holding nothing to report.
+        gitlinks (frozenset[str]): the gitlinks the index holds, whose
+            directory the walk never enters.
+        through_repos (bool): walk an untracked embedded repository as a
+            plain directory, its ``.git`` one untracked entry, as a switch
+            checks what it would write over.
     """
     rules = (
         ignores
@@ -407,6 +470,8 @@ async def scan(
         roots,
         per_directory,
         keep_empty,
+        gitlinks,
+        through_repos,
     )
     await scanner.walk("", False, rules)
     return scanner.found

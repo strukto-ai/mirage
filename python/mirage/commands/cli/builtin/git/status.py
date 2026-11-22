@@ -40,6 +40,7 @@ from mirage.commands.cli.builtin.git.ref_list import detached_line
 from mirage.commands.cli.builtin.git.refs import read_head
 from mirage.commands.cli.builtin.git.render import (
     branch_line,
+    gitlink_letters,
     long_format,
     relative_entries,
     short_format,
@@ -232,7 +233,7 @@ async def report_rows(
             report's paths are relative to.
     """
     rows, state, no_commits = await collect(
-        vfs, repo, location, UNTRACKED_NORMAL
+        vfs, repo, location, UNTRACKED_NORMAL, embedded={}
     )
     fully = await config_bool(vfs, location, b"core", b"quotepath", True)
     detached = (
@@ -356,6 +357,7 @@ async def status(
         location,
         parsed.untracked,
         parsed.ignored,
+        embedded={},
     )
     if patterns:
         rows = await _selected_rows(
@@ -384,7 +386,12 @@ async def status(
                 if parsed.branch
                 else None
             )
-            body = short_format(entries, header, fully, parsed.nul)
+            body = short_format(
+                entries if parsed.porcelain else gitlink_letters(entries),
+                header,
+                fully,
+                parsed.nul,
+            )
         else:
             body = long_format(
                 entries,

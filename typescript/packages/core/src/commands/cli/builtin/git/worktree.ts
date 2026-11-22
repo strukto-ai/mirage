@@ -21,7 +21,8 @@ import { GIT_DIR } from './constants.ts'
 import { WorkTreeLimitError } from './errors.ts'
 import { under } from './pathspec.ts'
 import { GITIGNORE, type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readNames, readOptional } from './io.ts'
+import { embeddedLocation } from './embedded.ts'
+import { readNames, readOptional, statOf } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import type { RepoLocation, WorkTree } from './types.ts'
@@ -59,11 +60,7 @@ function trackedDirectories(tracked: ReadonlySet<string>): Set<string> {
 
 /** One walk of the working tree, carrying what the walk needs. */
 class Scanner {
-  readonly found: { files: Map<string, FileStat>; untracked: string[]; ignored: string[] } = {
-    files: new Map(),
-    untracked: [],
-    ignored: [],
-  }
+  readonly found: WorkTree = { files: new Map(), untracked: [], ignored: [], repos: [] }
   private readonly directories: Set<string>
   private readonly mounts: MountView | undefined
   private readonly counted = new Map<string, number>()
@@ -80,6 +77,8 @@ class Scanner {
     private readonly roots: readonly string[] | null = null,
     private readonly perDirectory: string | null = GITIGNORE,
     private readonly keepEmpty = false,
+    private readonly gitlinks: ReadonlySet<string> = new Set(),
+    private readonly throughRepos = false,
   ) {
     this.directories = trackedDirectories(tracked)
     this.mounts = mountView(vfs, true)
@@ -211,6 +210,17 @@ class Scanner {
     return false
   }
 
+  /**
+   * Whether a directory holds a repository of its own, which git neither
+   * enters nor lists file by file, whatever the untracked mode: a `.git`
+   * inside it.
+   */
+  private async embedded(relative: string): Promise<boolean> {
+    const dir = this.absolute(relative)
+    if ((await statOf(this.vfs, dir.join(GIT_DIR))) === null) return false
+    return (await embeddedLocation(this.vfs, dir)) !== null
+  }
+
   /** The ignore rules inside a directory, given the ones outside. */
   private async descend(relative: string, ignores: IgnoreStack): Promise<IgnoreStack> {
     if (relative === '') return ignores
@@ -285,7 +295,32 @@ class Scanner {
       const info = await this.entryStat(child)
       if (info === null) continue
       if (info.type === FileType.DIRECTORY) {
-        await this.visitDirectory(child, ignored || rules.isIgnored(child, true), rules)
+        const skipped = ignored || rules.isIgnored(child, true)
+        // An ignored directory the walk passes over is not probed: nothing
+        // about it would be reported either way.
+        const needed =
+          !skipped ||
+          this.showIgnored ||
+          this.tracked.has(child) ||
+          this.roots?.includes(child) === true
+        if (!this.directories.has(child) && needed && (await this.embedded(child))) {
+          this.found.repos.push(child)
+          if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
+          if (this.throughRepos) {
+            // A switch writes into it as into any directory, and its .git is
+            // untracked content there too (git 2.47.3).
+            if (!skipped) this.found.untracked.push(`${child}/${GIT_DIR}`)
+            await this.visitDirectory(child, skipped, rules)
+            continue
+          }
+          if (!skipped) this.found.untracked.push(`${child}/`)
+          else if (this.showIgnored) this.found.ignored.push(`${child}/`)
+          continue
+        }
+        // A gitlink whose repository is not there: what its directory holds
+        // is not this one's.
+        if (this.gitlinks.has(child)) continue
+        await this.visitDirectory(child, skipped, rules)
         continue
       }
       this.count(child)
@@ -313,6 +348,9 @@ class Scanner {
  * @param roots narrow the walk to these repository-relative paths and what
  *   lies under them, for a verb whose pathspecs say what it reads; null walks
  *   it all
+ * @param throughRepos walk an untracked embedded repository as a plain
+ *   directory, its `.git` one untracked entry, as a switch checks what it
+ *   would write over
  */
 export async function scan(
   vfs: Files,
@@ -324,6 +362,8 @@ export async function scan(
   ignores: IgnoreStack | null = null,
   perDirectory: string | null = GITIGNORE,
   keepEmpty = false,
+  gitlinks: ReadonlySet<string> = new Set(),
+  throughRepos = false,
 ): Promise<WorkTree> {
   const rules = ignores ?? (await loadIgnores(vfs, location.commondir, location.worktree))
   const scanner = new Scanner(
@@ -335,6 +375,8 @@ export async function scan(
     roots,
     perDirectory,
     keepEmpty,
+    gitlinks,
+    throughRepos,
   )
   await scanner.walk('', false, rules)
   return scanner.found

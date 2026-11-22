@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from difflib import SequenceMatcher
 from stat import S_IFMT
 
 from dulwich.objects import Blob, ObjectID
@@ -23,6 +22,11 @@ from mirage.commands.cli.builtin.git.constants import (
     FUNCNAME_START,
     GIT_SPACE,
     GITLINK,
+)
+from mirage.commands.cli.builtin.git.opcodes import (
+    Opcode,
+    group_opcodes,
+    line_opcodes,
 )
 from mirage.commands.cli.builtin.git.render import quote_path
 from mirage.commands.cli.builtin.git.seen import readable
@@ -132,10 +136,18 @@ def file_patch(
         ]
     if old and new and old[1] == new[1]:
         return encode_text("".join(line + "\n" for line in head))
-    index = f"index {short_oid(old, width)}..{short_oid(new, width)}"
-    if old and new and old[0] == new[0]:
-        index += f" {old[0]:06o}"
-    head.append(index)
+    # A gitlink whose repository only has changes of its own records the
+    # same commit, and git names no ids for it.
+    if not (
+        old
+        and new
+        and old[0] == GITLINK
+        and old[1].removesuffix(b"-dirty") == new[1].removesuffix(b"-dirty")
+    ):
+        index = f"index {short_oid(old, width)}..{short_oid(new, width)}"
+        if old and new and old[0] == new[0]:
+            index += f" {old[0]:06o}"
+        head.append(index)
     before, after = blob_data(repo, old), blob_data(repo, new)
     source = source if old else DEV_NULL
     target = target if new else DEV_NULL
@@ -196,9 +208,8 @@ def hunks(
     out = []
     context = b""
     searched = -1
-    matcher = SequenceMatcher(a=old, b=new, autojunk=False)
-    codes = list(matcher.get_opcodes())
-    groups = list(matcher.get_grouped_opcodes(count))
+    codes = line_opcodes(old, new)
+    groups = group_opcodes(codes, count)
     if function_context:
         groups = _function_groups(old, codes, groups)
     for group in groups:
@@ -213,7 +224,7 @@ def hunks(
         )
         searched = start - 1
         if found is not None:
-            context = found[:FUNCNAME_BYTES].rstrip(GIT_SPACE)
+            context = whole_chars(found[:FUNCNAME_BYTES].rstrip(GIT_SPACE))
         head = (
             f"@@ -{_span(start, stop)} +{_span(group[0][3], group[-1][4])} @@"
         ).encode()
@@ -231,17 +242,17 @@ def hunks(
 
 def _function_groups(
     old: list[bytes],
-    codes: Sequence[tuple[str, int, int, int, int]],
-    groups: list[list[tuple[str, int, int, int, int]]],
-) -> list[list[tuple[str, int, int, int, int]]]:
+    codes: Sequence[Opcode],
+    groups: list[list[Opcode]],
+) -> list[list[Opcode]]:
     """Widen changed ranges to Git's default function boundaries.
 
     Pinned against Git 2.47.3 (Debian stable) and 2.50.1.
 
     Args:
         old (list[bytes]): original lines.
-        codes (Sequence[tuple[str, int, int, int, int]]): diff opcodes.
-        groups (list[list[tuple[str, int, int, int, int]]]): bounded hunks.
+        codes (Sequence[Opcode]): diff opcodes.
+        groups (list[list[Opcode]]): bounded hunks.
     """
     boundaries = [
         i
@@ -286,6 +297,25 @@ def _function_groups(
                 group.append((tag, i1, i2, j1, j2))
         result.append(group)
     return result
+
+
+def whole_chars(data: bytes) -> bytes:
+    """``data`` without the UTF-8 sequence its end cuts short, as git
+    trims a hunk header's function name once it has cut it to 80 bytes
+    and dropped the trailing blanks (git 2.47.3), a lone lead byte
+    included.
+
+    Args:
+        data (bytes): the cut function name.
+    """
+    for back in range(1, min(4, len(data)) + 1):
+        byte = data[-back]
+        if byte < 0x80:
+            return data
+        if byte >= 0xC0:
+            need = 2 if byte < 0xE0 else 3 if byte < 0xF0 else 4
+            return data if back >= need else data[:-back]
+    return data
 
 
 def _span(start: int, stop: int) -> str:

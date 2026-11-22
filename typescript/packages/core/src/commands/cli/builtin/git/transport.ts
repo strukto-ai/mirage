@@ -27,6 +27,7 @@ import { fromHex } from '../../../../utils/hex.ts'
 import type { Context } from '../../../config.ts'
 import { GITLINK_MODE } from './constants.ts'
 import { discover } from './discover.ts'
+import { openPacks, storedEntry } from './fs.ts'
 import { GitError, MissingRepositoryError } from './errors.ts'
 import { requireVfs } from './util.ts'
 import { loadRefs, readHead, SYMREF_PREFIX } from './refs.ts'
@@ -175,6 +176,7 @@ function nothing(): AsyncIterable<Uint8Array> {
  */
 async function* packChunks(repo: Repo, oids: readonly string[]): AsyncGenerator<Uint8Array> {
   const kinds: Record<string, number> = { commit: 1, tree: 2, blob: 3, tag: 4 }
+  const packs = openPacks(repo.vfs, repo.location.commondir)
   const sum = new Digest('sha1')
   try {
     const header = new Uint8Array(12)
@@ -185,6 +187,14 @@ async function* packChunks(repo: Repo, oids: readonly string[]): AsyncGenerator<
     sum.update(header)
     yield header
     for (const oid of oids) {
+      // An object its pack stores whole goes as it is stored; a delta, or a
+      // loose object, is read and compressed again.
+      const stored = await storedEntry(packs, oid)
+      if (stored !== null) {
+        sum.update(stored)
+        yield stored
+        continue
+      }
       const { type, raw } = await rawObject(repo, oid)
       let size = raw.byteLength
       const head = [((kinds[type] ?? 0) << 4) | (size & 15)]
