@@ -127,7 +127,6 @@ describe('loadWorkspaceConfig', () => {
 const PROTECTED = {
   decision: 'deny',
   reason: 'production data is protected',
-  paths: ['/repo/prod/*'],
 }
 
 describe('configToWorkspaceArgs', () => {
@@ -1004,8 +1003,12 @@ describe('configToWorkspaceArgs', () => {
         default: {
           cwd: '/scratch',
           env: { PAGER: 'cat' },
-          mounts: { '/repo': 'r', '/scratch': 'rwx' },
-          commands: { rm: PROTECTED, mv: PROTECTED, python3: 'deny' },
+          mounts: {
+            '/repo': 'r',
+            '/repo/prod': { commands: { rm: PROTECTED, mv: PROTECTED } },
+            '/scratch': 'rwx',
+          },
+          commands: { python3: 'deny' },
           paths: { hide: ['/scratch/finance'] },
         },
         reviewer: {
@@ -1022,9 +1025,10 @@ describe('configToWorkspaceArgs', () => {
       env: { PAGER: 'cat' },
       mounts: new Map([
         ['/repo', { mode: MountMode.READ }],
+        ['/repo/prod', { commands: commandTree({ rm: PROTECTED, mv: PROTECTED }) }],
         ['/scratch', { mode: MountMode.EXEC }],
       ]),
-      commands: commandTree({ rm: PROTECTED, mv: PROTECTED, python3: 'deny' }),
+      commands: commandTree({ python3: 'deny' }),
       paths: { hide: ['/scratch/finance'] },
     })
     expect(args.options.profiles?.reviewer).toEqual({

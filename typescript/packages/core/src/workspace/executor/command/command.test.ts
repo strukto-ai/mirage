@@ -647,7 +647,7 @@ describe('a wrapper', () => {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: { fgrep: { decision: 'deny', reason: 'sealed', paths: ['/private/*'] } },
+            mounts: { '/private': { commands: { fgrep: { decision: 'deny', reason: 'sealed' } } } },
           }),
         },
       },
@@ -662,7 +662,7 @@ describe('a wrapper', () => {
         refused.exitCode,
         decoder.decode(refused.stdout),
         decoder.decode(refused.stderr),
-      ]).toEqual([1, '', 'fgrep: /private/token: Permission denied\n'])
+      ]).toEqual([126, '', 'fgrep: Permission denied\n'])
     } finally {
       await ws.close()
     }

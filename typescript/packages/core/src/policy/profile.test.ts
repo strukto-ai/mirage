@@ -448,10 +448,10 @@ const DOCUMENT = {
       mode: 'read',
       paths: { hide: ['/repo/.env'], show: { '/repo/.env.example': null }, reasons: [] },
       commands: {
-        git: { push: { decision: 'ask', reason: 'sign-off', paths: ['/repo'] }, rebase: 'deny' },
+        git: { push: { decision: 'ask', reason: 'sign-off' }, rebase: 'deny' },
       },
     },
-    '/scratch': { mode: 'exec' },
+    '/scratch': { mode: 'exec', commands: { rm: { decision: 'ask', reason: 'shared' } } },
   },
   paths: {
     hide: ['/repo/secrets', '*.pem'],
@@ -463,7 +463,7 @@ const DOCUMENT = {
     ls: 'allow',
     cat: 'allow',
     git: { push: 'allow' },
-    rm: ['allow', { decision: 'ask', reason: 'shared', paths: ['/scratch/*'] }],
+    rm: 'allow',
     curl: 'deny',
   },
 }

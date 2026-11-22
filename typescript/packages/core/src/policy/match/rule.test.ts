@@ -67,16 +67,14 @@ describe('command trees over paths', () => {
   })
 
   it('ioRefusal judges a reached file as one more path', () => {
-    const rules = trees({
-      rm: [
-        { decision: 'deny', reason: 'keys', paths: ['*.key'] },
-        { decision: 'ask', reason: 'nod', paths: ['/d/*'] },
-      ],
+    const rules = trees(null, {
+      '/d': { grep: { decision: 'ask', reason: 'nod' } },
+      '/d/keys': { grep: { decision: 'deny', reason: 'keys' } },
     })
-    const ctx = line(['rm', '-r', '/d'])
+    const ctx = line(['grep', '-r', 'x', '/d'])
     const nod = decide(ctx, rules).asks
     expect(nod.map((a) => a.reason)).toEqual(['nod'])
-    expect(refusal(rules, ctx, '/d/x.key', nod)).toBe('keys')
+    expect(refusal(rules, ctx, '/d/keys/x.key', nod)).toBe('keys')
     expect(refusal(rules, ctx, '/d/a')).toBe('nod')
     expect(refusal(rules, ctx, '/d/a', nod)).toBeNull()
     expect(refusal(rules, ctx, '/open/a')).toBeNull()
@@ -86,10 +84,7 @@ describe('command trees over paths', () => {
   })
 
   it('ioReach reads each start point on its own', () => {
-    const rules = trees({
-      '*': { decision: 'deny', paths: ['/repo/.env'] },
-      rm: { decision: 'ask', paths: ['/data/*'] },
-    })
+    const rules = trees(null, { '/repo/.env': { '*': 'deny' }, '/data': { rm: 'ask' } })
     const find = line(['find', '/repo', '/s3', '/data'])
     expect(reach(rules, find, '/repo')).toBe(true)
     expect(reach(rules, find, '/repo/.env')).toBe(true)
@@ -120,22 +115,18 @@ describe('command trees over paths', () => {
   })
 
   it('ioReach skips an ask the line holds a grant for', () => {
-    const rules = trees({ rm: { decision: 'ask', paths: ['/data/*'] } })
+    const rules = trees(null, { '/data': { rm: 'ask' } })
     const rm = line(['rm', '-rf', '/data'])
     const nod = decide(rm, rules).asks
     expect(reach(rules, rm, '/data')).toBe(true)
     expect(reach(rules, rm, '/data', nod)).toBe(false)
     expect(reach(rules, rm, '/data/sub', nod)).toBe(false)
-    const kept = trees({
-      rm: [
-        { decision: 'ask', paths: ['/data/*'] },
-        { decision: 'deny', paths: ['*.pem'] },
-      ],
-    })
-    const held = decide(rm, kept).asks
+    const kept = trees(null, { '/data': { grep: 'ask' }, '/data/k': { grep: 'deny' } })
+    const grep = line(['grep', '-r', 'x', '/data'])
+    const held = decide(grep, kept).asks
     expect(held.length).toBeGreaterThan(0)
-    expect(reach(kept, rm, '/data', held)).toBe(true)
-    expect(reach(kept, rm, '/data/sub', held)).toBe(true)
+    expect(reach(kept, grep, '/data', held)).toBe(true)
+    expect(reach(kept, grep, '/data/k', held)).toBe(true)
   })
 
   it('ioReach covers every entry ioRefusal refuses below it', () => {
@@ -156,32 +147,12 @@ describe('command trees over paths', () => {
       Record<string, Record<string, unknown>>,
       string,
     ][] = [
-      [{ grep: { decision: 'ask', paths: ['/dir/*'] } }, {}, '/dir'],
-      [{ grep: { decision: 'ask', paths: ['*.pem'] } }, {}, '/dir'],
-      [
-        {
-          grep: [
-            { decision: 'ask', paths: ['/dir/*'] },
-            { decision: 'deny', paths: ['/dir/secret/*'] },
-          ],
-        },
-        {},
-        '/dir/a',
-      ],
-      [{ '*': 'deny', grep: { decision: 'ask', paths: ['/dir/**'] } }, {}, '/dir/a'],
-      [
-        {
-          grep: [
-            { decision: 'ask', paths: ['/dir/*'] },
-            { decision: 'deny', paths: ['*.pem'] },
-          ],
-        },
-        {},
-        '/dir',
-      ],
-      [{ grep: 'ask' }, { '/dir/secret': { grep: { decision: 'deny', paths: ['k.*'] } } }, '/dir'],
-      [{ grep: { decision: 'ask', paths: ['secret'] } }, { '/dir': { grep: 'ask' } }, '/'],
-      [{ '*': { decision: 'deny', paths: ['/dir2/*'] }, grep: 'allow' }, {}, '/dir'],
+      [null, { '/dir': { grep: 'ask' } }, '/dir'],
+      [null, { '/dir': { grep: 'ask' }, '/dir/secret': { grep: 'deny' } }, '/dir/a'],
+      [null, { '/dir': { grep: 'ask' }, '/dir/a/x.pem': { grep: 'deny' } }, '/dir'],
+      [{ grep: 'ask' }, { '/dir/secret': { grep: 'deny' } }, '/dir'],
+      [null, { '/dir/secret': { grep: 'ask' }, '/dir': { grep: 'ask' } }, '/'],
+      [{ grep: 'allow' }, { '/dir2': { '*': 'deny' } }, '/dir'],
     ]
     let checks = 0
     for (const [commands, mounts, operand] of table) {

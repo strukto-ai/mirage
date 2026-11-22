@@ -475,9 +475,13 @@ describe('policy cli fact', () => {
         mode: MountMode.WRITE,
         profiles: {
           sealed: SessionProfile({
-            commands: {
-              peek: { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] },
-              later: { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] },
+            mounts: {
+              '/data/secret.txt': {
+                commands: {
+                  peek: { decision: 'deny', reason: 'sealed' },
+                  later: { decision: 'deny', reason: 'sealed' },
+                },
+              },
             },
           }),
         },
@@ -743,7 +747,7 @@ describe('a session hides reach what a CLI prints', () => {
             commands: { '*': 'allow', shelf: 'allow' },
           }),
           sealed: SessionProfile({
-            commands: { shelf: { decision: 'deny', reason: 'sealed', paths: ['/data'] } },
+            mounts: { '/data': { commands: { shelf: { decision: 'deny', reason: 'sealed' } } } },
           }),
         },
       },

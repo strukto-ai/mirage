@@ -51,20 +51,29 @@ function gateCtx(tokens: string[]): CommandContext {
 const DOC = SessionProfile({
   commands: {
     '*': 'deny',
-    cat: ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] }],
+    cat: 'allow',
     rm: 'allow',
-    ls: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    ls: 'allow',
     ln: 'allow',
     echo: 'allow',
     head: 'allow',
-    grep: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
-    rg: ['allow', { decision: 'deny', reason: 'private', paths: ['/data/private'] }],
+    grep: 'allow',
+    rg: 'allow',
     cd: 'allow',
     xargs: 'allow',
     sh: 'allow',
     mkdir: 'allow',
     eval: 'allow',
     source: 'allow',
+  },
+  mounts: {
+    '/data/secret': { commands: { cat: { decision: 'deny', reason: 'sealed' } } },
+    '/data/secret2': { commands: { cat: { decision: 'deny', reason: 'sealed' } } },
+    '/data/private': {
+      commands: Object.fromEntries(
+        ['ls', 'grep', 'rg'].map((name) => [name, { decision: 'deny', reason: 'private' }]),
+      ),
+    },
   },
 })
 
@@ -99,7 +108,7 @@ describe('admission', () => {
         mode: MountMode.WRITE,
         profiles: {
           default: SessionProfile({
-            commands: { '*': { decision: 'deny', reason: 'elsewhere', paths: ['/secret'] } },
+            mounts: { '/secret': { commands: { '*': { decision: 'deny', reason: 'elsewhere' } } } },
           }),
         },
       },
@@ -133,23 +142,17 @@ describe('admission', () => {
     }
     expect(await run('ls', [])).toBeNull()
     await w.shell('cd /data/private')
-    expect(await run('ls', [])).toEqual([
-      1,
-      "ls: cannot access '.': Permission denied\npolicy denied: private\n",
-    ])
+    expect(await run('ls', [])).toEqual([126, 'ls: Permission denied\npolicy denied: private\n'])
     // A named operand replaces the implied one.
     expect(await run('ls', ['/data'])).toBeNull()
     // grep reads the cwd only under -r; rg yields to a piped stdin.
     expect(await run('grep', ['x'])).toBeNull()
     expect(await run('grep', ['-r', 'x'])).toEqual([
-      1,
-      'grep: /data/private: Permission denied\npolicy denied: private\n',
+      126,
+      'grep: Permission denied\npolicy denied: private\n',
     ])
     expect(await run('rg', ['x'], new TextEncoder().encode('x\n'))).toBeNull()
-    expect(await run('rg', ['x'])).toEqual([
-      1,
-      'rg: /data/private: Permission denied\npolicy denied: private\n',
-    ])
+    expect(await run('rg', ['x'])).toEqual([126, 'rg: Permission denied\npolicy denied: private\n'])
   })
 
   it('a hidden path is no path to any policy', async () => {
@@ -168,28 +171,28 @@ describe('admission', () => {
       return decision instanceof Admitted ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await run(plain, 'cat', '/data/secret')).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await run(veiled, 'cat', '/data/secret')).toBeNull()
     expect(await run(plain, 'ls', '/data/private')).toEqual([
-      1,
-      "ls: cannot access '/data/private': Permission denied\npolicy denied: private\n",
+      126,
+      'ls: Permission denied\npolicy denied: private\n',
     ])
     expect(await run(veiled, 'ls', '/data/private')).toBeNull()
     // The followed target and the implied operand are dropped too.
     await w.shell('ln -s /data/secret /data/l')
     expect(await run(plain, 'cat', '/data/l')).toEqual([
-      1,
-      'cat: /data/l: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await run(veiled, 'cat', '/data/l')).toBeNull()
     // Whatever the session sees is still read as before.
     expect(await run(veiled, 'cat', '/data/a')).toBeNull()
     await w.shell('echo x > /data/private/f')
     expect(await run(plain, 'grep', '-r', 'x', '/data/private')).toEqual([
-      1,
-      'grep: /data/private: Permission denied\npolicy denied: private\n',
+      126,
+      'grep: Permission denied\npolicy denied: private\n',
     ])
     expect(await run(veiled, 'grep', '-r', 'x', '/data/private')).toBeNull()
   })
@@ -207,12 +210,12 @@ describe('admission', () => {
     // Quotes and escapes read as the text they name: a quoted path is a
     // path, a quoted head is the command.
     expect(await line('\'cat\' "/data/secret"')).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await line('cat /data/sec\\ret')).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     // A head only the runtime can expand is refused under any rule.
     expect(await line('$cmd /data/x')).toEqual([126, '$cmd: ' + unread('$cmd')])
@@ -224,13 +227,13 @@ describe('admission', () => {
     expect(await line('echo "$HOME" $(ls /data)')).toBeNull()
     // What a word runs is admitted in turn.
     expect(await line("eval 'cat /data/secret'")).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await line('eval "$p"')).toEqual([126, '"$p": ' + unread('"$p"')])
     expect(await line('echo $(cat /data/secret)')).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await line('ls | xargs cat')).toEqual([
       126,
@@ -278,8 +281,8 @@ describe('admission', () => {
     // A rule reads the literal words, path-shaped ones as paths.
     const sealed = await line('ls /data && cat /data/secret')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\n',
+      126,
+      'cat: Permission denied\n',
     ])
     // The same gate, one command at a time.
     expect(await admit('rm', ['/data/x'], [], session, w.registry, w.namespace)).toBeInstanceOf(
@@ -298,8 +301,8 @@ describe('admission', () => {
       admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     const sealed = await line('cat secret')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
-      1,
-      'cat: secret: Permission denied\n',
+      126,
+      'cat: Permission denied\n',
     ])
     expect(await line('cat open')).toBeNull()
   })
@@ -312,7 +315,12 @@ describe('admission', () => {
     // names the program no operand is a path.
     const w = ws(
       SessionProfile({
-        commands: { '*': { decision: 'deny', reason: 'sealed', paths: ['/data/secret*'] } },
+        mounts: Object.fromEntries(
+          ['/data/secret.py', '/data/secret.js'].map((entry) => [
+            entry,
+            { commands: { '*': { decision: 'deny', reason: 'sealed' } } },
+          ]),
+        ),
       }),
     )
     await w.shell('cd /data')
@@ -321,13 +329,13 @@ describe('admission', () => {
       admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     const sealed = await line('python3 secret.py')
     expect([sealed?.exitCode, DEC.decode(sealed?.stderr)]).toEqual([
-      1,
-      'python3: secret.py: Permission denied\n',
+      126,
+      'python3: Permission denied\n',
     ])
     const dashed = await line('node -- secret.js')
     expect([dashed?.exitCode, DEC.decode(dashed?.stderr)]).toEqual([
-      1,
-      'node: secret.js: Permission denied\n',
+      126,
+      'node: Permission denied\n',
     ])
     expect(await line("python3 -c 'print(1)' secret.py")).toBeNull()
     expect(await line('node -e 1 secret.js')).toBeNull()
@@ -398,13 +406,13 @@ describe('admission', () => {
       return decision === null ? null : [decision.exitCode, voicedStderr(decision)]
     }
     expect(await line('cat < /data/secret')).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await line('head -c 1 /data/open > /data/secret2')).toBeNull()
     expect(await line('cat /data/open > /data/secret2')).toEqual([
-      1,
-      'cat: /data/secret2: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
     expect(await line('cat < $F')).toEqual([
       126,
@@ -433,8 +441,8 @@ describe('admission', () => {
     const session = w.sessionManager.get(w.sessionManager.defaultId)
     const decision = await admitLine(parse(text), session, w.registry, w.namespace, (t) => parse(t))
     expect(decision === null ? null : [decision.exitCode, voicedStderr(decision)]).toEqual([
-      1,
-      'cat: /data/secret: Permission denied\npolicy denied: sealed\n',
+      126,
+      'cat: Permission denied\npolicy denied: sealed\n',
     ])
   })
 
@@ -446,17 +454,13 @@ describe('admission', () => {
     await w.shell('echo TOPSECRET > /data/secret')
     const io = await w.shell(text)
     expect(DEC.decode(io.stdout)).not.toContain('TOPSECRET')
-    expect(DEC.decode(await materialize(io.stderr))).toContain(
-      'cat: /data/secret: Permission denied',
-    )
+    expect(DEC.decode(await materialize(io.stderr))).toContain('cat: Permission denied')
     expect(io.decision?.reason).toBe('sealed')
   })
   it('the admitted gate judges what the line did not name', () => {
-    const rules = trees({
-      grep: [
-        { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] },
-        { decision: 'ask', reason: 'nod', paths: ['/data/asked/*'] },
-      ],
+    const rules = trees(null, {
+      '/data/sealed': { grep: { decision: 'deny', reason: 'sealed' } },
+      '/data/asked': { grep: { decision: 'ask', reason: 'nod' } },
     })
     const ask = ruleTable(rules).find((r) => r.reason === 'nod')
     if (ask === undefined) throw new Error('no ask leaf')
@@ -507,7 +511,7 @@ describe('admission', () => {
   it('the admitted gate scopes each start point on its own', () => {
     // A walk keeps its native op where no rule could reach: the gate of
     // `find /data /other` sets aside only the walk of /data.
-    const rules = trees({ '*': { decision: 'deny', reason: 'sealed', paths: ['/data/sealed'] } })
+    const rules = trees(null, { '/data/sealed': { '*': { decision: 'deny', reason: 'sealed' } } })
     const gate = new Admitted({
       rules,
       ctx: gateCtx(['find', '/data', '/other']),
@@ -872,24 +876,24 @@ async function tested(profile: SessionProfile, name: string, prefix: string, exp
 // each name for itself.
 describe("the shell's own tests", () => {
   const DENY: SessionProfile = SessionProfile({
-    commands: { '*': { decision: 'deny', reason: 'secret', paths: ['/data/secret.txt'] } },
+    mounts: { '/data/secret.txt': { commands: { '*': { decision: 'deny', reason: 'secret' } } } },
   })
 
   it.each(['test', '[', '[['])('%s reads a file operand as a path rule does', async (name) => {
     expect(await tested(DENY, name, 'cd /data && ', '-e secret.txt')).toEqual([
-      1,
+      126,
       '',
-      `${name}: secret.txt: Permission denied\n`,
+      `${name}: Permission denied\n`,
     ])
     expect(await tested(DENY, name, '', '-e /data/secret.txt')).toEqual([
-      1,
+      126,
       '',
-      `${name}: /data/secret.txt: Permission denied\n`,
+      `${name}: Permission denied\n`,
     ])
     expect(await tested(DENY, name, 'cd /data && ', 'a.txt -nt secret.txt')).toEqual([
-      1,
+      126,
       '',
-      `${name}: secret.txt: Permission denied\n`,
+      `${name}: Permission denied\n`,
     ])
     expect(await tested(DENY, name, 'cd /data && ', '-e a.txt')).toEqual([0, '0\n', ''])
   })
@@ -903,17 +907,17 @@ describe("the shell's own tests", () => {
     // as `test -e a -o -e b` would.
     for (const expr of ['-e a.txt || -e secret.txt', '-e nope || -e secret.txt']) {
       expect(await tested(DENY, '[[', 'cd /data && ', expr)).toEqual([
-        1,
+        126,
         '',
-        '[[: secret.txt: Permission denied\n',
+        '[[: Permission denied\n',
       ])
     }
     // A leaf only the run can expand is admitted where it is reached, and a
     // branch never reached is never admitted.
     expect(await tested(DENY, '[[', 'cd /data && x=secret.txt && ', '-e nope || -e $x')).toEqual([
       0,
-      '1\n',
-      '[[: secret.txt: Permission denied\n',
+      '126\n',
+      '[[: Permission denied\n',
     ])
     expect(await tested(DENY, '[[', 'cd /data && x=secret.txt && ', '-e a.txt || -e $x')).toEqual([
       0,
@@ -937,9 +941,8 @@ describe("the shell's own tests", () => {
 })
 
 const SEALED = SessionProfile({
-  commands: {
-    '*': ['allow', { decision: 'deny', reason: 'sealed', paths: ['/data/secret.txt'] }],
-  },
+  commands: { '*': 'allow' },
+  mounts: { '/data/secret.txt': { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
 })
 
 describe('a redirect no command owns', () => {
@@ -977,7 +980,7 @@ describe('a redirect no command owns', () => {
         profiles: {
           closed: SessionProfile({ commands: { '*': 'deny', ls: 'allow', cat: 'allow' } }),
           named: SessionProfile({
-            commands: { cat: { decision: 'deny', paths: ['/data/secret.txt'] } },
+            mounts: { '/data/secret.txt': { commands: { cat: 'deny' } } },
           }),
         },
       },
@@ -1044,9 +1047,8 @@ describe('a redirect no command owns', () => {
 })
 
 const ASKS = SessionProfile({
-  commands: {
-    '*': ['allow', { decision: 'ask', reason: 'nod', paths: ['/data/f'] }],
-  },
+  commands: { '*': 'allow' },
+  mounts: { '/data/f': { commands: { '*': { decision: 'ask', reason: 'nod' } } } },
 })
 
 class LineBox extends Runtime implements LineExecutorMixin {

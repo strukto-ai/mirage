@@ -31,11 +31,13 @@ class Sessions {
 }
 
 const FULL = trees(
+  { cp: { decision: 'ask', reason: 'sign-off' } },
   {
-    rm: { decision: 'deny', reason: 'no repo deletes', paths: ['/repo/*'] },
-    cp: { decision: 'ask', reason: 'sign-off' },
+    '/repo': {
+      rm: { decision: 'deny', reason: 'no repo deletes' },
+      cp: { decision: 'deny', reason: 'read-only' },
+    },
   },
-  { '/repo': { cp: { decision: 'deny', reason: 'read-only' } } },
 )
 const REVIEWER = trees({ '*': 'deny', ls: 'allow', cat: 'allow' })
 
@@ -84,7 +86,8 @@ describe('PermissionsPolicy', () => {
     const refused = judge(p, ['rm', '/repo/x'])
     expect(refused?.kind).toBe('deny')
     if (refused?.kind === 'deny') {
-      expect(refused.path).toBe('/repo/x')
+      expect(refused.reason).toBe('no repo deletes')
+      expect(refused.rule?.mount).toBe('/repo')
       expect(refused.rule?.decision).toBe(Outcome.DENY)
     }
     expect(judge(p, ['rm', '/scratch/x'])).toBeNull()

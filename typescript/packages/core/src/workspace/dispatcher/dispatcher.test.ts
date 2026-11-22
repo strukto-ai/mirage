@@ -3847,7 +3847,7 @@ it.each([
   try {
     ws.createSession('agent', {
       profile: SessionProfile({
-        commands: { '*': { decision: 'deny', reason: 'sealed', paths: [sealed] } },
+        mounts: { [sealed]: { commands: { '*': { decision: 'deny', reason: 'sealed' } } } },
       }),
     })
     await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
@@ -3872,7 +3872,7 @@ it('keeps the one-call tree removal under an approved ask', async () => {
   try {
     ws.createSession('agent', {
       profile: SessionProfile({
-        commands: { rm: { decision: 'ask', reason: 'confirm', paths: ['/d/t/*'] } },
+        mounts: { '/d/t': { commands: { rm: { decision: 'ask', reason: 'confirm' } } } },
       }),
     })
     for (const run of [1, 2]) {

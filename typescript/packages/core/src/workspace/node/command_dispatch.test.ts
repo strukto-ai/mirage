@@ -297,7 +297,7 @@ describe('a wrapper Mirage runs', () => {
 
   it("reads its program's operands", async () => {
     const profile = {
-      commands: { '*': { decision: 'deny', reason: 'secret', paths: ['/data/secret.py'] } },
+      mounts: { '/data/secret.py': { commands: { '*': { decision: 'deny', reason: 'secret' } } } },
     }
     await withBox(profile, async (ws, box) => {
       const bare = await ws.shell('cd /data && python3 secret.py', { sessionId: 's' })
@@ -734,7 +734,7 @@ describe('a wrapper over a path-spelled program', () => {
     const ws = spelledWs({
       profiles: {
         default: SessionProfile({
-          commands: { cat: { decision: 'deny', reason: 'r', paths: ['/secret.txt'] } },
+          mounts: { '/secret.txt': { commands: { cat: { decision: 'deny', reason: 'r' } } } },
         }),
       },
     })
@@ -755,7 +755,7 @@ describe('a wrapper over a path-spelled program', () => {
     const ws = spelledWs({
       profiles: {
         default: SessionProfile({
-          commands: { chmod: { decision: 'deny', reason: 'r', paths: ['/d/s'] } },
+          mounts: { '/d/s': { commands: { chmod: { decision: 'deny', reason: 'r' } } } },
         }),
       },
     })
@@ -785,7 +785,7 @@ describe('a wrapper over a path-spelled program', () => {
     const ws = spelledWs({
       profiles: {
         default: SessionProfile({
-          commands: { rm: { decision: 'deny', reason: 'r', paths: ['/d/k/*'] } },
+          mounts: { '/d/k': { commands: { rm: { decision: 'deny', reason: 'r' } } } },
         }),
       },
     })
@@ -803,7 +803,7 @@ describe('a wrapper over a path-spelled program', () => {
     const ws = spelledWs({
       profiles: {
         default: SessionProfile({
-          commands: { ls: { decision: 'deny', reason: 'r', paths: ['/secret'] } },
+          mounts: { '/secret': { commands: { ls: { decision: 'deny', reason: 'r' } } } },
         }),
       },
     })

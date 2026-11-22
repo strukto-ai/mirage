@@ -433,9 +433,12 @@ describe('external command routing regressions', () => {
   })
 })
 
-/** The production rule law fed one command tree as every session's profile. */
-function profileRule(block: Record<string, unknown>): PermissionsPolicy {
-  const rules = trees(block)
+/**
+ * The production rule law fed folder entries' command trees as every
+ * session's profile.
+ */
+function profileRule(mounts: Record<string, Record<string, unknown>>): PermissionsPolicy {
+  const rules = trees(null, mounts)
   return new PermissionsPolicy({ commandsOf: () => rules })
 }
 
@@ -449,14 +452,14 @@ describe.each(['process', 'shell'] as const)('external %s path admission', (kind
         machines: [probe],
         mode: MountMode.EXEC,
         policies: [
-          profileRule(
-            Object.fromEntries(
+          profileRule({
+            '/work/secret.txt': Object.fromEntries(
               ['cat', 'grep', 'tar'].map((name) => [
                 name,
-                { decision: 'deny', reason: 'protected', paths: ['/work/secret.txt'] },
+                { decision: 'deny', reason: 'protected' },
               ]),
             ),
-          ),
+          }),
         ],
       },
     )
@@ -556,14 +559,11 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
     const [ws, probe] = textWorkspace(
       ['grep', 'python3'],
       [
-        profileRule(
-          Object.fromEntries(
-            ['grep', 'python3'].map((name) => [
-              name,
-              { decision: 'deny', reason: 'protected', paths: ['/work/secret.txt'] },
-            ]),
+        profileRule({
+          '/work/secret.txt': Object.fromEntries(
+            ['grep', 'python3'].map((name) => [name, { decision: 'deny', reason: 'protected' }]),
           ),
-        ),
+        }),
       ],
     )
     try {
@@ -602,7 +602,14 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
         machines: [probe],
         mode: MountMode.EXEC,
         policies: [
-          profileRule({ '*': { decision: 'deny', reason: 'protected', paths: ['/work/*'] } }),
+          profileRule(
+            Object.fromEntries(
+              ['/work/steal.py', '/work/steal.js', '/work/-'].map((entry) => [
+                entry,
+                { '*': { decision: 'deny', reason: 'protected' } },
+              ]),
+            ),
+          ),
         ],
       },
     )
@@ -630,10 +637,9 @@ describe.each(['process', 'shell'] as const)('interpreter %s script admission', 
     const [ws, probe] = await guardedWorkspace()
     try {
       const result = await ws.shell(line)
-      const words = line.split(' ')
-      const [name = '', operand = ''] = [words[0], words.at(-1)]
-      expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe(`${name}: ${operand}: Permission denied\n`)
+      const name = line.split(' ')[0] ?? ''
+      expect(result.exitCode).toBe(126)
+      expect(DEC.decode(result.stderr)).toBe(`${name}: Permission denied\n`)
       expect(result.decision?.reason).toBe('protected')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
     } finally {

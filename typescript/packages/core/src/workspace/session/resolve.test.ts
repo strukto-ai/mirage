@@ -148,7 +148,7 @@ describe('commandRules', () => {
         commands: { '*': 'deny', ls: 'allow' },
         mounts: {
           '/repo': {
-            commands: { rm: { decision: 'deny', paths: ['*.pem'] }, git: { push: 'ask' } },
+            commands: { rm: 'deny', git: { push: 'ask' } },
           },
         },
       }),
@@ -158,7 +158,6 @@ describe('commandRules', () => {
     )
     expect(rules?.trees.map((t) => t.mount)).toEqual(['', '/repo'])
     const leaves = new Map((rules === null ? [] : ruleTable(rules)).map((r) => [r.at, r]))
-    expect(leaves.get('/rm/*')?.paths).toEqual(['/repo/*.pem'])
     expect(leaves.get('/rm/*')?.mount).toBe('/repo')
     expect(leaves.get('/*')?.mount).toBe('')
   })

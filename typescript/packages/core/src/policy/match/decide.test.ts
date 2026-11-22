@@ -51,10 +51,10 @@ describe('decide', () => {
   })
 
   it('a mount tree reports where it was written', () => {
-    const rules = trees(null, { '/a': { rm: { decision: 'deny', paths: ['b/*'] } } })
+    const rules = trees(null, { '/a': { rm: 'deny' } })
     const ruling = decide(line(['rm', '/a/b/x']), rules)
     expect(ruling.outcome).toBe(Outcome.DENY)
-    expect(ruling.rule?.paths).toEqual(['/a/b/*'])
+    expect(ruling.rule?.mount).toBe('/a')
     expect(ruling.source).toBe('mounts./a')
     expect(decide(line(['rm', '/c/x']), rules).outcome).toBe(Outcome.ALLOW)
   })

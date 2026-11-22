@@ -233,13 +233,15 @@ function executableWorkspace(
   commands?: Record<string, unknown>,
   policies?: readonly Policy[],
   machines?: Runtime[],
+  mounts?: Record<string, unknown>,
 ): Workspace {
   const ram = new RAMVFS()
+  const profile = { ...(commands ? { commands } : {}), ...(mounts ? { mounts } : {}) }
   return new Workspace(
     { '/data/': ram },
     {
       mode: MountMode.WRITE,
-      ...(commands ? { profiles: { default: SessionProfile({ commands }) } } : {}),
+      ...(commands || mounts ? { profiles: { default: SessionProfile(profile) } } : {}),
       ...(policies ? { policies } : {}),
       ...(machines ? { machines } : {}),
     },
@@ -529,16 +531,16 @@ describe('workspace policies', () => {
   })
 
   it('guards refuse before backend I/O and leave other paths open', async () => {
-    const ws = executableWorkspace({
-      rm: { decision: 'deny', reason: 'production data is protected', paths: ['/data/prod/*'] },
+    const ws = executableWorkspace(undefined, undefined, undefined, {
+      '/data/prod': {
+        commands: { rm: { decision: 'deny', reason: 'production data is protected' } },
+      },
     })
     try {
       await ws.shell('mkdir -p /data/prod && echo keep > /data/prod/x.txt')
       const refused = await ws.shell('rm /data/prod/x.txt')
-      expect(refused.exitCode).toBe(1)
-      expect(new TextDecoder().decode(refused.stderr)).toBe(
-        "rm: cannot remove '/data/prod/x.txt': Permission denied\n",
-      )
+      expect(refused.exitCode).toBe(126)
+      expect(new TextDecoder().decode(refused.stderr)).toBe('rm: Permission denied\n')
       const intact = await ws.shell('cat /data/prod/x.txt')
       expect(new TextDecoder().decode(intact.stdout)).toBe('keep\n')
     } finally {
@@ -588,10 +590,12 @@ describe('workspace policies', () => {
     // source is a dispatch-level shell builtin and touch is
     // namespace-routed; neither reaches handleCommand, so this pins
     // the method at the dispatch chokepoint.
-    const ws = executableWorkspace({
-      source: { decision: 'deny', reason: 'disabled' },
-      touch: { decision: 'deny', reason: 'frozen', paths: ['/data/prod/*'] },
-    })
+    const ws = executableWorkspace(
+      { source: { decision: 'deny', reason: 'disabled' } },
+      undefined,
+      undefined,
+      { '/data/prod': { commands: { touch: { decision: 'deny', reason: 'frozen' } } } },
+    )
     try {
       const refused = await ws.shell('source /data/setup.sh')
       expect(refused.exitCode).toBe(126)
@@ -604,10 +608,8 @@ describe('workspace policies', () => {
         matched: { command: ['source'], flags: [], keys: [] },
       })
       const frozen = await ws.shell('touch /data/prod/x')
-      expect(frozen.exitCode).toBe(1)
-      expect(new TextDecoder().decode(frozen.stderr)).toBe(
-        "touch: cannot touch '/data/prod/x': Permission denied\n",
-      )
+      expect(frozen.exitCode).toBe(126)
+      expect(new TextDecoder().decode(frozen.stderr)).toBe('touch: Permission denied\n')
       expect(frozen.decision?.reason).toBe('frozen')
       const ok = await ws.shell('touch /data/dev-x && echo done')
       expect(new TextDecoder().decode(ok.stdout)).toContain('done')
@@ -619,13 +621,13 @@ describe('workspace policies', () => {
   it('guards cover path-valued flags', async () => {
     // shuf discovers its output path from -o, not a positional
     // operand; the policy context must include flag-valued paths.
-    const ws = executableWorkspace({
-      shuf: { decision: 'deny', reason: 'prod is protected', paths: ['/data/prod/*'] },
+    const ws = executableWorkspace(undefined, undefined, undefined, {
+      '/data/prod': { commands: { shuf: { decision: 'deny', reason: 'prod is protected' } } },
     })
     try {
       await ws.shell('mkdir -p /data/prod')
       const refused = await ws.shell('shuf -e a -o /data/prod/out')
-      expect(refused.exitCode).toBe(1)
+      expect(refused.exitCode).toBe(126)
       expect(refused.decision?.reason).toBe('prod is protected')
       const listing = await ws.shell('ls /data/prod')
       expect(new TextDecoder().decode(listing.stdout)).not.toContain('out')
@@ -1253,7 +1255,7 @@ describe('postCommand', () => {
       await ws.vfs.write('/data/b', 'b\n'.repeat(3))
       ws.createSession('agent', {
         profile: SessionProfile({
-          commands: { cat: { decision: 'ask', reason: 'b', paths: ['/data/b'] } },
+          mounts: { '/data/b': { commands: { cat: { decision: 'ask', reason: 'b' } } } },
         }),
       })
       const line = 'cat /data/a /data/b | tail -c 4'
