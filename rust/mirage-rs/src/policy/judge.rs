@@ -377,8 +377,8 @@ pub(crate) fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
     if under(&facts.cwd, mount) || facts.paths.iter().any(|p| under(&p.virtual_path, mount)) {
         return true;
     }
-    if facts.walks {
-        return facts.walks_into.iter().any(|root| root == mount);
+    if facts.walks && facts.walks_into.iter().any(|root| root == mount) {
+        return true;
     }
     if !facts.subtree {
         return false;
@@ -584,6 +584,18 @@ mod tests {
         assert_eq!(m.decide(&walk(&[])).outcome, Allow);
         assert_eq!(m.decide(&walk(&["/d/w"])).outcome, Allow);
         assert_eq!(m.decide(&walk(&["/d/w/keep"])).outcome, Deny);
+    }
+
+    #[test]
+    fn a_walk_that_also_removes_its_tree_takes_a_folder_inside_it() {
+        let folder = text("/d/w/keep");
+        let both = CommandFacts {
+            walks: true,
+            subtree: true,
+            ..facts("/", &["rm", "-r", "/d/w"], &["/d/w"])
+        };
+        assert!(touches(&folder, &both));
+        assert!(!touches(&text("/d/other"), &both));
     }
 
     #[test]
