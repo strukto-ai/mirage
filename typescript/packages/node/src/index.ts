@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export * from '@struktoai/mirage-core'
+export { AST_GREP, GH, OFFICE, PDFINFO, PDFTOTEXT } from './clis/index.ts'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { MountCore, type MountCoreOptions } from '@struktoai/mirage-core/mount/core'
 export { isMacosMetadata } from '@struktoai/mirage-core/mount/platform/macos'

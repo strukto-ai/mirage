@@ -109,8 +109,8 @@ from mirage.commands.cli.builtin.git.revparse import (
 from mirage.commands.cli.builtin.git.session import index_locked, opened
 from mirage.commands.cli.builtin.git.tree import (
     Tree,
+    blob_bytes,
     commit_entries,
-    contents,
     valid_path,
 )
 from mirage.commands.cli.builtin.git.types import (
@@ -393,9 +393,6 @@ async def switch_to(
         location.worktree,
         [path.decode("utf-8", errors="replace") for path in replacing],
     )
-    blobs = await asyncio.to_thread(
-        contents, repo, [after[path][1] for path in replacing]
-    )
     # Removals first, and the emptied directories with them, because
     # the two sets name the same place whenever a branch records a file
     # where the other records a directory: writing ``slot/child`` while
@@ -424,6 +421,10 @@ async def switch_to(
         if mode == GITLINK:
             await keep_gitlink(vfs, location.worktree.join(name))
             continue
+        # Read before anything standing in the entry's way is removed, so
+        # a blob that cannot be read takes nothing of the working tree
+        # with it.
+        blob = await asyncio.to_thread(blob_bytes, repo, sha)
         # Whatever the removals above did not take, a component above
         # the entry may still not be a directory: an ignored file or
         # link is in neither tree and in no collision list, so it
@@ -445,7 +446,7 @@ async def switch_to(
             info = await stat_of(vfs, where)
             if info is not None and info.type is FileType.DIRECTORY:
                 await remove_tree(vfs, where)
-        await restore_entry(vfs, where, mode, blobs[sha])
+        await restore_entry(vfs, where, mode, blob)
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it
@@ -935,7 +936,16 @@ async def checkout(
         detach or (ref not in known and target != head.branch)
     ):
         try:
-            named = resolve_commit(repo, target)
+            # A local branch of the name is what git detaches at, ahead
+            # of what the name would resolve to otherwise (a root ref's
+            # file, a tag).
+            if detach and ref in known:
+                note_ambiguity(repo, target)
+                found = repo[repo.refs[ref]]
+                assert isinstance(found, Commit)
+                named = found
+            else:
+                named = resolve_commit(repo, target)
         except GitError as exc:
             if detach:
                 raise DetachPathError(target) from exc

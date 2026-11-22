@@ -17,7 +17,7 @@ import { FileType, LINK_TARGET_KEY, type FileStat, PathSpec } from '../../../../
 import { eexist, isEisdir, isEnotdir, isMissingPath } from '../../../../errors/fs.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { Files } from '../../../../workspace/files.ts'
-import { PERMISSION_BITS, SYMLINK_MODE } from './constants.ts'
+import { PERMISSION_BITS, SYMLINK_MODE, UNSET_PERMISSIONS } from './constants.ts'
 import { MountInWayError } from './errors.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
@@ -111,7 +111,8 @@ export async function restoreEntry(
   mode: string,
   blob: Uint8Array,
 ): Promise<void> {
-  const linked = await isLink(vfs, path)
+  const held = await lstat(vfs, path)
+  const linked = held?.type === FileType.SYMLINK
   if (mode === SYMLINK_MODE) {
     await removeFile(vfs, path)
     // symlink(2) needs the directory above the entry, as the write below
@@ -122,7 +123,13 @@ export async function restoreEntry(
   }
   if (linked) await removeFile(vfs, path)
   await writeFile(vfs, path, blob)
-  await vfs.setattr(path, { mode: Number.parseInt(mode, 8) & PERMISSION_BITS })
+  // A write keeps the bits a file had, and a new file has none set, so the
+  // setattr runs only when it changes them: a checkout writes thousands of
+  // 644 files that need none.
+  const bits = Number.parseInt(mode, 8) & PERMISSION_BITS
+  const had = held === null || linked ? null : held.mode
+  if (((had ?? UNSET_PERMISSIONS) & PERMISSION_BITS) !== bits)
+    await vfs.setattr(path, { mode: bits })
 }
 
 /**

@@ -73,7 +73,7 @@ import {
   writeRef,
 } from './refs.ts'
 import { matched, repoRelative, under as inside, visibleEntries } from './pathspec.ts'
-import { commitFacts, repoArgs, type Repo } from './repo.ts'
+import { commitFacts, refOid, repoArgs, type Repo } from './repo.ts'
 import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
@@ -772,7 +772,14 @@ export async function checkout(
   let named: string | null = null
   if (!creating && (detach || (!known.has(ref) && target !== head.branch))) {
     try {
-      named = await resolveCommit(repo, target)
+      // A local branch of the name is what git detaches at, ahead of what
+      // the name would resolve to otherwise (a root ref's file, a tag).
+      if (detach && known.has(ref)) {
+        await noteAmbiguity(repo, target)
+        named = await refOid(repo, ref)
+      } else {
+        named = await resolveCommit(repo, target)
+      }
     } catch (err) {
       if (!(err instanceof GitError)) throw err
       if (detach) throw new DetachPathError(target)

@@ -1,0 +1,6 @@
+# The Worker with this package and none of its `clis/` entries, which
+# bundle.test.ts sizes with a dry run to show the engines stay out.
+name = "mirage-cloudflare-bundle-bare"
+main = "bundle_bare.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]

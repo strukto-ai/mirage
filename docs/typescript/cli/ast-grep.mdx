@@ -8,10 +8,10 @@ description: Search and rewrite syntax trees in the workspace.
 import Reference from '/snippets/cli/ast-grep.mdx'
 import License from '/snippets/cli/license/ast-grep.mdx'
 
-The browser, Node and Cloudflare bindings load the bundled Rust parser on first use.
+Node installs ast-grep with its package. A browser page or a Worker carries the Rust parser only when it imports the CLI's entry, as below, and loads it on first use.
 
 ```typescript
-import { AST_GREP } from '@struktoai/mirage-core'
+import { AST_GREP } from '@struktoai/mirage-core/clis/ast_grep'
 
 ws.registerCli('ast-grep', AST_GREP)
 ```

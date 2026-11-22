@@ -22,7 +22,7 @@ import {
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
 import { Workspace as BrowserWorkspace, OPFSVFS } from '@struktoai/mirage-browser'
-import { AST_GREP } from '@struktoai/mirage-core'
+import { AST_GREP } from '@struktoai/mirage-core/clis/ast_grep'
 import { TrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'

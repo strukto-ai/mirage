@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import git, { Errors } from 'isomorphic-git'
-import { DWIM_RULES, GITLINK_MODE, HEAD, LOGS_DIR } from './constants.ts'
+import { DWIM_RULES, GITLINK_MODE, HEAD, LOGS_DIR, ROOT_REF } from './constants.ts'
 
 import {
   AmbiguousArgumentError,
@@ -238,6 +238,13 @@ export function refsNamed(table: { has(name: string): boolean }, name: string): 
  */
 async function namedObject(repo: Repo, spelled: string, revision: string): Promise<string> {
   const base = await expandSelector(repo, spelled, revision)
+  // git's first rule is the name in the git directory itself, so a root
+  // ref's file wins over a branch or tag of the same name.
+  const root = await rootRef(repo, base)
+  if (root !== null) {
+    await noteAmbiguity(repo, base)
+    return root
+  }
   let oid: string
   try {
     oid = await refOid(repo, base)
@@ -254,6 +261,25 @@ async function namedObject(repo: Repo, spelled: string, revision: string): Promi
   }
   await noteAmbiguity(repo, base)
   return oid
+}
+
+/**
+ * The id a root ref names, null when the name is none or its file is missing.
+ *
+ * FETCH_HEAD and its kind live in the git directory itself, and git reads one
+ * by the id that leads its first line: FETCH_HEAD's lines go on to say where
+ * each ref came from, which no ref parser takes (pinned against git 2.47.3).
+ *
+ * @param repo repository to resolve against
+ * @param name the name as typed
+ */
+export async function rootRef(repo: Repo, name: string): Promise<string | null> {
+  if (!ROOT_REF.test(name)) return null
+  const data = await readOptional(repo.vfs, repo.location.gitdir.join(name))
+  if (data === null) return null
+  const first = new TextDecoder().decode(data).split('\n', 1)[0] ?? ''
+  const oid = first.split(/\s/, 1)[0] ?? ''
+  return oid === '' ? null : oid
 }
 
 /**
@@ -517,7 +543,9 @@ export async function treeId(repo: Repo, revision: string): Promise<string> {
 export async function noteAmbiguity(repo: Repo, name: string): Promise<void> {
   if (repo.ambiguous === null) return
   const table = await loadRefs(repo.vfs, repo.location.gitdir, repo.location.commondir)
-  if (refsNamed(table, name).length > 1) {
+  // A root ref's file is one more name git's rules find, ahead of the rest.
+  const root = (await rootRef(repo, name)) === null ? 0 : 1
+  if (refsNamed(table, name).length + root > 1) {
     repo.ambiguous.push(`warning: refname '${name}' is ambiguous.\n`)
   }
 }

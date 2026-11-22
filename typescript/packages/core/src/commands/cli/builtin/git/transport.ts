@@ -640,3 +640,26 @@ export async function openTransport(
 export function isLocal(url: string): boolean {
   return !REMOTE_HELPER.test(url) && !SCP_LIKE.test(url)
 }
+
+// How C's atoi and strtol(..., 0) read a number, which is how git reads
+// `--depth`: atoi for the positive check, strtol for the value.
+const ATOI = /^\s*([+-]?\d+)/
+const STRTOL = /^\s*\+?(0[xX][0-9a-fA-F]+|0[0-7]*|[1-9]\d*)$/
+
+/** Refuse a `--depth` git refuses, cloning or fetching: one C's atoi reads below one. */
+export function checkDepth(text: string): void {
+  const found = ATOI.exec(text)?.[1]
+  if (found === undefined || Number.parseInt(found, 10) < 1)
+    throw new GitError(`depth ${text} is not a positive number`)
+}
+
+/**
+ * `--depth` as the transport reads it, C's strtol in base 0; the value is past
+ * `checkDepth`, so it is never negative.
+ */
+export function transportDepth(text: string): number {
+  const digits = STRTOL.exec(text)?.[1]
+  if (digits === undefined) throw new GitError(`transport: invalid depth option '${text}'`)
+  if (/^0[xX]/.test(digits)) return Number.parseInt(digits.slice(2), 16)
+  return Number.parseInt(digits, digits.startsWith('0') ? 8 : 10)
+}

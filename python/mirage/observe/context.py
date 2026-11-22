@@ -22,6 +22,7 @@ from mirage.context.session_context import (
     current_process_id,
     reset_caller,
 )
+from mirage.execution.types import ProcessId
 from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     LostPaths,
@@ -33,6 +34,26 @@ from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
 
 SYSTEM_CLOCK = SystemClock()
+
+
+# Each process's id as its records name it, written once: a record per op
+# otherwise held its own copy, and a clone makes tens of thousands of them.
+# A process id never repeats, so the table empties past a few.
+PROCESS_TEXT: dict[ProcessId, str] = {}
+
+
+def _process_text() -> str | None:
+    """The current process's id as its records name it, None outside
+    one."""
+    pid = current_process_id()
+    if pid is None:
+        return None
+    text = PROCESS_TEXT.get(pid)
+    if text is None:
+        if len(PROCESS_TEXT) >= 64:
+            PROCESS_TEXT.clear()
+        text = PROCESS_TEXT[pid] = str(pid)
+    return text
 
 
 def line_version(
@@ -369,7 +390,7 @@ def finish_record(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=recorder.mount_id if recorder is not None else None,
-        process=str(pid) if (pid := current_process_id()) else None,
+        process=_process_text(),
     )
 
 
@@ -474,7 +495,7 @@ def record_stream(
         fingerprint=fingerprint,
         revision=revision,
         mount_id=rec.mount_id,
-        process=str(pid) if (pid := current_process_id()) else None,
+        process=_process_text(),
     )
     op_rec.complete = False
     rec.sink.append(op_rec)

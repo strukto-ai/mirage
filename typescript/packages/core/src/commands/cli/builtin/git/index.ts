@@ -1000,6 +1000,7 @@ export const GIT = new CLI({
           }),
           new Argument(['-t', '--tags'], { action: 'store_true', help: 'Fetch every tag' }),
           new Argument(['-n', '--no-tags'], { action: 'store_true', help: 'Follow no tags' }),
+          new Argument('--depth', { help: 'Fetch only this many commits of history' }),
           REVISION,
         ],
       }),

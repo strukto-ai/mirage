@@ -200,6 +200,15 @@ The [supported VFS](/home/setup/vfs#supported-vfs) and [supported CLIs](/home/se
 `proxy`, Redis is reached through Cloudflare's `connect()`, and the `mcp` and
 `search` CLIs also run.
 
+`ast-grep`, `gh`, `office`, `pdfinfo` and `pdftotext` each carry an engine that
+counts toward the Worker's 64 MiB, so the Worker carries one only when it
+imports its entry:
+
+```ts src/worker.ts
+import '@struktoai/mirage-cloudflare/clis/gh'
+import '@struktoai/mirage-cloudflare/clis/ast_grep'
+```
+
 ## Limits
 
 - An isolate has 128 MB and no disk, shared by every workspace in it. Set

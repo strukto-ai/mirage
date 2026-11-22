@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import './clis/index.ts'
 import { KERNEL_BACKENDS, MountBackend } from '@struktoai/mirage-core/types'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'

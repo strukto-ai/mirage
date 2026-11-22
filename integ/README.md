@@ -498,6 +498,11 @@ additional jobs:
 
 Shared TypeScript fixtures under `packages/*/tests/` remain covered by the
 whole-host TypeScript filters, since integration runners import some of them.
+The `src/clis/` entries that install ast-grep, gh, office and the PDF tools
+(in `core`, `node`, `browser` and `cloudflare`) use the same filters: the ts job
+reaches them through the runners and Node's entry points, the browser job
+through `integ/browser/suite.ts`, and the cloudflare job through the test
+Worker's imports.
 The agent adapter packages, `openai-agents` among them, select no job.
 Rust filename sanitization (`rust/mirage-rs/src/sanitize.rs`), its mirrored
 `utils/sanitize` adapters, `core/generic/types`, and the condition `errors`

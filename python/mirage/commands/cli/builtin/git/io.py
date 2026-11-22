@@ -14,7 +14,11 @@
 
 import logging
 
-from mirage.commands.cli.builtin.git.constants import PERMISSION_BITS, SYMLINK
+from mirage.commands.cli.builtin.git.constants import (
+    PERMISSION_BITS,
+    SYMLINK,
+    UNSET_PERMISSIONS,
+)
 from mirage.commands.cli.builtin.git.errors import MountInWayError
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import eexist
@@ -132,10 +136,10 @@ async def restore_entry(
     modification ``restore`` undoes, and ``chmod +x`` on a ``100644``
     one is a modification it undoes the other way. Writing the bytes
     alone left the bit as the working tree had it, so the file came back
-    unrunnable and ``status`` went on calling it modified for ever. The
-    write is unconditional rather than probed: a stat to decide costs
-    the same op as the setattr it would save, and the backends git
-    actually runs on apply it natively, so nothing reaches the overlay.
+    unrunnable and ``status`` went on calling it modified for ever. A
+    write keeps the bits a file had and a new file has none set, so the
+    setattr runs only when it changes them, read off the lstat already
+    made: a checkout writes thousands of 644 files that need none.
 
     Args:
         vfs (Files): the session's files.
@@ -143,7 +147,8 @@ async def restore_entry(
         mode (int): the tree entry's mode.
         blob (bytes): the entry's blob content.
     """
-    linked = await is_link(vfs, path)
+    held = await lstat(vfs, path)
+    linked = held is not None and held.type is FileType.SYMLINK
     if mode == SYMLINK:
         await remove_file(vfs, path)
         # symlink(2) needs the directory above the entry, as the write
@@ -154,7 +159,10 @@ async def restore_entry(
     if linked:
         await remove_file(vfs, path)
     await write_file(vfs, path, blob)
-    await vfs.setattr(path, mode=mode & PERMISSION_BITS)
+    bits = mode & PERMISSION_BITS
+    had = None if held is None or linked else held.mode
+    if (UNSET_PERMISSIONS if had is None else had) & PERMISSION_BITS != bits:
+        await vfs.setattr(path, mode=bits)
 
 
 async def keep_gitlink(vfs: Files, path: PathSpec) -> None:

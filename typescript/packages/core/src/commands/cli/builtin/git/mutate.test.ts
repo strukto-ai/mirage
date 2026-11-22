@@ -47,6 +47,7 @@ import {
   refuseMount,
   removeEmptyParents,
   removeTree,
+  restoreEntry,
 } from './io.ts'
 import { blockingRef } from './refs.ts'
 
@@ -2877,6 +2878,62 @@ function quiet(): { calls: [string, string][]; dispatch: CallerDispatchFn } {
   }
   return { calls, dispatch }
 }
+
+/** A file at /repo/slot with the bits it was given, or nothing there, under directories; it records each setattr. */
+function holding(present: boolean, mode: number | null) {
+  const state = { present, mode, set: [] as number[] }
+  const dispatch: CallerDispatchFn = (op, path, _args, kwargs) => {
+    const where = path.virtual
+    if (op === 'stat') {
+      if (where !== '/repo/slot') {
+        const name = where.slice(where.lastIndexOf('/') + 1)
+        return Promise.resolve([new FileStat({ name, type: FileType.DIRECTORY }), new IOResult()])
+      }
+      if (!state.present) {
+        return Promise.reject(Object.assign(new Error(where), { code: 'ENOENT' }))
+      }
+      return Promise.resolve([
+        new FileStat({ name: 'slot', type: FileType.FILE, mode: state.mode }),
+        new IOResult(),
+      ])
+    }
+    if (op === 'write') state.present = true
+    if (op === 'setattr') {
+      const bits = Number(kwargs?.mode)
+      state.set.push(bits)
+      state.mode = bits
+      return Promise.resolve([{}, new IOResult()])
+    }
+    return Promise.resolve([null, new IOResult()])
+  }
+  return { state, dispatch }
+}
+
+// A checkout writes thousands of files: the setattr after each runs only when
+// it changes the bits, a new file rendering 644 and a write keeping what a file
+// had.
+describe('restoreEntry', () => {
+  it.each([
+    [false, null, '100644', []],
+    [false, null, '100755', [0o755]],
+    [true, null, '100644', []],
+    [true, 0o755, '100644', [0o644]],
+    [true, 0o644, '100755', [0o755]],
+    [true, 0o755, '100755', []],
+  ] as const)(
+    'present %s with bits %s restored as %s sets %j',
+    async (present, had, mode, want) => {
+      const { state, dispatch } = holding(present, had)
+      await restoreEntry(
+        filesOver(dispatch),
+        PathSpec.fromStrPath('/repo/slot'),
+        mode,
+        new Uint8Array([120]),
+      )
+      expect(state.set).toEqual(want)
+    },
+  )
+})
 
 describe('removeTree meeting a link', () => {
   /** A dispatcher that lists one link and records every op it is asked for. */
