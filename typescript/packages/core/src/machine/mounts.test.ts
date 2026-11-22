@@ -887,7 +887,49 @@ describe('MachineMounts', () => {
     await ws.close()
   })
 
-  it('refuses a session made again under its id', async () => {
+  it('lets sessions with one view share the machine', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const first = await ws.session('first', { profile: 'agent' })
+    const second = await ws.session('second', { profile: 'agent' })
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    const pipes = [...sandbox.pipes]
+    const result = await second.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+    expect(sandbox.pipes).toEqual(pipes)
+    await ws.close()
+  })
+
+  it('keeps the machine on the view of the session it first served', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const first = await ws.session('first', { profile: 'agent' })
+    const second = await ws.session('second', { profile: 'agent' })
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    expect((await second.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.setSessionProfile('second', null)
+    const moved = await second.shell('python3 job.py')
+    expect([moved.exitCode, DEC.decode(moved.stderr)]).toEqual([
+      1,
+      "fake: this machine shows session first's view of the workspace; " +
+        'give session second a machine of its own\n',
+    ])
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('lets sessions share whatever order their mounts were listed in', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    const first = await ws.session('first', { mounts: { '/data': 'read', '/my notes': 'read' } })
+    const second = await ws.session('second', { mounts: { '/my notes': 'read', '/data': 'read' } })
+    expect((await first.shell('python3 job.py')).exitCode).toBe(0)
+    const result = await second.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+    await ws.close()
+  })
+
+  it('lets a session made again under its view share the machine', async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox)
     let agent = await ws.session('agent', { profile: 'agent' })
@@ -895,12 +937,23 @@ describe('MachineMounts', () => {
     await ws.closeSession('agent')
     agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])
+    await ws.close()
+  })
+
+  it('refuses a session made again under another view', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox)
+    let agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.closeSession('agent')
+    agent = await ws.session('agent')
+    const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(1)
     expect(DEC.decode(result.stderr)).toBe(
       "fake: this machine shows an earlier session agent's view of the workspace; " +
         'give session agent a machine of its own\n',
     )
-    expect(sandbox.pipes).toHaveLength(2)
     await ws.close()
   })
 

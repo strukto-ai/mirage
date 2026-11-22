@@ -96,6 +96,25 @@ export const SSHFS_LINKS_OPTION = 'no_contain_symlinks'
 // so each instance knows its own mounts from another's on the same machine.
 export const SSHFS_SOURCE_PREFIX = 'mirage-'
 
+// The keys of a session's record a served machine's view rests on: the
+// narrowing its profile stamps, which no line edits, and the host's standing
+// decisions. A session whose record matches on every one sees what the
+// served session sees, so the machine shows it the same mounts.
+export const VIEW_KEYS = [
+  'mount_modes',
+  'hidden_paths',
+  'shown_paths',
+  'hide_reasons',
+  'hidden_vars',
+  'command_trees',
+  'scripts',
+  'command_limits',
+  'network',
+  'processes',
+  'profile',
+  'decisions',
+] as const
+
 // The line that makes sure the machine has sshfs, exiting 0 once it does:
 // one it lacks is installed by its package manager, as root or through sudo
 // without a password, from the package lists the image keeps and, when that

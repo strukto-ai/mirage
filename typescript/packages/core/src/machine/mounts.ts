@@ -58,6 +58,7 @@ import {
   SSHFS_SOURCE_PREFIX,
   SYNTHETIC_CONF,
   UNMOUNT_WAIT_SECONDS,
+  VIEW_KEYS,
   machineDirLine,
   mountField,
 } from './constants.ts'
@@ -100,6 +101,25 @@ export function registerPipeServer(
 
 const DECODER = new TextDecoder()
 const ENCODER = new TextEncoder()
+/**
+ * What a served machine shows `session`: its record's `VIEW_KEYS`. Each SSH
+ * login, port forward and reconnect is a session of its own, so a machine
+ * compares views, not sessions: one whose view matches the session it first
+ * served runs there too, and that session stays the one compared against. Keys compare in any order, as Python's dicts do.
+ */
+function viewOf(session: SessionState): string {
+  const record = session.toDict(false)
+  return JSON.stringify(
+    VIEW_KEYS.map((key) => record[key] ?? null),
+    keysInOrder,
+  )
+}
+
+function keysInOrder(_key: string, value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+}
+
 const OCTAL_ESCAPE = /\\([0-7]{3})/g
 
 function octalChar(_match: string, digits: string): string {
@@ -649,7 +669,7 @@ export class MachineMounts {
       if (this.served.size === 0) this.name = id === '' ? this.random : sourceName(id, this.machine)
       const served = this.session
       const session = getSession(current.sessionId)
-      if (served !== null && served !== session) {
+      if (served !== null && served !== session && viewOf(served) !== viewOf(session)) {
         const earlier = served.sessionId === current.sessionId ? 'an earlier ' : ''
         return refuse(
           `${this.provider}: this machine shows ${earlier}session ${served.sessionId}'s view ` +
@@ -667,7 +687,7 @@ export class MachineMounts {
       const lost = this.lost()
       if (lost !== null) return refuse(`${unmounted(this.provider, lost)}\n`, CANNOT_EXECUTE_STATUS)
       const unserved = this.unserved(ruled)
-      if (this.mountType !== 'own' && (!unserved || this.served.size > 0)) {
+      if (served === null && this.mountType !== 'own' && (!unserved || this.served.size > 0)) {
         this.session = session
       }
       return unserved
