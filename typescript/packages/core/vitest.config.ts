@@ -28,5 +28,16 @@ export default defineConfig({
     // transforms and reports, so on a 4-core runner a quarter of this, the
     // longest test leg, sat idle.
     maxWorkers: '100%',
+    // A commit starts `git maintenance run --auto`, and on a recent git (seen
+    // on 2.56) its `.git/objects/maintenance.lock` is still there when the
+    // commit returns and goes a moment later. A test that copies the
+    // repository into a workspace then lists a file that is gone before it
+    // reads it. No test wants that run, so the real git every test starts
+    // has it off.
+    env: {
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'maintenance.auto',
+      GIT_CONFIG_VALUE_0: 'false',
+    },
   },
 })

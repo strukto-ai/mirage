@@ -56,7 +56,7 @@ async def test_native_git(readonly_repo, form):
     native = subprocess.run(
         ["git", "-C", str(readonly_repo), *shlex.split(form)],
         capture_output=True,
-        env=ENV,
+        env={**ENV, "GIT_CONFIG_COUNT": "0"},
     )
     with mounted(readonly_repo) as ws:
         ws.register_cli("git", GIT)
