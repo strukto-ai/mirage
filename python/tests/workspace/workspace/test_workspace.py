@@ -29,12 +29,15 @@ import pytest
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_caller, set_current_session
 from mirage.execution.job import JobState
 from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
+from mirage.io import IOResult
 from mirage.machine import MachineHandle
 from mirage.policy.errors import PolicyError
 from mirage.types import (
@@ -1239,3 +1242,64 @@ async def test_a_snapshot_reloads_after_its_profiles_mount_is_unmounted():
         assert loaded.profiles["agent"].mounts["/later"].mode == MountMode.READ
     finally:
         await loaded.close()
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_reloads_after_a_nested_profile_mount_is_unmounted():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws.add_mount("/data/keep", RAMVFS(), MountMode.WRITE)
+    ws.set_profile("agent", {"mounts": {"/data/keep": "read"}})
+    await ws.unmount("/data/keep")
+    buf = io.BytesIO()
+    await ws.snapshot(buf)
+    await ws.close()
+    buf.seek(0)
+    loaded = await Workspace.load(buf)
+    try:
+        assert (
+            loaded.profiles["agent"].mounts["/data/keep"].mode
+            == MountMode.READ
+        )
+        with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+            loaded.create_session("a", profile="agent")
+    finally:
+        await loaded.close()
+    buf.seek(0)
+    with pytest.raises(PolicyError, match=re.escape(FOLDER_MODE)):
+        await Workspace.load(
+            buf, profiles={"agent": {"mounts": {"/data/keep": "read"}}}
+        )
+
+
+async def _ran(accessor, paths, texts, ctx):
+    return b"ran\n", IOResult()
+
+
+def _deploy(sub: str) -> CLI:
+    return CLI(
+        spec=CommandSpec(name="deploy", subcommands=(CommandSpec(name=sub),)),
+        handlers={sub: CLIHandler(fn=_ran)},
+    )
+
+
+class _Served(RAMVFS):
+    def commands(self) -> list[Any]:
+        return [_deploy("old")]
+
+
+@pytest.mark.asyncio
+async def test_a_profile_is_read_by_the_cli_the_constructor_installs():
+    ws = Workspace(
+        {"/data": _Served()},
+        clis={"deploy": (_deploy("new"), None)},
+        profiles={"agent": {"commands": {"deploy": {"new": "deny"}}}},
+    )
+    try:
+        ws.create_session("a", profile="agent")
+        io = await ws.shell("deploy new", session_id="a")
+        assert (io.exit_code, io.stderr) == (
+            126,
+            b"deploy: Permission denied\n",
+        )
+    finally:
+        await ws.close()

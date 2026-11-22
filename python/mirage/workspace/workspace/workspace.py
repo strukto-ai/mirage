@@ -646,32 +646,23 @@ class Workspace:
         # clears these, not only what the state store would hand out.
         self._planes = (stores.namespace, stores.observe, stores.sessions)
         self._mount_views()
-        # Every mount is in place, so a profile's modes can be held
+        # Installed CLIs, fully separate from mounts: the YAML `clis:`
+        # section arrives as {head: (spec key or tree, config)}; a spec
+        # key resolves against the named registry and every entry
+        # installs through the same fail-loud path as register_cli.
+        for cli_name, (spec_or_key, cli_config) in (clis or {}).items():
+            cli_spec = (
+                spec_or_key
+                if isinstance(spec_or_key, CLI)
+                else cli_spec_for(spec_or_key)
+            )
+            self._registry.clis.install(cli_name, cli_spec, cli_config)
+        # Every mount is in place and every CLI installed, so a profile
+        # is read by the grammars a line is, and its modes are held
         # against the mounts they name.
         for name, doc in (profiles or {}).items():
             self.set_profile(name, doc)
-        self._default_profile_name = profile
-        if profile is not None and profile not in self._profiles:
-            raise PolicyError(f"unknown profile {profile!r}")
-        # What the workspace and its mounts hide from every session,
-        # stamped onto the default session now and onto every session
-        # created or hydrated later.
-        # The workspace's own session is a session created without a
-        # name, so the default profile shapes it too: the primary agent
-        # is not the one agent the document cannot reach.
-        default_base = self._base_profile(None)
-        self._session_mgr.default_profile = (
-            self._compile(default_base, None)
-            if default_base is not None
-            or self._workspace_processes is not None
-            else None
-        )
-        # Every session starts within max_env, this one with the
-        # workspace's env and its profile's.
-        self._session_mgr.max_env = self._registry.max_env
-        check_env_fits(
-            self._session_mgr.get(session_id), self._registry.max_env
-        )
+        self._use_default_profile(profile)
 
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
@@ -742,7 +733,7 @@ class Workspace:
         self._runtimes.resolve(entries)
         self._router = Router(self._registry, self._runtimes, self._namespace)
 
-        self._start_installs(clis, specs)
+        self._start_kernel_mounts(specs)
         self._trees_changed()
         for mounted in self._registry.mounts():
             mounted.trees_changed = self._trees_changed
@@ -949,29 +940,13 @@ class Workspace:
         self.process_table.machine_resources = self.machine_table.resources
         self.process_table.machine_instance = self.machine_table.instance
 
-    def _start_installs(
-        self,
-        clis: dict[str, tuple[str | CLI, dict[str, Any] | None]] | None,
-        specs: list[Any],
-    ) -> None:
-        """Install the CLIs, bind the clocks and start the kernel mounts.
+    def _start_kernel_mounts(self, specs: list[Any]) -> None:
+        """Bind the clocks and start the kernel mounts.
 
         Args:
-            clis (dict | None): the CLI entries by installed name.
             specs (list[Any]): the normalized mount specs.
         """
-        # Installed CLIs, fully separate from mounts: the YAML `clis:`
-        # section arrives as {head: (spec key or tree, config)}; a spec
-        # key resolves against the named registry and every entry
-        # installs through the same fail-loud path as register_cli.
         try:
-            for cli_name, (spec_or_key, cli_config) in (clis or {}).items():
-                cli_spec = (
-                    spec_or_key
-                    if isinstance(spec_or_key, CLI)
-                    else cli_spec_for(spec_or_key)
-                )
-                self._registry.clis.install(cli_name, cli_spec, cli_config)
             self._registry.bind_clocks()
             for spec in specs:
                 if spec.backend in KERNEL_BACKENDS:
@@ -2646,6 +2621,7 @@ class Workspace:
         # state did not record, so the restored sessions keep the
         # narrowing it gives them, as a checkout's do.
         built_for_state = profiles is None and profile is None
+        recorded = profiles is None
         # No read= here: each restored Mount carries its own spec, and
         # its own mode, so `mode` reaches only a scratch root the
         # workspace adds, for a state that saved none.
@@ -2663,8 +2639,8 @@ class Workspace:
             clis=args.clis,
             secrets=secrets,
             command_limits=args.command_limits,
-            profiles=args.profiles if profiles is None else profiles,
-            profile=args.profile if built_for_state else profile,
+            profiles=None if recorded else profiles,
+            profile=None if recorded else profile,
             processes=args.processes,
             ceilings=ceilings,
             machines=machines,
@@ -2682,6 +2658,10 @@ class Workspace:
                 for r in mounts.values()
             }
         try:
+            if recorded:
+                ws._adopt_profiles(
+                    args.profiles, args.profile if built_for_state else profile
+                )
             await apply_state_dict(
                 ws, state, built_for_state=built_for_state, shared=shared
             )
@@ -3010,6 +2990,57 @@ class Workspace:
         self._check_modes(doc)
         self._compile(doc, name)
         self._profiles[name] = doc
+
+    def _use_default_profile(self, profile: str | None) -> None:
+        """Name the profile a session gets when it names none, and shape
+        the workspace's own session by it: that session is one created
+        without a name, so the default profile reaches it too, and the
+        primary agent is not the one agent the document cannot reach.
+
+        Args:
+            profile (str | None): the default profile's name; None for
+                ``profiles.default`` when the table has one.
+
+        Raises:
+            PolicyError: the table has no profile of that name.
+        """
+        if profile is not None and profile not in self._profiles:
+            raise PolicyError(f"unknown profile {profile!r}")
+        self._default_profile_name = profile
+        default_base = self._base_profile(None)
+        self._session_mgr.default_profile = (
+            self._compile(default_base, None)
+            if default_base is not None
+            or self._workspace_processes is not None
+            else None
+        )
+        # Every session starts within max_env, this one with the
+        # workspace's env and its profile's.
+        self._session_mgr.max_env = self._registry.max_env
+        check_env_fits(
+            self._session_mgr.get(self._session_mgr.default_id),
+            self._registry.max_env,
+        )
+
+    def _adopt_profiles(
+        self, profiles: Mapping[str, SessionProfile], profile: str | None
+    ) -> None:
+        """Take a recorded profile table as the workspace held it.
+
+        A mode the table puts on a folder stays: the mount it named may
+        have been unmounted since, leaving the folder inside another
+        mount, and a session taking that profile is refused then
+        (``_check_modes``), not the restore.
+
+        Args:
+            profiles (Mapping[str, SessionProfile]): the table by name.
+            profile (str | None): the default profile's name.
+        """
+        for name, doc in profiles.items():
+            doc = SessionProfile.model_validate(doc)
+            self._compile(doc, name)
+            self._profiles[name] = doc
+        self._use_default_profile(profile)
 
     def _check_modes(self, *docs: SessionProfile | None) -> None:
         """Hold each document against the mounts there are now, as it

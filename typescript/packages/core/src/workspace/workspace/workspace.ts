@@ -149,7 +149,7 @@ import { pathVisible } from '../../utils/hidden.ts'
 import { checkName, type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { normDir, parent } from '../../utils/path.ts'
+import { norm, normDir, parent } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { BinViewVFS } from '../../vfs/bin/bin.ts'
@@ -383,8 +383,7 @@ export class Workspace {
   private readonly profilesInternal = Object.create(null) as Record<string, SessionProfile>
   /** The workspace's `processes` block as stated, which each profile's overrides. */
   readonly workspaceProcesses: Partial<ProcessPermissions> | null
-  /** The profile table's default. */
-  readonly defaultProfileName: string | null
+  private defaultProfileInternal: string | null = null
   // True when `/` is an anchor the workspace added or a restore mounted (see syntheticRoot).
   // The anchor is internal and is not forwarded into the Pyodide filesystem.
   private syntheticRootAnchor = false
@@ -640,23 +639,13 @@ export class Workspace {
       })
       this.syntheticRootAnchor = true
     }
-    // Every mount is in place, so a profile's modes can be held against
-    // the mounts they name.
+    // Every mount is in place and every CLI installed, so a profile is
+    // read by the grammars a line is, and its modes are held against the
+    // mounts they name.
     for (const [name, profile] of Object.entries(options.profiles ?? {})) {
       this.setProfile(name, profile)
     }
-    this.defaultProfileName = options.profile ?? null
-    if (this.defaultProfileName !== null && !(this.defaultProfileName in this.profiles)) {
-      throw new PolicyError(`unknown profile ${JSON.stringify(this.defaultProfileName)}`)
-    }
-    // The workspace's own session is a session created without a name,
-    // so `profiles.default` shapes it too (design 3.4): the primary
-    // agent is not the one agent the document cannot reach.
-    const defaultBase = this.baseProfile(null)
-    this.sessionManager.defaultProfile =
-      defaultBase === null && this.workspaceProcesses === null
-        ? null
-        : this.compile(defaultBase, null)
+    this.useDefaultProfile(options.profile ?? null)
     this.applyLimits(options)
     // Every connection a line or an op opens must clear the workspace's
     // network setting and the process's ceiling.
@@ -760,6 +749,44 @@ export class Workspace {
       }
     this.sessionManager.rulesRead = (rules) => this.readBack(rules)
     this.machineTable.holdHandles()
+  }
+
+  /**
+   * Name the profile a session gets when it names none, and shape the
+   * workspace's own session by it: that session is one created without a
+   * name, so `profiles.default` reaches it too (design 3.4), and the
+   * primary agent is not the one agent the document cannot reach. Mirrors
+   * Python's `_use_default_profile`.
+   */
+  private useDefaultProfile(profile: string | null): void {
+    if (profile !== null && !(profile in this.profiles)) {
+      throw new PolicyError(`unknown profile ${JSON.stringify(profile)}`)
+    }
+    this.defaultProfileInternal = profile
+    const defaultBase = this.baseProfile(null)
+    this.sessionManager.defaultProfile =
+      defaultBase === null && this.workspaceProcesses === null
+        ? null
+        : this.compile(defaultBase, null)
+  }
+
+  /**
+   * Take a recorded profile table as the workspace held it. A mode the
+   * table puts on a folder stays: the mount it named may have been
+   * unmounted since, leaving the folder inside another mount, and a
+   * session taking that profile is refused then (`checkModes`), not the
+   * restore. Mirrors Python's `_adopt_profiles`.
+   */
+  private adoptProfiles(
+    profiles: Readonly<Record<string, SessionProfile>>,
+    profile: string | null,
+  ): void {
+    for (const [name, doc] of Object.entries(profiles)) {
+      this.compile(doc, name)
+      this.profilesInternal[name] = doc
+    }
+    this.useDefaultProfile(profile)
+    checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
   }
 
   /** Set the workspace's bounds on its registry. */
@@ -1425,7 +1452,8 @@ export class Workspace {
     if (profile === null && this.defaultProfileName !== null) {
       return this.profiles[this.defaultProfileName] ?? null
     }
-    return resolveProfile(this.profiles, profile)
+    const doc = resolveProfile(this.profiles, profile)
+    return doc === null ? null : this.canonicalMounts(doc)
   }
 
   /**
@@ -1490,7 +1518,8 @@ export class Workspace {
     } = {},
   ): SessionState {
     const base = this.baseProfile(options.profile ?? null)
-    let inline: SessionProfile | null = options.permissions ?? null
+    let inline: SessionProfile | null =
+      options.permissions == null ? null : this.canonicalMounts(options.permissions)
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
@@ -1623,6 +1652,11 @@ export class Workspace {
   }
 
   /** The profile table every session here runs under. */
+  /** The profile table's default. */
+  get defaultProfileName(): string | null {
+    return this.defaultProfileInternal
+  }
+
   get profiles(): Readonly<Record<string, SessionProfile>> {
     return this.profilesInternal
   }
@@ -1636,8 +1670,9 @@ export class Workspace {
    * `setSessionProfile` moves it. This is a host-side operation, like
    * creating a session.
    */
-  setProfile(name: string, profile: SessionProfile): void {
+  setProfile(name: string, typed: SessionProfile): void {
     checkName('profile name', name)
+    const profile = this.canonicalMounts(typed)
     // A typed caller does not pass the parser, so this entry point repeats
     // its checks: no field outside the type, and a policy block is whole.
     const fields: Record<keyof SessionProfile, true> = {
@@ -1678,6 +1713,18 @@ export class Workspace {
     this.checkModes(profile)
     this.compile(profile, name)
     this.profilesInternal[name] = profile
+  }
+
+  /**
+   * A typed document with each `mounts` key as the parser spells it
+   * (`/data/` as `/data`): a typed caller does not pass the parser, and
+   * a mode or a folder's rules are found by the mount's prefix. A later
+   * key wins over an earlier one spelling the same folder, as in the
+   * parser. Python's documents are validated, so its keys always are.
+   */
+  private canonicalMounts(doc: SessionProfile): SessionProfile {
+    if (doc.mounts == null || [...doc.mounts.keys()].every((key) => norm(key) === key)) return doc
+    return { ...doc, mounts: new Map([...doc.mounts].map(([key, entry]) => [norm(key), entry])) }
   }
 
   /**
@@ -3006,6 +3053,7 @@ export class Workspace {
           `the options ask write: ${asked}`,
       )
     }
+    const recorded = options.profiles === undefined
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
       maxMemory: args.maxMemory,
@@ -3016,11 +3064,11 @@ export class Workspace {
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,
-      // The state's profile table and its default; a caller's own table
-      // brings its own default.
-      ...(options.profiles === undefined ? { profiles: args.profiles, profile: args.profile } : {}),
       processes: args.processes,
       ...options,
+      // The state's profile table is taken once the workspace is built
+      // (`adoptProfiles`); a caller's own table brings its own default.
+      ...(recorded ? { profile: null } : {}),
       write: args.writeDefault,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
@@ -3032,6 +3080,12 @@ export class Workspace {
     // not record, so the restored sessions keep the narrowing it gave
     // them, as a checkout's do, rather than the recorded one.
     try {
+      if (recorded) {
+        ws.adoptProfiles(
+          args.profiles,
+          options.profile === undefined ? args.profile : options.profile,
+        )
+      }
       await applyStateDict(ws, state, {
         builtForState: options.profiles === undefined && options.profile === undefined,
         shared,

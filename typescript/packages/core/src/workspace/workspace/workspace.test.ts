@@ -14,7 +14,10 @@
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import { setCurrentSession } from '../../context/session_context.ts'
+import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { MachineHandle } from '../../machine/handle.ts'
 import type { RunResult } from '../../runtime/types.ts'
@@ -769,5 +772,76 @@ describe('profile modes', () => {
     const loaded = await Workspace.load(tar)
     open.push(loaded)
     expect(loaded.profiles.agent?.mounts?.get('/later')?.mode).toBe(MountMode.READ)
+  })
+
+  it('reloads a snapshot after a nested profile mount is unmounted', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    ws.addMount('/data/keep', new RAMVFS(), MountMode.WRITE)
+    ws.setProfile('agent', SessionProfile({ mounts: { '/data/keep': 'read' } }))
+    await ws.unmount('/data/keep')
+    const tar = await ws.snapshot()
+    const loaded = await Workspace.load(tar)
+    open.push(loaded)
+    expect(loaded.profiles.agent?.mounts?.get('/data/keep')?.mode).toBe(MountMode.READ)
+    expect(() => loaded.createSession('a', { profile: 'agent' })).toThrow(folderMode)
+    await expect(
+      Workspace.load(tar, {
+        profiles: { agent: SessionProfile({ mounts: { '/data/keep': 'read' } }) },
+      }),
+    ).rejects.toThrow(folderMode)
+  })
+
+  it('finds a typed mounts key as the parser spells it', async () => {
+    const typed = (key: string): SessionProfile => ({
+      mounts: new Map([[key, { mode: MountMode.READ }]]),
+    })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { agent: typed('/data/') } },
+    )
+    open.push(ws)
+    expect([...(ws.profiles.agent?.mounts?.keys() ?? [])]).toEqual(['/data'])
+    ws.setProfile('typed', typed('/data//'))
+    ws.createSession('a', { profile: 'agent' })
+    ws.createSession('b', { profile: 'typed' })
+    ws.createSession('c', { profile: typed('/data/') })
+    ws.createSession('d', { permissions: typed('/data/') })
+    ws.createSession('e')
+    await ws.setSessionProfile('e', typed('/data/'))
+    for (const sessionId of ['a', 'b', 'c', 'd', 'e']) {
+      expect((await ws.shell('echo x > /data/f', { sessionId })).exitCode).toBe(1)
+    }
+  })
+
+  it('reads a profile by the CLI the constructor installs', async () => {
+    const deploy = (sub: string): CLI =>
+      new CLI({
+        spec: new CommandSpec({ name: 'deploy', subcommands: [new CommandSpec({ name: sub })] }),
+        handlers: {
+          [sub]: new CLIHandler({
+            fn: () => Promise.resolve([new TextEncoder().encode('ran\n'), new IOResult()]),
+          }),
+        },
+      })
+    class Served extends RAMVFS {
+      override commands(): readonly CLI[] {
+        return [deploy('old')]
+      }
+    }
+    const ws = new Workspace(
+      { '/data': new Served() },
+      {
+        clis: { deploy: [deploy('new'), null] },
+        profiles: { agent: SessionProfile({ commands: { deploy: { new: 'deny' } } }) },
+      },
+    )
+    open.push(ws)
+    ws.createSession('a', { profile: 'agent' })
+    const r = await ws.shell('deploy new', { sessionId: 'a' })
+    expect([r.exitCode, new TextDecoder().decode(r.stderr)]).toEqual([
+      126,
+      'deploy: Permission denied\n',
+    ])
   })
 })
