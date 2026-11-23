@@ -15,6 +15,7 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.policy import Deny
 from mirage.policy.base import Policy
 from mirage.workspace.lookup.constants import LOCALHOST_WORD
 from tests.fixtures.machine import ScriptedMachine, failed
@@ -60,16 +61,22 @@ async def test_a_request_to_localhost_runs_on_the_machine_it_is_about():
 
 
 class Watched(Policy):
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str, int]] = []
+
     async def pre_network(self, ctx):
-        return None
+        self.asked.append((ctx.command, ctx.address, ctx.port))
+        return Deny(reason="watched")
 
 
 @pytest.mark.asyncio
 async def test_under_a_network_policy_mirage_keeps_a_request_to_localhost():
     a, b = FakeFiles(programs=("curl",)), FakeFiles(programs=("curl",))
-    ws = two(a, b, policies=[Watched()])
-    done = await ws.shell("curl -s --max-time 2 http://127.0.0.1:1/x")
-    assert done.exit_code != 0
+    watched = Watched()
+    ws = two(a, b, policies=[watched])
+    done = await ws.shell("curl -s --max-time 2 http://127.0.0.1:8000/x")
+    assert done.exit_code == 7
+    assert watched.asked == [("curl", "127.0.0.1", 8000)]
     assert (a.ran, b.ran) == ([], [])
     await ws.close()
 
