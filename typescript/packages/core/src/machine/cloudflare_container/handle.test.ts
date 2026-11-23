@@ -40,6 +40,7 @@ import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BOTH, NOT_ANSWERING, NO_CONTAINER, START_WAIT_SECONDS, STOPPED } from './constants.ts'
 import { ContainerMachine } from './handle.ts'
+import { RelayContainer } from './relay.ts'
 import type { Container, ExecOptions, ExecProcess } from './types.ts'
 
 vi.setConfig({ testTimeout: 10_000 })
@@ -890,6 +891,19 @@ describe('ContainerMachine on delete', () => {
     box.down = new Error('container is not running')
     await machine.destroy()
     expect(start).not.toHaveBeenCalled()
+  })
+
+  it('closes the relay its release reached', async () => {
+    const close = vi.spyOn(RelayContainer.prototype, 'close')
+    const machine = new ContainerMachine('box', {
+      mountType: 'ssh',
+      url: 'http://127.0.0.1:9',
+      token: 't',
+    })
+    machine.bindMemory(memory)
+    await machine.destroy()
+    expect(close).toHaveBeenCalledTimes(1)
+    close.mockRestore()
   })
 
   it('releases in a running container without starting it', async () => {

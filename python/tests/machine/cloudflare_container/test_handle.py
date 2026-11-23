@@ -222,3 +222,15 @@ async def test_a_delete_releases_in_a_running_container_without_starting_it():
     await asyncio.wait_for(machine.destroy(), 5)
     assert box.starts == 0
     assert box.ran("cat /proc/mounts")
+
+
+@pytest.mark.asyncio
+async def test_a_delete_closes_the_relay_session_its_release_opened():
+    machine = ContainerMachine(
+        "box",
+        {"mount_type": "ssh", "url": "http://127.0.0.1:9", "token": "t"},
+    )
+    machine.bind_memory(SimpleNamespace(workspace_id="w1"))
+    await asyncio.wait_for(machine.destroy(), 10)
+    session = machine._relay._session
+    assert session is None or session.closed

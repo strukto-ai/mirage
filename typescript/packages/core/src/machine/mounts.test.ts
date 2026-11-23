@@ -1140,6 +1140,19 @@ describe('MachineMounts', () => {
     expect([sandbox.connects, sandbox.closes]).toEqual([2, 2])
   })
 
+  it('releases on delete a mount its close could not unmount', async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox, [], undefined, undefined, 'w1')
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.refuseUnmount = true
+    await ws.close()
+    expect(sandbox.table.size).toBe(2)
+    sandbox.refuseUnmount = false
+    await sandbox.destroy()
+    expect(sandbox.table.size).toBe(0)
+  })
+
   it("keeps a live workspace's own mounts through destroy", async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox, [], undefined, undefined, 'w1')

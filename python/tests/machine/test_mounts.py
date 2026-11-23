@@ -1113,6 +1113,20 @@ async def test_a_delete_closes_the_connection_its_release_opened():
 
 
 @pytest.mark.asyncio
+async def test_a_delete_releases_a_mount_its_close_could_not_unmount():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox, workspace_id="w1")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.refuse_unmount = True
+    await ws.close()
+    assert len(sandbox.table) == 2
+    sandbox.refuse_unmount = False
+    await sandbox.destroy()
+    assert sandbox.table == {}
+
+
+@pytest.mark.asyncio
 async def test_a_live_workspace_keeps_its_own_mounts_through_destroy():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox, workspace_id="w1")
