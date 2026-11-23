@@ -132,14 +132,11 @@ import {
   runsPrograms,
   runsWrapper,
 } from '../lookup/lookup.ts'
-import {
-  binProgram,
-  linkMachine,
-  operandMachine,
-  preferredMachine,
-  programMachine,
-  severalMachines,
-} from '../lookup/machine.ts'
+import { binProgram } from '../lookup/machine/answers.ts'
+import { operandMachine, programMachine } from '../lookup/machine/command.ts'
+import { linkMachine } from '../lookup/machine/links.ts'
+import { severalMachines } from '../lookup/machine/mounts.ts'
+import { preferredMachine } from '../lookup/machine/preferred.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'

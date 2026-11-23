@@ -17,12 +17,13 @@ import itertools
 import posixpath
 import shlex
 
+from mirage import MountMode, Workspace
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.posix.constants import ENTRY_FORMAT
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
-from tests.fixtures.machine import failed, ok, table_of
+from tests.fixtures.machine import ScriptedMachine, failed, ok, table_of
 
 ROW = b"f 644 3 1700000000 1700000001 0 50 1 0 \0"
 DIR = b"d 755 4096 1700000000 1700000001 0 0 2 8 \0"
@@ -222,3 +223,68 @@ class FakeFiles:
             return ok()
         self.ran.append(shlex.join(words))
         return ok(b"ran\n")
+
+
+TOOLS = ("ls", "cat", "grep", "wc")
+
+
+def one(files: FakeFiles, mounts=None, **kwargs) -> Workspace:
+    """A workspace running its programs on one machine, ``box``, that
+    holds ``files``; writable unless ``mode`` says otherwise.
+
+    Args:
+        files (FakeFiles): the machine's files.
+        mounts (dict | None): the workspace's mounts.
+        kwargs: the workspace's other options.
+    """
+    return Workspace(
+        mounts or {},
+        mode=kwargs.pop("mode", MountMode.WRITE),
+        machines={"box": ScriptedMachine("box", files.answer)},
+        **kwargs,
+    )
+
+
+async def out(ws: Workspace, line: str) -> str:
+    """What a line writes to stdout.
+
+    Args:
+        ws (Workspace): the workspace.
+        line (str): the line it runs.
+    """
+    return await (await ws.shell(line)).stdout_str()
+
+
+def two(a: FakeFiles, b: FakeFiles, **kwargs) -> Workspace:
+    """A writable workspace running its programs on two machines, ``a``
+    then ``b``.
+
+    Args:
+        a (FakeFiles): the first machine's files.
+        b (FakeFiles): the second machine's files.
+        kwargs: the workspace's other options, ``mounts`` among them.
+    """
+    return Workspace(
+        kwargs.pop("mounts", {}),
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+        },
+        **kwargs,
+    )
+
+
+async def run(ws: Workspace, line: str) -> tuple[int, str, str]:
+    """A line's exit code, stdout and stderr.
+
+    Args:
+        ws (Workspace): the workspace.
+        line (str): the line it runs.
+    """
+    result = await ws.shell(line)
+    return (
+        result.exit_code,
+        await result.stdout_str(),
+        await result.stderr_str(),
+    )

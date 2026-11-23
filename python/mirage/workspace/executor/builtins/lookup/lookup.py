@@ -41,7 +41,7 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup import program
 from mirage.workspace.lookup.constants import PROGRAM_LOOKUPS
-from mirage.workspace.lookup.machine import machine_answers
+from mirage.workspace.lookup.machine.answers import machine_answers
 from mirage.workspace.lookup.types import MachineAnswer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState

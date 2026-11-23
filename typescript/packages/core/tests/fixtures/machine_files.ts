@@ -18,7 +18,10 @@ import { PathSpec } from '../../src/types.ts'
 import type { RunAnswer } from '../../src/runtime/types.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { MachineVFSConfig } from '../../src/vfs/machine/config.ts'
-import { failed, ok, tableOf, type Answer } from './machine.ts'
+import { MountMode } from '../../src/types.ts'
+import type { MountSpec, WorkspaceOptions } from '../../src/workspace/workspace/types.ts'
+import { Workspace } from '../../src/workspace/workspace/workspace.ts'
+import { ScriptedMachine, failed, ok, tableOf, type Answer } from './machine.ts'
 
 const ENC = new TextEncoder()
 
@@ -243,4 +246,56 @@ export class FakeFiles {
     this.ran.push(w.join(' '))
     return ok('ran\n')
   }
+}
+
+const DEC = new TextDecoder()
+
+export const TOOLS = ['ls', 'cat', 'grep', 'wc']
+
+/**
+ * A workspace running its programs on one machine, `box`, that holds
+ * `files`; writable unless `options.mode` says otherwise. Mirrors Python's
+ * `tests/fixtures/machine_files.one`.
+ */
+export function one(
+  files: FakeFiles,
+  mounts: Record<string, MountSpec> = {},
+  options: WorkspaceOptions = {},
+): Workspace {
+  return new Workspace(mounts, {
+    mode: MountMode.WRITE,
+    machines: { box: new ScriptedMachine('box', files.answer) },
+    ...options,
+  })
+}
+
+/** What a line writes to stdout. Mirrors Python's `out`. */
+export async function out(ws: Workspace, line: string): Promise<string> {
+  return DEC.decode((await ws.shell(line)).stdout)
+}
+
+/**
+ * A writable workspace running its programs on two machines, `a` then `b`.
+ * Mirrors Python's `tests/fixtures/machine_files.two`.
+ */
+export function two(
+  a: FakeFiles,
+  b: FakeFiles,
+  mounts: Record<string, MountSpec | string> = {},
+): Workspace {
+  return new Workspace(mounts, {
+    mode: MountMode.WRITE,
+    machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+  })
+}
+
+/** A line's exit code, stdout and stderr. Mirrors Python's `run`. */
+export async function run(ws: Workspace, line: string): Promise<[number, string, string]> {
+  const result = await ws.shell(line)
+  return [result.exitCode, DEC.decode(result.stdout), DEC.decode(result.stderr)]
+}
+
+/** A machine's files as text, by path. */
+export function texts(files: FakeFiles): Record<string, string> {
+  return Object.fromEntries([...files.files].map(([k, v]) => [k, DEC.decode(v)]))
 }
