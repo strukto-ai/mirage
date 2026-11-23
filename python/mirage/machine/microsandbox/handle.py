@@ -154,8 +154,11 @@ class MicrosandboxMachine(ProgramMachine):
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
         # Piped stdin skips --stream: msb fails more runs that close it early.
+        # No stdin says --no-stdin, else msb's EOF to a finished guest fails it.
         words, tail = self.exec_words()
-        head = words if stdin is not None else (*words, "--stream")
+        head = (
+            words if stdin is not None else (*words, "--stream", "--no-stdin")
+        )
         return await self._exec_program(
             exec_args(
                 head,
