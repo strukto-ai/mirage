@@ -126,7 +126,21 @@ class Episode:
     idle: asyncio.Event = field(default_factory=idle_event)
 
 
-STEPPING: ContextVar[Episode | None] = ContextVar(
+@dataclass(slots=True)
+class StepScope:
+    """One running step, seen by the hooks it calls and the tasks they
+    start.
+
+    Args:
+        episode (Episode): The episode the step runs in.
+        active (bool): True until the step returns.
+    """
+
+    episode: Episode
+    active: bool = True
+
+
+STEPPING: ContextVar[StepScope | None] = ContextVar(
     "mirage_openenv_stepping", default=None
 )
 
@@ -280,10 +294,12 @@ class MirageOpenEnv(MCPEnvironment):
         episode = await self._current()
         episode.steps += 1
         episode.idle.clear()
-        token = STEPPING.set(episode)
+        scope = StepScope(episode)
+        token = STEPPING.set(scope)
         try:
             return await self._step(episode, action, timeout_s)
         finally:
+            scope.active = False
             STEPPING.reset(token)
             episode.steps -= 1
             if episode.steps == 0:
@@ -432,8 +448,12 @@ class MirageOpenEnv(MCPEnvironment):
             await episode.workspace.close()
 
     def _refuse_from_own_step(self, verb: str) -> None:
-        stepping = STEPPING.get()
-        if stepping is not None and stepping is self._episode:
+        scope = STEPPING.get()
+        if (
+            scope is not None
+            and scope.active
+            and scope.episode is self._episode
+        ):
             raise RuntimeError(
                 f"cannot {verb} the environment from inside one of its "
                 "steps; the step would wait for itself"

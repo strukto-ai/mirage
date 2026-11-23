@@ -412,6 +412,31 @@ async def test_a_tool_call_runs_in_the_episode_its_step_started_in():
 
 
 @pytest.mark.asyncio
+async def test_a_task_a_hook_starts_may_close_once_its_step_is_done():
+    factory = Factory()
+    step_done = asyncio.Event()
+    deferred: list[asyncio.Task[None]] = []
+
+    async def close_after_step() -> None:
+        await step_done.wait()
+        await env.aclose()
+
+    async def reward(
+        session: Session, action: Action, observation: Observation
+    ) -> float:
+        deferred.append(asyncio.create_task(close_after_step()))
+        return 1.0
+
+    env = MirageOpenEnv(factory=factory, reward=reward)
+    await env.reset_async()
+    await env.step_async(shell("true"))
+    step_done.set()
+    await asyncio.wait_for(deferred[0], 5)
+
+    assert await closed(factory.built[0])
+
+
+@pytest.mark.asyncio
 async def test_a_cancelled_reset_leaves_the_episode_in_place():
     factory = Factory()
     judging = asyncio.Event()
