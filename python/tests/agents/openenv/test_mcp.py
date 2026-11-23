@@ -50,8 +50,12 @@ async def daemon(
         port = server.servers[0].sockets[0].getsockname()[1]
         yield f"http://127.0.0.1:{port}"
     finally:
-        server.should_exit = True
-        await task
+        if server.started:
+            server.should_exit = True
+            await task
+        else:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
 
 async def create_workspace(base: str, token: str | None = None) -> str:
