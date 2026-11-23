@@ -178,6 +178,7 @@ from mirage.workspace.lookup.lookup import (
 )
 from mirage.workspace.lookup.machine.answers import bin_program
 from mirage.workspace.lookup.machine.command import (
+    fact_machine,
     operand_machine,
     program_machine,
 )
@@ -1447,7 +1448,10 @@ async def _held_machine(
     links = namespace.session_links(session)
     machine = await operand_machine(argv, session, registry, links, stdin)
     if machine is None:
-        return None, argv
+        asked = await fact_machine(
+            argv, session, registry, links, placed, stdin
+        )
+        return asked, argv
     matched = await _matched(argv, session, registry, namespace)
     if matched is not argv:
         machine = await operand_machine(

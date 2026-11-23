@@ -18,6 +18,7 @@ import { FakeFiles, TOOLS, one, out, two } from '../../../../tests/fixtures/mach
 import { SessionProfile } from '../../../policy/profile.ts'
 import type { Action, CommandContext } from '../../../policy/types.ts'
 import { MountMode } from '../../../types.ts'
+import { LOCALHOST_WORD } from '../constants.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
@@ -240,5 +241,68 @@ describe('operand routing', () => {
     await ws.shell('/tmp/tool', { machine: 'a' })
     expect([a.ran, b.ran]).toEqual([[], ['/tmp/tool']])
     await ws.close()
+  })
+
+  it('asks a machine fact of the machine the command is about', async () => {
+    const a = new FakeFiles({}, ['uname'])
+    const b = new FakeFiles({ '/srv/k': 'k' }, ['uname'])
+    const first = new ScriptedMachine('a', a.answer)
+    const ws = new Workspace(
+      { '/srv': '@b', '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, machines: { a: first, b: new ScriptedMachine('b', b.answer) } },
+    )
+    await ws.shell('cd /data && uname -m')
+    await ws.shell('cd /data && uname -r', { machine: 'b' })
+    await ws.shell('cd /srv && uname -s')
+    expect([a.ran, b.ran]).toEqual([['uname -m'], ['uname -r', 'uname -s']])
+    expect(first.cwds).toEqual(['/'])
+    await ws.close()
+  })
+
+  it('leaves the fact to Mirage where no machine has the program', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles()
+    const ws = two(a, b)
+    expect(await out(ws, 'uname -s')).toBe('Linux\n')
+    expect([a.ran, b.ran]).toEqual([[], []])
+    await ws.close()
+  })
+
+  it('runs a request to localhost on the machine it is about', async () => {
+    const a = new FakeFiles({}, ['curl'])
+    const b = new FakeFiles({}, ['curl'])
+    const ws = two(a, b, { '/data': new RAMVFS() })
+    await ws.shell('cd /data && curl -s localhost:8000/health')
+    await ws.shell('curl -s http://127.0.0.1:8000/x', { machine: 'b' })
+    expect(a.ran).toEqual(['curl -s localhost:8000/health'])
+    expect(b.ran).toEqual(['curl -s http://127.0.0.1:8000/x'])
+    await ws.close()
+  })
+
+  it('keeps a request to localhost with Mirage under a network policy', async () => {
+    const a = new FakeFiles({}, ['curl'])
+    const b = new FakeFiles({}, ['curl'])
+    const ws = two(a, b)
+    ws.policies.add({ preNetwork: (): Action | null => null })
+    const done = await ws.shell('curl -s --max-time 2 http://127.0.0.1:1/x')
+    expect(done.exitCode).not.toBe(0)
+    expect([a.ran, b.ran]).toEqual([[], []])
+    await ws.close()
+  })
+
+  it.each([
+    ['localhost', true],
+    ['localhost:8000/health', true],
+    ['http://LOCALHOST/', true],
+    ['https://127.0.0.1:8443/a?b=1', true],
+    ['http://[::1]:80/', true],
+    ['user@localhost:8000', true],
+    ['http://localhost.example.com/', false],
+    ['http://localhost@example.com/', false],
+    ['localhosts', false],
+    ['Host: localhost', false],
+    ['example.com', false],
+  ])('tells whether %s addresses its own machine', (word, local) => {
+    expect(LOCALHOST_WORD.test(word)).toBe(local)
   })
 })

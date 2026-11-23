@@ -74,7 +74,7 @@ async def handle_nproc(
     name = parse.flags.get("machine")
     named = name if isinstance(name, str) else None
     processes = job_table.processes
-    scope = machine_scope(processes, named, workspace=True)
+    scope = machine_scope(processes, named, workspace=True, about=True)
     if scope is None:
         return job_result(cmd_str, f"nproc: {named}: no such machine\n", 1)
     rows, errors = await read_machines(processes, scope, "nproc")

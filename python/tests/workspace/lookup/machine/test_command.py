@@ -17,6 +17,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy import Deny
 from mirage.policy.base import Policy
+from mirage.workspace.lookup.constants import LOCALHOST_WORD
 from tests.fixtures.machine import ScriptedMachine
 from tests.fixtures.machine_files import TOOLS, FakeFiles, one, out, two
 
@@ -286,3 +287,76 @@ async def test_a_program_file_one_machine_holds_runs_there_whoever_is_named():
     await ws.shell("/tmp/tool", machine="a")
     assert (a.ran, b.ran) == ([], ["/tmp/tool"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_fact_is_asked_of_the_machine_the_command_is_about():
+    a = FakeFiles(programs=("uname",))
+    b = FakeFiles({"/srv/k": b"k"}, programs=("uname",))
+    first = ScriptedMachine("a", a.answer)
+    ws = Workspace(
+        {"/srv": "@b", "/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        machines={"a": first, "b": ScriptedMachine("b", b.answer)},
+    )
+    await ws.shell("cd /data && uname -m")
+    await ws.shell("cd /data && uname -r", machine="b")
+    await ws.shell("cd /srv && uname -s")
+    assert (a.ran, b.ran) == (["uname -m"], ["uname -r", "uname -s"])
+    assert first.cwds == ["/"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_without_the_program_leaves_the_fact_to_mirage():
+    a, b = FakeFiles(), FakeFiles()
+    ws = two(a, b)
+    assert await out(ws, "uname -s") == "Linux\n"
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_request_to_localhost_runs_on_the_machine_it_is_about():
+    a, b = FakeFiles(programs=("curl",)), FakeFiles(programs=("curl",))
+    ws = two(a, b, mounts={"/data": RAMVFS()})
+    await ws.shell("cd /data && curl -s localhost:8000/health")
+    await ws.shell("curl -s http://127.0.0.1:8000/x", machine="b")
+    assert a.ran == ["curl -s localhost:8000/health"]
+    assert b.ran == ["curl -s http://127.0.0.1:8000/x"]
+    await ws.close()
+
+
+class Watched(Policy):
+    async def pre_network(self, ctx):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_under_a_network_policy_mirage_keeps_a_request_to_localhost():
+    a, b = FakeFiles(programs=("curl",)), FakeFiles(programs=("curl",))
+    ws = two(a, b, policies=[Watched()])
+    done = await ws.shell("curl -s --max-time 2 http://127.0.0.1:1/x")
+    assert done.exit_code != 0
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.parametrize(
+    ("word", "local"),
+    [
+        ("localhost", True),
+        ("localhost:8000/health", True),
+        ("http://LOCALHOST/", True),
+        ("https://127.0.0.1:8443/a?b=1", True),
+        ("http://[::1]:80/", True),
+        ("user@localhost:8000", True),
+        ("http://localhost.example.com/", False),
+        ("http://localhost@example.com/", False),
+        ("localhosts", False),
+        ("Host: localhost", False),
+        ("example.com", False),
+    ],
+)
+def test_a_word_addressing_its_own_machine_is_told_apart(word, local):
+    assert bool(LOCALHOST_WORD.fullmatch(word)) is local

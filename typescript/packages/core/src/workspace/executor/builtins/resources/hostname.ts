@@ -34,7 +34,7 @@ export async function handleHostname(
   const cmdStr = parts.join(' ')
   const named = machineNamed(parts.slice(1))
   const processes = jobTable.processes
-  const scope = machineScope(processes, named, true)
+  const scope = machineScope(processes, named, true, true)
   if (scope === null) return jobResult(cmdStr, `hostname: ${named ?? ''}: no such machine\n`, 1)
   const [rows, errors] = await readMachines(processes, scope, 'hostname')
   const names = [

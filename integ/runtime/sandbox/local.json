@@ -727,7 +727,7 @@
     },
     {
       "id": "programs_on_two_machines",
-      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. A session that hides a name is still refused its programs, not told the program is missing.",
+      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. uname answers for the machine the command is about, and nproc prints a row each until the line names one machine. A session that hides a name is still refused its programs, not told the program is missing.",
       "runtimes": [
         "docker"
       ],
@@ -868,6 +868,40 @@
           "expect": {
             "exit": 0,
             "stdout": "600\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "[ \"$(uname -r)\" != mirage ] && echo machine",
+          "expect": {
+            "exit": 0,
+            "stdout": "machine\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "[ \"$(uname -n)\" = \"$(dash -c 'cat /etc/hostname')\" ] && echo same",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "same\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "nproc | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "nproc | wc -l",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
             "stderr": ""
           }
         },

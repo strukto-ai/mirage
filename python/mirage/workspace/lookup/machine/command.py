@@ -23,16 +23,23 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
 from mirage.policy.types import CommandWord
 from mirage.rs.find import find_layout
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.machine import RemoteRuntime
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
 from mirage.utils.path import norm
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.constants import FOLDER_FREE
+from mirage.workspace.lookup.constants import (
+    FOLDER_FREE,
+    LOCALHOST_CLIENTS,
+    LOCALHOST_WORD,
+    MACHINE_FACTS,
+)
 from mirage.workspace.lookup.machine.mounts import (
+    folder_machines,
     is_piped,
     machine_holding_all,
     machine_mounts,
@@ -191,6 +198,109 @@ async def operand_machine(
     if runtime is None or not await runtime.handle().has_program(argv.name):
         return None
     return ExternalTarget(runtime, runs_from)
+
+
+def about_machine(
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> RemoteRuntime | None:
+    """The machine a command that asks about its machine is about: the
+    one its line names, else the one the session's folder is on, else
+    the first that takes programs no name captures, where the session's
+    programs run. None where no machine takes them.
+
+    Args:
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if routing is None:
+        return None
+    if routing.machine is not None:
+        return only_machine([routing.machine], registry)
+    shown = folder_machines(session.cwd, registry)
+    if len(shown) == 1:
+        return only_machine(shown, registry)
+    first = routing.bindings.get(EXTERNAL_COMMANDS)
+    return first if isinstance(first, RemoteRuntime) else None
+
+
+def asks_about_machine(argv: Argv) -> bool:
+    """Whether a command of Mirage's own asks about the machine it runs
+    on: one that reports a machine's facts (``MACHINE_FACTS``), or one
+    that reaches a server at ``localhost`` (``LOCALHOST_CLIENTS``).
+
+    Args:
+        argv (Argv): the command.
+    """
+    if argv.name in MACHINE_FACTS:
+        return True
+    return argv.name in LOCALHOST_CLIENTS and any(
+        LOCALHOST_WORD.fullmatch(word) for word in argv.args
+    )
+
+
+async def fact_machine(
+    argv: Argv,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    stdin: ByteSource | None,
+) -> ExternalTarget | None:
+    """The machine a command that asks about its machine runs on whole
+    (``asks_about_machine``): ``uname -m`` is the machine's own answer,
+    where Mirage's is no machine's, and ``curl localhost:8000`` reaches
+    the server a program of the session started there. It runs from the
+    session's folder when that is the machine's own, else from ``/``.
+
+    Mirage keeps the command where no machine takes programs
+    (``about_machine``) or that machine refuses the session's runs or
+    lacks the program; when a path it names is not that machine's own, or
+    is typed relative to a folder that is not; when input is piped into
+    a machine that takes none; and, for a command that reaches a server,
+    when a network policy speaks for the session, which judges the
+    request inside Mirage.
+
+    Args:
+        argv (Argv): the command.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+        routing (RouteDecision | None): the line's placement.
+        stdin (ByteSource | None): what is piped into it.
+    """
+    if not asks_about_machine(argv):
+        return None
+    runtime = about_machine(session, registry, routing)
+    if runtime is None or runtime.refuses_session():
+        return None
+    if is_piped(stdin) and not runtime.handle().takes_input:
+        return None
+    sid = session.session_id
+    if argv.name in LOCALHOST_CLIENTS and (
+        await registry.policies.wants_for("pre_network", sid)
+    ):
+        return None
+    here = folder_machines(session.cwd, registry) == [runtime.default_machine]
+    typed = [w for w in argv.operands if isinstance(w, PathSpec)]
+    options = _option_paths(argv, session.cwd)
+    paths = [*(unmark_globs(w.virtual) for w in typed), *options]
+    leans = options != _option_paths(argv, "/") or any(
+        not w.raw_path.startswith("/") for w in typed
+    )
+    if leans and not here:
+        return None
+    if paths:
+        held = await machine_holding_all(
+            [(p, True) for p in paths], session, registry, links, None
+        )
+        if held is not runtime:
+            return None
+    if not await runtime.handle().has_program(argv.name):
+        return None
+    return ExternalTarget(runtime, None if here else "/")
 
 
 def stated_machine(

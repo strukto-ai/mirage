@@ -24,7 +24,7 @@ from mirage.commands.spec.shell import (
 )
 from mirage.commands.spec.synopsis import SYNOPSES
 from mirage.commands.spec.types import CommandSpec
-from mirage.context import get_current_evaluation
+from mirage.context import current_caller, get_current_evaluation
 from mirage.execution.process.constants import WORKSPACE_MACHINE
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineResources
@@ -156,11 +156,39 @@ def _default_engine(
     return None
 
 
+def _told_machine(
+    routing: RouteDecision[RuntimeIdentity] | None, every: list[str]
+) -> str | None:
+    """The machine a command is about without naming it, by id as ``ps``
+    shows it: the one its line names, else the one a command Mirage runs
+    itself prefers (``Caller.preferred_machine``: the machine whose
+    program writes its pipe, or the one its folder is on); None when
+    nothing says.
+
+    Args:
+        routing (RouteDecision | None): the line's placement.
+        every (list[str]): every machine in scope.
+    """
+    told = (
+        routing.machine
+        if routing is not None and routing.machine is not None
+        else current_caller().preferred_machine
+    )
+    if told is None:
+        return None
+    return next((m for m in every if names_machine(m, told)), None)
+
+
 def machine_scope(
-    processes: ProcessTable, name: str | None, workspace: bool = False
+    processes: ProcessTable,
+    name: str | None,
+    workspace: bool = False,
+    about: bool = False,
 ) -> MachineScope | None:
     """Which machines a command answers for: the one ``--machine``
-    names; in a command substitution, whose reader
+    names; for a command that reports one machine's facts (``about``),
+    the one its line or its folder says it is about (``_told_machine``);
+    in a command substitution, whose reader
     is a script, only the default one, an engine's when programs run on
     it by default, the workspace when there is no machine; otherwise
     every one. The host
@@ -176,6 +204,8 @@ def machine_scope(
         name (str | None): the option's value, None for none.
         workspace (bool): the command also answers for the workspace,
             which is ``mirage`` to ``--machine`` as it is to ``ps``.
+        about (bool): the command reports one machine's facts, so a
+            line that says which machine gets that one's alone.
 
     Returns:
         MachineScope | None: the machines; None when ``name`` names none.
@@ -212,6 +242,9 @@ def machine_scope(
             return MachineScope((named[0],), True)
         engine = [m for m in engines if names_machine(m, name)]
         return MachineScope((), True, engines=(engine[0],)) if engine else None
+    told = _told_machine(routing, every) if about else None
+    if told is not None:
+        return MachineScope((told,), True)
     substituted = (
         frame is not None and frame.substitution and routing is not None
     )

@@ -18,6 +18,7 @@ import {
   resources,
   tableOf,
 } from '../../../../../tests/workspace/fixtures/machine_resources.ts'
+import { bindCaller, currentCaller } from '../../../../context/session_context.ts'
 import { handleNproc } from './nproc.ts'
 
 describe('nproc', () => {
@@ -41,6 +42,14 @@ describe('nproc', () => {
   it('picks one with --machine', async () => {
     const table = tableOf([resources('docker:a'), resources('e2b:b', { cpus: 2 })])
     expect(decoded((await handleNproc(table, ['nproc', '--machine', 'e2b:b']))[0])).toBe('2\n')
+  })
+
+  it("prints one machine's alone for a line about that machine", async () => {
+    const table = tableOf([resources('docker:a'), resources('e2b:b', { cpus: 2 })])
+    const [out] = await bindCaller({ ...currentCaller(), preferredMachine: 'b' }, () =>
+      handleNproc(table, ['nproc']),
+    )
+    expect(decoded(out)).toBe('2\n')
   })
 
   it('picks the workspace with --machine', async () => {

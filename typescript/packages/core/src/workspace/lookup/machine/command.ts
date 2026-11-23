@@ -19,8 +19,10 @@ import { findLayout } from '../../../rs/find.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CommandWord } from '../../../policy/types.ts'
-import type { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
+import type { Runtime } from '../../../runtime/base.ts'
+import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
+import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
+import type { DispatchFn, RouteDecision } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { norm } from '../../../utils/path.ts'
@@ -29,9 +31,10 @@ import type { NamespaceReader } from '../../dispatcher/reader.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
-import { FOLDER_FREE } from '../constants.ts'
+import { FOLDER_FREE, LOCALHOST_CLIENTS, LOCALHOST_WORD, MACHINE_FACTS } from '../constants.ts'
 import { Consumer, type ExternalTarget } from '../types.ts'
 import {
+  folderMachines,
   isPiped,
   machineHoldingAll,
   machineMounts,
@@ -172,6 +175,106 @@ export async function operandMachine(
   }
   if (runtime === null || !(await runtime.handle().hasProgram(argv.name))) return null
   return { kind: Consumer.EXTERNAL, runtime, cwd: runsFrom }
+}
+
+/**
+ * The machine a command that asks about its machine is about: the one its
+ * line names, else the one the session's folder is on, else the first that
+ * takes programs no name captures, where the session's programs run. Null
+ * where no machine takes them. Mirrors Python's `about_machine`.
+ *
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ */
+export function aboutMachine(
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): RemoteRuntime | null {
+  if (routing === undefined) return null
+  if (routing.machine !== undefined) return onlyMachine([routing.machine], registry)
+  const shown = folderMachines(session.cwd, registry)
+  if (shown.length === 1) return onlyMachine(shown, registry)
+  const first = routing.bindings[EXTERNAL_COMMANDS]
+  return first instanceof RemoteRuntime ? first : null
+}
+
+/**
+ * Whether a command of Mirage's own asks about the machine it runs on: one
+ * that reports a machine's facts (`MACHINE_FACTS`), or one that reaches a
+ * server at `localhost` (`LOCALHOST_CLIENTS`). Mirrors Python's
+ * `asks_about_machine`.
+ *
+ * @param argv the command.
+ */
+export function asksAboutMachine(argv: Argv): boolean {
+  if (MACHINE_FACTS.has(argv.name)) return true
+  return LOCALHOST_CLIENTS.has(argv.name) && argv.args.some((word) => LOCALHOST_WORD.test(word))
+}
+
+/**
+ * The machine a command that asks about its machine runs on whole
+ * (`asksAboutMachine`): `uname -m` is the machine's own answer, where
+ * Mirage's is no machine's, and `curl localhost:8000` reaches the server a
+ * program of the session started there. It runs from the session's folder
+ * when that is the machine's own, else from `/`.
+ *
+ * Mirage keeps the command where no machine takes programs (`aboutMachine`)
+ * or that machine refuses the session's runs or lacks the program; when a
+ * path it names is not that machine's own, or is typed relative to a folder
+ * that is not; when input is piped into a machine that takes none; and, for
+ * a command that reaches a server, when a network policy speaks for the
+ * session, which judges the request inside Mirage. Mirrors Python's
+ * `fact_machine`.
+ *
+ * @param argv the command.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ * @param routing the line's placement.
+ * @param stdin what is piped into it.
+ */
+export async function factMachine(
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+  routing: RouteDecision<Runtime> | undefined,
+  stdin: ByteSource | null,
+): Promise<ExternalTarget | null> {
+  if (!asksAboutMachine(argv)) return null
+  const runtime = aboutMachine(session, registry, routing)
+  if (runtime === null || runtime.refusesSession()) return null
+  if (isPiped(stdin) && !runtime.handle().takesInput) return null
+  if (
+    LOCALHOST_CLIENTS.has(argv.name) &&
+    (await registry.policies.wantsFor('preNetwork', session.sessionId))
+  )
+    return null
+  const shown = folderMachines(session.cwd, registry)
+  const here = shown.length === 1 && shown[0] === runtime.defaultMachine
+  const typed = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
+  const options = optionPaths(argv, session.cwd)
+  const paths = [...typed.map((w) => unmarkGlobs(w.virtual)), ...options]
+  const rooted = optionPaths(argv, '/')
+  const leans =
+    options.length !== rooted.length ||
+    options.some((path, at) => path !== rooted[at]) ||
+    typed.some((w) => !w.rawPath.startsWith('/'))
+  if (leans && !here) return null
+  if (paths.length > 0) {
+    const held = await machineHoldingAll(
+      paths.map((path) => [path, true] as const),
+      session,
+      registry,
+      links,
+      null,
+    )
+    if (held !== runtime) return null
+  }
+  if (!(await runtime.handle().hasProgram(argv.name))) return null
+  return { kind: Consumer.EXTERNAL, runtime, ...(here ? {} : { cwd: '/' }) }
 }
 
 /**

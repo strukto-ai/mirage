@@ -424,6 +424,18 @@ prints one name a line. Figures are never added up, as one program cannot use an
 With one machine, `free` answers for that machine alone, in the real `free`'s
 table, and `free --machine mirage` shows the workspace.
 
+A line that says which machine it is about gets that machine's answer alone:
+one that names a machine (`execute(machine=)`, a route), or one run from a
+folder only one machine has. Nothing else changes the rows.
+
+`uname` and `arch` have no row per machine. They answer for the machine the
+command is about: the one the line names, else the one the session's folder
+is on, else the first that takes programs. `curl` and `wget` asked for
+`localhost` run on that same machine, so they reach a server a program
+started there. Mirage answers itself where no machine takes programs, where
+that machine lacks the command, and for a request to `localhost` under a
+network policy.
+
 ```bash
 $ nproc
 1  mirage

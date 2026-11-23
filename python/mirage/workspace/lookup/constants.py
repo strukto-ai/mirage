@@ -45,6 +45,25 @@ NAMESPACE_COMMANDS = frozenset({"getfattr", "ln", "readlink", "setfattr"})
 # link there is the machine's real link, not one in the namespace's table.
 MACHINE_ANSWERED = frozenset({"readlink"})
 
+# The commands of Mirage's own that report on the machine they run on,
+# which is no fact of Mirage's: over machines that take programs they
+# run on the one the command is about (``fact_machine``).
+MACHINE_FACTS = frozenset({"arch", "uname"})
+
+# The commands of Mirage's own that reach a server by its address. One
+# asked for ``localhost`` means the machine the command is about, where
+# the session's programs listen, so it runs there.
+LOCALHOST_CLIENTS = frozenset({"curl", "wget"})
+
+# A word that addresses the machine it is typed on: ``localhost``, a
+# ``127.`` address or ``[::1]``, with or without a scheme, a user and a
+# port.
+LOCALHOST_WORD = re.compile(
+    r"(?:[a-z][a-z0-9+.-]*://)?(?:[^/@]*@)?"
+    r"(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:[/?#].*)?",
+    re.IGNORECASE,
+)
+
 # The mount commands that touch nothing but the paths their words name, so
 # a line of one naming only absolute paths does the same from any folder:
 # a machine holding them all runs it from `/` when the session's folder is

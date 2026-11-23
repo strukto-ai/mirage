@@ -134,7 +134,7 @@ import {
   runsWrapper,
 } from '../lookup/lookup.ts'
 import { binProgram } from '../lookup/machine/answers.ts'
-import { operandMachine, programMachine } from '../lookup/machine/command.ts'
+import { factMachine, operandMachine, programMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
 import { preferredMachine } from '../lookup/machine/preferred.ts'
@@ -1369,7 +1369,8 @@ async function heldMachine(
     return [null, argv]
   const links = namespace.sessionLinks(session)
   let machine = await operandMachine(argv, session, registry, links, stdin)
-  if (machine === null) return [null, argv]
+  if (machine === null)
+    return [await factMachine(argv, session, registry, links, placed, stdin), argv]
   const words = await matched(argv, session, registry, namespace)
   if (words !== argv) machine = await operandMachine(words, session, registry, links, stdin)
   return [machine, words]
