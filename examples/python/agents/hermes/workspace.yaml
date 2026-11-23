@@ -1,0 +1,4 @@
+processes: workspace
+mounts:
+  /tmp: { vfs: ram, mode: write }
+  /project: { vfs: ram, mode: write }

@@ -14,6 +14,7 @@ permissions:
       - examples/data/**
       - examples/python/**
       - integ/**
+      - plugins/hermes/**
       # mypy reads these now. Without the entry a PR touching only a
       # generator would skip this workflow, which is the only place
       # mypy runs, so the gate would pass by never starting.
@@ -73,6 +74,7 @@ jobs:
               - 'examples/data/**'
               - 'examples/python/**'
               - 'integ/**'
+              - 'plugins/hermes/**'
               - 'scripts/**'
               - '.pre-commit-config.yaml'
               - '.github/workflows/test_python.yml'
@@ -431,6 +433,28 @@ jobs:
           print(f"OK: imported {name} cleanly without deepagents")
           PY
           done
+
+      # hermes builds no wheel, so its backend's tests run on an editable install of the release plugin.yaml floors.
+      - name: hermes terminal backend against hermes' release
+        working-directory: python
+        env:
+          HERMES_REF: v0.23.3
+        run: |
+          mkdir -p "$RUNNER_TEMP/hermes"
+          curl -fsSL "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$HERMES_REF.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP/hermes" --strip-components 1
+          uv venv .venv-hermes
+          uv pip install --python .venv-hermes/bin/python -e "$RUNNER_TEMP/hermes" . pytest
+          .venv-hermes/bin/python -c "import agent.terminal_env_provider, tools.environments.base, mirage.agents.hermes"
+          .venv-hermes/bin/python - <<'PY'
+          import importlib.util
+
+          spec = importlib.util.spec_from_file_location("hermes_plugin", "../plugins/hermes/__init__.py")
+          plugin = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(plugin)
+          assert callable(plugin.register)
+          PY
+          .venv-hermes/bin/python -m pytest tests/agents/hermes -p no:cacheprovider -rs
 
       # Informational: a fresh advisory reports without failing the job.
       - name: Audit dependencies for known vulnerabilities (informational)

@@ -1,0 +1,83 @@
+---
+title: Hermes Agent
+description: Run Hermes Agent's terminal and file tools in a Mirage workspace, or give it Mirage's MCP tools or a FUSE folder.
+icon: terminal
+---
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) runs its terminal and file tools on a terminal backend. Mirage reaches it three ways:
+
+| Way | Hermes runs | Mirage sees |
+| --- | --- | --- |
+| [Terminal backend](#terminal-backend) | every command and file tool in the workspace | everything |
+| [MCP](#mcp) | its own terminal, plus Mirage's tools | the calls to those tools |
+| [FUSE](#fuse) | its own terminal, in a folder that is the workspace | every file read and write |
+
+## Install
+
+Install [Hermes Agent](https://hermes-agent.nousresearch.com/docs/getting-started/installation) 0.23.3 or later. The terminal backend needs nothing else; for MCP and FUSE, install the Mirage CLI:
+
+<CodeGroup>
+```bash uv
+uv tool install mirage-ai
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+## Workspace
+
+```yaml /Users/me/workspace.yaml
+processes: workspace
+mounts:
+  /tmp: { vfs: ram, mode: write }
+  /project: { vfs: disk, mode: write, config: { root: /Users/me/project } }
+```
+
+Hermes keeps its shell state and background-job logs in `/tmp`, and polls a background job from another session than the one that started it, so the terminal backend needs both lines.
+
+## Terminal backend
+
+```bash
+hermes plugins install strukto-ai/mirage/plugins/hermes --enable
+hermes config set terminal.backend mirage
+hermes config set plugins.entries.mirage.settings.config /Users/me/workspace.yaml
+```
+
+Hermes installs `mirage-ai` into its own environment. Every command its terminal tool runs, and every `read_file`, `write_file`, `patch` and `search_files`, now goes to the workspace.
+
+- Each Hermes task gets its own sessions in the workspace, closed when the task ends. A background job lives as long as its task.
+- `python3`, `pip` and `git` run on a [machine](/home/setup/machine/overview); add one to the workspace YAML. Hermes' `execute_code` needs one with Python.
+- Hermes' `approvals.mode` still decides which commands ask first, and the workspace's [command rules](/home/configuration/session#command-rules) apply as well.
+
+## MCP
+
+```yaml ~/.hermes/config.yaml
+mcp_servers:
+  mirage:
+    command: mirage
+    args: [mcp, /Users/me/workspace.yaml]
+```
+
+Hermes keeps its own terminal and gains the workspace's tools. `mirage mcp` starts the Mirage server when it is not running.
+
+## FUSE
+
+Install a [FUSE driver](/home/setup/fuse), and with uv, `'mirage-ai[fuse]'`.
+
+```yaml workspace-fuse.yaml
+mounts:
+  /:
+    vfs: ram
+    mode: write
+    backend: fuse
+    mountpoint: /tmp/mirage-demo
+```
+
+```bash
+mirage workspace create workspace-fuse.yaml --id demo-fuse
+hermes config set terminal.backend local
+hermes config set terminal.cwd /tmp/mirage-demo
+```
+
+Hermes' commands run on your computer in `/tmp/mirage-demo`, and each file they read or write goes through the workspace.
