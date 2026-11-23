@@ -61,6 +61,7 @@ import {
 } from './constants.ts'
 import {
   darwinAdminHint,
+  darwinLeft,
   darwinMountTable,
   darwinTableLine,
   killLine,
@@ -1090,6 +1091,53 @@ describe('MachineMounts', () => {
     expect(first.table.size).toBe(0)
   })
 
+  it('releases the mounts a deleted workspace left', async () => {
+    const first = new FakeMachine('ssh')
+    const one = await workspace(first, [], undefined, undefined, 'w1').session('agent', {
+      profile: 'agent',
+    })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    const left = [...first.table.values()].map(([source]) => source)
+    const others: [string, string][] = [
+      ['/theirs', 'mirage-w2.box-0123abcd-1:/theirs'],
+      ['/box2', 'mirage-w1.box2-0123abcd-1:/box2'],
+    ]
+    for (const [prefix, source] of others) {
+      first.table.set(prefix, [source, 'fuse.sshfs'])
+      first.running.add(source)
+    }
+    // The host restarted, and the workspace is deleted before it runs a line.
+    const second = sharing(first, 'ssh')
+    workspace(second, [], undefined, undefined, 'w1')
+    await second.destroy()
+    expect(left.map((s) => second.commands.includes(killLine(s)))).toEqual([true, true])
+    expect([...second.table].map(([p, [s]]) => [p, s])).toEqual(others)
+    expect([...second.running].sort()).toEqual(others.map(([, s]) => s).sort())
+  })
+
+  it("keeps a live workspace's own mounts through destroy", async () => {
+    const sandbox = new FakeMachine('ssh')
+    const ws = workspace(sandbox, [], undefined, undefined, 'w1')
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const serving = [...sandbox.table]
+    await sandbox.destroy()
+    expect([...sandbox.table]).toEqual(serving)
+    await ws.close()
+    expect(sandbox.table.size).toBe(0)
+  })
+
+  it('tries every mount a deleted workspace left', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.table.set('/data', ['mirage-w1.box-0123abcd-1:/data', 'fuse.sshfs'])
+    sandbox.table.set('/more', ['mirage-w1.box-0123abcd-2:/more', 'fuse.sshfs'])
+    sandbox.refuseUnmount = true
+    workspace(sandbox, [], undefined, undefined, 'w1')
+    await sandbox.destroy()
+    const tried = sandbox.commands.filter((c) => c.startsWith('fusermount3 -uz '))
+    expect(tried.map((c) => words(c)[2])).toEqual(['/data', '/more'])
+  })
+
   it('fails loud when the mount a restarted instance left cannot be unmounted', async () => {
     const sandbox = new FakeMachine('ssh')
     sandbox.table.set('/data', ['mirage-w1.box-0123abcd-1:/data', 'fuse.sshfs'])
@@ -2001,6 +2049,31 @@ describe('MachineMounts on a Mac', () => {
     expect(mac.guards[0]?.filter((_, i) => i % 4 === 2)).toEqual(['macfuse', 'macfuse'])
     await ws.close()
     expect(mac.table.size).toBe(0)
+  })
+
+  it("finds only the workspace's own mounts in mount's table", () => {
+    const text =
+      'mirage-w1.box-0123abcd-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev)\n' +
+      'mirage-w2.box-0123abcd-1:/other on /home/u/.mirage/mnt/other (macfuse)\n' +
+      'mirage-w1.box-0123abcd-2:/my notes on /home/u/.mirage/mnt/my notes (macfuse)\n' +
+      '/dev/disk1s1 on / (apfs, local)\n'
+    expect([...darwinLeft(text, 'mirage-w1.box')].sort()).toEqual(['/data', '/my notes'])
+  })
+
+  it('releases the mounts a deleted workspace left', async () => {
+    const first = new FakeMac('mirage', ['/data', '/my notes'])
+    const one = await workspace(first, [], undefined, undefined, 'w1').session('agent', {
+      profile: 'agent',
+    })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    expect(first.table.size).toBe(2)
+    // The host restarted, and the workspace is deleted before it runs a line.
+    const second = new FakeMac('mirage', ['/data', '/my notes'])
+    second.table = first.table
+    second.running = first.running
+    workspace(second, [], undefined, undefined, 'w1')
+    await second.destroy()
+    expect([first.table.size, first.running.size]).toEqual([0, 0])
   })
 
   it('names the commands that make a root link it lacks', async () => {

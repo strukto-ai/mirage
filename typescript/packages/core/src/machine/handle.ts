@@ -377,11 +377,32 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
 
   /**
    * Remove the machine Mirage started for this handle, as its workspace is
-   * deleted, and forget it; one the user brought stays. A provider that
-   * starts machines overrides this.
+   * deleted, and forget it; one the user brought stays, with the mounts the
+   * workspace left there released (`releaseMounts`). A provider that starts
+   * machines overrides this.
    */
   destroy(): Promise<void> {
-    return Promise.resolve()
+    return this.releaseMounts()
+  }
+
+  /**
+   * Kill and unmount what the deleted workspace's earlier instances left
+   * serving in the machine (`MachineMounts.release`), which nothing else
+   * would take back. A failure to connect or release is logged: the
+   * workspace is deleted either way.
+   */
+  protected async releaseMounts(): Promise<void> {
+    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
+    if (this.mounts === null || this.memory === null) return
+    try {
+      await this.ensureConnected()
+      await this.mounts.release(this.memory.workspaceId)
+    } catch (error) {
+      console.warn(
+        `${String(this.machine)}: releasing the deleted workspace's mounts failed:`,
+        error,
+      )
+    }
   }
 
   /**

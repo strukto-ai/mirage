@@ -169,6 +169,23 @@ def darwin_table_line(prefixes: Sequence[str]) -> str:
     )
 
 
+def darwin_left(text: str, name: str) -> set[str]:
+    """The prefixes a Mac's ``mount`` table shows ``name``'s mounts at:
+    each row whose source is ``<name>-<instance>-<n>:<prefix>``, its
+    prefix read up to the row's first `` on /``.
+
+    Args:
+        text (str): ``mount``'s output.
+        name (str): the sources' name (``source_name``).
+    """
+    shape = re.compile(rf"{re.escape(name)}-[0-9a-f]{{8}}-[0-9]+:(/.*?) on /")
+    return {
+        found.group(1)
+        for line in text.split("\n")
+        if (found := shape.match(line)) is not None
+    }
+
+
 def darwin_mount_table(
     text: str, known: Mapping[str, str]
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
@@ -888,6 +905,42 @@ class MachineMounts:
         async with self._lock:
             await self._unmount()
             self._session = None
+
+    async def release(self, workspace_id: str) -> None:
+        """Kill and unmount every mount this machine entry of the
+        workspace left from an earlier instance, as the workspace is
+        deleted: no later instance comes to take them back (``_reclaim``),
+        and their sshfs or mirage-fuse would hold the prefixes from every
+        other workspace.
+
+        Args:
+            workspace_id (str): the workspace's id.
+        """
+        async with self._lock:
+            if not self._served:
+                self._name = source_name(workspace_id, self._machine)
+            present = await self._table()
+            if self._darwin:
+                listed = await self._run(darwin_table_line([]))
+                left = darwin_left(
+                    listed.stdout.decode(errors="replace"), self._name
+                )
+                if not left <= self._looked:
+                    self._looked |= left
+                    present = await self._table()
+            failures: list[Exception] = []
+            for prefix, (source, kind) in present.items():
+                if (
+                    kind in SERVED_KINDS
+                    and self._ours(source, prefix)
+                    and source not in self._sources
+                ):
+                    try:
+                        await self._reclaim(source, prefix)
+                    except Exception as exc:
+                        failures.append(exc)
+            if failures:
+                raise ExceptionGroup("releasing mounts failed", failures)
 
     async def land(self) -> list[str]:
         """Land every write a served prefix's server has acknowledged.

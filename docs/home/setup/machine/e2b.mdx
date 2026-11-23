@@ -208,7 +208,8 @@ the workspace again.
 - With `mount_type: ssh`, `mirage` or `both`, a workspace that restarts with the
   same workspace ID takes back the mounts it left in the sandbox. Give
   each live workspace its own ID: two live workspaces with one ID take
-  each other's mounts.
+  each other's mounts. Deleting the workspace releases its mounts in a
+  sandbox the config names, so another workspace can be served there.
 - Output comes back as the program wrote it, binary included: the
   sandbox base64-encodes it on the way out, so the image needs `dd` and
   `base64` (Debian, Ubuntu and Alpine images have both), and output

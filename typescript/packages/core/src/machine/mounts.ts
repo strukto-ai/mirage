@@ -167,6 +167,24 @@ export function darwinTableLine(prefixes: readonly string[]): string {
 }
 
 /**
+ * The prefixes a Mac's `mount` table shows `name`'s mounts at: each row whose
+ * source is `<name>-<instance>-<n>:<prefix>`, its prefix read up to the row's
+ * first ` on /`. Mirrors Python's `darwin_left`.
+ *
+ * @param text `mount`'s output.
+ * @param name the sources' name (`sourceName`).
+ */
+export function darwinLeft(text: string, name: string): Set<string> {
+  const left = new Set<string>()
+  for (const line of text.split('\n')) {
+    if (!line.startsWith(`${name}-`)) continue
+    const found = /^[0-9a-f]{8}-[0-9]+:(\/.*?) on \//.exec(line.slice(name.length + 1))
+    if (found?.[1] !== undefined) left.add(found[1])
+  }
+  return left
+}
+
+/**
  * `mountTable` for what `darwinTableLine` printed: each prefix's source and
  * type, by the real path it mounts at, and each prefix's real path, `known`
  * among them. A row is matched by that path, as a source can hold ` on /`;
@@ -786,6 +804,38 @@ export class MachineMounts {
     return this.locked(async () => {
       await this.unmount()
       this.session = null
+    })
+  }
+
+  /**
+   * Kill and unmount every mount this machine entry of the workspace left
+   * from an earlier instance, as the workspace is deleted: no later
+   * instance comes to take them back (`reclaim`), and their sshfs or
+   * mirage-fuse would hold the prefixes from every other workspace.
+   */
+  release(workspaceId: string): Promise<void> {
+    return this.locked(async () => {
+      if (this.served.size === 0) this.name = sourceName(workspaceId, this.machine)
+      let present = await this.table()
+      if (this.darwin === true) {
+        const listed = await this.run(darwinTableLine([]))
+        const left = darwinLeft(DECODER.decode(listed.stdout), this.name)
+        if ([...left].some((prefix) => !this.looked.has(prefix))) {
+          for (const prefix of left) this.looked.add(prefix)
+          present = await this.table()
+        }
+      }
+      const failures: unknown[] = []
+      for (const [prefix, [source, kind]] of present) {
+        if (SERVED_KINDS.has(kind) && this.ours(source, prefix) && !this.sources.has(source)) {
+          try {
+            await this.reclaim(source, prefix)
+          } catch (error) {
+            failures.push(error)
+          }
+        }
+      }
+      if (failures.length > 0) throw new AggregateError(failures, 'releasing mounts failed')
     })
   }
 
