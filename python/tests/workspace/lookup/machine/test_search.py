@@ -354,3 +354,35 @@ async def test_a_prefix_that_sets_path_through_a_reference_is_the_path_searched(
         "smi",
     ]
     await ws.close()
+
+
+class Serving(ScriptedMachine):
+    """A machine that is served the session's restricted view."""
+
+    def serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+        return True
+
+
+@pytest.mark.asyncio
+async def test_a_machine_that_refuses_the_session_is_no_candidate():
+    a, b = FakeFiles(), FakeFiles(programs=("smi",))
+    second = ScriptedMachine("b", b.answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": Serving("a", a.answer), "b": second},
+        profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
+    )
+    agent = await ws.session("agent", profile="agent")
+    await agent.shell("smi")
+    assert (a.ran, second.lines) == (["smi"], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_is_searched_for_past_a_function_of_its_name():
+    a, b = FakeFiles(), FakeFiles(programs=("tool",))
+    ws = two(a, b)
+    await ws.shell("tool() { :; }; /usr/bin/tool -x")
+    assert (a.ran, b.ran) == ([], ["tool -x"])
+    await ws.close()

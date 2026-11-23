@@ -1228,7 +1228,8 @@ async function runArgv(
 /**
  * The program a command runs that search order places (`isSearched`),
  * through the wrappers Mirage runs (`nice gen`) and by the `/usr/bin` path a
- * lookup prints for it (`binProgram`); null for any other command.
+ * lookup prints for it (`binProgram`), which names the program past a
+ * function of its name; null for any other command.
  * It is placed before the command's redirects open, since what they make
  * lands on its machine, and once the command is admitted: a refused one
  * never reaches a machine. Mirrors Python's `_searched_program`.
@@ -1243,16 +1244,17 @@ function searchedProgram(
 ): string | null {
   if (name === '' || routing === undefined || routing.machine !== undefined) return null
   const typed = programHead(registry, [name, ...args], session, routing)
-  const head = typed.includes('/')
-    ? (binProgram(typed, session, registry, links, routing) ?? typed)
-    : typed
-  return isSearched(head, session, registry, routing) ? head : null
+  const byPath = typed.includes('/')
+  const head = byPath ? (binProgram(typed, session, registry, links, routing) ?? typed) : typed
+  return isSearched(head, session, registry, routing, byPath) ? head : null
 }
 
 /**
  * A line's placement with a program on the machine search order picks for it
  * (`searchedMachine`), for the command's run alone; the placement as it is
- * where no machine has the program. Mirrors Python's `_searched_routing`.
+ * where no machine has the program. The program is one `searchedProgram`
+ * already found search order places, so a function of its name no longer
+ * counts. Mirrors Python's `_searched_routing`.
  */
 async function searchedRouting(
   program: string,
@@ -1265,7 +1267,16 @@ async function searchedRouting(
   const paths = argv.operands
     .filter((w): w is PathSpec => w instanceof PathSpec)
     .map((w) => unmarkGlobs(w.virtual))
-  const found = await searchedMachine(program, paths, session, registry, routing, null, prefixPath)
+  const found = await searchedMachine(
+    program,
+    paths,
+    session,
+    registry,
+    routing,
+    null,
+    prefixPath,
+    true,
+  )
   return found === null ? routing : boundTo(routing, program, found)
 }
 

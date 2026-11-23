@@ -1301,7 +1301,8 @@ def _searched_program(
 ) -> str | None:
     """The program a command runs that search order places
     (``is_searched``), through the wrappers Mirage runs (``nice gen``)
-    and by the ``/usr/bin`` path a lookup prints for it (``bin_program``);
+    and by the ``/usr/bin`` path a lookup prints for it (``bin_program``),
+    which names the program past a function of its name;
     None for any other command. It is placed before the command's
     redirects open, since what they make lands on its machine, and once
     the command is admitted: a refused one never reaches a machine.
@@ -1316,10 +1317,14 @@ def _searched_program(
     """
     if not name or routing is None or routing.machine is not None:
         return None
-    head = program_head(registry, [name, *args], session, routing)
-    if "/" in head:
-        head = bin_program(head, session, registry, links, routing) or head
-    return head if is_searched(head, session, registry, routing) else None
+    typed = program_head(registry, [name, *args], session, routing)
+    by_path = "/" in typed
+    head = typed
+    if by_path:
+        head = bin_program(typed, session, registry, links, routing) or typed
+    if not is_searched(head, session, registry, routing, by_path):
+        return None
+    return head
 
 
 async def _searched_routing(
@@ -1332,7 +1337,9 @@ async def _searched_routing(
 ) -> RouteDecision[RuntimeIdentity] | None:
     """A line's placement with a program on the machine search order
     picks for it (``searched_machine``), for the command's run alone;
-    the placement as it is where no machine has the program.
+    the placement as it is where no machine has the program. The
+    program is one ``_searched_program`` already found search order
+    places, so a function of its name no longer counts.
 
     Args:
         program (str): the program search order places.
@@ -1350,7 +1357,13 @@ async def _searched_routing(
         if isinstance(w, PathSpec)
     ]
     found = await searched_machine(
-        program, paths, session, registry, routing, path=prefix_path
+        program,
+        paths,
+        session,
+        registry,
+        routing,
+        path=prefix_path,
+        past_functions=True,
     )
     return routing if found is None else bound_to(routing, program, found)
 

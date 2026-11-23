@@ -231,7 +231,8 @@ async def searched_machine(
     """The machine a program named by its name runs on when nothing says
     which (``is_searched``): among the machines a run started now would
     find the program on (``finds_program``), the one search order picks
-    (``nearest_machine``). None where search
+    (``nearest_machine``). A machine that refuses the session's runs is
+    asked nothing and is no candidate. None where search
     order does not place the program, and where no machine has it, so
     the first machine answers ``command not found`` as it does today.
 
@@ -253,7 +254,12 @@ async def searched_machine(
         return None
     here = session.cwd if cwd is None else cwd
     on = env_snapshot(session).get("PATH") if path is None else path
-    having = await _machines_with(name, on, here, searched_machines(registry))
+    willing = [
+        machine
+        for machine in searched_machines(registry)
+        if not machine.refuses_session()
+    ]
+    having = await _machines_with(name, on, here, willing)
     picked = await nearest_machine(
         [m.default_machine for m in having],
         here,

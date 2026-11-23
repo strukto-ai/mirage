@@ -28,6 +28,13 @@ class Down extends ScriptedMachine {
   }
 }
 
+/** A machine that is served the session's restricted view. */
+class Serving extends ScriptedMachine {
+  override servesSession(): boolean {
+    return true
+  }
+}
+
 describe('searchedMachine', () => {
   it('runs a program only a later machine has there', async () => {
     const a = new FakeFiles({}, ['both'])
@@ -327,6 +334,32 @@ describe('searchedMachine', () => {
     )
     await ws.shell('declare -n P=PATH; P=/opt/bin smi')
     expect(second.lines).toEqual(['PATH=/opt/bin command -v smi >/dev/null 2>&1', 'smi'])
+    await ws.close()
+  })
+
+  it('takes a machine that refuses the session as no candidate', async () => {
+    const a = new FakeFiles()
+    const second = new ScriptedMachine('b', new FakeFiles({}, ['smi']).answer)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new Serving('a', a.answer), b: second },
+        profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
+      },
+    )
+    const agent = await ws.session('agent', { profile: 'agent' })
+    await agent.shell('smi')
+    expect([a.ran, second.lines]).toEqual([['smi'], []])
+    await ws.close()
+  })
+
+  it('searches for a /usr/bin path past a function of its name', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({}, ['tool'])
+    const ws = two(a, b)
+    await ws.shell('tool() { :; }; /usr/bin/tool -x')
+    expect([a.ran, b.ran]).toEqual([[], ['tool -x']])
     await ws.close()
   })
 })

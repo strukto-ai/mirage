@@ -200,7 +200,8 @@ export async function nearestMachine(
  * The machine a program named by its name runs on when nothing says which
  * (`isSearched`): among the machines a run started now would find the
  * program on (`findsProgram`), the one search order picks
- * (`nearestMachine`). Null where search order does not place the
+ * (`nearestMachine`). A machine that refuses the session's runs is asked
+ * nothing and is no candidate. Null where search order does not place the
  * program, and where no machine has it, so the first machine answers
  * `command not found` as it does today. Mirrors Python's `searched_machine`.
  *
@@ -228,7 +229,8 @@ export async function searchedMachine(
   if (!isSearched(name, session, registry, routing, pastFunctions)) return null
   const here = cwd ?? session.cwd
   const on = path ?? envSnapshot(session).PATH ?? null
-  const having = await machinesWith(name, on, here, searchedMachines(registry))
+  const willing = searchedMachines(registry).filter((machine) => !machine.refusesSession())
+  const having = await machinesWith(name, on, here, willing)
   const picked = await nearestMachine(
     having.map((machine) => machine.defaultMachine),
     here,
