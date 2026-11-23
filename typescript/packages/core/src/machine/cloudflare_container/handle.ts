@@ -199,6 +199,19 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
   }
 
   /**
+   * Release as any machine does (`MachineHandle.releaseMounts`); a relay
+   * socket it opened on a container this handle is not connected to closes
+   * again, as `close` closes it.
+   */
+  protected override async releaseMounts(): Promise<void> {
+    try {
+      await super.releaseMounts()
+    } finally {
+      if (this.connecting === null) await this.relay?.close()
+    }
+  }
+
+  /**
    * Whether the container is running, asked without starting it: a stopped
    * container holds no mounts, and connecting would start it. The release
    * then runs on it as it is.

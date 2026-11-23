@@ -812,7 +812,7 @@ export class MachineMounts {
 
   /**
    * Kill and unmount every mount this machine entry of the workspace left
-   * from an earlier instance, as the workspace is deleted: no later
+   * that this instance does not serve now, as the workspace is deleted: no later
    * instance comes to take them back (`reclaim`), and their sshfs or
    * mirage-fuse would hold the prefixes from every other workspace.
    */
@@ -828,9 +828,10 @@ export class MachineMounts {
           present = await this.table()
         }
       }
+      const live = new Set([...this.served.values()].map((entry) => entry.source))
       const failures: unknown[] = []
       for (const [prefix, [source, kind]] of present) {
-        if (SERVED_KINDS.has(kind) && this.ours(source, prefix) && !this.sources.has(source)) {
+        if (SERVED_KINDS.has(kind) && this.ours(source, prefix) && !live.has(source)) {
           try {
             await this.reclaim(source, prefix)
           } catch (error) {

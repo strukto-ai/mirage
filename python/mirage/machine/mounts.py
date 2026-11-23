@@ -913,8 +913,8 @@ class MachineMounts:
 
     async def release(self, workspace_id: str) -> None:
         """Kill and unmount every mount this machine entry of the
-        workspace left from an earlier instance, as the workspace is
-        deleted: no later instance comes to take them back (``_reclaim``),
+        workspace left that this instance does not serve now, as the
+        workspace is deleted: no later instance comes to take them back (``_reclaim``),
         and their sshfs or mirage-fuse would hold the prefixes from every
         other workspace.
 
@@ -933,12 +933,13 @@ class MachineMounts:
                 if not left <= self._looked:
                     self._looked |= left
                     present = await self._table()
+            live = {source for _, _, _, source in self._served.values()}
             failures: list[Exception] = []
             for prefix, (source, kind) in present.items():
                 if (
                     kind in SERVED_KINDS
                     and self._ours(source, prefix)
-                    and source not in self._sources
+                    and source not in live
                 ):
                     try:
                         await self._reclaim(source, prefix)

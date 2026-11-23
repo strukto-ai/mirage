@@ -219,6 +219,16 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
                 last or exc
             )
 
+    async def _release_mounts(self) -> None:
+        """Release as any machine does (``MachineHandle._release_mounts``);
+        a relay session it opened on a container this handle is not
+        connected to closes again, as ``close`` closes it."""
+        try:
+            await super()._release_mounts()
+        finally:
+            if not self._connected and self._relay is not None:
+                await self._relay.close()
+
     async def _reach_to_release(self) -> bool:
         """Whether the container is running, asked without starting it: a
         stopped container holds no mounts, and connecting would start it.
