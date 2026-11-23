@@ -126,6 +126,7 @@ import {
 } from '../lookup/constants.ts'
 import {
   externalTarget,
+  programHead,
   programRuntime,
   resolveTarget,
   runsAs,
@@ -133,10 +134,12 @@ import {
   runsWrapper,
 } from '../lookup/lookup.ts'
 import { binProgram } from '../lookup/machine/answers.ts'
-import { operandMachine, programMachine } from '../lookup/machine/command.ts'
+import { factMachine, operandMachine, programMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
-import { preferredMachine } from '../lookup/machine/preferred.ts'
+import { asksMachines, preferredMachine } from '../lookup/machine/preferred.ts'
+import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
+import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -648,6 +651,8 @@ export async function executeCommand(
       seedPrefix,
       expanded,
       new Set(prefixAssignments.map(([k]) => k)),
+      new Map(prefixAssignments.map(([given, v]) => [deref(session, given), v])).get('PATH') ??
+        null,
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     // A run that starts as its output is read still runs under the prefix,
@@ -758,6 +763,7 @@ async function runCommandBody(
   seedPrefix?: (command: string) => void,
   expanded?: ExpandedWords,
   assigned: ReadonlySet<string> = new Set(),
+  prefixPath: string | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const stdin = stdinIn
@@ -802,6 +808,7 @@ async function runCommandBody(
     redirectRunnerFor(node),
     seedPrefix,
     assigned,
+    prefixPath,
   )
   bindLastWord(session, argv.name !== '' ? [argv.name, ...argv.args] : [])
   let stdout = ranStdout
@@ -862,6 +869,9 @@ async function runArgv(
   runner: RedirectRunner | null = null,
   seedPrefix?: (name: string) => void,
   assigned: ReadonlySet<string> = new Set(),
+  // The PATH the command's prefix sets (`PATH=/opt/bin tool`), which its
+  // program is looked up on; null when it sets none.
+  prefixPath: string | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const name = argv.name
@@ -986,7 +996,7 @@ async function runArgv(
       const line = context.frame.routing
       let nested = executeFn
       const place = (answer: Route | null): void => {
-        const here = context.frame.routing
+        const here = searched !== null && unplaced !== undefined ? unplaced : context.frame.routing
         if (answer === null || here === undefined) return
         let routing: RouteDecision<Runtime>
         try {
@@ -1160,32 +1170,127 @@ async function runArgv(
   // admitted: a refused one never reaches a machine. A command of Mirage's
   // own that a machine runs whole (`cat > /tmp/out`) is no program of that
   // machine: what it writes goes where Mirage's own writes go.
-  let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-  if (
-    name.includes('/') &&
-    (runner !== null || redirects.length > 0) &&
-    severalMachines(registry)
-  ) {
-    const denied = await guard([], stdin)
-    if (denied !== null) return denied
-    const [held] = await heldMachine(argv, deps, context, stdin)
-    if (held?.runtime) machine = held.runtime.machine
-  }
-  const preferred = await preferredMachine(
+  const unplaced = context.frame.routing
+  const searched = searchedProgram(
+    name,
+    argv.args,
     session,
     registry,
-    context.frame.routing,
-    context.frame.stdinWriter,
-    deps.namespace,
-    deps.dispatch,
+    unplaced,
+    namespace.sessionLinks(session),
   )
-  const outer = currentCaller()
-  if (
-    (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
-    preferred === outer.preferredMachine
+  if (searched !== null) {
+    const denied = await guard([], stdin)
+    if (denied !== null) return denied
+  }
+  const routedByPolicy = (): boolean => (admitted?.route ?? null) !== null
+  try {
+    if (searched !== null && unplaced !== undefined && !routedByPolicy())
+      context.frame.routing = await searchedRouting(
+        searched,
+        argv,
+        session,
+        registry,
+        unplaced,
+        prefixPath,
+      )
+    let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
+    if (
+      name.includes('/') &&
+      (runner !== null || redirects.length > 0) &&
+      severalMachines(registry)
+    ) {
+      const denied = await guard([], stdin)
+      if (denied !== null) return denied
+      const [held] = await heldMachine(argv, deps, context, stdin)
+      if (held?.runtime) machine = held.runtime.machine
+    }
+    if (
+      asksMachines(
+        session,
+        registry,
+        context.frame.routing,
+        context.frame.stdinWriter,
+        context.frame.folderHolders,
+      )
+    ) {
+      const denied = await guard([], stdin)
+      if (denied !== null) return denied
+    }
+    const preferred = await preferredMachine(
+      session,
+      registry,
+      context.frame.routing,
+      context.frame.stdinWriter,
+      deps.namespace,
+      deps.dispatch,
+      context.frame.folderHolders,
+    )
+    const outer = currentCaller()
+    if (
+      (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
+      preferred === outer.preferredMachine
+    )
+      return await run()
+    return await bindCaller({ ...outer, machine, preferredMachine: preferred }, run)
+  } finally {
+    if (unplaced !== undefined) context.frame.routing = unplaced
+  }
+}
+
+/**
+ * The program a command runs that search order places (`isSearched`),
+ * through the wrappers Mirage runs (`nice gen`) and by the `/usr/bin` path a
+ * lookup prints for it (`binProgram`), which names the program past a
+ * function of its name; null for any other command.
+ * It is placed before the command's redirects open, since what they make
+ * lands on its machine, and once the command is admitted: a refused one
+ * never reaches a machine. Mirrors Python's `_searched_program`.
+ */
+function searchedProgram(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  links: NamespaceReader,
+): string | null {
+  if (name === '' || routing === undefined || routing.machine !== undefined) return null
+  const typed = programHead(registry, [name, ...args], session, routing)
+  const byPath = typed.includes('/')
+  const head = byPath ? (binProgram(typed, session, registry, links, routing) ?? typed) : typed
+  return isSearched(head, session, registry, routing, byPath) ? head : null
+}
+
+/**
+ * A line's placement with a program on the machine search order picks for it
+ * (`searchedMachine`), for the command's run alone; the placement as it is
+ * where no machine has the program. The program is one `searchedProgram`
+ * already found search order places, so a function of its name no longer
+ * counts. Mirrors Python's `_searched_routing`.
+ */
+async function searchedRouting(
+  program: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime>,
+  prefixPath: string | null = null,
+): Promise<RouteDecision<Runtime>> {
+  const paths = argv.operands
+    .filter((w): w is PathSpec => w instanceof PathSpec)
+    .map((w) => unmarkGlobs(w.virtual))
+  const found = await searchedMachine(
+    program,
+    paths,
+    session,
+    registry,
+    routing,
+    null,
+    prefixPath,
+    true,
   )
-    return run()
-  return bindCaller({ ...outer, machine, preferredMachine: preferred }, run)
+  return found === null ? routing : boundTo(routing, program, found)
 }
 
 /**
@@ -1260,6 +1365,10 @@ async function heldMachine(
       namespace.sessionLinks(session),
       dispatch,
       stdin,
+      placed.machine ?? null,
+      argv.operands
+        .filter((w): w is PathSpec => w instanceof PathSpec)
+        .map((w) => unmarkGlobs(w.virtual)),
     )
     return [held === null ? null : { kind: Consumer.EXTERNAL, runtime: held }, argv]
   }
@@ -1273,7 +1382,11 @@ async function heldMachine(
     return [null, argv]
   const links = namespace.sessionLinks(session)
   let machine = await operandMachine(argv, session, registry, links, stdin)
-  if (machine === null) return [null, argv]
+  if (machine === null)
+    return [
+      await factMachine(argv, session, registry, links, placed, stdin, context.frame.folderHolders),
+      argv,
+    ]
   const words = await matched(argv, session, registry, namespace)
   if (words !== argv) machine = await operandMachine(words, session, registry, links, stdin)
   return [machine, words]

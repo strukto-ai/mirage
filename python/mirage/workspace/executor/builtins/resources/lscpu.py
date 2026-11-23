@@ -131,7 +131,7 @@ async def handle_lscpu(
     cmd_str = " ".join(parts)
     named = machine_named(parts[1:])
     processes = job_table.processes
-    scope = machine_scope(processes, named, workspace=True)
+    scope = machine_scope(processes, named, workspace=True, about=True)
     if scope is None:
         return job_result(cmd_str, f"lscpu: {named}: no such machine\n", 1)
     rows, errors = await read_machines(processes, scope, "lscpu")

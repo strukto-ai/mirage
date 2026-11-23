@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller, missingProgram } from '../context/session_context.ts'
+import {
+  DEFAULT_UMASK,
+  currentCaller,
+  missingProgram,
+  sessionUmask,
+} from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
@@ -24,7 +29,7 @@ import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MachineMemory, MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
-import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
@@ -242,6 +247,17 @@ export class OutputWatch {
 }
 
 /**
+ * Whether a PATH names a folder by where the run stands: an entry that is
+ * empty or not absolute, which a program lookup resolves against the working
+ * folder. Mirrors Python's `_leans_on_folder`.
+ *
+ * @param path the PATH, null for the machine's own.
+ */
+function leansOnFolder(path: string | null): boolean {
+  return path?.split(':').some((entry) => !entry.startsWith('/')) ?? false
+}
+
+/**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
@@ -309,7 +325,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // waits for that, not only the one that started it.
   private waking: Promise<void> | null = null
   // Whether the machine has a program, by name, asked once each.
-  private readonly programs = new Map<string, Promise<boolean>>()
+  private readonly programs = new Map<string, Map<string, Promise<boolean>>>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -486,8 +502,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       sink = outExit.write
     }
     const watch = new OutputWatch()
+    const mask = sessionUmask()
     const execution = this.execArgv(
-      runArgv(tag, nonce, run, missing, currentCaller().joinsErrors),
+      runArgv(
+        tag,
+        nonce,
+        run,
+        missing,
+        currentCaller().joinsErrors,
+        mask === DEFAULT_UMASK ? null : mask,
+      ),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
@@ -517,6 +541,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } finally {
       this.runs -= 1
     }
+    if (done.exitCode === NOT_FOUND_STATUS) this.forgetPrograms(argv)
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
     const lost =
@@ -894,15 +919,64 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param name the program's name.
    */
   hasProgram(name: string): Promise<boolean> {
-    let known = this.programs.get(name)
-    if (known === undefined) {
-      known = this.ensureConnected()
-        .then(() => this.setup(`command -v ${shellQuote(name)} >/dev/null 2>&1`))
-        .then((done) => done.exitCode === 0)
-      known.catch(() => this.programs.delete(name))
-      this.programs.set(name, known)
-    }
-    return known
+    return this.programs.get(name)?.get(JSON.stringify([null, null])) ?? this.look(name, null, null)
+  }
+
+  /**
+   * Whether a run started now would find a program of this name: on the PATH
+   * the session exported, which the run gets, and asked again where the last
+   * answer was no, since the program may have been installed since. A PATH
+   * that names a folder by where the run stands (`venv/bin:/usr/bin`) is
+   * looked on from the run's folder, and its answer is kept for that folder
+   * alone.
+   *
+   * @param name the program's name.
+   * @param path the PATH the session exported; null for the machine's own.
+   * @param cwd the folder the run starts in.
+   */
+  async findsProgram(
+    name: string,
+    path: string | null = null,
+    cwd: string | null = null,
+  ): Promise<boolean> {
+    const at = leansOnFolder(path) ? cwd : null
+    const known = this.programs.get(name)?.get(JSON.stringify([path, at]))
+    return (known !== undefined && (await known)) || this.look(name, path, at)
+  }
+
+  /**
+   * Ask the machine for a program on a PATH, and keep the answer.
+   *
+   * @param name the program's name.
+   * @param path the PATH to look on; null for the machine's own.
+   * @param cwd the folder to look from; null for `/`. A machine without the
+   *   folder has no such program.
+   */
+  private look(name: string, path: string | null, cwd: string | null): Promise<boolean> {
+    const key = JSON.stringify([path, cwd])
+    const at = cwd === null ? '' : `cd -- ${shellQuote(cwd)} 2>/dev/null && `
+    const on = path === null ? '' : `PATH=${shellQuote(path)} `
+    const found = this.ensureConnected()
+      .then(() => this.setup(`${at}${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
+      .then((done) => done.exitCode === 0)
+    const kept = this.programs.get(name) ?? new Map<string, Promise<boolean>>()
+    this.programs.set(name, kept)
+    kept.set(key, found)
+    found.catch(() => {
+      if (kept.get(key) === found) kept.delete(key)
+    })
+    return found
+  }
+
+  /**
+   * Drop what is kept of the programs a run names, once it ended with
+   * `command not found`: one removed from the machine since it was last
+   * asked is asked for again, so the next search leaves the machine out.
+   *
+   * @param words the run's words.
+   */
+  private forgetPrograms(words: readonly string[]): void {
+    for (const word of words) this.programs.delete(word)
   }
 
   /**

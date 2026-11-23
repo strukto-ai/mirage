@@ -516,7 +516,7 @@ async def handle_free(
     name = parse.flags.get("machine")
     named = name if isinstance(name, str) else None
     processes = job_table.processes
-    found = machine_scope(processes, named, workspace=True)
+    found = machine_scope(processes, named, workspace=True, about=True)
     if found is None:
         return job_result(cmd_str, f"free: {named}: no such machine\n", 1)
     scope = _answering(found)

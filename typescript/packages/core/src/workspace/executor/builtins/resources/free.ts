@@ -361,7 +361,7 @@ export async function handleFree(
   const name = parse.flags.machine
   const named = typeof name === 'string' ? name : null
   const processes = jobTable.processes
-  const found = machineScope(processes, named, true)
+  const found = machineScope(processes, named, true, true)
   if (found === null) return jobResult(cmdStr, `free: ${named ?? ''}: no such machine\n`, 1)
   const scope = answering(found)
   const options = freeOptions(units, parse.flags)

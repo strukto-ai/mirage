@@ -33,6 +33,7 @@ import { KEYWORDS } from '../constants.ts'
 import { lookupAll } from '../lookup.ts'
 import { Consumer, MachineAnswer, ProgramLookup } from '../types.ts'
 import { machineHoldingAll } from './mounts.ts'
+import { searchedMachine } from './search.ts'
 
 /**
  * The machine a lookup of `name` asks: the one that would run it as a
@@ -202,6 +203,9 @@ async function answer(
  * @param registry the workspace's mounts and machines.
  * @param links the session's link table.
  * @param routing the line's placement.
+ *
+ * A name no machine captures is asked of the machine search order picks for
+ * it (`searchedMachine`).
  */
 export async function machineAnswers(
   command: string,
@@ -217,7 +221,18 @@ export async function machineAnswers(
   const asked = new Map<string, RemoteRuntime>()
   for (const name of new Set(names)) {
     const runtime = lookupMachine(name, session, registry, routing, pastFunctions)
-    if (runtime !== null) asked.set(name, runtime)
+    if (runtime === null) continue
+    const searched = await searchedMachine(
+      name,
+      [],
+      session,
+      registry,
+      routing,
+      null,
+      null,
+      pastFunctions,
+    )
+    asked.set(name, searched ?? runtime)
   }
   const found = await Promise.all(
     [...asked].map(

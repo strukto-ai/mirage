@@ -74,6 +74,9 @@ class ExecutionFrame:
     ``ending`` is the id of the command a job runs as a whole, whose
     redirects its shell never puts back: it ends with the command, so
     bash keeps no copy of what they replace.
+    ``folder_holders`` are the machines holding each folder a command of
+    the line stood in, by folder, asked once for the whole line and
+    shared by every frame it forks (``folder_holders``).
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
@@ -92,14 +95,16 @@ class ExecutionFrame:
     stdin: ByteSource | None = None
     stdin_writer: PipeWriter | None = None
     ending: int | None = None
+    folder_holders: dict[str, list[str]] = field(default_factory=dict)
 
     def fork(self, stdin: ByteSource | None = None) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the
         line's routing decision, since nested lines never re-route, its
         time limit, which a job it starts runs under from its own start,
         the process whose shell it is part of, whether that shell is a
-        substitution's, and the writer of the pipe it reads when that is
-        the pipe this frame's stage reads.
+        substitution's, the writer of the pipe it reads when that is
+        the pipe this frame's stage reads, and the machines the line
+        found holding its folders.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
@@ -121,4 +126,5 @@ class ExecutionFrame:
             stdin_writer=(
                 writer if writer is not None and given is writer.pipe else None
             ),
+            folder_holders=self.folder_holders,
         )

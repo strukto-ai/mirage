@@ -913,7 +913,7 @@ differently from a shell on one Linux host:
 | `ps` | The host's processes | What the session started, on every machine, with a `MACHINE` column; `-p` and `-C` select as Linux's do, `--machine NAME` narrows it to one, `-o pid,machine` picks columns |
 | `jobs`, `wait`, `kill` | One process table | Each machine is asked what runs there. A PID two machines share is refused as ambiguous; name the machine with `-m` or `--machine`: `kill -m box 13` |
 | `pgrep`, `pkill`, `pidof`, `killall` | Every process on the host | Only what Mirage started, on every machine at once |
-| `nproc`, `hostname`, `lscpu`, `free` | The host | One row per machine, with the machine on the right. With one machine, `free` prints that machine's table alone, as Linux's `free` does. Inside `$( )`, the default machine's answer; `--machine NAME` picks one, `--machine mirage` the workspace |
+| `nproc`, `hostname`, `lscpu`, `free` | The host | One row per machine, with the machine on the right. With one machine, `free` prints that machine's table alone, as Linux's `free` does. Inside `$( )`, the default machine's answer; `--machine NAME` picks one, `--machine mirage` the workspace. A line that names a machine prints that machine's answer alone |
 | `uptime`, `top` | Always there | Only while a machine or the host runs programs; `top` needs `-b` |
 | `df`, `mount` | The host's disks | The workspace's mounts |
 

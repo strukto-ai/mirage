@@ -56,7 +56,7 @@ export async function handleNproc(
   const name = parse.flags.machine
   const named = typeof name === 'string' ? name : null
   const processes = jobTable.processes
-  const scope = machineScope(processes, named, true)
+  const scope = machineScope(processes, named, true, true)
   if (scope === null) return jobResult(cmdStr, `nproc: ${named ?? ''}: no such machine\n`, 1)
   const [rows, errors] = await readMachines(processes, scope, 'nproc')
   const env = session?.env ?? {}

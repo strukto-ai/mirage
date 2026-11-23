@@ -16,7 +16,9 @@ import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import type { DispatchFn, RouteDecision } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
+import { unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { norm } from '../../../utils/path.ts'
+import { classifyWord } from '../../expand/classify/heuristic.ts'
 import type { PipeWriter } from '../../frame.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -24,11 +26,13 @@ import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
 import { programMachine } from './command.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
+import { folderHolders, searchedMachine } from './search.ts'
 
 /**
  * The machine a command Mirage runs itself is about
  * (`Caller.preferredMachine`): the one the line names, else the one whose
- * program writes the pipe it reads, else the one its folder is on; null when
+ * program writes the pipe it reads, else the one machine holding its folder,
+ * which a mount several machines show asks them (`folderHolders`); null when
  * nothing says, and in a workspace that runs programs on one machine, where
  * nothing is to choose. Mirrors Python's `preferred_machine`.
  *
@@ -41,6 +45,8 @@ import { folderMachines, severalMachines } from './mounts.ts'
  * @param fedBy the program writing the pipe the command reads.
  * @param namespace the link table a writer's path is read through.
  * @param dispatch op dispatcher, which a writer's path is asked of.
+ * @param asked the machines the line found holding its folders
+ *   (`ExecutionFrame.folderHolders`).
  */
 export async function preferredMachine(
   session: SessionState,
@@ -49,6 +55,7 @@ export async function preferredMachine(
   fedBy: PipeWriter | null,
   namespace: Namespace,
   dispatch: DispatchFn,
+  asked: Map<string, string[]>,
 ): Promise<string | null> {
   if (routing === undefined || !severalMachines(registry)) return null
   if (routing.machine !== undefined) return routing.machine
@@ -57,9 +64,56 @@ export async function preferredMachine(
     fedBy.placed = true
   }
   if (fedBy !== null && fedBy.machine !== null) return fedBy.machine
-  const shown = folderMachines(session.cwd, registry)
-  const [only] = shown
-  return shown.length === 1 && only !== undefined ? only : null
+  const held = await folderHolders(session.cwd, session, registry, asked)
+  const [only] = held
+  return held.length === 1 && only !== undefined ? only : null
+}
+
+/**
+ * Whether `preferredMachine` may ask a machine for its answer: to place a
+ * pipe's writer not placed yet, or to find who holds a folder a mount
+ * several machines show that the line has not asked about. The command is
+ * then admitted first, so a refused one never reaches a machine. Mirrors
+ * Python's `asks_machines`.
+ *
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param fedBy the program writing the pipe the command reads.
+ * @param asked the machines the line found holding its folders
+ *   (`ExecutionFrame.folderHolders`).
+ */
+export function asksMachines(
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  fedBy: PipeWriter | null,
+  asked: Map<string, string[]>,
+): boolean {
+  if (routing === undefined || routing.machine !== undefined) return false
+  if (!severalMachines(registry)) return false
+  if (fedBy !== null && !fedBy.placed) return true
+  if (fedBy !== null && fedBy.machine !== null) return false
+  const folder = session.cwd
+  return !asked.has(folder) && folderMachines(folder, registry).length > 1
+}
+
+/**
+ * The absolute paths a pipe's writer names, read as its run reads its words
+ * (`classifyWord`), so the writer is placed where it runs
+ * (`gen /srv/gpu/in | tee log`); a word only known when it runs names none.
+ * Mirrors Python's `_writer_paths`.
+ *
+ * @param fedBy the pipe's writer.
+ * @param registry the workspace's mounts and machines.
+ */
+function writerPaths(fedBy: PipeWriter, registry: MountRegistry): string[] {
+  return fedBy.words
+    .slice(1)
+    .filter((word) => word !== null)
+    .map((word) => classifyWord(word, registry, fedBy.cwd))
+    .filter((word): word is PathSpec => word instanceof PathSpec)
+    .map((word) => unmarkGlobs(word.virtual))
 }
 
 /**
@@ -92,6 +146,7 @@ async function writerMachine(
   dispatch: DispatchFn,
 ): Promise<string | null> {
   const head = programHead(registry, fedBy.words, session, routing)
+  const paths = writerPaths(fedBy, registry)
   let runtime: Runtime | null | undefined = null
   if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
     runtime = await programMachine(
@@ -101,7 +156,11 @@ async function writerMachine(
       namespace.sessionLinks(session),
       dispatch,
       null,
+      null,
+      paths,
+      fedBy.cwd,
     )
+  runtime ??= await searchedMachine(head, paths, session, registry, routing, fedBy.cwd)
   runtime ??= programRuntime(registry, fedBy.words, session, routing)
   if (!(runtime instanceof RemoteRuntime)) return null
   const name = runtime.defaultMachine

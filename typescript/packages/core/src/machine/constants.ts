@@ -476,7 +476,10 @@ export const FIFO_NAME = 'fd'
 
 // Every program runs as a child of this wrapper, which outlives it to say
 // how it ended, since an exec holds on while anything the program started
-// keeps its output open (E2B, msb). `$1` is the run's own word, which no
+// keeps its output open (E2B, msb). Its first word is the `umask` the
+// session set, empty for a session that set none: the wrapper takes it for
+// itself, so its program starts under it (`umask 077; python3 gen.py`), and
+// drops the word. After that `$1` is the run's own word, which no
 // program's output can know to forge; `$2` to `$4` the words a program the
 // machine cannot run is reported in (`PROGRAM_CHECK`); `$5` the tag's
 // assignment, exported for the program alone so the wrapper shows in no scan
@@ -495,6 +498,7 @@ export const FIFO_NAME = 'fd'
 // and the program gets the real one back. It needs only a POSIX shell at
 // `/bin/sh`. Mirrors Python's `RUN_WRAPPER`.
 export const RUN_WRAPPER =
+  '[ -z "$1" ] || umask "$1"; shift; ' +
   'exec 6>&2 2>/dev/null; ' +
   "( /bin/sh -c 'if read -r s </proc/$PPID/stat; then set -- ${s##*)}; " +
   't=${20}; else t=$(' +
@@ -517,9 +521,10 @@ export const RUN_WRAPPER =
 export const RUN_WRAPPER_JOINED = RUN_WRAPPER.replace('exec 2>&6 6>&-; ', 'exec 2>&1 6>&-; ')
 
 // Where a run's program starts in what `runArgv` builds: past
-// `/bin/sh -c RUN_WRAPPER sh`, the run's own word, the three words a program
-// it cannot run is reported in, and the tag's assignment.
-export const RUN_PROGRAM_AT = 9
+// `/bin/sh -c RUN_WRAPPER sh`, the session's umask, the run's own word, the
+// three words a program it cannot run is reported in, and the tag's
+// assignment.
+export const RUN_PROGRAM_AT = 10
 
 // The marks ahead of the pid line and the exit line the wrapper writes on
 // stderr, a record separator first so no program's output starts with it.
@@ -763,6 +768,8 @@ export function fifoLine(name: string, prefixes: readonly string[]): string {
  *   (`PROGRAM_CHECK`).
  * @param joined the program writes its stderr into its stdout
  *   (`RUN_WRAPPER_JOINED`).
+ * @param umask the mask the session set, which the program starts under;
+ *   null for a session that set none, which leaves the machine's own.
  */
 export function runArgv(
   tag: string,
@@ -770,12 +777,14 @@ export function runArgv(
   argv: readonly string[],
   missing: readonly [string, string, string] = ['', 'command not found', ''],
   joined = false,
+  umask: number | null = null,
 ): string[] {
   return [
     '/bin/sh',
     '-c',
     joined ? RUN_WRAPPER_JOINED : RUN_WRAPPER,
     'sh',
+    umask === null ? '' : umask.toString(8).padStart(4, '0'),
     nonce,
     ...missing,
     `${PROCESS}=${tag}`,

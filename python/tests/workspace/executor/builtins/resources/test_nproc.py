@@ -14,6 +14,11 @@
 
 import pytest
 
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.workspace.executor.builtins.resources.nproc import handle_nproc
 from tests.fixtures.machine_resources import resources, table_of
 
@@ -46,6 +51,17 @@ async def test_all_and_ignore_apply_to_each_machine():
 async def test_machine_picks_one():
     table = table_of(resources("docker:a"), resources("e2b:b", cpus=2))
     out, _, _ = await handle_nproc(table, ["nproc", "--machine", "e2b:b"])
+    assert out == b"2\n"
+
+
+@pytest.mark.asyncio
+async def test_a_line_about_one_machine_prints_that_machine_s_alone():
+    table = table_of(resources("docker:a"), resources("e2b:b", cpus=2))
+    token = bind_caller(current_caller().changed({"preferred_machine": "b"}))
+    try:
+        out, _, _ = await handle_nproc(table, ["nproc"])
+    finally:
+        reset_caller(token)
     assert out == b"2\n"
 
 

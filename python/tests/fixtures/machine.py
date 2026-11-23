@@ -58,6 +58,7 @@ class ScriptedMachine(MachineHandle):
         self.fed: list[bytes | None] = []
         self.cwds: list[str] = []
         self.joined: list[bool] = []
+        self.umasks: list[str] = []
 
     async def connect(self) -> None:
         return None
@@ -75,6 +76,7 @@ class ScriptedMachine(MachineHandle):
         if is_run(argv):
             self.cwds.append(cwd)
             self.joined.append(joined)
+            self.umasks.append(argv[RUN_PROGRAM_AT - 6])
             argv = argv[RUN_PROGRAM_AT:]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None

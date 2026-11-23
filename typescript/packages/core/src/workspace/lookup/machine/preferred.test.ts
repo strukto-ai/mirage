@@ -13,9 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
 import { FakeFiles, two, run, texts } from '../../../../tests/fixtures/machine_files.ts'
-import type { Action } from '../../../policy/types.ts'
+import type { Action, CommandContext } from '../../../policy/types.ts'
+import { MountMode } from '../../../types.ts'
 import { MachineVFS } from '../../../vfs/machine/machine.ts'
+import { Workspace } from '../../workspace/workspace.ts'
 
 describe('preferredMachine', () => {
   it('gives a named machine the new names Mirage makes', async () => {
@@ -40,6 +43,60 @@ describe('preferredMachine', () => {
       { '/tmp/from-tmp': '' },
       ['/srv/kept', '/tmp/from-b'],
     ])
+    await ws.close()
+  })
+
+  it('gives a shared folder one machine holds the new names made from it', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/only/k': 'k' })
+    const ws = two(a, b)
+    expect((await run(ws, 'cd /tmp/only && touch /tmp/from-only'))[0]).toBe(0)
+    expect([Object.keys(texts(a)), Object.keys(texts(b)).sort()]).toEqual([
+      [],
+      ['/tmp/from-only', '/tmp/only/k'],
+    ])
+    await ws.close()
+  })
+
+  it.each([
+    [
+      'refused',
+      {
+        preCommand: (ctx: CommandContext): Action | null =>
+          ctx.command === 'echo' ? { kind: 'deny', reason: 'no echo' } : null,
+      },
+    ],
+    ['judged by a file policy', { preVfs: (): Action | null => null }],
+  ])('asks no machine about its folder for a %s line', async (_, policy) => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/only/k': 'k' })
+    const first = new ScriptedMachine('a', a.answer)
+    const second = new ScriptedMachine('b', b.answer)
+    const ws = new Workspace({}, { mode: MountMode.WRITE, machines: { a: first, b: second } })
+    ws.policies.add(policy)
+    await ws.shell('cd /tmp/only')
+    const before = [first.lines.length, second.lines.length]
+    await ws.shell('echo 1')
+    expect([first.lines.length, second.lines.length]).toEqual(before)
+    await ws.close()
+  })
+
+  it('asks who holds its folder once a line', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/only/k': 'k' })
+    const first = new ScriptedMachine('a', a.answer)
+    const ws = new Workspace(
+      {},
+      { mode: MountMode.WRITE, machines: { a: first, b: new ScriptedMachine('b', b.answer) } },
+    )
+    await ws.shell('cd /tmp/only')
+    let start = first.lines.length
+    await ws.shell('echo 1')
+    const oneEcho = first.lines.length - start
+    start = first.lines.length
+    await ws.shell('echo 1; echo 2; echo 3; echo 4')
+    expect(oneEcho).toBeGreaterThan(0)
+    expect(first.lines.length - start).toBe(oneEcho)
     await ws.close()
   })
 

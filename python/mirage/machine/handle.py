@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from importlib import import_module
 from time import monotonic
@@ -23,7 +23,12 @@ from types import ModuleType
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller, missing_program
+from mirage.context.session_context import (
+    DEFAULT_UMASK,
+    current_caller,
+    missing_program,
+    session_umask,
+)
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
@@ -66,7 +71,7 @@ from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.utils.clock import bound_system_clock
 from mirage.utils.quote import shell_quote
 
@@ -269,6 +274,19 @@ class OutputWatch:
         return 0.0 if self._busy else monotonic() - self._moved
 
 
+def _leans_on_folder(path: str | None) -> bool:
+    """Whether a PATH names a folder by where the run stands: an entry
+    that is empty or not absolute, which a program lookup resolves
+    against the working folder.
+
+    Args:
+        path (str | None): the PATH, None for the machine's own.
+    """
+    return path is not None and any(
+        not entry.startswith("/") for entry in path.split(":")
+    )
+
+
 class MachineHandle:
     """One machine a workspace runs programs on, reached through its
     provider: the live connection, held once per workspace.
@@ -354,7 +372,7 @@ class MachineHandle:
         # started it.
         self._waking: asyncio.Event | None = None
         # Whether the machine has a program, by name, asked once each.
-        self._programs: dict[str, bool] = {}
+        self._programs: dict[tuple[str, str | None, str | None], bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -558,11 +576,17 @@ class MachineHandle:
             filters = [out_exit, out_pid, *filters]
             sink = out_exit.write
         watch = OutputWatch()
+        mask = session_umask()
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
                 run_argv(
-                    tag, nonce, run, missing, current_caller().joins_errors
+                    tag,
+                    nonce,
+                    run,
+                    missing,
+                    current_caller().joins_errors,
+                    None if mask == DEFAULT_UMASK else mask,
                 ),
                 ctx.stdin,
                 {**given, **clock},
@@ -600,6 +624,8 @@ class MachineHandle:
             done = RunResult(exit_code=HANGUP_EXIT_CODE)
         finally:
             self._executing -= 1
+        if done.exit_code == NOT_FOUND_STATUS:
+            self._forget_programs(argv)
         if self._mounts is None:
             return done
         if done.exit_code == CANNOT_EXECUTE_STATUS:
@@ -995,14 +1021,65 @@ class MachineHandle:
         Args:
             name (str): the program's name.
         """
-        known = self._programs.get(name)
+        known = self._programs.get((name, None, None))
         if known is None:
-            await self.ensure_connected()
-            done = await self._setup(
-                f"command -v {shell_quote(name)} >/dev/null 2>&1"
-            )
-            known = self._programs[name] = done.exit_code == 0
+            return await self._look(name, None, None)
         return known
+
+    async def finds_program(
+        self, name: str, path: str | None = None, cwd: str | None = None
+    ) -> bool:
+        """Whether a run started now would find a program of this name:
+        on the PATH the session exported, which the run gets, and asked
+        again where the last answer was no, since the program may have
+        been installed since. A PATH that names a folder by where the
+        run stands (``venv/bin:/usr/bin``) is looked on from the run's
+        folder, and its answer is kept for that folder alone.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH the session exported; None for
+                the machine's own.
+            cwd (str | None): the folder the run starts in.
+        """
+        at = cwd if _leans_on_folder(path) else None
+        if self._programs.get((name, path, at)):
+            return True
+        return await self._look(name, path, at)
+
+    def _forget_programs(self, words: Sequence[str]) -> None:
+        """Drop what is kept of the programs a run names, once it ended
+        with ``command not found``: one removed from the machine since it
+        was last asked is asked for again, so the next search leaves the
+        machine out.
+
+        Args:
+            words (Sequence[str]): the run's words.
+        """
+        named = set(words)
+        for key in [key for key in self._programs if key[0] in named]:
+            del self._programs[key]
+
+    async def _look(
+        self, name: str, path: str | None, cwd: str | None
+    ) -> bool:
+        """Ask the machine for a program on a PATH, and keep the answer.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH to look on; None for the
+                machine's own.
+            cwd (str | None): the folder to look from; None for ``/``.
+                A machine without the folder has no such program.
+        """
+        await self.ensure_connected()
+        at = "" if cwd is None else f"cd -- {shell_quote(cwd)} 2>/dev/null && "
+        on = "" if path is None else f"PATH={shell_quote(path)} "
+        done = await self._setup(
+            f"{at}{on}command -v {shell_quote(name)} >/dev/null 2>&1"
+        )
+        found = self._programs[(name, path, cwd)] = done.exit_code == 0
+        return found
 
     async def look_up(self, line: str, env: Mapping[str, str]) -> RunAnswer:
         """Run a lookup the agent typed (``which perl``) as the machine
