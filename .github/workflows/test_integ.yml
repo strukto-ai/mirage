@@ -699,7 +699,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # A cold build of the embedded WASM modules takes about 15 minutes
+    # before the Nextcloud battery can start.
+    timeout-minutes: 45
     services:
       redis:
         image: redis:7
