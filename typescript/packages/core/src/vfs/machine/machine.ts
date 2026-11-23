@@ -102,65 +102,6 @@ async function refuseLanding(
 }
 
 /**
- * Land a whole file on the machine its bytes come from (`originMachine`: a
- * program's `>`, or a copy made by a read and a write) as a direct copy
- * lands (`MachineVFS.copyFrom`): its folder made there when only another
- * machine holds it, and no other machine's copy of the name left to show
- * again. Mirrors Python's `_land_at_origin`.
- *
- * @param accessor the mount's machines.
- * @param machine the machine the bytes come from.
- * @param path the file.
- * @param data its bytes.
- * @param atomic show nothing until the bytes have ended whole.
- * @param live the machines writing each name now (`MachineVFS.liveWrites`).
- */
-async function landAtOrigin(
-  accessor: MachineAccessor,
-  machine: string,
-  path: PathSpec,
-  data: ByteSource,
-  atomic: boolean,
-  live: ReadonlyMap<string, readonly string[]>,
-): Promise<void> {
-  let lacking: string[]
-  try {
-    lacking = await machinesLackingFolder(accessor, [machine], path)
-  } catch (err) {
-    await closeQuietly(data)
-    throw err
-  }
-  await machineWrite(accessor, machine, path, data, false, atomic, lacking.length > 0)
-  await dropOtherCopies(accessor, machine, path, live)
-}
-
-/**
- * Take a name off every other machine holding it as a file, once its new
- * copy has landed on `machine`, so an older copy never shows again. A
- * machine still writing the name keeps its copy: that write lands later,
- * and the write that ends last is the one shown, as with two writers of one
- * file. Mirrors Python's `_drop_other_copies`.
- *
- * @param accessor the mount's machines.
- * @param machine the machine the name landed on.
- * @param path the name.
- * @param live the machines writing each name now (`MachineVFS.liveWrites`).
- */
-async function dropOtherCopies(
-  accessor: MachineAccessor,
-  machine: string,
-  path: PathSpec,
-  live: ReadonlyMap<string, readonly string[]>,
-): Promise<void> {
-  if (!accessor.several) return
-  for (const one of await holders(accessor, path)) {
-    if (one.machine === machine || one.isFolder) continue
-    if (live.get(path.virtual)?.includes(one.machine) === true) continue
-    await machineUnlink(accessor, one.machine, path)
-  }
-}
-
-/**
  * A machine's own files at a prefix, reached through the exec the workspace
  * already holds for the machine: what its programs read and write, without
  * serving or copying anything.
@@ -187,6 +128,8 @@ export class MachineVFS extends BaseVFS {
   readonly config: MachineVFSConfig
   override readonly accessor: MachineAccessor
   private readonly liveWrites = new Map<string, string[]>()
+  private readonly lastLanded = new Map<string, string>()
+  private readonly unsettled = new Set<string>()
 
   constructor(config: MachineVFSConfig) {
     super()
@@ -327,7 +270,7 @@ export class MachineVFS extends BaseVFS {
     await refuseLanding(this.accessor, machine, path, data)
     await this.liveWrite(machine, path, async () => {
       if (originMachine(this.accessor) === machine) {
-        await landAtOrigin(this.accessor, machine, path, data, atomic, this.liveWrites)
+        await this.landAtOrigin(machine, path, data, atomic)
         return
       }
       await machineWrite(this.accessor, machine, path, data, false, atomic)
@@ -343,9 +286,9 @@ export class MachineVFS extends BaseVFS {
   }
 
   /**
-   * Count a write of a name on a machine as live while it lands, so a write
-   * of the name landing elsewhere meanwhile leaves its copy
-   * (`dropOtherCopies`). Mirrors Python's `MachineVFS._live_write`.
+   * Count a write of a name on a machine as live while it lands
+   * (`dropOtherCopies`), and end it (`endWrite`). Mirrors Python's
+   * `MachineVFS._live_write`.
    *
    * @param machine the machine written.
    * @param path the name.
@@ -358,11 +301,95 @@ export class MachineVFS extends BaseVFS {
       this.liveWrites.set(path.virtual, live)
     }
     live.push(machine)
+    let done: T
     try {
-      return await write()
-    } finally {
-      live.splice(live.indexOf(machine), 1)
-      if (live.length === 0) this.liveWrites.delete(path.virtual)
+      done = await write()
+    } catch (err) {
+      await this.endWrite(machine, path, false)
+      throw err
+    }
+    await this.endWrite(machine, path, true)
+    return done
+  }
+
+  /**
+   * End a live write of a name. A cleanup that passed over a live write left
+   * the name unsettled (`dropOtherCopies`), and the last write of it to end
+   * settles it: the copy of the write that landed last stays and every other
+   * machine's goes, a failed write's too, so once the writes end one copy
+   * shows, the newest. Mirrors Python's `MachineVFS._end_write`.
+   *
+   * @param machine the machine written.
+   * @param path the name.
+   * @param landed the write landed; a failed one leaves the copies of those
+   *   that did.
+   */
+  private async endWrite(machine: string, path: PathSpec, landed: boolean): Promise<void> {
+    const key = path.virtual
+    if (landed) this.lastLanded.set(key, machine)
+    const live = this.liveWrites.get(key) ?? []
+    live.splice(live.indexOf(machine), 1)
+    if (live.length > 0) return
+    this.liveWrites.delete(key)
+    const last = this.lastLanded.get(key)
+    this.lastLanded.delete(key)
+    if (!this.unsettled.delete(key) || last === undefined) return
+    try {
+      await this.dropOtherCopies(last, path)
+    } catch (err) {
+      if (landed) throw err
+      console.debug(`older copies of ${key} kept:`, err)
+    }
+  }
+
+  /**
+   * Land a whole file on the machine its bytes come from (`originMachine`: a
+   * program's `>`, or a copy made by a read and a write) as a direct copy
+   * lands (`copyFrom`): its folder made there when only another machine
+   * holds it, and no other machine's copy of the name left to show again.
+   * Mirrors Python's `MachineVFS._land_at_origin`.
+   *
+   * @param machine the machine the bytes come from.
+   * @param path the file.
+   * @param data its bytes.
+   * @param atomic show nothing until the bytes have ended whole.
+   */
+  private async landAtOrigin(
+    machine: string,
+    path: PathSpec,
+    data: ByteSource,
+    atomic: boolean,
+  ): Promise<void> {
+    let lacking: string[]
+    try {
+      lacking = await machinesLackingFolder(this.accessor, [machine], path)
+    } catch (err) {
+      await closeQuietly(data)
+      throw err
+    }
+    await machineWrite(this.accessor, machine, path, data, false, atomic, lacking.length > 0)
+    await this.dropOtherCopies(machine, path)
+  }
+
+  /**
+   * Take a name off every other machine holding it as a file, once its new
+   * copy has landed on `machine`, so an older copy never shows again. A
+   * machine still writing the name keeps its copy, and the name is left for
+   * the last write of it to settle (`endWrite`). Mirrors Python's
+   * `MachineVFS._drop_other_copies`.
+   *
+   * @param machine the machine the name landed on.
+   * @param path the name.
+   */
+  private async dropOtherCopies(machine: string, path: PathSpec): Promise<void> {
+    if (!this.accessor.several) return
+    for (const one of await holders(this.accessor, path)) {
+      if (one.machine === machine || one.isFolder) continue
+      if (this.liveWrites.get(path.virtual)?.includes(one.machine) === true) {
+        this.unsettled.add(path.virtual)
+        continue
+      }
+      await machineUnlink(this.accessor, one.machine, path)
     }
   }
 
@@ -485,12 +512,10 @@ export class MachineVFS extends BaseVFS {
     const machine = await holdingMachine(this.accessor, src)
     await refuseHidden(this.accessor, machine, dst)
     const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
-    await machineCopy(this.accessor, machine, src, dst, lacking.length > 0)
-    if (!this.accessor.several) return
-    for (const one of await holders(this.accessor, dst)) {
-      if (one.machine !== machine && !one.isFolder)
-        await machineUnlink(this.accessor, one.machine, dst)
-    }
+    await this.liveWrite(machine, dst, async () => {
+      await machineCopy(this.accessor, machine, src, dst, lacking.length > 0)
+      await this.dropOtherCopies(machine, dst)
+    })
   }
 
   /**
@@ -519,7 +544,7 @@ export class MachineVFS extends BaseVFS {
     const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
     await this.liveWrite(machine, dst, async () => {
       await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
-      await dropOtherCopies(this.accessor, machine, dst, this.liveWrites)
+      await this.dropOtherCopies(machine, dst)
     })
   }
 

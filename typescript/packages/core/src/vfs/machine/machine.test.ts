@@ -23,6 +23,7 @@ import {
 import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
 import { bindCaller, currentCaller } from '../../context/session_context.ts'
 import { MachineName } from '../../execution/types.ts'
+import type { ByteSource } from '../../io/types.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -718,8 +719,73 @@ describe('bytes between machines', () => {
   })
 })
 
+/** Write a name as a program's `>` on machine `name` does. */
+function writeOn(name: string, vfs: MachineVFS, path: string, data: ByteSource): Promise<void> {
+  return runningOn(name, () => vfs.write(spec(path), data))
+}
+
 describe('a landed write', () => {
-  it("leaves another machine's live write of the name", async () => {
+  it.each(['write', 'copy'])(
+    "leaves another machine's live write of the name: %s",
+    async (landing) => {
+      const a = new FakeFiles({ '/tmp/src': 'from a\n' })
+      const b = new FakeFiles({ '/tmp/k': 'old\n' })
+      const vfs = shared(a, b)
+      let pulled = (): void => undefined
+      const started = new Promise<void>((resolve) => {
+        pulled = resolve
+      })
+      let release = (): void => undefined
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      async function* slow(): AsyncGenerator<Uint8Array> {
+        pulled()
+        await released
+        yield ENC.encode('from b\n')
+      }
+      const writing = writeOn('b', vfs, '/k', slow())
+      await started
+      if (landing === 'write') await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+      else await vfs.copy(spec('/src'), spec('/k'))
+      expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', true])
+      release()
+      await writing
+      expect([a.files.has('/tmp/k'), texts(b)['/tmp/k']]).toEqual([false, 'from b\n'])
+    },
+  )
+
+  it('leaves the copy landed meanwhile when a live write fails', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.written.set('/tmp/k', 2_000_000_000)
+    const vfs = shared(a, b)
+    let pulled = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      pulled = resolve
+    })
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const failing: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<Uint8Array>> => {
+          pulled()
+          await released
+          throw new Error('EIO')
+        },
+      }),
+    }
+    const writing = writeOn('b', vfs, '/k', failing)
+    await started
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    release()
+    await expect(writing).rejects.toThrow('EIO')
+    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
+
+  it('keeps the copy of the write that ends last', async () => {
     const a = new FakeFiles()
     const b = new FakeFiles({ '/tmp/k': 'old\n' })
     const vfs = shared(a, b)
@@ -736,12 +802,42 @@ describe('a landed write', () => {
       await released
       yield ENC.encode('from b\n')
     }
-    const writing = runningOn('b', () => vfs.write(spec('/k'), slow()))
+    const writing = vfs.write(spec('/k'), slow())
     await started
-    await runningOn('a', () => vfs.write(spec('/k'), ENC.encode('from a\n')))
-    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', true])
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
     release()
     await writing
     expect([a.files.has('/tmp/k'), texts(b)['/tmp/k']]).toEqual([false, 'from b\n'])
+  })
+
+  it('leaves one copy when writes on two machines end together', async () => {
+    const machines = { a: new FakeFiles(), b: new FakeFiles() }
+    const vfs = shared(machines.a, machines.b)
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pulled: Promise<void>[] = []
+    function held(name: string): AsyncGenerator<Uint8Array> {
+      let started = (): void => undefined
+      pulled.push(
+        new Promise<void>((resolve) => {
+          started = resolve
+        }),
+      )
+      return (async function* (): AsyncGenerator<Uint8Array> {
+        started()
+        await released
+        yield ENC.encode(`from ${name}\n`)
+      })()
+    }
+    const writes = Object.keys(machines).map((name) => writeOn(name, vfs, '/k', held(name)))
+    await Promise.all(pulled)
+    release()
+    await Promise.all(writes)
+    const kept = Object.entries(machines).filter(([, files]) => files.files.has('/tmp/k'))
+    expect(kept.map(([name, files]) => [texts(files)['/tmp/k'], name, kept.length])).toEqual(
+      kept.map(([name]) => [`from ${name}\n`, name, 1]),
+    )
   })
 })

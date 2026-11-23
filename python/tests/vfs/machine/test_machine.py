@@ -24,8 +24,10 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.execution.types import MachineName
+from mirage.io.types import ByteSource
 from mirage.policy.base import Policy
 from mirage.runtime.types import RunAnswer
+from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
@@ -786,8 +788,73 @@ def running_on(name: str) -> CallerToken:
     )
 
 
+async def write_on(
+    name: str, vfs: MachineVFS, path: PathSpec, data: ByteSource
+) -> None:
+    """Write a name as a program's ``>`` on machine ``name`` does.
+
+    Args:
+        name (str): the program's machine.
+        vfs (MachineVFS): the mount.
+        path (PathSpec): the name.
+        data (ByteSource): what the program writes.
+    """
+    token = running_on(name)
+    try:
+        await vfs.write(path, data)
+    finally:
+        reset_caller(token)
+
+
 @pytest.mark.asyncio
-async def test_a_landed_write_leaves_another_machine_s_live_write():
+@pytest.mark.parametrize("landing", ["write", "copy"])
+async def test_a_landing_leaves_another_machine_s_live_write(landing):
+    a = FakeFiles({"/tmp/src": b"from a\n"})
+    b = FakeFiles({"/tmp/k": b"old\n"})
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def slow():
+        pulled.set()
+        await released.wait()
+        yield b"from b\n"
+
+    writing = asyncio.create_task(write_on("b", vfs, spec("/k"), slow()))
+    await pulled.wait()
+    if landing == "write":
+        await write_on("a", vfs, spec("/k"), b"from a\n")
+    else:
+        await vfs.copy(spec("/src"), spec("/k"))
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", True)
+    released.set()
+    await writing
+    assert ("/tmp/k" in a.files, b.files["/tmp/k"]) == (False, b"from b\n")
+
+
+@pytest.mark.asyncio
+async def test_a_live_write_that_fails_leaves_the_copy_landed_meanwhile():
+    a, b = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    b.written["/tmp/k"] = 2 * 10**9
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def failing():
+        pulled.set()
+        await released.wait()
+        raise OSError(5, "Input/output error")
+        yield b""
+
+    writing = asyncio.create_task(write_on("b", vfs, spec("/k"), failing()))
+    await pulled.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    released.set()
+    with pytest.raises(OSError):
+        await writing
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", False)
+
+
+@pytest.mark.asyncio
+async def test_the_write_ending_last_is_the_copy_kept():
     a, b = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
     vfs = shared(a, b)
     pulled, released = asyncio.Event(), asyncio.Event()
@@ -797,18 +864,38 @@ async def test_a_landed_write_leaves_another_machine_s_live_write():
         await released.wait()
         yield b"from b\n"
 
-    token = running_on("b")
-    try:
-        writing = asyncio.create_task(vfs.write(spec("/k"), slow()))
-    finally:
-        reset_caller(token)
+    writing = asyncio.create_task(vfs.write(spec("/k"), slow()))
     await pulled.wait()
-    token = running_on("a")
-    try:
-        await vfs.write(spec("/k"), b"from a\n")
-    finally:
-        reset_caller(token)
-    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", True)
+    await write_on("a", vfs, spec("/k"), b"from a\n")
     released.set()
     await writing
     assert ("/tmp/k" in a.files, b.files["/tmp/k"]) == (False, b"from b\n")
+
+
+@pytest.mark.asyncio
+async def test_writes_ending_together_on_two_machines_leave_one_copy():
+    machines = {"a": FakeFiles(), "b": FakeFiles()}
+    vfs = shared(*machines.values())
+    released = asyncio.Event()
+    pulled = {name: asyncio.Event() for name in machines}
+
+    async def held(name):
+        pulled[name].set()
+        await released.wait()
+        yield f"from {name}\n".encode()
+
+    writes = [
+        asyncio.create_task(write_on(name, vfs, spec("/k"), held(name)))
+        for name in machines
+    ]
+    await asyncio.gather(*(event.wait() for event in pulled.values()))
+    released.set()
+    await asyncio.gather(*writes)
+    kept = {
+        name: files.files["/tmp/k"]
+        for name, files in machines.items()
+        if "/tmp/k" in files.files
+    }
+    assert [(data, len(kept)) for name, data in kept.items()] == [
+        (f"from {name}\n".encode(), 1) for name in kept
+    ]
