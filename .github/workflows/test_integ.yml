@@ -433,6 +433,7 @@ jobs:
               - 'integ/unix/gunzip/**'
               - 'integ/unix/gzip/**'
               - 'integ/unix/head/**'
+              - 'integ/unix/hexdump/**'
               - 'integ/unix/ln/**'
               - 'integ/unix/ls/**'
               - 'integ/unix/mkdir/**'

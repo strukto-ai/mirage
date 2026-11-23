@@ -418,9 +418,9 @@ pub(super) enum Piece {
     Run(u8, usize),
 }
 
-/// Where output goes in one `drain`: a run of one byte is written up to
-/// `limit` and the rest of it, and all that follows, held for the next;
-/// `prints` counts down the prints the call may still run.
+/// Where output goes in one `drain`: bytes and runs of one byte are
+/// written up to `limit` and the rest, and all that follows, held for the
+/// next; `prints` counts down the prints the call may still run.
 pub(super) struct Sink<'a> {
     out: &'a mut Vec<u8>,
     limit: usize,
@@ -453,10 +453,14 @@ impl<'a> Sink<'a> {
         if bytes.is_empty() {
             return;
         }
-        if self.held.is_empty() {
-            self.out.extend_from_slice(bytes);
-        } else {
+        if !self.held.is_empty() {
             self.held.push_back(Piece::Bytes(bytes.to_vec()));
+            return;
+        }
+        let now = bytes.len().min(self.limit.saturating_sub(self.out.len()));
+        self.out.extend_from_slice(&bytes[..now]);
+        if now < bytes.len() {
+            self.held.push_back(Piece::Bytes(bytes[now..].to_vec()));
         }
     }
 
@@ -479,7 +483,14 @@ impl<'a> Sink<'a> {
     pub(super) fn release(&mut self) {
         while let Some(piece) = self.held.pop_front() {
             match piece {
-                Piece::Bytes(bytes) => self.out.extend_from_slice(&bytes),
+                Piece::Bytes(bytes) => {
+                    let now = bytes.len().min(self.limit.saturating_sub(self.out.len()));
+                    self.out.extend_from_slice(&bytes[..now]);
+                    if now < bytes.len() {
+                        self.held.push_front(Piece::Bytes(bytes[now..].to_vec()));
+                        return;
+                    }
+                }
                 Piece::Run(byte, count) => {
                     let now = count.min(self.limit.saturating_sub(self.out.len()));
                     self.out.resize(self.out.len() + now, byte);

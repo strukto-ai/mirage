@@ -467,3 +467,103 @@ fn a_width_past_int_shows_nothing_of_its_conversion() {
     assert_eq!(shows("1/1 \"<%2147483648x|\" \"\\n\"", "ab"), "|\n|\n");
     assert_eq!(shows("1/1 \"<%.4294967297x|\" \"\\n\"", "a"), "|\n");
 }
+
+#[test]
+fn a_fraction_reads_its_digits_as_one_number() {
+    for (raw, want) in [
+        ("0.10K", 1024),
+        ("0.100K", 1024),
+        ("0.010K", 102),
+        ("0.0010K", 10),
+        ("0.120K", 122),
+        ("0.105K", 107),
+        ("0.205K", 209),
+        ("0.0500K", 51),
+        ("1.50K", 1536),
+        ("0.12345678901234567890K", 125),
+        ("0.0000000000000000000001K", 0),
+    ] {
+        assert_eq!(size(raw.as_bytes(), "length"), Ok(want), "{raw}");
+    }
+    assert_eq!(
+        size(b"0.98765432109876543210K", "length"),
+        Err("hexdump: failed to parse length: '0.98765432109876543210K': Numerical result out of range".into())
+    );
+}
+
+#[test]
+fn the_end_unit_keeps_the_text_after_a_conversion_it_cannot_run() {
+    assert_eq!(shows("1/1 \"%c\" \" end=%_Ad %c!\\n\"", "a"), "a end=1!\n");
+    let two = run(
+        json!([["format", "1/1 \"%c\""], ["format", "\"<%_Ad|%c>%c!\\n\""]]),
+        &["a"],
+        &[("a", "a")],
+    );
+    assert_eq!(two.0, "a<1!\n");
+}
+
+#[test]
+fn a_format_file_with_no_format_leaves_the_default() {
+    let files = [("a", "ab"), ("c", "# a comment\n\n"), ("e", "")];
+    let default = "0000000 6261                                   \n0000002\n";
+    for file in ["c", "e"] {
+        let (out, _, status) = run(json!([["format_file", file]]), &["a"], &files);
+        assert_eq!((out.as_str(), status), (default, 0), "{file}");
+    }
+    let (out, _, _) = run(json!([["format", ""]]), &["a"], &files);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn a_stdin_operand_hands_back_what_a_length_leaves() {
+    let mut host = Host::with(&[], "abcdef");
+    let mut stream = hexdump(
+        json!([["format", "1/1 \"%c\""], ["length", "2"]]),
+        &["/dev/stdin"],
+    );
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out, b"ab");
+    assert_eq!(host.stdin, b"cdef");
+}
+
+#[test]
+fn finish_takes_one_bounded_step_and_leaves_the_rest_to_drain() {
+    let mut host = Host::with(&[("a", "a")], "");
+    let mut stream = hexdump(json!([["format", "1/1 \"%1000000x|\""]]), &["a"]);
+    let mut out = Vec::new();
+    while !stream.busy() {
+        let mut data = Vec::new();
+        let header = stream.request(&mut data).expect("asks for input");
+        let (reply, data) = host.serve(&header, data);
+        stream
+            .respond(reply.to_string().as_bytes(), &data, &mut out)
+            .expect("answers");
+    }
+    stream.finish(&mut out).expect("finishes");
+    assert!(out.len() <= super::OUTPUT, "{}", out.len());
+    assert!(stream.busy());
+    while stream.busy() {
+        stream.drain(&mut out).expect("drains");
+    }
+    assert_eq!(out.len(), 1_000_001);
+}
+
+#[test]
+fn long_text_and_a_long_end_unit_write_a_bounded_step_a_drain() {
+    let text = "x".repeat(200_000);
+    let mut host = Host::with(&[("a", "a")], "");
+    let format = format!("1/1 \"{text}%c\"");
+    let mut stream = hexdump(json!([["format", format]]), &["a"]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out.len(), 200_001);
+    assert!(host.drains > 200_000 / super::OUTPUT, "{}", host.drains);
+    let mut host = Host::with(&[("a", "a")], "");
+    let ending = format!("\"{text}%_Ad\\n\"");
+    let mut stream = hexdump(
+        json!([["format", "1/1 \"%c\""], ["format", ending]]),
+        &["a"],
+    );
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out, format!("a{text}1\n").into_bytes());
+    assert!(host.drains > 200_000 / super::OUTPUT, "{}", host.drains);
+}

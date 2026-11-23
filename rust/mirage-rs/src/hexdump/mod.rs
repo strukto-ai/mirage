@@ -102,29 +102,58 @@ fn size(raw: &[u8], what: &str) -> Result<u64, String> {
     };
     let multiplier = step.checked_pow(power).ok_or_else(range)?;
     let mut total = value.checked_mul(multiplier).ok_or_else(range)?;
-    // Each fraction digit `d` at place `p` adds the multiplier over
-    // `10**p / d`, in whole numbers, as util-linux counts it: 0.9K is
-    // 1024, 0.25K is 255.
-    let mut place: u128 = 1;
-    for &b in fraction.unwrap_or_default() {
-        let Some(next) = place.checked_mul(10) else {
-            break;
-        };
-        place = next;
-        if let Some(share) = place.checked_div(u128::from(b - b'0')) {
-            total = total.checked_add(multiplier / share).ok_or_else(range)?;
-        }
+    if let Some(digits) = fraction {
+        total = total
+            .checked_add(fraction_of(digits, multiplier).ok_or_else(range)?)
+            .ok_or_else(range)?;
     }
     u64::try_from(total).map_err(|_| range())
+}
+
+/// A size's fraction as util-linux counts it: the digits read as one
+/// whole number, over the least power of ten not below it, one place more
+/// for each leading zero; then each digit `d` from the last adds the
+/// multiplier over `divisor / d`, the divisor a place less each digit.
+/// So 0.9K is 1024, 0.25K is 255 and 0.10K is 1024. None when the digits
+/// outrun 64 bits.
+fn fraction_of(digits: &[u8], multiplier: u128) -> Option<u128> {
+    let zeros = digits.iter().take_while(|&&b| b == b'0').count();
+    let mut whole: u128 = 0;
+    for &b in &digits[zeros..] {
+        whole = whole
+            .checked_mul(10)?
+            .checked_add(u128::from(b - b'0'))
+            .filter(|whole| *whole <= u128::from(u64::MAX))?;
+    }
+    // A divisor past u128 leaves every share zero.
+    let mut divisor: Option<u128> = Some(10);
+    while let Some(d) = divisor
+        && d < whole
+    {
+        divisor = d.checked_mul(10);
+    }
+    for _ in 0..zeros {
+        divisor = divisor.and_then(|d| d.checked_mul(10));
+    }
+    let mut sum: u128 = 0;
+    while whole > 0 {
+        let Some(d) = divisor.filter(|&d| d > 0) else {
+            break;
+        };
+        if let Some(share) = d.checked_div(whole % 10) {
+            sum += multiplier / share;
+        }
+        whole /= 10;
+        divisor = Some(d / 10);
+    }
+    Some(sum)
 }
 
 /// What the options set, read in the order typed.
 #[derive(Default)]
 struct Settings {
+    /// The formats added so far; with none, the default display shows.
     formats: Vec<Format>,
-    /// A display option, a format or a format file was given, so the
-    /// default display adds none.
-    chosen: bool,
     length: Option<u64>,
     skip: u64,
     verbose: bool,
@@ -147,18 +176,11 @@ impl Settings {
         };
         if let Some(preset) = preset {
             self.formats.extend(presets(preset));
-            self.chosen = true;
             return Ok(None);
         }
         match name {
-            "format" => {
-                self.formats.push(format::parse(&raw)?);
-                self.chosen = true;
-            }
-            "format_file" => {
-                self.chosen = true;
-                return Ok(Some(raw));
-            }
+            "format" => self.formats.push(format::parse(&raw)?),
+            "format_file" => return Ok(Some(raw)),
             "length" => self.length = Some(size(&raw, "length")?),
             "skip" => self.skip = size(&raw, "offset")?,
             "no_squeezing" => self.verbose = true,
@@ -337,25 +359,31 @@ impl Layout {
         });
     }
 
-    /// The `%_A` unit, at the address the input ended: its offsets and its
-    /// text, nothing it would read.
-    fn ending(&self, address: u64, sink: &mut Sink) {
+    /// The `%_A` unit, at the address the input ended, from print `next`
+    /// on as far as the sink allows; true once it is all written. Its
+    /// offsets and its text show, but a conversion that would read shows
+    /// neither itself nor the text before it, only the text after.
+    fn ending(&self, address: u64, next: &mut usize, sink: &mut Sink) -> bool {
         let Some((f, u)) = self.end else {
-            return;
+            return true;
         };
-        for print in &self.formats[f][u].prints {
+        while let Some(print) = self.formats[f][u].prints.get(*next) {
+            if sink.spent() {
+                return false;
+            }
+            sink.prints -= 1;
             match print.kind {
                 Kind::Text => sink.bytes(&print.before),
-                Kind::Address { .. } => {
-                    if !print.lost() {
-                        sink.bytes(&print.before);
-                        format::render(print, &[], address, sink);
-                    }
-                    sink.bytes(&print.after);
+                Kind::Address { .. } if !print.lost() => {
+                    sink.bytes(&print.before);
+                    format::render(print, &[], address, sink);
                 }
                 _ => {}
             }
+            sink.bytes(&print.after);
+            *next += 1;
         }
+        true
     }
 }
 
@@ -379,8 +407,10 @@ struct Dump {
     starred: bool,
     showing: Option<Showing>,
     held: VecDeque<Piece>,
-    /// The last, short block has been started, and the `%_A` unit written.
+    /// The last, short block has been started, the `%_A` unit's next
+    /// print, and that unit written.
     closing: bool,
+    ending: usize,
     ended: bool,
 }
 
@@ -494,10 +524,10 @@ impl Dump {
             }
         }
         if !self.ended {
-            self.ended = true;
-            if self.address > 0 {
-                self.layout.ending(self.address, sink);
+            if self.address > 0 && !self.layout.ending(self.address, &mut self.ending, sink) {
+                return false;
             }
+            self.ended = true;
         }
         sink.release();
         sink.held.is_empty() && self.showing.is_none()
@@ -533,6 +563,8 @@ struct Loading {
     fd: u32,
     name: Vec<u8>,
     line: Vec<u8>,
+    /// The line begun is a comment, whose bytes are not kept.
+    comment: bool,
 }
 
 struct Hexdump {
@@ -616,11 +648,13 @@ impl Hexdump {
                     fd,
                     name: file,
                     line: Vec::new(),
+                    comment: false,
                 });
                 return Ok(());
             }
         }
-        if !self.settings.chosen {
+        // A format file of comments alone adds none.
+        if self.settings.formats.is_empty() {
             self.settings.formats.extend(presets(format::DEFAULT));
         }
         let mut formats = std::mem::take(&mut self.settings.formats);
@@ -644,6 +678,7 @@ impl Hexdump {
             showing: None,
             held: VecDeque::new(),
             closing: false,
+            ending: 0,
             ended: false,
         });
         self.stage = Stage::Skip;
@@ -680,7 +715,9 @@ impl Hexdump {
             let Some((name, opening)) = self.files.pop_front() else {
                 return self.end();
             };
-            let stdin = matches!(opening, Opening::Name);
+            // The hosts read these operands from standard input too.
+            let stdin = matches!(opening, Opening::Name)
+                || matches!(&name[..], b"/dev/stdin" | b"/dev/fd/0");
             let opening = match opening {
                 Opening::Operand(operand) if self.stage == Stage::Skip && self.skip >= SEEK => {
                     Opening::Range(operand, self.skip, self.left)
@@ -736,16 +773,28 @@ impl Hexdump {
             self.refuse(&message);
             return Ok(());
         }
+        // Only the new bytes are searched for line ends.
+        let mut search = loading.line.len();
         loading.line.extend_from_slice(data);
         let mut start = 0;
-        while let Some(newline) = loading.line[start..].iter().position(|&b| b == b'\n') {
-            if let Err(message) = self.settings.line(&loading.line[start..start + newline]) {
+        while let Some(newline) = loading.line[search..].iter().position(|&b| b == b'\n') {
+            let end = search + newline;
+            if !std::mem::take(&mut loading.comment)
+                && let Err(message) = self.settings.line(&loading.line[start..end])
+            {
                 self.refuse(&message);
                 return Ok(());
             }
-            start += newline + 1;
+            start = end + 1;
+            search = start;
         }
         loading.line.drain(..start);
+        if loading.line.trim_ascii_start().first() == Some(&b'#') {
+            loading.comment = true;
+        }
+        if loading.comment {
+            loading.line.clear();
+        }
         if !reply.end {
             self.io.push(Request::Read {
                 fd: loading.fd,
@@ -768,13 +817,10 @@ impl Stream for Hexdump {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        // A host that stops before the tail is drained still gets it.
-        if matches!(self.stage, Stage::Skip | Stage::Dump | Stage::Ended)
-            && let Some(dump) = &mut self.dump
-        {
-            let mut sink = Sink::new(out, usize::MAX, usize::MAX, std::mem::take(&mut dump.held));
-            dump.tail(&mut sink);
-            dump.held = sink.held;
+        // One bounded step, as `drain` takes: a host that finishes before
+        // the dump is written drains the rest while `busy` says so.
+        if matches!(self.stage, Stage::Skip | Stage::Dump | Stage::Ended) {
+            return self.drain(out);
         }
         self.stage = Stage::Done;
         Ok(())
