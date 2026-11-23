@@ -78,7 +78,7 @@ import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import { classify } from '../../../errors/classify.ts'
-import { DEFAULT_UMASK, sessionUmask } from '../../../context/session_context.ts'
+import { copying, DEFAULT_UMASK, sessionUmask } from '../../../context/session_context.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE } from '../../../utils/mode.ts'
 
 const ENC = new TextEncoder()
@@ -1659,12 +1659,14 @@ async function copyEntry(
         (err as Partial<WalkDeclinedError>).declined !== true)
     )
       throw err
-    const data = await primeStream(copies.relay.read(src))
-    try {
-      await copies.relay.write(dst, data)
-    } finally {
-      await closeQuietly(data)
-    }
+    await copying(async () => {
+      const data = await primeStream(copies.relay.read(src))
+      try {
+        await copies.relay.write(dst, data)
+      } finally {
+        await closeQuietly(data)
+      }
+    })
   }
 }
 
@@ -2028,31 +2030,35 @@ export async function transferFile(
       }
     }
   }
-  let data: ByteSource
-  const reading = { failed: false }
-  try {
-    data = await primeStream(strategy.read(src), () => {
-      reading.failed = true
-    })
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    errors.push(`${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`)
-    return false
-  }
-  try {
-    await strategy.write(dst, data)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    errors.push(
-      reading.failed
-        ? `${cmdName}: error reading '${src.rawPath}': ${String(fsStrerror(err))}`
-        : `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
-    )
-    return false
-  } finally {
-    await closeQuietly(data)
-  }
-  return true
+  return copying(async () => {
+    let data: ByteSource
+    const reading = { failed: false }
+    try {
+      data = await primeStream(strategy.read(src), () => {
+        reading.failed = true
+      })
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(
+        `${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`,
+      )
+      return false
+    }
+    try {
+      await strategy.write(dst, data)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(
+        reading.failed
+          ? `${cmdName}: error reading '${src.rawPath}': ${String(fsStrerror(err))}`
+          : `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
+      )
+      return false
+    } finally {
+      await closeQuietly(data)
+    }
+    return true
+  })
 }
 
 // Copy sources to a destination, fanning out into a directory. NativeCopy

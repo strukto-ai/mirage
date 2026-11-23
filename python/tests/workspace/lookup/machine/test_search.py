@@ -417,3 +417,13 @@ async def test_a_program_reading_a_pipe_runs_on_its_writer_s_machine():
     assert (await ws.shell("both")).exit_code == 0
     assert (a.ran, b.ran) == (["both"], ["gen", "both"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_middle_stage_is_placed_where_its_own_writer_put_it():
+    a = FakeFiles(programs=("filter",))
+    b = FakeFiles(programs=("gen", "filter", "sink"))
+    ws = two(a, b)
+    assert (await ws.shell("gen | filter | sink")).exit_code == 0
+    assert (a.ran, b.ran) == ([], ["gen", "filter", "sink"])
+    await ws.close()

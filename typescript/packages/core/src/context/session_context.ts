@@ -178,6 +178,9 @@ export interface Caller {
   // Whether the running program's stderr goes where its stdout goes
   // (`2>&1`), so a machine joins the two where the program writes them.
   readonly joinsErrors: boolean
+  // The machines whose files the copy being made by a read and a write has
+  // read (`copying`), where its write lands; null outside such a copy.
+  readonly copiedFrom: Set<string> | null
 }
 
 /**
@@ -237,6 +240,7 @@ const UNBOUND: Caller = {
   machine: null,
   preferredMachine: null,
   joinsErrors: false,
+  copiedFrom: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()
@@ -282,6 +286,18 @@ export function liveCallers(): readonly Caller[] {
  */
 export async function bindCaller<T>(caller: Caller, fn: () => Promise<T>): Promise<T> {
   return callsAs(caller, fn)()
+}
+
+/**
+ * `fn` run noting the machines whose files a copy made by a read and a
+ * write reads (`Caller.copiedFrom`), so the write lands on that machine or
+ * is refused, as a copy one machine makes would be. Mirrors Python's
+ * `copying`.
+ *
+ * @param fn the copy.
+ */
+export function copying<T>(fn: () => Promise<T>): Promise<T> {
+  return bindCaller({ ...currentCaller(), copiedFrom: new Set() }, fn)
 }
 
 /**

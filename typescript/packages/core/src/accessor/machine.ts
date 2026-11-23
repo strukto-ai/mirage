@@ -140,15 +140,17 @@ export class MachineAccessor extends Accessor {
    * @param command the line, as `/bin/sh -c` reads it.
    * @param failed the error of a line that ended with this status and
    *   stderr.
+   * @param signal stops the line, a read waiting on it included.
    */
   async *stream(
     machine: string,
     command: string,
     failed: (status: number, err: Uint8Array) => Error,
+    signal?: AbortSignal,
   ): AsyncGenerator<Uint8Array> {
     const handle = this.handle(machine)
     await handle.ensureConnected()
-    yield* handle.streamLine(command, { ...handle.config.env }, '/', failed)
+    yield* handle.streamLine(command, { ...handle.config.env }, '/', failed, signal)
   }
 
   /**

@@ -15,7 +15,13 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from importlib import import_module
 from time import monotonic
@@ -981,7 +987,7 @@ class MachineHandle:
         env: dict[str, str],
         cwd: str,
         failed: Callable[[int | None, bytes], BaseException],
-    ) -> AsyncIterator[bytes]:
+    ) -> AsyncGenerator[bytes, None]:
         """Execute one of Mirage's own shell lines on the machine, as
         ``/bin/sh -c``, and hand its output over as it is read, never
         held whole: a reader that falls behind holds the line back, and

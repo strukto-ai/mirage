@@ -64,7 +64,7 @@ import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { NodeType as NT } from '../../shell/types.ts'
+import { NodeType as NT, RedirectKind } from '../../shell/types.ts'
 import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
@@ -979,6 +979,17 @@ async function runArgv(
         const command = await bindCommand(argv, routedDeps, context, given, (install) => {
           releaseInstall = install.activity.acquire()
         })
+        const crossed = pipeCrossing(
+          name,
+          argv,
+          command.target.kind === 'wrapper' ? machine : targetMachine(command.target),
+          context.frame.pipeWriterOf(given),
+          registry,
+          routedByPolicy() ||
+            (unplaced !== undefined &&
+              configPins([name, ...argv.args], session, registry, unplaced)),
+        )
+        if (crossed !== null) return crossed
         return await runResolved(
           routedDeps,
           recurse,
@@ -1177,6 +1188,9 @@ async function runArgv(
   // the holder of a program file and the machine a command prefers each ask
   // the machines, so the command is admitted once, before any of them.
   const unplaced = context.frame.routing
+  // The machine the command's program runs on, placed below before the
+  // redirects open; the pipe check reads it for a wrapper.
+  let machine: MachineName | null = null
   const searched = searchedProgram(
     name,
     argv.args,
@@ -1185,11 +1199,17 @@ async function runArgv(
     unplaced,
     namespace.sessionLinks(session),
   )
-  const byPath =
-    name.includes('/') && (runner !== null || redirects.length > 0) && severalMachines(registry)
+  const placedFirst = (runner !== null || redirects.length > 0) && severalMachines(registry)
+  const byPath = name.includes('/') && placedFirst
+  const handed =
+    placedFirst &&
+    !name.includes('/') &&
+    !inputRedirected(runner) &&
+    mayRunOnMachine(name, argv, session, registry, unplaced)
   if (
     searched !== null ||
     byPath ||
+    handed ||
     asksMachines(
       session,
       registry,
@@ -1226,8 +1246,8 @@ async function runArgv(
         writer,
       )
     }
-    let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-    if (byPath) {
+    machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
+    if (byPath || handed) {
       const [held] = await heldMachine(argv, deps, context, stdin)
       if (held?.runtime) machine = held.runtime.machine
     }
@@ -1240,16 +1260,6 @@ async function runArgv(
       deps.dispatch,
       context.frame.folderHolders,
     )
-    const crossed = pipeCrossing(
-      name,
-      argv,
-      machine,
-      fedBy,
-      registry,
-      routedByPolicy() ||
-        (unplaced !== undefined && configPins([name, ...argv.args], session, registry, unplaced)),
-    )
-    if (crossed !== null) return crossed
     const outer = currentCaller()
     if (
       (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
@@ -1317,6 +1327,60 @@ async function searchedRouting(
     writer,
   )
   return found === null ? routing : boundTo(routing, program, found)
+}
+
+/**
+ * Whether the command's own redirects give it the input it reads (`< f`, a
+ * here-document, `<&3`), which decides whether a machine may run it whole
+ * (`operandMachine` keeps a command anything is piped into) only once the
+ * redirects open. Mirrors Python's `_input_redirected`.
+ */
+function inputRedirected(runner: RedirectRunner | null): boolean {
+  const bound = currentCaller().redirects
+  if (runner === null || bound?.[2] !== runner) return false
+  return bound[3].some((r) => r.fd === 0 && INPUT_REDIRECTS.has(r.kind))
+}
+
+/**
+ * Whether a command is one of Mirage's own that a machine may run whole
+ * (`heldMachine`): a mount command, or a namespace command a machine
+ * answers. Asked from its words alone, before any machine. Mirrors Python's
+ * `_may_run_on_machine`.
+ */
+function mayRunOnMachine(
+  name: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  if (routing === undefined) return false
+  const consumer = resolveTarget(name, argv.args, session, registry, routing).kind
+  return (
+    consumer === Consumer.MOUNT || (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name))
+  )
+}
+
+/** The redirects that give a command the input it reads on descriptor 0. */
+const INPUT_REDIRECTS: ReadonlySet<string> = new Set([
+  RedirectKind.STDIN,
+  RedirectKind.READWRITE,
+  RedirectKind.HEREDOC,
+  RedirectKind.HERESTRING,
+  RedirectKind.DUP_INPUT,
+])
+
+/**
+ * The machine a bound command's program runs on: its runtime's, or for a
+ * program named by a path no machine holds, its fallback's; null for a
+ * command Mirage runs itself. Mirrors Python's `_target_machine`.
+ */
+function targetMachine(target: ResolvedCommand['target']): MachineName | null {
+  const external = target.kind === 'path' ? target.fallback : target
+  if (external?.kind !== Consumer.EXTERNAL) return null
+  const runtime = external.runtime
+  if (runtime === null || runtime.reach === 'workspace') return null
+  return runtime.machine
 }
 
 /**

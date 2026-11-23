@@ -653,5 +653,34 @@ async def test_a_command_handed_to_a_machine_lands_its_output_there():
     assert await done.stderr_str() == (
         "bash: line 1: /srv/b/cat: Permission denied\n"
     )
-    assert b.files.get("/srv/b/cat", b"") == b""
+    assert a.ran == ["cat /srv/a/k"]
+    assert "/srv/b/cat" not in b.files
+    await ws.close()
+
+
+class Judged(Policy):
+    """A post_vfs policy, under which a copy goes by a read and a write."""
+
+    async def post_vfs(self, ctx):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_copy_by_a_read_and_a_write_keeps_its_bytes_on_their_machine():
+    a = FakeFiles({"/srv/a/k": b"key\n"})
+    b = FakeFiles()
+    b.dirs.add("/srv/b")
+    ws = two(
+        a, b, mounts={"/srv/a": "@a", "/srv/b": "@b"}, policies=[Judged()]
+    )
+    for verb in ("cp", "mv"):
+        done = await ws.shell(f"{verb} /srv/a/k /srv/b/k")
+        assert done.exit_code == 1
+        assert await done.stderr_str() == (
+            f"{verb}: cannot create regular file '/srv/b/k':"
+            " Permission denied\n"
+        )
+    assert "/srv/b/k" not in b.files
+    assert await run(ws, "cp /srv/a/k /tmp/k") == (0, "", "")
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"key\n", False)
     await ws.close()

@@ -31,6 +31,7 @@ import {
   holders,
   holdingMachine,
   machinesLackingFolder,
+  noteCopySource,
   refuseCrossing,
   refuseHidden,
   writeMachine,
@@ -56,6 +57,8 @@ import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
 import { eisdir, enoent, enotdir, enotempty, enotsup, exdev } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
+import { callerSignal } from '../../context/session_context.ts'
+import { closeQuietly } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   PathSpec,
@@ -88,6 +91,31 @@ import { MachineVFSConfig } from './config.ts'
  * machine at the same path, so Mirage and the machine's programs name a
  * file the same way. Mirrors Python's `MachineVFS`.
  */
+/**
+ * Refuse bytes landing on a machine they may not go to (`refuseCrossing`),
+ * closing what would have been written so its writer stops. Mirrors
+ * Python's `_refuse_landing`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the write lands on.
+ * @param path the file.
+ * @param data what would have been written.
+ * @throws FsError the bytes come from another machine.
+ */
+async function refuseLanding(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<void> {
+  try {
+    refuseCrossing(accessor, machine, path)
+  } catch (err) {
+    await closeQuietly(data)
+    throw err
+  }
+}
+
 export class MachineVFS extends BaseVFS {
   override readonly name = VFSName.MACHINE
   // Programs change these files behind Mirage's back.
@@ -170,8 +198,9 @@ export class MachineVFS extends BaseVFS {
   ): Promise<ByteSource> {
     const machine = await holdingMachine(this.accessor, path)
     refuseCrossing(this.accessor, machine, path, true)
+    noteCopySource(machine)
     if (offset === 0 && size === null && this.accessor.streams(machine))
-      return machineReadStream(this.accessor, machine, path)
+      return machineReadStream(this.accessor, machine, path, callerSignal())
     return machineRead(this.accessor, machine, path, offset, size)
   }
 
@@ -234,13 +263,13 @@ export class MachineVFS extends BaseVFS {
     atomic = false,
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
-    refuseCrossing(this.accessor, machine, path)
+    await refuseLanding(this.accessor, machine, path, data)
     await machineWrite(this.accessor, machine, path, data, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
     const machine = await writeMachine(this.accessor, path)
-    refuseCrossing(this.accessor, machine, path)
+    await refuseLanding(this.accessor, machine, path, data)
     await machineWrite(this.accessor, machine, path, data, true)
   }
 

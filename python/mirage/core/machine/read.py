@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.utils import machine_path, run_checked
@@ -63,7 +64,7 @@ async def read(
 
 async def read_stream(
     accessor: MachineAccessor, machine: str, path: PathSpec
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     """A whole file's bytes on its machine, handed over as they are read
     and never held whole, so a file of any size goes to a store in the
     memory of a few chunks.
@@ -75,13 +76,16 @@ async def read_stream(
     """
     timer = start_op()
     sent = 0
-    async for chunk in accessor.stream(
-        machine,
-        read_command(machine_path(accessor, path), 0, None),
-        lambda _status, err: refusal(path, err),
-    ):
-        sent += len(chunk)
-        yield chunk
+    async with aclosing(
+        accessor.stream(
+            machine,
+            read_command(machine_path(accessor, path), 0, None),
+            lambda _status, err: refusal(path, err),
+        )
+    ) as chunks:
+        async for chunk in chunks:
+            sent += len(chunk)
+            yield chunk
     record("read", path.virtual, "machine", sent, timer)
 
 

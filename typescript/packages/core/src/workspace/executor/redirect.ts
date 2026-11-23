@@ -1276,6 +1276,7 @@ async function runRedirects(
   ]
   let unwound: Unwinding | null = null
   let cancelled: Error | null = null
+  let produced: MachineName | null = null
   let refused = false
   let io = new IOResult()
   const saved = session.descriptors
@@ -1335,7 +1336,7 @@ async function runRedirects(
           ),
         )
         refused = result[2].refused
-        const produced = producingMachine(result[1])
+        produced = producingMachine(result[1])
         await bindCaller(
           { ...currentCaller(), streamed, ...(produced && { machine: produced }) },
           () =>
@@ -1388,14 +1389,17 @@ async function runRedirects(
   }
   if (cancelled !== null) {
     try {
-      await runLanding(() => keepOutput(recorder, outputs, dispatch, session))
+      const kept = produced
+      await bindCaller({ ...currentCaller(), ...(kept && { machine: kept }) }, () =>
+        runLanding(() => keepOutput(recorder, outputs, dispatch, session)),
+      )
     } catch (error) {
       console.debug(`kept output not written: ${String(error)}`)
     }
     throw cancelled
   }
   const landing = io
-  const produced = producingMachine(landing)
+  produced = producingMachine(landing)
   const [stdout, landed] = await bindCaller(
     { ...currentCaller(), ...(produced && { machine: produced }) },
     () =>

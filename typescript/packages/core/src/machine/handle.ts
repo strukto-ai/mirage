@@ -879,16 +879,23 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param cwd the working directory, passed through verbatim.
    * @param failed the error of a line that ended with this status and
    *   stderr.
+   * @param signal stops the line, a read waiting on it included.
    */
   async *streamLine(
     line: string,
     env: Record<string, string>,
     cwd: string,
     failed: (status: number, err: Uint8Array) => Error,
+    signal?: AbortSignal,
   ): AsyncGenerator<Uint8Array> {
     const pipe = new BytePipe()
     const said: Uint8Array[] = []
     const stop = new AbortController()
+    const cancel = (): void => {
+      stop.abort(signal?.reason)
+    }
+    if (signal?.aborted === true) cancel()
+    else signal?.addEventListener('abort', cancel, { once: true })
     const ran = this.busyWith(() =>
       this.execArgv(
         ['/bin/sh', '-c', line],
@@ -914,6 +921,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     try {
       yield* pipe.stream()
     } finally {
+      signal?.removeEventListener('abort', cancel)
       pipe.closeReader()
       stop.abort()
       await ran

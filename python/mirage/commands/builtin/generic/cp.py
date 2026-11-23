@@ -48,6 +48,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.commands.spec.word_choice import WordMatch, match_word
 from mirage.context import DEFAULT_UMASK, session_umask
+from mirage.context.session_context import copying, reset_caller
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import enoent, fs_strerror, is_aborting, strerror_of
@@ -1889,11 +1890,15 @@ async def _copy_entry(
             exc.errno != errno.EXDEV and not isinstance(exc, WalkDeclinedError)
         ):
             raise
-        data = await prime_stream(copies.relay.read(src))
+        token = copying()
         try:
-            await copies.relay.write(dst, data=data)
+            data = await prime_stream(copies.relay.read(src))
+            try:
+                await copies.relay.write(dst, data=data)
+            finally:
+                await close_quietly(data)
         finally:
-            await close_quietly(data)
+            reset_caller(token)
 
 
 def copy_failed(
@@ -2332,29 +2337,34 @@ async def transfer_file(
         nonlocal read_failed
         read_failed = True
 
+    token = copying()
     try:
-        data = await prime_stream(strategy.read(src), failed)
-    except FS_ERRORS as exc:
-        errors.append(
-            f"{cmd_name}: cannot open '{src.raw_path}' "
-            f"for reading: {fs_strerror(exc)}"
-        )
-        return False
-    try:
-        await strategy.write(dst, data=data)
-    except FS_ERRORS as exc:
-        errors.append(
-            f"{cmd_name}: error reading '{src.raw_path}': {fs_strerror(exc)}"
-            if read_failed
-            else (
-                f"{cmd_name}: cannot create regular file "
-                f"'{dst.raw_path}': {fs_strerror(exc)}"
+        try:
+            data = await prime_stream(strategy.read(src), failed)
+        except FS_ERRORS as exc:
+            errors.append(
+                f"{cmd_name}: cannot open '{src.raw_path}' "
+                f"for reading: {fs_strerror(exc)}"
             )
-        )
-        return False
+            return False
+        try:
+            await strategy.write(dst, data=data)
+        except FS_ERRORS as exc:
+            errors.append(
+                f"{cmd_name}: error reading '{src.raw_path}': "
+                f"{fs_strerror(exc)}"
+                if read_failed
+                else (
+                    f"{cmd_name}: cannot create regular file "
+                    f"'{dst.raw_path}': {fs_strerror(exc)}"
+                )
+            )
+            return False
+        finally:
+            await close_quietly(data)
+        return True
     finally:
-        await close_quietly(data)
-    return True
+        reset_caller(token)
 
 
 async def _mirror_dirs(

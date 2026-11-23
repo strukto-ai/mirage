@@ -623,7 +623,27 @@ describe('bytes between machines', () => {
     expect(new TextDecoder().decode(done.stderr)).toBe(
       'bash: line 1: /srv/b/cat: Permission denied\n',
     )
-    expect(texts(b)['/srv/b/cat'] ?? '').toBe('')
+    expect(a.ran).toEqual(['cat /srv/a/k'])
+    expect(b.files.has('/srv/b/cat')).toBe(false)
+    await ws.close()
+  })
+
+  it('keeps the bytes of a copy by a read and a write on their machine', async () => {
+    const a = new FakeFiles({ '/srv/a/k': 'key\n' })
+    const b = new FakeFiles()
+    b.dirs.add('/srv/b')
+    const ws = two(a, b, { '/srv/a': '@a', '/srv/b': '@b' })
+    ws.policies.add({ postVfs: (): Action | null => null })
+    for (const verb of ['cp', 'mv']) {
+      const done = await ws.shell(`${verb} /srv/a/k /srv/b/k`)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `${verb}: cannot create regular file '/srv/b/k': Permission denied\n`,
+      )
+    }
+    expect(b.files.has('/srv/b/k')).toBe(false)
+    expect(await run(ws, 'cp /srv/a/k /tmp/k')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['key\n', false])
     await ws.close()
   })
 })

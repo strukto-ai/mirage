@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
+from contextlib import aclosing
 from functools import partial
 
 from mirage.accessor.base import Accessor
@@ -141,7 +142,7 @@ class MachineAccessor(Accessor):
         machine: str,
         command: str,
         failed: Callable[[int | None, bytes], BaseException],
-    ) -> AsyncIterator[bytes]:
+    ) -> AsyncGenerator[bytes, None]:
         """Run one shell line on a machine, at ``/`` in its environment,
         its output handed over as it is read and never held whole
         (``MachineHandle.stream_line``).
@@ -154,10 +155,11 @@ class MachineAccessor(Accessor):
         """
         handle = self.handle(machine)
         await handle.ensure_connected()
-        async for chunk in handle.stream_line(
-            command, dict(handle.config.env), "/", failed
-        ):
-            yield chunk
+        async with aclosing(
+            handle.stream_line(command, dict(handle.config.env), "/", failed)
+        ) as lines:
+            async for chunk in lines:
+                yield chunk
 
     def streams(self, machine: str) -> bool:
         """Whether a machine's output can be read as it comes: not on a

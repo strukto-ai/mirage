@@ -73,11 +73,13 @@ export async function read(
  * @param accessor the mount's machines.
  * @param machine the machine holding the file.
  * @param path the file.
+ * @param signal stops the read, one waiting on the machine included.
  */
 export async function* readStream(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
+  signal?: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   const timer = startOp()
   let sent = 0
@@ -85,6 +87,7 @@ export async function* readStream(
     machine,
     readCommand(machinePath(accessor, path), 0, null),
     (_status, err) => refusal(path, err),
+    signal,
   )) {
     sent += chunk.byteLength
     yield chunk

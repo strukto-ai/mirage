@@ -1113,4 +1113,24 @@ describe('a pipe between machines', () => {
     expect([a.ran, b.ran]).toEqual([['gen'], ['sink']])
     await ws.close()
   })
+
+  it('judges the input and the machine a reader ends with', async () => {
+    const a = new FakeFiles({}, ['gen', 'both'])
+    const b = new FakeFiles({ '/srv/b/sink': '#!/bin/sh\n' }, ['sink', 'both'])
+    const ws = two(a, b, { '/srv/b': '@b', '/ram': new RAMVFS() })
+    ws.policies.add({
+      preCommand: (ctx: CommandContext): Route | null =>
+        ctx.command === 'sink' ? { kind: 'route', machine: 'b' } : null,
+    })
+    expect((await ws.shell('echo in > /ram/input')).exitCode).toBe(0)
+    expect((await ws.shell('gen | sink < /ram/input')).exitCode).toBe(0)
+    const path = await ws.shell('gen | /srv/b/sink')
+    expect(path.exitCode).toBe(126)
+    expect(new TextDecoder().decode(path.stderr)).toBe('/srv/b/sink: Permission denied\n')
+    const routed = await ws.shell('gen | sink')
+    expect(routed.exitCode).toBe(126)
+    expect(new TextDecoder().decode(routed.stderr)).toBe('sink: Permission denied\n')
+    expect(b.ran).toEqual(['sink'])
+    await ws.close()
+  })
 })

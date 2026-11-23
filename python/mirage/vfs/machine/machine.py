@@ -52,6 +52,7 @@ from mirage.errors.fs import (
     exdev,
 )
 from mirage.execution.machine.table import MachineTable
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -63,6 +64,29 @@ from mirage.utils.path import norm
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.machine.config import MachineVFSConfig
+
+
+async def _refuse_landing(
+    accessor: MachineAccessor, machine: str, path: PathSpec, data: ByteSource
+) -> None:
+    """Refuse bytes landing on a machine they may not go to
+    (``place.refuse_crossing``), closing what would have been written
+    so its writer stops.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the write lands on.
+        path (PathSpec): the file.
+        data (ByteSource): what would have been written.
+
+    Raises:
+        PermissionError: the bytes come from another machine.
+    """
+    try:
+        place.refuse_crossing(accessor, machine, path)
+    except PermissionError:
+        await close_quietly(data)
+        raise
 
 
 class MachineVFS(BaseVFS):
@@ -163,6 +187,7 @@ class MachineVFS(BaseVFS):
         """
         machine = await place.holding_machine(self.accessor, path)
         place.refuse_crossing(self.accessor, machine, path, reads=True)
+        place.note_copy_source(machine)
         if not offset and size is None and self.accessor.streams(machine):
             return _read_stream(self.accessor, machine, path)
         return await _read(self.accessor, machine, path, offset, size)
@@ -218,12 +243,12 @@ class MachineVFS(BaseVFS):
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
-        place.refuse_crossing(self.accessor, machine, path)
+        await _refuse_landing(self.accessor, machine, path, data)
         await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         machine = await place.write_machine(self.accessor, path)
-        place.refuse_crossing(self.accessor, machine, path)
+        await _refuse_landing(self.accessor, machine, path, data)
         await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:

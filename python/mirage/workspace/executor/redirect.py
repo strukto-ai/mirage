@@ -1681,6 +1681,7 @@ async def _handle_redirect(
     depth = len(session.shadowed)
     session.shadowed.extend(shadowed)
     cancelled: asyncio.CancelledError | CommandTimeoutError | None = None
+    produced: MachineName | None = None
     try:
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
@@ -1758,12 +1759,20 @@ async def _handle_redirect(
             else:
                 session.descriptors.pop(fd, None)
     if cancelled is not None:
+        kept = (
+            None
+            if produced is None
+            else bind_caller(current_caller().changed({"machine": produced}))
+        )
         try:
             await run_landing(
                 _keep_output(recorder, outputs, dispatch, session)
             )
         except Exception as exc:
             logger.debug("kept output not written: %s", exc)
+        finally:
+            if kept is not None:
+                reset_caller(kept)
         raise cancelled
     produced = _producing_machine(io)
     bound = (

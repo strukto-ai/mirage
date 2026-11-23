@@ -1143,3 +1143,32 @@ async def test_a_pipe_between_programs_the_config_pins_to_two_machines_streams()
     assert await done.stdout_str() == "ran\n"
     assert (a.ran, b.ran) == (["gen"], ["sink"])
     await ws.close()
+
+
+class RoutesSink(Policy):
+    """Routes ``sink`` to machine ``b``."""
+
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "sink" else None
+
+
+@pytest.mark.asyncio
+async def test_the_pipe_check_judges_the_input_and_machine_a_reader_ends_with():
+    a = FakeFiles(programs=("gen", "both"))
+    b = FakeFiles({"/srv/b/sink": b"#!/bin/sh\n"}, programs=("sink", "both"))
+    ws = two(
+        a,
+        b,
+        mounts={"/srv/b": "@b", "/ram": RAMVFS()},
+        policies=[RoutesSink()],
+    )
+    assert (await ws.shell("echo in > /ram/input")).exit_code == 0
+    assert (await ws.shell("gen | sink < /ram/input")).exit_code == 0
+    path = await ws.shell("gen | /srv/b/sink")
+    assert path.exit_code == 126
+    assert await path.stderr_str() == "/srv/b/sink: Permission denied\n"
+    routed = await ws.shell("gen | sink")
+    assert routed.exit_code == 126
+    assert await routed.stderr_str() == "sink: Permission denied\n"
+    assert b.ran == ["sink"]
+    await ws.close()

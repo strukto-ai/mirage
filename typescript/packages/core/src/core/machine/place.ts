@@ -21,6 +21,7 @@ import { KERNEL_VIEWS } from './constants.ts'
 import { hiddenMachines, statEntry } from './stat.ts'
 import { Holder } from './types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { folderOf, machinePath } from './utils.ts'
 
 /**
@@ -86,10 +87,43 @@ export function refuseCrossing(
   path: PathSpec,
   reads = false,
 ): void {
-  const running = currentCaller().machine
-  if (running === null || running.name === machine || !accessor.isMachine(running.name)) return
-  if (reads) throw crossingRefused(machine, running.name, path)
-  throw crossingRefused(running.name, machine, path)
+  const caller = currentCaller()
+  const running = caller.machine
+  if (running !== null && running.name !== machine && accessor.isMachine(running.name)) {
+    if (reads) throw crossingRefused(machine, running.name, path)
+    throw crossingRefused(running.name, machine, path)
+  }
+  if (reads) return
+  for (const source of [...(caller.copiedFrom ?? [])].sort(compareCodePoints)) {
+    if (source !== machine && accessor.isMachine(source))
+      throw crossingRefused(source, machine, path)
+  }
+}
+
+/**
+ * The machine whose file the copy being made by a read and a write read
+ * (`Caller.copiedFrom`), when it read one machine's file and that machine is
+ * one of the mount's; null for any other write. Mirrors Python's
+ * `copy_machine`.
+ *
+ * @param accessor the mount's machines.
+ */
+export function copyMachine(accessor: MachineAccessor): string | null {
+  const copied = currentCaller().copiedFrom
+  if (copied?.size !== 1) return null
+  const [machine] = copied
+  return machine !== undefined && accessor.names().includes(machine) ? machine : null
+}
+
+/**
+ * Note a machine whose file the copy being made by a read and a write reads
+ * (`Caller.copiedFrom`); nothing outside such a copy. Mirrors Python's
+ * `note_copy_source`.
+ *
+ * @param machine the machine holding the file read.
+ */
+export function noteCopySource(machine: string): void {
+  currentCaller().copiedFrom?.add(machine)
 }
 
 /**
@@ -308,7 +342,8 @@ export async function writeMachine(
   path: PathSpec,
   opts: { replaces?: boolean; parents?: boolean } = {},
 ): Promise<string> {
-  const running = opts.replaces === true ? runningMachine(accessor) : null
+  const running =
+    opts.replaces === true ? (runningMachine(accessor) ?? copyMachine(accessor)) : null
   if (running === null) {
     const held = await holders(accessor, path)
     if (held.length > 0) return chosen(accessor, held).machine

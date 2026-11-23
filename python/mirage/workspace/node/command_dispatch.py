@@ -87,7 +87,12 @@ from mirage.shell.helpers import (
 from mirage.shell.parse.constants import ALIAS_WORD_TYPES, WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.types import AliasExpansion, Redirect, TSNodeLike
+from mirage.shell.types import (
+    AliasExpansion,
+    Redirect,
+    RedirectKind,
+    TSNodeLike,
+)
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import ShellVar, VarAttr
 from mirage.shell.voice import shell_voice
@@ -1091,6 +1096,24 @@ async def _run_argv(
                 command = await bind_command(
                     argv, routed_deps, context, given, lifetime
                 )
+                crossed = _pipe_crossing(
+                    name,
+                    argv,
+                    _target_machine(command.target)
+                    if command.target != "wrapper"
+                    else machine,
+                    context.frame.pipe_writer_of(given),
+                    registry,
+                    (admitted is not None and admitted.route is not None)
+                    or (
+                        unplaced is not None
+                        and config_pins(
+                            [name, *argv.args], session, registry, unplaced
+                        )
+                    ),
+                )
+                if crossed is not None:
+                    return crossed
                 result = await run_resolved(
                     routed_deps,
                     recurse,
@@ -1192,16 +1215,16 @@ async def _run_argv(
         return drained(), io, node
 
     # A name the command's redirects make lands on the machine its
-    # program runs on (``python gen.py > /tmp/out``), or the machine a
+    # program runs on (``python gen.py > /tmp/out``), the machine a
     # program named by its path runs on because the file is that
-    # machine's (``/tmp/tool > /tmp/out``), which matters only over
-    # several machines, so only then is it asked before the redirects
-    # open, once the command is admitted: a refused one never reaches a
-    # machine. A command of Mirage's own that a machine runs whole
-    # (``cat > /tmp/out``) is no program of that machine: what it
-    # writes goes where Mirage's own writes go. Search order, the holder
-    # of a program file and the machine a command prefers each ask the
-    # machines, so the command is admitted once, before any of them.
+    # machine's (``/tmp/tool > /tmp/out``), or the machine that runs a
+    # command of Mirage's own whole (``cat /srv/a/x > /tmp/out``), whose
+    # output is that machine's bytes. That matters only over several
+    # machines, so only then is it asked before the redirects open, once
+    # the command is admitted: a refused one never reaches a machine.
+    # Search order, the holder of a program file and the machine a
+    # command prefers each ask the machines, so the command is admitted
+    # once, before any of them.
     unplaced = context.frame.routing
     searched = _searched_program(
         name,
@@ -1211,14 +1234,20 @@ async def _run_argv(
         unplaced,
         namespace.session_links(session),
     )
-    by_path = (
-        "/" in name
-        and (runner is not None or redirects)
-        and several_machines(registry)
+    placed_first = (runner is not None or redirects) and several_machines(
+        registry
+    )
+    by_path = "/" in name and placed_first
+    handed = (
+        placed_first
+        and "/" not in name
+        and not _input_redirected(runner)
+        and _may_run_on_machine(name, argv, session, registry, unplaced)
     )
     if (
         searched is not None
         or by_path
+        or handed
         or asks_machines(
             session,
             registry,
@@ -1261,7 +1290,7 @@ async def _run_argv(
         machine = _running_machine(
             name, argv.args, session, registry, context.frame.routing
         )
-        if by_path:
+        if by_path or handed:
             held, _ = await _held_machine(argv, deps, context, stdin)
             machine = (
                 machine
@@ -1277,22 +1306,6 @@ async def _run_argv(
             deps.dispatch,
             context.frame.folder_holders,
         )
-        crossed = _pipe_crossing(
-            name,
-            argv,
-            machine,
-            fed_by,
-            registry,
-            (admitted is not None and admitted.route is not None)
-            or (
-                unplaced is not None
-                and config_pins(
-                    [name, *argv.args], session, registry, unplaced
-                )
-            ),
-        )
-        if crossed is not None:
-            return crossed
         caller = current_caller()
         staged = (
             bind_caller(
@@ -1427,6 +1440,76 @@ async def _searched_routing(
         writer=writer,
     )
     return routing if found is None else bound_to(routing, program, found)
+
+
+def _input_redirected(runner: RedirectRunner | None) -> bool:
+    """Whether the command's own redirects give it the input it reads
+    (``< f``, a here-document, ``<&3``), which decides whether a machine
+    may run it whole (``operand_machine`` keeps a command anything is
+    piped into) only once the redirects open.
+
+    Args:
+        runner (RedirectRunner | None): the command's redirect runner.
+    """
+    bound = current_caller().redirects
+    if runner is None or bound is None or bound[2] is not runner:
+        return False
+    return any(r.fd == 0 and r.kind in INPUT_REDIRECTS for r in bound[3])
+
+
+def _may_run_on_machine(
+    name: str,
+    argv: Argv,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> bool:
+    """Whether a command is one of Mirage's own that a machine may run
+    whole (``_held_machine``): a mount command, or a namespace command a
+    machine answers. Asked from its words alone, before any machine.
+
+    Args:
+        name (str): the command's name.
+        argv (Argv): its words.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if routing is None:
+        return False
+    consumer = target_consumer(
+        resolve_target(name, argv.args, session, registry, routing)
+    )
+    return consumer is Consumer.MOUNT or (
+        consumer is Consumer.NAMESPACE and name in MACHINE_ANSWERED
+    )
+
+
+INPUT_REDIRECTS = frozenset(
+    {
+        RedirectKind.STDIN,
+        RedirectKind.READWRITE,
+        RedirectKind.HEREDOC,
+        RedirectKind.HERESTRING,
+        RedirectKind.DUP_INPUT,
+    }
+)
+
+
+def _target_machine(target: ExecutionTarget) -> MachineName | None:
+    """The machine a bound command's program runs on: its runtime's, or
+    for a program named by a path no machine holds, its fallback's; None
+    for a command Mirage runs itself.
+
+    Args:
+        target (ExecutionTarget): what ``bind_command`` chose.
+    """
+    external = target.fallback if isinstance(target, PathTarget) else target
+    if not isinstance(external, ExternalTarget) or external.runtime is None:
+        return None
+    if getattr(external.runtime, "reach", "workspace") == "workspace":
+        return None
+    return external.runtime.machine
 
 
 def _pipe_crossing(

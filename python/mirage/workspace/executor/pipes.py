@@ -122,6 +122,41 @@ def _shell_stage(cmd: TSNodeLike, session: SessionState) -> bool:
     return cmd.type == NT.SUBSHELL or nested_shell(cmd, session)
 
 
+def _stage_writers(
+    commands: list[TSNodeLike],
+    inputs: list[ByteSource | None],
+    first: PipeWriter | None,
+    session: SessionState,
+    named: bool,
+) -> list[PipeWriter | None]:
+    """The writer of the pipe each stage reads, by its program's words,
+    each linked to the writer of the pipe that program reads in turn
+    (``PipeWriter.upstream``), so the stage after a middle one places it
+    as its own run does; the first stage keeps the one it was handed.
+
+    Args:
+        commands (list[TSNodeLike]): the stages.
+        inputs (list[ByteSource | None]): the input each stage reads.
+        first (PipeWriter | None): the writer of the pipe the first
+            stage reads, if any.
+        session (SessionState): the shell running the pipeline.
+        named (bool): the stages run as processes, whose programs'
+            words are known.
+    """
+    writers: list[PipeWriter | None] = [first]
+    for i in range(1, len(commands)):
+        words = program_words(commands[i - 1], session) if named else None
+        stream = inputs[i]
+        writers.append(
+            PipeWriter(
+                stream, tuple(words), session.cwd, upstream=writers[i - 1]
+            )
+            if words and stream is not None
+            else None
+        )
+    return writers
+
+
 async def handle_pipe(
     execute_node: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
@@ -198,20 +233,11 @@ async def handle_pipe(
             )
         token = set_current_evaluation(child_evaluation)
         output = pipes[i]
-        input_stream = stdin if i == 0 else pipes[i - 1].stream()
+        input_stream = inputs[i]
         fed_by = child_evaluation.frame.stdin_writer
         if i > 0:
             child_evaluation.frame.stdin = input_stream
-            words = (
-                program_words(commands[i - 1], session)
-                if processes is not None
-                else None
-            )
-            child_evaluation.frame.stdin_writer = (
-                PipeWriter(input_stream, tuple(words), session.cwd)
-                if words and input_stream is not None
-                else None
-            )
+            child_evaluation.frame.stdin_writer = writers[i]
         io = IOResult()
         child_exec = ExecutionNode()
         stage_stack = (
@@ -340,6 +366,17 @@ async def handle_pipe(
         ios[i].exit_code = code
         return code
 
+    inputs: list[ByteSource | None] = [
+        stdin,
+        *(pipe.stream() for pipe in pipes[:-1]),
+    ]
+    writers = _stage_writers(
+        commands,
+        inputs,
+        children[0].frame.stdin_writer,
+        session,
+        processes is not None,
+    )
     tasks: list[asyncio.Task[int]] = []
     failed = False
     try:

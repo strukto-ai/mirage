@@ -26,7 +26,7 @@ import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
 import { programMachine } from './program.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
-import { configPins, folderHolders, searchedMachine } from './search.ts'
+import { configPins, folderHolders, isSearched, searchedMachine } from './search.ts'
 
 /**
  * The machine a command Mirage runs itself is about
@@ -190,7 +190,24 @@ async function writerMachine(
       paths,
       fedBy.cwd,
     )
-  runtime ??= await searchedMachine(head, paths, session, registry, routing, fedBy.cwd)
+  if (runtime == null) {
+    const upstream = fedBy.upstream
+    const writer =
+      upstream !== null && isSearched(head, session, registry, routing)
+        ? await pipeWriterMachine(upstream, session, registry, routing, namespace, dispatch)
+        : null
+    runtime = await searchedMachine(
+      head,
+      paths,
+      session,
+      registry,
+      routing,
+      fedBy.cwd,
+      null,
+      false,
+      writer,
+    )
+  }
   runtime ??= programRuntime(registry, fedBy.words, session, routing)
   if (!(runtime instanceof RemoteRuntime)) return null
   const name = runtime.defaultMachine

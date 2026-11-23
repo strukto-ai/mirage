@@ -396,3 +396,14 @@ describe('a pipe', () => {
     await ws.close()
   })
 })
+
+describe('a middle stage', () => {
+  it('is placed where its own writer put it', async () => {
+    const a = new FakeFiles({}, ['filter'])
+    const b = new FakeFiles({}, ['gen', 'filter', 'sink'])
+    const ws = two(a, b)
+    expect((await ws.shell('gen | filter | sink')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([[], ['gen', 'filter', 'sink']])
+    await ws.close()
+  })
+})

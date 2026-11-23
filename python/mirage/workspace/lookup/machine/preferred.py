@@ -28,6 +28,7 @@ from mirage.workspace.lookup.machine.program import program_machine
 from mirage.workspace.lookup.machine.search import (
     config_pins,
     folder_holders,
+    is_searched,
     searched_machine,
 )
 from mirage.workspace.mount import MountRegistry
@@ -214,8 +215,17 @@ async def _writer_machine(
             cwd=fed_by.cwd,
         )
     if runtime is None:
+        upstream = fed_by.upstream
+        writer = (
+            await pipe_writer_machine(
+                upstream, session, registry, routing, namespace, dispatch
+            )
+            if upstream is not None
+            and is_searched(head, session, registry, routing)
+            else None
+        )
         runtime = await searched_machine(
-            head, paths, session, registry, routing, fed_by.cwd
+            head, paths, session, registry, routing, fed_by.cwd, writer=writer
         )
     if runtime is None:
         runtime = program_runtime(registry, fed_by.words, session, routing)

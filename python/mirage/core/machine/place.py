@@ -38,6 +38,33 @@ def running_machine(accessor: MachineAccessor) -> str | None:
     return machine.name
 
 
+def copy_machine(accessor: MachineAccessor) -> str | None:
+    """The machine whose file the copy being made by a read and a write
+    read (``Caller.copied_from``), when it read one machine's file and
+    that machine is one of the mount's; None for any other write.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+    """
+    copied = current_caller().copied_from
+    if copied is None or len(copied) != 1:
+        return None
+    (machine,) = copied
+    return machine if machine in accessor.names() else None
+
+
+def note_copy_source(machine: str) -> None:
+    """Note a machine whose file the copy being made by a read and a
+    write reads (``Caller.copied_from``); nothing outside such a copy.
+
+    Args:
+        machine (str): the machine holding the file read.
+    """
+    copied = current_caller().copied_from
+    if copied is not None:
+        copied.add(machine)
+
+
 def crossing_reason(source: str, target: str) -> str:
     """Why bytes from one machine do not go to another, for the decision
     record of the refusal (stderr says ``Permission denied``).
@@ -79,9 +106,11 @@ def refuse_crossing(
     the line runs on a machine: a file of ``machine`` it reads
     (``prog < /srv/b/in``), or its output landing there (``prog >
     /srv/b/out``), when the program is on another of the workspace's
-    machines. Bytes go between a machine and a store, never from one
-    machine to another. The refusal is ``Permission denied``, its reason
-    on the line's decision record.
+    machines; and a copy made by a read and a write landing on another
+    machine than the one whose file it read (``Caller.copied_from``).
+    Bytes go between a machine and a store, never from one machine to
+    another. The refusal is ``Permission denied``, its reason on the
+    line's decision record.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -93,16 +122,21 @@ def refuse_crossing(
     Raises:
         PermissionError: the program runs on another machine.
     """
-    running = current_caller().machine
+    caller = current_caller()
+    running = caller.machine
     if (
-        running is None
-        or running.name == machine
-        or not accessor.is_machine(running.name)
+        running is not None
+        and running.name != machine
+        and accessor.is_machine(running.name)
     ):
-        return
+        if reads:
+            raise crossing_refused(machine, running.name, path)
+        raise crossing_refused(running.name, machine, path)
     if reads:
-        raise crossing_refused(machine, running.name, path)
-    raise crossing_refused(running.name, machine, path)
+        return
+    for source in sorted(caller.copied_from or ()):
+        if source != machine and accessor.is_machine(source):
+            raise crossing_refused(source, machine, path)
 
 
 def command_machine(accessor: MachineAccessor) -> str | None:
@@ -346,7 +380,11 @@ async def write_machine(
         FileNotFoundError: the machine's own links lead the name to one
             the session hides.
     """
-    running = running_machine(accessor) if replaces else None
+    running = (
+        running_machine(accessor) or copy_machine(accessor)
+        if replaces
+        else None
+    )
     if running is None:
         held = await holders(accessor, path)
         if held:
