@@ -24,6 +24,7 @@ import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machin
 import { bindCaller, currentCaller } from '../../context/session_context.ts'
 import { MachineName } from '../../execution/types.ts'
 import type { ByteSource } from '../../io/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -836,8 +837,60 @@ describe('a landed write', () => {
     release()
     await Promise.all(writes)
     const kept = Object.entries(machines).filter(([, files]) => files.files.has('/tmp/k'))
-    expect(kept.map(([name, files]) => [texts(files)['/tmp/k'], name, kept.length])).toEqual(
-      kept.map(([name]) => [`from ${name}\n`, name, 1]),
+    expect(kept).toHaveLength(1)
+    expect(kept.map(([name, files]) => [name, texts(files)['/tmp/k']])).toEqual(
+      kept.map(([name]) => [name, `from ${name}\n`]),
     )
+  })
+})
+
+/** A machine whose next look at a name, once `armed` with it, waits for `go`. */
+class Gated extends ScriptedMachine {
+  armed: string | null = null
+  private markHeld: () => void = () => undefined
+  readonly held = new Promise<void>((resolve) => {
+    this.markHeld = resolve
+  })
+  private open: () => void = () => undefined
+  private readonly opened = new Promise<void>((resolve) => {
+    this.open = resolve
+  })
+
+  go(): void {
+    this.open()
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    const line = argv.join(' ')
+    if (this.armed !== null && line.includes(this.armed) && line.includes('-maxdepth 0')) {
+      this.armed = null
+      this.markHeld()
+      await this.opened
+    }
+    return super.execArgv(argv, stdin, env, cwd, output, errors)
+  }
+}
+
+describe('a settling', () => {
+  it('keeps a copy landed while it looks', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles()
+    const a = new Gated('a', aFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(a, new ScriptedMachine('b', bFiles.answer)), 'a')
+    a.armed = '/tmp/k'
+    const first = writeOn('b', vfs, '/k', ENC.encode('from b\n'))
+    await a.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    a.go()
+    await first
+    expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual(['from a\n', false])
   })
 })

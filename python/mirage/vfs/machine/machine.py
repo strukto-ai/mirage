@@ -94,6 +94,23 @@ async def _refuse_landing(
         raise
 
 
+async def _unlink_older(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> None:
+    """Take an older copy of a name off a machine; one already gone, which
+    another settling took first, is no error.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine holding the copy.
+        path (PathSpec): the name.
+    """
+    try:
+        await _unlink(accessor, machine, path)
+    except FileNotFoundError as exc:
+        logger.debug("%s already gone from %s: %s", path.virtual, machine, exc)
+
+
 class MachineVFS(BaseVFS):
     """A machine's own files at a prefix, reached through the exec the
     workspace already holds for the machine: what its programs read and
@@ -125,63 +142,118 @@ class MachineVFS(BaseVFS):
         self.config = config
         self.accessor = MachineAccessor(config)
         self._live_writes: dict[str, list[str]] = {}
-        self._last_landed: dict[str, str] = {}
+        self._latest: dict[str, tuple[int, str]] = {}
+        self._landings = 0
+        self._settling: dict[str, int] = {}
         self._unsettled: set[str] = set()
 
     @asynccontextmanager
     async def _live_write(
-        self, machine: str, path: PathSpec
+        self, machine: str, path: PathSpec, *, replaces: bool
     ) -> AsyncIterator[None]:
-        """Count a write of a name on a machine as live while it lands
-        (``_drop_other_copies``), and end it (``_end_write``).
+        """Count a write of a name on a machine as live while it lands,
+        and end it (``_end_write``).
 
         Args:
             machine (str): the machine written.
             path (PathSpec): the name.
+            replaces (bool): the write replaces the name, so once it lands
+                no other machine's copy of it stays.
         """
         self._live_writes.setdefault(path.virtual, []).append(machine)
         try:
             yield
         except BaseException:
-            await self._end_write(machine, path, landed=False)
+            await self._end_write(
+                machine, path, landed=False, replaces=replaces
+            )
             raise
-        await self._end_write(machine, path, landed=True)
+        await self._end_write(machine, path, landed=True, replaces=replaces)
 
     async def _end_write(
-        self, machine: str, path: PathSpec, *, landed: bool
+        self, machine: str, path: PathSpec, *, landed: bool, replaces: bool
     ) -> None:
-        """End a live write of a name. A cleanup that passed over a live
-        write left the name unsettled (``_drop_other_copies``), and the
-        last write of it to end settles it: the copy of the write that
-        landed last stays and every other machine's goes, a failed
-        write's too, so once the writes end one copy shows, the newest.
+        """End a live write of a name. One that landed is the name's latest
+        copy, noted while the name has other writes to settle with
+        (``_latest``). One that replaces the name settles it
+        (``_settle``), and so does the last write of an unsettled name to
+        end, a failed one too, so once the writes end one copy shows, the
+        newest.
 
         Args:
             machine (str): the machine written.
             path (PathSpec): the name.
             landed (bool): the write landed; a failed one leaves the
                 copies of those that did.
+            replaces (bool): the write replaces the name.
         """
         key = path.virtual
-        if landed:
-            self._last_landed[key] = machine
         live = self._live_writes[key]
         live.remove(machine)
-        if live:
+        if not live:
+            del self._live_writes[key]
+        if landed and (
+            replaces or live or key in self._unsettled or key in self._settling
+        ):
+            self._landings += 1
+            self._latest[key] = (self._landings, machine)
+        if not (landed and replaces) and (live or key not in self._unsettled):
+            self._forget(key)
             return
-        del self._live_writes[key]
-        last = self._last_landed.pop(key, None)
-        if key not in self._unsettled:
-            return
-        self._unsettled.discard(key)
-        if last is None:
-            return
+        if not live:
+            self._unsettled.discard(key)
         try:
-            await self._drop_other_copies(last, path)
+            await self._settle(path)
         except Exception as exc:
             if landed:
                 raise
             logger.debug("older copies of %s kept: %s", key, exc)
+
+    async def _settle(self, path: PathSpec) -> None:
+        """Take a name off every machine but the one its latest write
+        landed on (``_latest``), so one copy shows, the newest. The latest
+        is looked up again before every removal, and a write landing
+        meanwhile makes the look start over with its copy kept. A machine
+        still writing the name keeps its copy and leaves the name
+        unsettled, for the last write of it to settle (``_end_write``).
+
+        Args:
+            path (PathSpec): the name.
+        """
+        key = path.virtual
+        self._settling[key] = self._settling.get(key, 0) + 1
+        try:
+            while self.accessor.several and (seen := self._latest.get(key)):
+                for one in await place.holders(self.accessor, path):
+                    if self._latest.get(key) != seen:
+                        break
+                    if one.machine == seen[1] or one.is_folder:
+                        continue
+                    if one.machine in self._live_writes.get(key, ()):
+                        self._unsettled.add(key)
+                        continue
+                    await _unlink_older(self.accessor, one.machine, path)
+                if self._latest.get(key) == seen:
+                    return
+        finally:
+            self._settling[key] -= 1
+            if not self._settling[key]:
+                del self._settling[key]
+            self._forget(key)
+
+    def _forget(self, key: str) -> None:
+        """Let go of a name's latest landing once nothing writes or settles
+        it.
+
+        Args:
+            key (str): the name.
+        """
+        if (
+            key not in self._live_writes
+            and key not in self._unsettled
+            and key not in self._settling
+        ):
+            self._latest.pop(key, None)
 
     async def _land_at_origin(
         self, machine: str, path: PathSpec, data: ByteSource, atomic: bool
@@ -189,8 +261,8 @@ class MachineVFS(BaseVFS):
         """Land a whole file on the machine its bytes come from
         (``place.origin_machine``: a program's ``>``, or a copy made by a
         read and a write) as a direct copy lands (``copy_from``): its
-        folder made there when only another machine holds it, and no
-        other machine's copy of the name left to show again.
+        folder made there when only another machine holds it; the other
+        machines' copies of the name go once it lands (``_end_write``).
 
         Args:
             machine (str): the machine the bytes come from.
@@ -213,28 +285,6 @@ class MachineVFS(BaseVFS):
             atomic=atomic,
             make_parent=bool(lacking),
         )
-        await self._drop_other_copies(machine, path)
-
-    async def _drop_other_copies(self, machine: str, path: PathSpec) -> None:
-        """Take a name off every other machine holding it as a file, once
-        its new copy has landed on ``machine``, so an older copy never
-        shows again. A machine still writing the name keeps its copy, and
-        the name is left for the last write of it to settle
-        (``_end_write``).
-
-        Args:
-            machine (str): the machine the name landed on.
-            path (PathSpec): the name.
-        """
-        if not self.accessor.several:
-            return
-        for one in await place.holders(self.accessor, path):
-            if one.machine == machine or one.is_folder:
-                continue
-            if one.machine in self._live_writes.get(path.virtual, ()):
-                self._unsettled.add(path.virtual)
-                continue
-            await _unlink(self.accessor, one.machine, path)
 
     def bind_machines(self, machines: MachineTable, default: str) -> None:
         """Reach the workspace's machines once it has them.
@@ -360,16 +410,17 @@ class MachineVFS(BaseVFS):
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
         await _refuse_landing(self.accessor, machine, path, data)
-        async with self._live_write(machine, path):
-            if place.origin_machine(self.accessor) == machine:
+        origin = place.origin_machine(self.accessor) == machine
+        async with self._live_write(machine, path, replaces=origin):
+            if origin:
                 await self._land_at_origin(machine, path, data, atomic)
-                return
-            await _write(self.accessor, machine, path, data, atomic=atomic)
+            else:
+                await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         machine = await place.write_machine(self.accessor, path)
         await _refuse_landing(self.accessor, machine, path, data)
-        async with self._live_write(machine, path):
+        async with self._live_write(machine, path, replaces=False):
             await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
@@ -500,11 +551,10 @@ class MachineVFS(BaseVFS):
         lacking = await place.machines_lacking_folder(
             self.accessor, [machine], dst
         )
-        async with self._live_write(machine, dst):
+        async with self._live_write(machine, dst, replaces=True):
             await _copy(
                 self.accessor, machine, src, dst, make_parent=bool(lacking)
             )
-            await self._drop_other_copies(machine, dst)
 
     async def copy_from(
         self, source: BaseVFS, src: PathSpec, dst: PathSpec
@@ -540,7 +590,7 @@ class MachineVFS(BaseVFS):
         lacking = await place.machines_lacking_folder(
             self.accessor, [machine], dst
         )
-        async with self._live_write(machine, dst):
+        async with self._live_write(machine, dst, replaces=True):
             await _copy_from(
                 source.accessor,
                 self.accessor,
@@ -549,7 +599,6 @@ class MachineVFS(BaseVFS):
                 dst,
                 make_parent=bool(lacking),
             )
-            await self._drop_other_copies(machine, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a folder one machine holds, on that machine. A folder

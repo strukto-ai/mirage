@@ -26,7 +26,7 @@ from mirage.context.session_context import (
 from mirage.execution.types import MachineName
 from mirage.io.types import ByteSource
 from mirage.policy.base import Policy
-from mirage.runtime.types import RunAnswer
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
@@ -896,6 +896,51 @@ async def test_writes_ending_together_on_two_machines_leave_one_copy():
         for name, files in machines.items()
         if "/tmp/k" in files.files
     }
-    assert [(data, len(kept)) for name, data in kept.items()] == [
-        (f"from {name}\n".encode(), 1) for name in kept
-    ]
+    assert len(kept) == 1
+    ((name, data),) = kept.items()
+    assert data == f"from {name}\n".encode()
+
+
+class Gated(ScriptedMachine):
+    """A machine whose next look at a name, once ``armed`` with it, waits
+    for ``go``, setting ``held`` as it starts to wait."""
+
+    def __init__(self, name: str, answer) -> None:
+        super().__init__(name, answer)
+        self.armed: str | None = None
+        self.held = asyncio.Event()
+        self.go = asyncio.Event()
+
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn,
+        errors: OutputFn,
+    ) -> RunResult:
+        line = " ".join(argv)
+        if self.armed and self.armed in line and "-maxdepth 0" in line:
+            self.armed = None
+            self.held.set()
+            await self.go.wait()
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+
+@pytest.mark.asyncio
+async def test_a_settling_keeps_a_copy_landed_while_it_looks():
+    a_files, b_files = FakeFiles(), FakeFiles()
+    a = Gated("a", a_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(a, ScriptedMachine("b", b_files.answer)), "a")
+    a.armed = "/tmp/k"
+    first = asyncio.create_task(write_on("b", vfs, spec("/k"), b"from b\n"))
+    await a.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    a.go.set()
+    await first
+    assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
+        b"from a\n",
+        False,
+    )
