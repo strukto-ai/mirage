@@ -1849,6 +1849,21 @@
         "stdout": "d\nrc=124\ni1\nrc=124\ns\nrc=124\nt\nrc=124\np\nrc=124\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "a_redirected_group_s_reader_leaving_ends_it_with_sigpipe",
+      "seq": 1380039,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "{ echo a; sleep 0.2; echo b; } 2>&1 | head -1; echo ${PIPESTATUS[*]}",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\n141 0\n",
+        "stderr": ""
+      }
     }
   ]
 }

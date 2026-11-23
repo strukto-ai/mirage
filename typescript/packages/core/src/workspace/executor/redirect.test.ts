@@ -1774,17 +1774,18 @@ describe('a first write across workspaces', () => {
 })
 
 describe('a redirected compound', () => {
-  it.each([
-    '{ echo d; sleep 30\n} 2>&1',
-    '( echo d; sleep 30 ) 2>/dev/null',
-    'for i in 1; do echo d; sleep 30; done 2>&1',
-    'while true; do echo d; sleep 30; done 2>&1',
-    'if true; then echo d; sleep 30; fi 2>&1',
-    'f() { echo d; sleep 30; }; f 2>&1',
-    '{ echo d >&3; sleep 30; } 3>&1',
-    'true && { echo d; sleep 30; } 2>&1',
-    'echo x | { echo d; sleep 30; } 2>&1',
-  ])('streams what it prints: %j', async (line) => {
+  it.each<[string, string]>([
+    ['{ echo d; sleep 30\n} 2>&1', 'stdout'],
+    ['( echo d; sleep 30 ) 2>/dev/null', 'stdout'],
+    ['for i in 1; do echo d; sleep 30; done 2>&1', 'stdout'],
+    ['while true; do echo d; sleep 30; done 2>&1', 'stdout'],
+    ['if true; then echo d; sleep 30; fi 2>&1', 'stdout'],
+    ['f() { echo d; sleep 30; }; f 2>&1', 'stdout'],
+    ['{ echo d >&3; sleep 30; } 3>&1', 'stdout'],
+    ['true && { echo d; sleep 30; } 2>&1', 'stdout'],
+    ['echo x | { echo d; sleep 30; } 2>&1', 'stdout'],
+    ['{ echo d >&2; sleep 30; } >/dev/null', 'stderr'],
+  ])('streams what it prints: %j', async (line, stream) => {
     const ws = new Workspace({})
     try {
       const execution = await ws.shell(line, { stream: true })
@@ -1799,7 +1800,7 @@ describe('a redirected compound', () => {
         ])
         if (first.done === true) throw new Error('no output')
         const event = first.value
-        expect([event.stream, new TextDecoder().decode(event.data)]).toEqual(['stdout', 'd\n'])
+        expect([event.stream, new TextDecoder().decode(event.data)]).toEqual([stream, 'd\n'])
       } finally {
         await execution.close()
       }
