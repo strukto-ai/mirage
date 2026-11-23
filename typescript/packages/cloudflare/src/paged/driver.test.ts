@@ -165,6 +165,67 @@ describe('the paged sql driver of a Durable Object', () => {
     ).toEqual([])
   })
 
+  it('runs a script one statement at a time, its last one taking the parameters', async () => {
+    const driver = await open(new ObjectStorage())
+    const rows = driver.sql.exec(
+      'CREATE TABLE t (a INTEGER, b TEXT); INSERT INTO t VALUES (1, NULL);; -- the last\n' +
+        'SELECT a FROM t WHERE a = ? /* and no more */ ;\n',
+      1,
+    )
+    expect(rows.toArray()).toEqual([{ a: 1 }])
+    driver.sql.exec('INSERT INTO t VALUES (?, ?); ', 2, 'x')
+    driver.sql.exec('INSERT INTO t VALUES (?, ?); ', 3, 'y')
+    expect(driver.sql.exec('SELECT a, b FROM t ORDER BY a').toArray()).toEqual([
+      { a: 1, b: null },
+      { a: 2, b: 'x' },
+      { a: 3, b: 'y' },
+    ])
+    expect(() => driver.sql.exec('DELETE FROM t; SELECT * FROM missing')).toThrow(
+      'no such table: missing',
+    )
+    expect(driver.sql.exec('SELECT count(*) AS n FROM t').toArray()).toEqual([{ n: 0 }])
+  })
+
+  it('answers a text as it was bound, a NUL in it too', async () => {
+    const driver = await open(new ObjectStorage())
+    driver.sql.exec('CREATE TABLE t (k INTEGER PRIMARY KEY, a TEXT)')
+    const long = `${'x'.repeat(40)}\0y`
+    const texts = ['a\0b', 'é😀', 'ab\udc80cd', long]
+    texts.forEach((text, k) => driver.sql.exec('INSERT INTO t VALUES (?, ?)', k, text))
+    const rows = driver.sql.exec('SELECT a FROM t ORDER BY k').toArray()
+    expect(rows.map((row) => row.a)).toEqual(['a\0b', 'é😀', 'ab\ufffdcd', long])
+    expect(driver.sql.exec("SELECT 'é😀' AS a").toArray()).toEqual([{ a: 'é😀' }])
+  })
+
+  it('opens no database file beside its own', async () => {
+    const driver = await open(new ObjectStorage())
+    driver.sql.exec('CREATE TABLE t (a INTEGER)')
+    expect(() => driver.sql.exec("ATTACH 'other.db' AS other")).toThrow('unable to open database')
+    expect(() => driver.sql.exec("ATTACH 'main.db' AS again")).toThrow('unable to open database')
+    driver.sql.exec("ATTACH ':memory:' AS scratch")
+    driver.sql.exec('CREATE TABLE scratch.t (a INTEGER)')
+    expect(driver.sql.exec('SELECT count(*) AS n FROM scratch.t').toArray()).toEqual([{ n: 0 }])
+  })
+
+  it('throws what failed a transaction SQLite rolled back by itself', async () => {
+    const storage = new ObjectStorage()
+    const driver = await open(storage, { spillBytes: 65536 })
+    driver.sql.exec('CREATE TABLE t (a INTEGER PRIMARY KEY, b BLOB)')
+    driver.sql.exec('INSERT INTO t (a) VALUES (1)')
+    expect(() => {
+      driver.transactionSync(() => {
+        driver.sql.exec('INSERT OR ROLLBACK INTO t (a) VALUES (1)')
+      })
+    }).toThrow('UNIQUE constraint failed: t.a')
+    driver.flush()
+    storage.writesLeft = 0
+    await expect(async () => {
+      await driver.batch([
+        { sql: 'INSERT INTO t (a, b) VALUES (?, ?)', params: [2, new Uint8Array(3 << 20)] },
+      ])
+    }).rejects.toThrow('COMMIT: the storage refused a write')
+  })
+
   it('lets the event loop turn as statements carry file data, on one timer at a time', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(0)
     const driver = await open(new ObjectStorage())

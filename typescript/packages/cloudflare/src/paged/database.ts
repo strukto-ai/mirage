@@ -25,6 +25,27 @@ const INTEGER = 1
 const FLOAT = 2
 const TEXT = 3
 const BLOB = 4
+const encoder = new TextEncoder()
+const decoder = new TextDecoder()
+
+// Whether a script has no statement left in `rest`: blanks, semicolons and
+// comments may follow its last one.
+function ends(rest: string): boolean {
+  let at = 0
+  while (at < rest.length) {
+    if (rest.startsWith('--', at)) {
+      const line = rest.indexOf('\n', at)
+      if (line < 0) return true
+      at = line + 1
+    } else if (rest.startsWith('/*', at)) {
+      const close = rest.indexOf('*/', at + 2)
+      if (close < 0) return true
+      at = close + 2
+    } else if (' \t\n\f\r;'.includes(rest.charAt(at))) at += 1
+    else return false
+  }
+  return true
+}
 
 /** How a paged database is opened. */
 export interface PagedDatabaseOptions extends PageLogOptions {
@@ -41,8 +62,6 @@ interface SqliteModule {
   _sqlite3_malloc(size: number): number
   _sqlite3_free(at: number): void
   _getSqliteFree(): number
-  lengthBytesUTF8(text: string): number
-  stringToUTF8(text: string, at: number, size: number): void
   getValue(at: number, type: string): number
   getTempRet0(): number
   cwrap(name: string, returns: string, args: readonly string[]): Call<unknown>
@@ -72,8 +91,12 @@ class PagedVFS implements SQLiteVFS {
   constructor(private readonly log: PageLog) {}
 
   xOpen(name: string | null, fileId: number, flags: number, pOutFlags: DataView): number {
-    if ((flags & SQLite.SQLITE_OPEN_MAIN_DB) !== 0) this.files.set(fileId, null)
-    else {
+    if ((flags & SQLite.SQLITE_OPEN_MAIN_DB) !== 0) {
+      // The page log is one database's: another file, or the same one opened
+      // again, would write over its pages.
+      if (name !== MAIN || [...this.files.values()].includes(null)) return SQLite.SQLITE_CANTOPEN
+      this.files.set(fileId, null)
+    } else {
       const key = name ?? `temp-${String(fileId)}`
       let file = this.memory.get(key)
       if (file === undefined) {
@@ -264,7 +287,7 @@ export class PagedDatabase {
   private readonly columnType: Call<number>
   private readonly columnInt64: Call<number>
   private readonly columnDouble: Call<number>
-  private readonly columnText: Call<string>
+  private readonly columnText: Call<number>
   private readonly columnBlob: Call<number>
   private readonly columnBytes: Call<number>
   private readonly autocommit: Call<number>
@@ -297,7 +320,7 @@ export class PagedDatabase {
     this.columnType = call('sqlite3_column_type', n, [n, n])
     this.columnInt64 = call('sqlite3_column_int64', n, [n, n])
     this.columnDouble = call('sqlite3_column_double', n, [n, n])
-    this.columnText = call('sqlite3_column_text', 'string', [n, n])
+    this.columnText = call('sqlite3_column_text', n, [n, n])
     this.columnBlob = call('sqlite3_column_blob', n, [n, n])
     this.columnBytes = call('sqlite3_column_bytes', n, [n, n])
     this.autocommit = call('sqlite3_get_autocommit', n, [n])
@@ -353,8 +376,8 @@ export class PagedDatabase {
   /**
    * Run `sql` and answer its rows.
    *
-   * @param sql one statement, or several of which the last one's rows are answered.
-   * @param params the values of the statement's `?` parameters; only a single statement takes any.
+   * @param sql one statement, or several run in turn, of which the last one's rows are answered.
+   * @param params the values of the `?` parameters of the last statement.
    */
   exec(sql: string, params: readonly unknown[] = []): SqlRow[] {
     if (this.closed) throw new Error('the paged database is closed')
@@ -364,25 +387,31 @@ export class PagedDatabase {
       this.statements.set(sql, held)
       return this.run(held, params, sql)
     }
-    const found = this.prepare(sql)
-    const [only] = found
-    if (only === undefined) return []
-    if (found.length === 1) {
-      this.statements.set(sql, only)
-      if (this.statements.size > STATEMENTS) {
-        for (const [oldest, statement] of this.statements) {
-          this.statements.delete(oldest)
-          this.finalize(statement)
-          break
-        }
-      }
-      return this.run(only, params, sql)
-    }
+    const m = this.module
+    const [text, size] = this.text(sql)
+    const end = text + size
     let rows: SqlRow[] = []
     try {
-      for (const statement of found) rows = this.run(statement, [], sql)
+      // A statement is read once the one before it ran: it may use a table
+      // that one made, and a PRAGMA takes effect as it is read.
+      for (let at = text, first = true; at < end; first = false) {
+        if (this.prepareAt(this.db, at, -1, this.out, this.out + 4) !== 0) throw this.fail(sql)
+        const statement = m.getValue(this.out, '*')
+        if (statement === 0) break
+        at = m.getValue(this.out + 4, '*')
+        const last = at >= end || ends(decoder.decode(m.HEAPU8.subarray(at, end)))
+        if (first && last) {
+          this.hold(sql, statement)
+          return this.run(statement, params, sql)
+        }
+        try {
+          rows = this.run(statement, last ? params : [], sql)
+        } finally {
+          this.finalize(statement)
+        }
+      }
     } finally {
-      for (const statement of found) this.finalize(statement)
+      m._sqlite3_free(text)
     }
     return rows
   }
@@ -419,28 +448,24 @@ export class PagedDatabase {
     return new Error(`${sql.slice(0, 80)}: ${reason}`, cause === null ? undefined : { cause })
   }
 
-  private prepare(sql: string): number[] {
-    const m = this.module
-    const size = m.lengthBytesUTF8(sql) + 1
-    const text = m._sqlite3_malloc(size)
-    m.stringToUTF8(sql, text, size)
-    const found: number[] = []
-    let at = text
-    try {
-      while (at < text + size - 1) {
-        if (this.prepareAt(this.db, at, -1, this.out, this.out + 4) !== 0) throw this.fail(sql)
-        const statement = m.getValue(this.out, '*')
-        at = m.getValue(this.out + 4, '*')
-        if (statement === 0) break
-        found.push(statement)
-      }
-    } catch (e) {
-      for (const statement of found) this.finalize(statement)
-      throw e
-    } finally {
-      m._sqlite3_free(text)
+  // Keep a statement for the next time its text is run, the oldest kept given up.
+  private hold(sql: string, statement: number): void {
+    this.statements.set(sql, statement)
+    if (this.statements.size <= STATEMENTS) return
+    for (const [oldest, old] of this.statements) {
+      this.statements.delete(oldest)
+      this.finalize(old)
+      break
     }
-    return found
+  }
+
+  // `text` as UTF-8 in SQLite's memory with a NUL after it: where, and its bytes.
+  private text(text: string): [number, number] {
+    const bytes = encoder.encode(text)
+    const at = this.module._sqlite3_malloc(bytes.byteLength + 1)
+    this.module.HEAPU8.set(bytes, at)
+    this.module.HEAPU8[at + bytes.byteLength] = 0
+    return [at, bytes.byteLength]
   }
 
   private bind(statement: number, at: number, value: unknown): number {
@@ -460,10 +485,8 @@ export class PagedDatabase {
       )
     }
     if (typeof value === 'string') {
-      const size = m.lengthBytesUTF8(value) + 1
-      const text = m._sqlite3_malloc(size)
-      m.stringToUTF8(value, text, size)
-      return this.bindText(statement, at, text, size - 1, this.free)
+      const [text, size] = this.text(value)
+      return this.bindText(statement, at, text, size, this.free)
     }
     let blob: Uint8Array
     if (value instanceof Uint8Array) blob = value
@@ -490,8 +513,11 @@ export class PagedDatabase {
       }
       case FLOAT:
         return this.columnDouble(statement, at)
-      case TEXT:
-        return this.columnText(statement, at)
+      case TEXT: {
+        const memory = this.columnText(statement, at)
+        const size = this.columnBytes(statement, at)
+        return decoder.decode(m.HEAPU8.subarray(memory, memory + size))
+      }
       case BLOB: {
         const size = this.columnBytes(statement, at)
         const memory = this.columnBlob(statement, at)
