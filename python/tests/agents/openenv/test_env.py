@@ -384,6 +384,57 @@ async def test_a_reset_waits_for_the_step_it_replaces():
     assert env.state.step_count == 0
 
 
+@pytest.mark.asyncio
+async def test_a_cancelled_reset_leaves_the_episode_in_place():
+    factory = Factory()
+    judging = asyncio.Event()
+    release = asyncio.Event()
+
+    async def reward(
+        session: Session, action: Action, observation: Observation
+    ) -> float:
+        judging.set()
+        await release.wait()
+        return 1.0
+
+    env = MirageOpenEnv(factory=factory, reward=reward)
+    await env.reset_async(episode_id="first")
+    step = asyncio.create_task(env.step_async(shell("true")))
+    await judging.wait()
+    reset = asyncio.create_task(env.reset_async(episode_id="second"))
+    await asyncio.sleep(0.05)
+    reset.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reset
+    release.set()
+    await step
+    state = env.state
+    await env.aclose()
+
+    assert state.episode_id == "first"
+    assert state.step_count == 1
+    assert len(factory.built) == 1
+    assert await closed(factory.built[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call", ["reset_async", "aclose"])
+async def test_a_hook_may_not_reset_or_close_its_own_environment(call):
+    env: MirageOpenEnv
+
+    async def reward(
+        session: Session, action: Action, observation: Observation
+    ) -> float:
+        await getattr(env, call)()
+        return 1.0
+
+    env = MirageOpenEnv(base(), reward=reward)
+    await env.reset_async()
+    with pytest.raises(RuntimeError, match="from inside one of its steps"):
+        await asyncio.wait_for(env.step_async(shell("true")), 5)
+    await env.aclose()
+
+
 class ExitCodeRubric(Rubric):
     def __init__(self) -> None:
         super().__init__()

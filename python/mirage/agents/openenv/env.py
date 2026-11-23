@@ -16,6 +16,9 @@ import asyncio
 import logging
 import math
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import partial
 from types import TracebackType
@@ -123,6 +126,11 @@ class Episode:
     idle: asyncio.Event = field(default_factory=idle_event)
 
 
+STEPPING: ContextVar[Episode | None] = ContextVar(
+    "mirage_openenv_stepping", default=None
+)
+
+
 class MirageOpenEnv(MCPEnvironment):
     """A Mirage workspace as an OpenEnv environment.
 
@@ -139,6 +147,9 @@ class MirageOpenEnv(MCPEnvironment):
     or MCP's ``ListToolsAction`` and ``CallToolAction``, which reach
     Mirage's seven tools and every ``vfs_<call>`` in process. An action
     before the first reset starts an episode as ``reset()`` would.
+    A reset or close waits for the episode's running steps, so a step
+    runs and is judged in the episode it started in; from inside one of
+    those steps' hooks it raises ``RuntimeError``.
 
     The async methods are the implementation; the sync ones run them on
     one owner loop and refuse to run on it. Close the environment with
@@ -238,14 +249,11 @@ class MirageOpenEnv(MCPEnvironment):
         episode_id: str | None = None,
         **kwargs: JsonValue,
     ) -> Observation:
+        self._refuse_from_own_step("reset")
         spec = EpisodeSpec(episode_id or str(uuid.uuid4()), seed, dict(kwargs))
-        previous: Episode | None = None
-        try:
-            async with self._lock:
-                previous, self._episode = self._episode, None
-                episode = await self._begin(spec)
-        finally:
-            await self._retire(previous)
+        async with self._quiet():
+            await self._end()
+            episode = await self._begin(spec)
         return self._apply_transform(
             MirageObservation(cwd=episode.session.state.cwd)
         )
@@ -272,9 +280,11 @@ class MirageOpenEnv(MCPEnvironment):
         episode = await self._current()
         episode.steps += 1
         episode.idle.clear()
+        token = STEPPING.set(episode)
         try:
             return await self._step(episode, action, timeout_s)
         finally:
+            STEPPING.reset(token)
             episode.steps -= 1
             if episode.steps == 0:
                 episode.idle.set()
@@ -319,6 +329,7 @@ class MirageOpenEnv(MCPEnvironment):
     async def aclose(self) -> None:
         """Close the episode's workspace and the owner loop this
         environment started; the base workspace stays open."""
+        self._refuse_from_own_step("close")
         self._shut = True
         await self._finish()
         await self._sync_bridge.ashutdown()
@@ -401,16 +412,37 @@ class MirageOpenEnv(MCPEnvironment):
         assert self._factory is not None
         return await self._factory(spec)
 
-    async def _retire(self, episode: Episode | None) -> None:
+    @asynccontextmanager
+    async def _quiet(self) -> AsyncIterator[None]:
+        while True:
+            if self._episode is not None:
+                await self._episode.idle.wait()
+            await self._lock.acquire()
+            if self._episode is None or self._episode.steps == 0:
+                break
+            self._lock.release()
+        try:
+            yield
+        finally:
+            self._lock.release()
+
+    async def _end(self) -> None:
+        episode, self._episode = self._episode, None
         if episode is not None:
-            await episode.idle.wait()
             await episode.workspace.close()
+
+    def _refuse_from_own_step(self, verb: str) -> None:
+        stepping = STEPPING.get()
+        if stepping is not None and stepping is self._episode:
+            raise RuntimeError(
+                f"cannot {verb} the environment from inside one of its "
+                "steps; the step would wait for itself"
+            )
 
     @on_owner_loop
     async def _finish(self) -> None:
-        async with self._lock:
-            episode, self._episode = self._episode, None
-        await self._retire(episode)
+        async with self._quiet():
+            await self._end()
 
     async def _current(self) -> Episode:
         async with self._lock:
