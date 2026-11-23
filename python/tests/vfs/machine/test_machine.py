@@ -705,11 +705,31 @@ async def test_a_copy_by_a_read_and_a_write_lands_as_a_direct_copy_does():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("policies", [[], [Judged()]])
-async def test_a_copy_never_makes_a_folder_through_a_link_to_a_hidden_one(
-    policies,
+@pytest.mark.parametrize(
+    ("line", "policies", "said"),
+    [
+        (
+            "cp /srv/a/k /tmp/public/missing/k",
+            policies,
+            "cp: cannot create regular file '/tmp/public/missing/k':"
+            " No such file or directory\n",
+        )
+        for policies in ([], [Judged()])
+    ]
+    + [
+        (
+            "gen > /tmp/public/missing/k",
+            [],
+            "bash: line 1: /tmp/public/missing/k: No such file or directory\n",
+        )
+    ],
+)
+async def test_a_write_never_makes_a_folder_through_a_link_to_a_hidden_one(
+    line, policies, said
 ):
-    a = FakeFiles({"/srv/a/k": b"key\n", "/tmp/secret/s": b"s"})
+    a = FakeFiles(
+        {"/srv/a/k": b"key\n", "/tmp/secret/s": b"s"}, programs=("gen",)
+    )
     a.links["/tmp/public"] = "/tmp/secret"
     b = FakeFiles()
     b.dirs.update({"/tmp/public", "/tmp/public/missing"})
@@ -721,12 +741,26 @@ async def test_a_copy_never_makes_a_folder_through_a_link_to_a_hidden_one(
         profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
     )
     agent = await ws.session("agent", profile="agent")
-    done = await agent.shell("cp /srv/a/k /tmp/public/missing/k")
-    assert (done.exit_code, await done.stderr_str()) == (
-        1,
-        "cp: cannot create regular file '/tmp/public/missing/k':"
-        " No such file or directory\n",
-    )
+    done = await agent.shell(line)
+    assert (done.exit_code, await done.stderr_str()) == (1, said)
     assert sorted(a.files) == ["/srv/a/k", "/tmp/secret/s"]
     assert not any(d.endswith("/missing") for d in a.dirs)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_s_output_lands_on_its_machine_as_a_copy_does():
+    a = FakeFiles(programs=("gen",))
+    b = FakeFiles({"/tmp/k": b"old\n"})
+    b.dirs.add("/tmp/only")
+    b.written["/tmp/k"] = 2 * 10**9
+    ws = two(a, b)
+    assert await run(ws, "gen > /tmp/only/out") == (0, "", "")
+    assert (a.files["/tmp/only/out"], "/tmp/only/out" in b.files) == (
+        b"ran\n",
+        False,
+    )
+    assert await run(ws, "gen > /tmp/k") == (0, "", "")
+    assert "/tmp/k" not in b.files
+    assert await run(ws, "cat /tmp/k") == (0, "ran\n", "")
     await ws.close()

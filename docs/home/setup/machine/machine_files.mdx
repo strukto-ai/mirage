@@ -191,9 +191,9 @@ flowchart LR
 | Read, `stat`, `chmod`, append to an existing name | The machine holding it; of several, the copy written last |
 | `rm` | Every machine holding the name |
 | `mv` | The machine holding the name, and the old name goes from every machine. A folder is renamed on every machine holding it |
-| `cp` | The source's machine, so no bytes cross. Another machine's copy of the new name is removed |
+| `cp` | The source's machine, so no bytes cross; the folder is made there when only another machine holds it. Another machine's copy of the new name is removed |
 | Write a new name | The machine the command is about when it holds the folder, else the machine that holds the folder |
-| A program's `>` (`python3 gen.py > /tmp/out`) | The program's machine |
+| A program's `>` (`python3 gen.py > /tmp/out`) | The program's machine, as `cp` lands: the folder is made there when only another machine holds it, and another machine's copy of the name is removed |
 | `ln`, `ln -s` | The machine holding the link's target, so the link leads somewhere there; a link to a name no machine holds lands like a new name |
 | `ls`, `find`, `grep -r` | Every machine, each name once, by the copy written last |
 | A name that is a file on one machine and a folder on another | The copy written last: a file shown there has no entries |

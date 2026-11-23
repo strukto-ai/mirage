@@ -981,7 +981,7 @@
     {
       "id": "bytes_between_two_machines",
       "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
-      "note": "Bytes go between a machine and a store, never from one machine to another. With a folder of each machine's own and a store, cp and mv from one machine's folder to the other's are refused (Permission denied, the source kept) and go through the store instead; a program reading a pipe runs on its writer's machine when that machine has it, and is refused where only another machine has it; a program's redirect onto the other machine's folder, and the other machine's file fed to a program, are refused; a program's output goes to the store.",
+      "note": "Bytes go between a machine and a store, never from one machine to another. With a folder of each machine's own and a store, cp and mv from one machine's folder to the other's are refused (Permission denied, the source kept) and go through the store instead; a program reading a pipe runs on its writer's machine when that machine has it, and is refused where only another machine has it; a program's redirect onto the other machine's folder, and the other machine's file fed to a program, are refused; a program's output goes to the store. Under a folder both machines show, a program's output lands on its own machine as a copy does: the folder is made there when only the other machine holds it, and the other machine's copy of the name is removed, so it never shows again whatever its time.",
       "runtimes": [
         "docker"
       ],
@@ -1018,6 +1018,16 @@
             "config": {
               "root": "/var/tmp/mirage-two",
               "machines": [
+                "second"
+              ]
+            }
+          },
+          "/var/tmp/mirage-both": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-both",
+              "machines": [
+                "docker",
                 "second"
               ]
             }
@@ -1107,7 +1117,39 @@
           }
         },
         {
-          "command": "dash -c 'rm -rf \"/var/tmp/mirage-two/$1\" \"/var/tmp/mirage-where-$1\"' dash $n",
+          "command": "dash -c 'mkdir -p \"/var/tmp/mirage-both/$1/only\" && echo old > \"/var/tmp/mirage-both/$1/k\" && touch -d 2099-01-01 \"/var/tmp/mirage-both/$1/k\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /var/tmp/mirage-both/$n/only/out && cat /var/tmp/mirage-both/$n/only/out",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /var/tmp/mirage-both/$n/k && cat /var/tmp/mirage-both/$n/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'ls \"/var/tmp/mirage-both/$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "only\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf \"/var/tmp/mirage-two/$1\" \"/var/tmp/mirage-where-$1\" \"/var/tmp/mirage-both/$1\"' dash $n",
           "machine": "second",
           "expect": {
             "exit": 0,
@@ -1116,7 +1158,7 @@
           }
         },
         {
-          "command": "rm -r $d && dash -c 'rm -f \"/var/tmp/mirage-where-$1\"' dash $n && echo gone",
+          "command": "rm -r $d && dash -c 'rm -rf \"/var/tmp/mirage-where-$1\" \"/var/tmp/mirage-both/$1\"' dash $n && echo gone",
           "expect": {
             "exit": 0,
             "stdout": "gone\n",

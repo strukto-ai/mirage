@@ -53,6 +53,18 @@ def copy_machine(accessor: MachineAccessor) -> str | None:
     return machine if machine in accessor.names() else None
 
 
+def origin_machine(accessor: MachineAccessor) -> str | None:
+    """The machine a whole file's bytes come from, which the file lands
+    on: the running program's, for its ``>`` (``running_machine``), or
+    the source's of a copy made by a read and a write
+    (``copy_machine``); None for any other write.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+    """
+    return running_machine(accessor) or copy_machine(accessor)
+
+
 def note_copy_source(machine: str) -> None:
     """Note a machine whose file the copy being made by a read and a
     write reads (``Caller.copied_from``); nothing outside such a copy.
@@ -365,8 +377,9 @@ async def write_machine(
     parents: bool = False,
 ) -> str:
     """The machine a write goes to. What a program's ``>`` replaces lands
-    on the program's machine, whose disk the program reads next. Any
-    other write of a name some machine holds goes to that copy
+    on the program's machine, whose disk the program reads next, and a
+    copy made by a read and a write on its source's (``origin_machine``).
+    Any other write of a name some machine holds goes to that copy
     (``chosen``), and a new name goes where its folder is
     (``new_name_machine``).
 
@@ -380,15 +393,11 @@ async def write_machine(
         FileNotFoundError: the machine's own links lead the name to one
             the session hides.
     """
-    running = (
-        running_machine(accessor) or copy_machine(accessor)
-        if replaces
-        else None
-    )
-    if running is None:
+    origin = origin_machine(accessor) if replaces else None
+    if origin is None:
         held = await holders(accessor, path)
         if held:
             return chosen(accessor, held).machine
-    target = running or await new_name_machine(accessor, path, parents)
+    target = origin or await new_name_machine(accessor, path, parents)
     await refuse_hidden(accessor, target, path)
     return target

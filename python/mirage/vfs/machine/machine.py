@@ -89,22 +89,23 @@ async def _refuse_landing(
         raise
 
 
-async def _land_copy(
+async def _land_at_origin(
     accessor: MachineAccessor,
     machine: str,
     path: PathSpec,
     data: ByteSource,
     atomic: bool,
 ) -> None:
-    """Land a copy made by a read and a write on its source's machine as
-    a direct copy lands (``MachineVFS.copy_from``): its folder made there
-    when only another machine holds it, and no other machine's copy of
-    the name left to show again.
+    """Land a whole file on the machine its bytes come from
+    (``place.origin_machine``: a program's ``>``, or a copy made by a
+    read and a write) as a direct copy lands (``MachineVFS.copy_from``):
+    its folder made there when only another machine holds it, and no
+    other machine's copy of the name left to show again.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
-        machine (str): the source's machine.
-        path (PathSpec): the copy.
+        machine (str): the machine the bytes come from.
+        path (PathSpec): the file.
         data (ByteSource): its bytes.
         atomic (bool): show nothing until the bytes have ended whole.
     """
@@ -300,8 +301,8 @@ class MachineVFS(BaseVFS):
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
         await _refuse_landing(self.accessor, machine, path, data)
-        if place.copy_machine(self.accessor) == machine:
-            await _land_copy(self.accessor, machine, path, data, atomic)
+        if place.origin_machine(self.accessor) == machine:
+            await _land_at_origin(self.accessor, machine, path, data, atomic)
             return
         await _write(self.accessor, machine, path, data, atomic=atomic)
 

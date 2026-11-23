@@ -252,10 +252,20 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it.each([false, true])(
-    'never makes a folder through a link to a hidden one (read and write: %s)',
-    async (judged) => {
-      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' })
+  const copiedIntoHidden =
+    "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n"
+  it.each([
+    ['cp /srv/a/k /tmp/public/missing/k', false, copiedIntoHidden],
+    ['cp /srv/a/k /tmp/public/missing/k', true, copiedIntoHidden],
+    [
+      'gen > /tmp/public/missing/k',
+      false,
+      'bash: line 1: /tmp/public/missing/k: No such file or directory\n',
+    ],
+  ])(
+    'never makes a folder through a link to a hidden one: %s (read and write: %s)',
+    async (line, judged, said) => {
+      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' }, ['gen'])
       a.links.set('/tmp/public', '/tmp/secret')
       const b = new FakeFiles()
       b.dirs.add('/tmp/public')
@@ -268,16 +278,27 @@ describe('MachineVFS', () => {
       )
       if (judged) ws.policies.add({ postVfs: (): Action | null => null })
       const agent = await ws.session('agent', { profile: 'agent' })
-      const done = await agent.shell('cp /srv/a/k /tmp/public/missing/k')
-      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([
-        1,
-        "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n",
-      ])
+      const done = await agent.shell(line)
+      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([1, said])
       expect(Object.keys(texts(a)).sort()).toEqual(['/srv/a/k', '/tmp/secret/s'])
       expect([...a.dirs].some((dir) => dir.endsWith('/missing'))).toBe(false)
       await ws.close()
     },
   )
+
+  it("lands a program's output on its machine as a copy does", async () => {
+    const a = new FakeFiles({}, ['gen'])
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.dirs.add('/tmp/only')
+    b.written.set('/tmp/k', 2_000_000_000)
+    const ws = two(a, b)
+    expect(await run(ws, 'gen > /tmp/only/out')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/only/out'], b.files.has('/tmp/only/out')]).toEqual(['ran\n', false])
+    expect(await run(ws, 'gen > /tmp/k')).toEqual([0, '', ''])
+    expect(b.files.has('/tmp/k')).toBe(false)
+    expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'ran\n', ''])
+    await ws.close()
+  })
 
   it('makes a folder only another machine holds for a cp into it', async () => {
     const a = new FakeFiles({ '/tmp/d/kept': 'k' })

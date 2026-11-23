@@ -26,13 +26,13 @@ import {
   askedMachines,
   chosen,
   commandMachine,
-  copyMachine,
   crossingRefused,
   existingHolders,
   holders,
   holdingMachine,
   machinesLackingFolder,
   noteCopySource,
+  originMachine,
   refuseCrossing,
   refuseHidden,
   writeMachine,
@@ -102,18 +102,19 @@ async function refuseLanding(
 }
 
 /**
- * Land a copy made by a read and a write on its source's machine as a
- * direct copy lands (`MachineVFS.copyFrom`): its folder made there when
- * only another machine holds it, and no other machine's copy of the name
- * left to show again. Mirrors Python's `_land_copy`.
+ * Land a whole file on the machine its bytes come from (`originMachine`: a
+ * program's `>`, or a copy made by a read and a write) as a direct copy
+ * lands (`MachineVFS.copyFrom`): its folder made there when only another
+ * machine holds it, and no other machine's copy of the name left to show
+ * again. Mirrors Python's `_land_at_origin`.
  *
  * @param accessor the mount's machines.
- * @param machine the source's machine.
- * @param path the copy.
+ * @param machine the machine the bytes come from.
+ * @param path the file.
  * @param data its bytes.
  * @param atomic show nothing until the bytes have ended whole.
  */
-async function landCopy(
+async function landAtOrigin(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
@@ -315,8 +316,8 @@ export class MachineVFS extends BaseVFS {
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
     await refuseLanding(this.accessor, machine, path, data)
-    if (copyMachine(this.accessor) === machine) {
-      await landCopy(this.accessor, machine, path, data, atomic)
+    if (originMachine(this.accessor) === machine) {
+      await landAtOrigin(this.accessor, machine, path, data, atomic)
       return
     }
     await machineWrite(this.accessor, machine, path, data, false, atomic)
