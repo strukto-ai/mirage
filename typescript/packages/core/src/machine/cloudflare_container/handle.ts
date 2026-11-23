@@ -17,6 +17,7 @@ import { feed } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   CHECK_LINE,
+  CHECK_WAIT_SECONDS,
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
@@ -195,6 +196,36 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
       await sleep(CHECK_POLL_SECONDS * 1000)
     }
     throw new Error(`cloudflare_container: ${NOT_ANSWERING}`, { cause: last })
+  }
+
+  /**
+   * Whether the container is running, asked without starting it: a stopped
+   * container holds no mounts, and connecting would start it. The release
+   * then runs on it as it is.
+   */
+  protected override async reachToRelease(): Promise<boolean> {
+    if (this.container === undefined) return false
+    const deadline = AbortSignal.timeout(CHECK_WAIT_SECONDS * 1000)
+    try {
+      await abortable(
+        answerOf((output, errors) =>
+          this.exec(
+            ['/bin/sh', '-c', CHECK_LINE],
+            null,
+            { ...this.config.env },
+            '/',
+            output,
+            errors,
+            deadline,
+          ),
+        ),
+        deadline,
+      )
+    } catch (error) {
+      logger.debug?.(`cloudflare_container: not running, nothing to release: ${String(error)}`)
+      return false
+    }
+    return true
   }
 
   /** Have the next line connect, and so start the container, once `container` has exited. */

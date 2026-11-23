@@ -170,20 +170,25 @@ def darwin_table_line(prefixes: Sequence[str]) -> str:
 
 
 def darwin_left(text: str, name: str) -> set[str]:
-    """The prefixes a Mac's ``mount`` table shows ``name``'s mounts at:
-    each row whose source is ``<name>-<instance>-<n>:<prefix>``, its
-    prefix read up to the row's first `` on /``.
+    """The prefixes a Mac's ``mount`` table may show ``name``'s mounts at:
+    for each row whose source is ``<name>-<instance>-<n>:<prefix>``, every
+    prefix the row reads as before one of its `` on /``, as a prefix can
+    hold one too. The table read at those prefixes keeps the one mounted.
 
     Args:
         text (str): ``mount``'s output.
         name (str): the sources' name (``source_name``).
     """
-    shape = re.compile(rf"{re.escape(name)}-[0-9a-f]{{8}}-[0-9]+:(/.*?) on /")
-    return {
-        found.group(1)
-        for line in text.split("\n")
-        if (found := shape.match(line)) is not None
-    }
+    shape = re.compile(rf"{re.escape(name)}-[0-9a-f]{{8}}-[0-9]+:(/.*)")
+    left: set[str] = set()
+    for line in text.split("\n"):
+        found = shape.match(line)
+        rest = found.group(1) if found is not None else ""
+        at = rest.find(" on /")
+        while at > 0:
+            left.add(rest[:at])
+            at = rest.find(" on /", at + 1)
+    return left
 
 
 def darwin_mount_table(

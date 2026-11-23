@@ -388,21 +388,34 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   /**
    * Kill and unmount what the deleted workspace's earlier instances left
    * serving in the machine (`MachineMounts.release`), which nothing else
-   * would take back. A failure to connect or release is logged: the
-   * workspace is deleted either way.
+   * would take back. A connection opened for it is closed again. A failure
+   * to connect or release is logged: the workspace is deleted either way.
    */
   protected async releaseMounts(): Promise<void> {
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     if (this.mounts === null || this.memory === null) return
+    const opened = this.connecting === null
     try {
-      await this.ensureConnected()
-      await this.mounts.release(this.memory.workspaceId)
+      try {
+        if (await this.reachToRelease()) await this.mounts.release(this.memory.workspaceId)
+      } finally {
+        if (opened && this.connecting !== null) await this.close()
+      }
     } catch (error) {
       console.warn(
         `${String(this.machine)}: releasing the deleted workspace's mounts failed:`,
         error,
       )
     }
+  }
+  /**
+   * Reach the machine for `releaseMounts`, as a line does; false when it
+   * holds nothing to release. A provider whose connect starts a stopped
+   * machine overrides this.
+   */
+  protected async reachToRelease(): Promise<boolean> {
+    await this.ensureConnected()
+    return true
   }
 
   /**

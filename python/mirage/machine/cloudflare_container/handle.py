@@ -35,6 +35,7 @@ from mirage.machine.cloudflare_container.types import Container, ExecProcess
 from mirage.machine.config import require_id
 from mirage.machine.constants import (
     CHECK_LINE,
+    CHECK_WAIT_SECONDS,
     EXEC_PRELUDE,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
@@ -217,6 +218,32 @@ class ContainerMachine(MachineHandle, PipeTransportMixin):
             raise RuntimeError(f"cloudflare_container: {NOT_ANSWERING}") from (
                 last or exc
             )
+
+    async def _reach_to_release(self) -> bool:
+        """Whether the container is running, asked without starting it: a
+        stopped container holds no mounts, and connecting would start it.
+        The release then runs on it as it is."""
+        if self._container is None:
+            return False
+        try:
+            async with asyncio.timeout(CHECK_WAIT_SECONDS):
+                await answer_of(
+                    lambda output, errors: self._exec(
+                        ("/bin/sh", "-c", CHECK_LINE),
+                        None,
+                        dict(self.config.env),
+                        "/",
+                        output,
+                        errors,
+                    )
+                )
+        except Exception as exc:
+            logger.debug(
+                "cloudflare_container: not running, nothing to release: %s",
+                exc,
+            )
+            return False
+        return True
 
     def _watch_exit(self, container: Container) -> None:
         """Have the next line connect, and so start the container, once

@@ -167,9 +167,10 @@ export function darwinTableLine(prefixes: readonly string[]): string {
 }
 
 /**
- * The prefixes a Mac's `mount` table shows `name`'s mounts at: each row whose
- * source is `<name>-<instance>-<n>:<prefix>`, its prefix read up to the row's
- * first ` on /`. Mirrors Python's `darwin_left`.
+ * The prefixes a Mac's `mount` table may show `name`'s mounts at: for each row
+ * whose source is `<name>-<instance>-<n>:<prefix>`, every prefix the row reads
+ * as before one of its ` on /`, as a prefix can hold one too. The table read at
+ * those prefixes keeps the one mounted. Mirrors Python's `darwin_left`.
  *
  * @param text `mount`'s output.
  * @param name the sources' name (`sourceName`).
@@ -178,8 +179,10 @@ export function darwinLeft(text: string, name: string): Set<string> {
   const left = new Set<string>()
   for (const line of text.split('\n')) {
     if (!line.startsWith(`${name}-`)) continue
-    const found = /^[0-9a-f]{8}-[0-9]+:(\/.*?) on \//.exec(line.slice(name.length + 1))
-    if (found?.[1] !== undefined) left.add(found[1])
+    const rest = /^[0-9a-f]{8}-[0-9]+:(\/.*)$/.exec(line.slice(name.length + 1))?.[1] ?? ''
+    for (let at = rest.indexOf(' on /'); at > 0; at = rest.indexOf(' on /', at + 1)) {
+      left.add(rest.slice(0, at))
+    }
   }
   return left
 }
