@@ -346,7 +346,6 @@ class MirageOpenEnv(MCPEnvironment):
         """Close the episode's workspace and the owner loop this
         environment started; the base workspace stays open."""
         self._refuse_from_own_step("close")
-        self._shut = True
         await self._finish()
         await self._sync_bridge.ashutdown()
         super().close()
@@ -355,8 +354,9 @@ class MirageOpenEnv(MCPEnvironment):
         """Close from sync code. On the owner loop itself, where it may
         not block, the episode's workspace closes as soon as the loop is
         free; ``aclose`` waits for that."""
-        self._shut = True
-        if self._episode is not None:
+        if self._episode is None:
+            self._shut = True
+        else:
             try:
                 running = asyncio.get_running_loop()
             except RuntimeError:
@@ -462,6 +462,7 @@ class MirageOpenEnv(MCPEnvironment):
     @on_owner_loop
     async def _finish(self) -> None:
         async with self._quiet():
+            self._shut = True
             await self._end()
 
     async def _current(self) -> Episode:

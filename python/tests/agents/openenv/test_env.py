@@ -437,6 +437,31 @@ async def test_a_task_a_hook_starts_may_close_once_its_step_is_done():
 
 
 @pytest.mark.asyncio
+async def test_a_close_lets_a_running_tool_call_finish():
+    factory = Factory()
+    env = MirageOpenEnv(factory=factory)
+    await env.reset_async()
+    step = asyncio.create_task(
+        env.step_async(
+            CallToolAction(
+                tool_name="shell",
+                arguments={"command": "sleep 0.1; echo done"},
+            )
+        )
+    )
+    await asyncio.sleep(0)
+    closing = asyncio.create_task(env.aclose())
+    called = await step
+    await closing
+
+    assert called.error is None
+    assert called.result.content[0].text == "done\n"
+    assert await closed(factory.built[0])
+    with pytest.raises(RuntimeError, match="closed"):
+        await env.step_async(shell("true"))
+
+
+@pytest.mark.asyncio
 async def test_a_cancelled_reset_leaves_the_episode_in_place():
     factory = Factory()
     judging = asyncio.Event()
