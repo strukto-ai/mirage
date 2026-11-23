@@ -68,8 +68,10 @@ describe('the page log of a paged database', () => {
       for (let op = 0; op < 1500; op++) {
         const r = rand()
         if (r < 0.62) {
-          const at = current.length === 0 || rand() < 0.3 ? current.length : pick(current.length)
+          const end = current.length + (rand() < 0.1 ? pick(4) : 0)
+          const at = current.length === 0 || rand() < 0.3 ? end : pick(current.length)
           log.write(at, page(++stamp))
+          while (current.length < at) current.push(0)
           current[at] = stamp
         } else if (r < 0.66) {
           const size = pick(current.length + 1)
@@ -119,10 +121,38 @@ describe('the page log of a paged database', () => {
     expect(() => {
       log.write(0, page(1))
     }).toThrow('the storage refused a write')
+    expect(() => log.read(0)).toThrow('the storage refused a write')
     storage.writesLeft = null
     expect(stamps(new PageLog(storage, SMALL))).toEqual(
       Array.from({ length: 20 }, (_, at) => at + 1),
     )
+  })
+
+  it('answers nothing more once the storage fails a row written ahead of its commit', () => {
+    const storage = new ObjectStorage()
+    const log = new PageLog(storage, SMALL)
+    log.write(0, page(1))
+    log.flush()
+    storage.writesLeft = 0
+    expect(() => {
+      for (let at = 0; at < 20; at++) log.write(at, page(at + 101))
+    }).toThrow('the storage refused a write')
+    expect(() => log.read(0)).toThrow('the storage refused a write')
+    expect(() => log.flush()).toThrow('the storage refused a write')
+    storage.writesLeft = null
+    expect(stamps(new PageLog(storage, SMALL))).toEqual([1])
+  })
+
+  it('writes zeros between the end and a page past it, whatever was there before a cut', () => {
+    const storage = new ObjectStorage()
+    const log = new PageLog(storage, SMALL)
+    for (let at = 0; at < 20; at++) log.write(at, page(at + 1))
+    log.flush()
+    log.truncate(5)
+    log.write(11, page(99))
+    expect(stamps(log)).toEqual([1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 99])
+    log.flush()
+    expect(stamps(new PageLog(storage, SMALL))).toEqual([1, 2, 3, 4, 5, 0, 0, 0, 0, 0, 0, 99])
   })
 
   it('keeps a commit whose last row holds no page while later pages are written ahead', () => {

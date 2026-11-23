@@ -63,6 +63,8 @@ interface MemoryFile {
  */
 class PagedVFS implements SQLiteVFS {
   readonly name = VFS_NAME
+  /** What the page log last threw inside a file call. */
+  failure: Error | null = null
   // The open files by SQLite's id for them; the database's own is null.
   private readonly files = new Map<number, MemoryFile | null>()
   private readonly memory = new Map<string, MemoryFile>()
@@ -97,63 +99,28 @@ class PagedVFS implements SQLiteVFS {
   xRead(fileId: number, pData: Uint8Array, iOffset: number): number {
     const file = this.files.get(fileId)
     if (file === undefined) return SQLite.SQLITE_IOERR
+    if (file === null) return this.guarded(() => this.readPages(pData, iOffset))
     const wanted = pData.byteLength
-    if (file !== null) {
-      const end = Math.min(iOffset + wanted, file.size)
-      const got = Math.max(end - iOffset, 0)
-      if (got > 0) pData.set(file.data.subarray(iOffset, end))
-      if (got === wanted) return SQLite.SQLITE_OK
-      pData.fill(0, got)
-      return SQLite.SQLITE_IOERR_SHORT_READ
-    }
-    const size = this.log.size * PAGE_BYTES
-    let done = 0
-    while (done < wanted) {
-      const at = iOffset + done
-      if (at >= size) {
-        pData.fill(0, done)
-        return SQLite.SQLITE_IOERR_SHORT_READ
-      }
-      const inside = at % PAGE_BYTES
-      const take = Math.min(PAGE_BYTES - inside, wanted - done)
-      const page = this.log.read((at - inside) / PAGE_BYTES)
-      if (page === null) pData.fill(0, done, done + take)
-      else pData.set(page.subarray(inside, inside + take), done)
-      done += take
-    }
-    return SQLite.SQLITE_OK
+    const end = Math.min(iOffset + wanted, file.size)
+    const got = Math.max(end - iOffset, 0)
+    if (got > 0) pData.set(file.data.subarray(iOffset, end))
+    if (got === wanted) return SQLite.SQLITE_OK
+    pData.fill(0, got)
+    return SQLite.SQLITE_IOERR_SHORT_READ
   }
 
   xWrite(fileId: number, pData: Uint8Array, iOffset: number): number {
     const file = this.files.get(fileId)
     if (file === undefined) return SQLite.SQLITE_IOERR
+    if (file === null) return this.guarded(() => this.writePages(pData, iOffset))
     const given = pData.byteLength
-    if (file !== null) {
-      if (iOffset + given > file.data.byteLength) {
-        const data = new Uint8Array(Math.max(iOffset + given, 2 * file.data.byteLength))
-        data.set(file.data.subarray(0, file.size))
-        file.data = data
-      }
-      file.data.set(pData, iOffset)
-      file.size = Math.max(file.size, iOffset + given)
-      return SQLite.SQLITE_OK
+    if (iOffset + given > file.data.byteLength) {
+      const data = new Uint8Array(Math.max(iOffset + given, 2 * file.data.byteLength))
+      data.set(file.data.subarray(0, file.size))
+      file.data = data
     }
-    let done = 0
-    while (done < given) {
-      const at = iOffset + done
-      const inside = at % PAGE_BYTES
-      const take = Math.min(PAGE_BYTES - inside, given - done)
-      const index = (at - inside) / PAGE_BYTES
-      if (take === PAGE_BYTES) this.log.write(index, pData.subarray(done, done + PAGE_BYTES))
-      else {
-        const whole = new Uint8Array(PAGE_BYTES)
-        const old = this.log.read(index)
-        if (old !== null) whole.set(old)
-        whole.set(pData.subarray(done, done + take), inside)
-        this.log.write(index, whole)
-      }
-      done += take
-    }
+    file.data.set(pData, iOffset)
+    file.size = Math.max(file.size, iOffset + given)
     return SQLite.SQLITE_OK
   }
 
@@ -211,6 +178,59 @@ class PagedVFS implements SQLiteVFS {
     this.memory.delete(name)
     return SQLite.SQLITE_OK
   }
+
+  // What the page log throws must not unwind SQLite's own frames: SQLite
+  // takes an I/O error and runs its error path, and the statement's failure
+  // carries what was thrown.
+  private guarded(call: () => number): number {
+    try {
+      return call()
+    } catch (e) {
+      this.failure = e instanceof Error ? e : new Error(String(e))
+      return SQLite.SQLITE_IOERR
+    }
+  }
+
+  private readPages(pData: Uint8Array, iOffset: number): number {
+    const wanted = pData.byteLength
+    const size = this.log.size * PAGE_BYTES
+    let done = 0
+    while (done < wanted) {
+      const at = iOffset + done
+      if (at >= size) {
+        pData.fill(0, done)
+        return SQLite.SQLITE_IOERR_SHORT_READ
+      }
+      const inside = at % PAGE_BYTES
+      const take = Math.min(PAGE_BYTES - inside, wanted - done)
+      const page = this.log.read((at - inside) / PAGE_BYTES)
+      if (page === null) pData.fill(0, done, done + take)
+      else pData.set(page.subarray(inside, inside + take), done)
+      done += take
+    }
+    return SQLite.SQLITE_OK
+  }
+
+  private writePages(pData: Uint8Array, iOffset: number): number {
+    const given = pData.byteLength
+    let done = 0
+    while (done < given) {
+      const at = iOffset + done
+      const inside = at % PAGE_BYTES
+      const take = Math.min(PAGE_BYTES - inside, given - done)
+      const index = (at - inside) / PAGE_BYTES
+      if (take === PAGE_BYTES) this.log.write(index, pData.subarray(done, done + PAGE_BYTES))
+      else {
+        const whole = new Uint8Array(PAGE_BYTES)
+        const old = this.log.read(index)
+        if (old !== null) whole.set(old)
+        whole.set(pData.subarray(done, done + take), inside)
+        this.log.write(index, whole)
+      }
+      done += take
+    }
+    return SQLite.SQLITE_OK
+  }
 }
 
 /**
@@ -224,6 +244,7 @@ class PagedVFS implements SQLiteVFS {
 export class PagedDatabase {
   /** The bytes of BLOBs statements were given and answered, so far. */
   blobBytes = 0
+  private closed = false
   private readonly statements = new Map<string, number>()
   private readonly free: number
   private readonly out: number
@@ -231,6 +252,8 @@ export class PagedDatabase {
   private readonly step: Call<number>
   private readonly reset: Call<number>
   private readonly finalize: Call<number>
+  private readonly clearBindings: Call<number>
+  private readonly closeDatabase: Call<number>
   private readonly bindBlob: Call<number>
   private readonly bindDouble: Call<number>
   private readonly bindInt64: Call<number>
@@ -250,7 +273,8 @@ export class PagedDatabase {
   private constructor(
     private readonly module: SqliteModule,
     private readonly db: number,
-    readonly log: PageLog,
+    private readonly log: PageLog,
+    private readonly vfs: PagedVFS,
   ) {
     const n = 'number'
     const call = <T>(name: string, returns: string, args: readonly string[]): Call<T> =>
@@ -261,6 +285,8 @@ export class PagedDatabase {
     this.step = call('sqlite3_step', n, [n])
     this.reset = call('sqlite3_reset', n, [n])
     this.finalize = call('sqlite3_finalize', n, [n])
+    this.clearBindings = call('sqlite3_clear_bindings', n, [n])
+    this.closeDatabase = call('sqlite3_close', n, [n])
     this.bindBlob = call('sqlite3_bind_blob', n, [n, n, n, n, n])
     this.bindDouble = call('sqlite3_bind_double', n, [n, n, n])
     this.bindInt64 = call('sqlite3_bind_int64', n, [n, n, n, n])
@@ -303,12 +329,10 @@ export class PagedDatabase {
     })) as SqliteModule
     const log = new PageLog(storage, options)
     const sqlite3 = SQLite.Factory(module)
-    sqlite3.vfs_register(new PagedVFS(log), false)
-    const database = new PagedDatabase(
-      module,
-      await sqlite3.open_v2(MAIN, undefined, VFS_NAME),
-      log,
-    )
+    const vfs = new PagedVFS(log)
+    sqlite3.vfs_register(vfs, false)
+    const db = await sqlite3.open_v2(MAIN, undefined, VFS_NAME)
+    const database = new PagedDatabase(module, db, log, vfs)
     // The page log is what makes a commit whole and lasting, so SQLite keeps
     // its journal in memory and waits on no sync.
     database.exec(`PRAGMA page_size = ${String(PAGE_BYTES)}`)
@@ -333,6 +357,7 @@ export class PagedDatabase {
    * @param params the values of the statement's `?` parameters; only a single statement takes any.
    */
   exec(sql: string, params: readonly unknown[] = []): SqlRow[] {
+    if (this.closed) throw new Error('the paged database is closed')
     const held = this.statements.get(sql)
     if (held !== undefined) {
       this.statements.delete(sql)
@@ -369,12 +394,29 @@ export class PagedDatabase {
    * @throws when a transaction is open.
    */
   flush(): number {
+    if (this.closed) return 0
     if (!this.idle) throw new Error('a paged database cannot flush inside a transaction')
     return this.log.flush()
   }
 
+  /** Flush, then free the database: it runs no statement after. */
+  close(): void {
+    if (this.closed) return
+    try {
+      this.flush()
+    } finally {
+      for (const statement of this.statements.values()) this.finalize(statement)
+      this.statements.clear()
+      this.closeDatabase(this.db)
+      this.closed = true
+    }
+  }
+
   private fail(sql: string): Error {
-    return new Error(`${sql.slice(0, 80)}: ${this.errmsg(this.db)}`)
+    const cause = this.vfs.failure
+    this.vfs.failure = null
+    const reason = cause === null ? this.errmsg(this.db) : cause.message
+    return new Error(`${sql.slice(0, 80)}: ${reason}`, cause === null ? undefined : { cause })
   }
 
   private prepare(sql: string): number[] {
@@ -483,6 +525,7 @@ export class PagedDatabase {
       }
     } finally {
       this.reset(statement)
+      this.clearBindings(statement)
     }
     return rows
   }

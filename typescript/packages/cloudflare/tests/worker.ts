@@ -211,7 +211,7 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
 /**
  * A SQLite-backed Durable Object whose workspace lives in its own storage:
  * in the storage's own tables, or on `paged` in a database inside it, opened
- * anew for each request and flushed before the answer.
+ * for each request and closed, which flushes it, before the answer.
  */
 export class SqlObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
@@ -221,7 +221,7 @@ export class SqlObject extends DurableObject<Env> {
     try {
       return await sqlLines(driver, run)
     } finally {
-      driver.flush()
+      await driver.close()
     }
   }
 }

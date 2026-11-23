@@ -34,7 +34,13 @@ export class ObjectStorage implements DurableObjectStorageLike {
   rowsWritten = 0
   /** The writes left before one throws; none throws while it is null. */
   writesLeft: number | null = null
-  private readonly db = new DatabaseSync(':memory:')
+
+  constructor(private readonly db = new DatabaseSync(':memory:')) {}
+
+  /** The same stored rows as an object started anew holds them. */
+  restarted(): ObjectStorage {
+    return new ObjectStorage(this.db)
+  }
 
   readonly sql = {
     exec: (query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] } => {

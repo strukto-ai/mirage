@@ -175,6 +175,7 @@ export class PageLog {
    * call, which may reuse it.
    */
   read(page: number): Uint8Array | null {
+    if (this.broken !== null) throw this.broken
     const held = this.dirty.get(page)
     if (held !== undefined) return held
     let id: number
@@ -191,9 +192,16 @@ export class PageLog {
     return this.fetch(id, Math.floor(slot / this.columnPages)).subarray(at, at + PAGE_BYTES)
   }
 
-  /** Hold one page's new bytes until the next commit. */
+  /**
+   * Hold one page's new bytes until the next commit.
+   *
+   * A page past the database's end leaves no hole before it: the pages
+   * between are written as zeros, so none of them can answer with what an
+   * earlier commit held there.
+   */
   write(page: number, data: Uint8Array): void {
     if (this.broken !== null) throw this.broken
+    for (let hole = this.size; hole < page; hole++) this.dirty.set(hole, this.buffer().fill(0))
     let held = this.dirty.get(page)
     if (held === undefined) {
       held = this.buffer()
@@ -201,7 +209,12 @@ export class PageLog {
     }
     held.set(data)
     if (page >= this.size) this.size = page + 1
-    if (this.dirty.size * PAGE_BYTES > this.spillBytes) this.emit(false)
+    if (this.dirty.size * PAGE_BYTES <= this.spillBytes) return
+    try {
+      this.emit(false)
+    } catch (e) {
+      throw this.breakWith(e)
+    }
   }
 
   /** Cut the database to `size` pages. */
@@ -217,8 +230,8 @@ export class PageLog {
    * Commit every change since the last commit, all of it or none.
    *
    * @returns the rows the commit wrote and deleted.
-   * @throws what the storage threw. The log then refuses further writes, as
-   *   what it holds in memory no longer matches what is stored.
+   * @throws what the storage threw. The log then refuses every read and
+   *   write, as what it holds in memory no longer matches what is stored.
    */
   flush(): number {
     if (this.dirty.size === 0 && this.spilled.size === 0 && this.size === this.published) return 0
@@ -229,8 +242,7 @@ export class PageLog {
         this.commit()
       })
     } catch (e) {
-      this.broken = e instanceof Error ? e : new Error(String(e))
-      throw e
+      throw this.breakWith(e)
     }
     this.published = this.size
     this.cutAt = Infinity
@@ -240,6 +252,13 @@ export class PageLog {
     this.provisional.clear()
     if (this.spare.length > 256) this.spare.length = 0
     return this.counts.rowsWritten + this.counts.rowsDeleted - before
+  }
+
+  // The storage failed while rows were being written, so what the log holds
+  // in memory no longer matches what is stored: it answers nothing more.
+  private breakWith(e: unknown): Error {
+    this.broken = e instanceof Error ? e : new Error(String(e))
+    return this.broken
   }
 
   private exec(sql: string, params: readonly unknown[] = []): Record<string, unknown>[] {

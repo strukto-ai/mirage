@@ -18,13 +18,16 @@ import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/s
 import { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ObjectStorage, sqliteWasm } from '../../tests/object_storage.ts'
-import { DurableObjectPagedSqlDriver } from './driver.ts'
+import { DurableObjectPagedSqlDriver, type PagedSqlOptions } from './driver.ts'
 
 const wasm = sqliteWasm()
 const decoder = new TextDecoder()
 
-function open(storage: ObjectStorage): Promise<DurableObjectPagedSqlDriver> {
-  return DurableObjectPagedSqlDriver.open(storage, { wasm })
+function open(
+  storage: ObjectStorage,
+  options: PagedSqlOptions = {},
+): Promise<DurableObjectPagedSqlDriver> {
+  return DurableObjectPagedSqlDriver.open(storage, { wasm, ...options })
 }
 
 // A workspace whose files and sessions live in `driver`, as a host builds one.
@@ -61,7 +64,7 @@ describe('the paged sql driver of a Durable Object', () => {
     await lines(first, ['mkdir -p /s/p && cd /s/p && printf "b\\na\\n" > f'])
     first.flush()
     await lines(first, ['printf lost > /s/p/g'])
-    const second = await open(storage)
+    const second = await open(storage.restarted())
     expect(await lines(second, ['pwd && sort f', 'ls /s/p'])).toBe('/s/p\na\nb\nf\n')
   })
 
@@ -76,6 +79,7 @@ describe('the paged sql driver of a Durable Object', () => {
     expect(driver.flush()).toBeLessThanOrEqual(3)
     expect(storage.rowsWritten).toBeLessThanOrEqual(3)
     expect(driver.flush()).toBe(0)
+    await driver.close()
     expect(await lines(await open(storage), ['ls /s/d | wc -l', 'wc -c < /s/d/f300'])).toBe(
       '300\n6000\n',
     )
@@ -89,8 +93,48 @@ describe('the paged sql driver of a Durable Object', () => {
     await lines(driver, ['head -c 3000000 /dev/zero > /s/big'])
     storage.writesLeft = 1
     expect(() => driver.flush()).toThrow('the storage refused a write')
-    storage.writesLeft = null
-    expect(await lines(await open(storage), ['ls /s', 'cat /s/a'])).toBe('a\nkept')
+    const again = await open(storage.restarted())
+    expect(await lines(again, ['ls /s', 'cat /s/a'])).toBe('a\nkept')
+  })
+
+  it('fails the statement when the storage refuses a row written ahead of a flush', async () => {
+    const storage = new ObjectStorage()
+    const driver = await open(storage, { spillBytes: 65536 })
+    await driver.query('CREATE TABLE t (a INTEGER PRIMARY KEY, b BLOB)')
+    driver.flush()
+    storage.writesLeft = 0
+    const insert = async (): Promise<void> => {
+      await driver.query('INSERT INTO t (a, b) VALUES (?, ?)', [1, new Uint8Array(3 << 20)])
+    }
+    await expect(insert).rejects.toThrow('INSERT INTO t (a, b) VALUES (?, ?): the storage refused')
+    await expect(async () => {
+      await driver.query('SELECT count(*) AS n FROM t')
+    }).rejects.toThrow('the storage refused a write')
+    const again = await open(storage.restarted())
+    expect(await again.query('SELECT count(*) AS n FROM t')).toEqual([{ n: 0 }])
+  })
+
+  it('holds a storage alone until it is closed', async () => {
+    const storage = new ObjectStorage()
+    const driver = await open(storage)
+    await expect(open(storage)).rejects.toThrow('already open on this storage')
+    await driver.query('CREATE TABLE t (a INTEGER PRIMARY KEY)')
+    await driver.close()
+    await expect(async () => {
+      await driver.query('SELECT 1')
+    }).rejects.toThrow('the paged database is closed')
+    expect(await (await open(storage)).query('SELECT count(*) AS n FROM t')).toEqual([{ n: 0 }])
+  })
+
+  it('binds a statement run again with fewer parameters to NULL, not to the last values', async () => {
+    const driver = await open(new ObjectStorage())
+    driver.sql.exec('CREATE TABLE t (a INTEGER PRIMARY KEY, b BLOB)')
+    driver.sql.exec('INSERT INTO t (a, b) VALUES (?, ?)', 1, new Uint8Array([7]))
+    driver.sql.exec('INSERT INTO t (a, b) VALUES (?, ?)', 2)
+    expect(driver.sql.exec('SELECT a, b FROM t ORDER BY a').toArray()).toEqual([
+      { a: 1, b: new Uint8Array([7]) },
+      { a: 2, b: null },
+    ])
   })
 
   it("runs a host's own tables in the database inside", async () => {
