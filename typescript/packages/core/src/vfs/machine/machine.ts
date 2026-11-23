@@ -113,6 +113,7 @@ async function refuseLanding(
  * @param path the file.
  * @param data its bytes.
  * @param atomic show nothing until the bytes have ended whole.
+ * @param live the machines writing each name now (`MachineVFS.liveWrites`).
  */
 async function landAtOrigin(
   accessor: MachineAccessor,
@@ -120,6 +121,7 @@ async function landAtOrigin(
   path: PathSpec,
   data: ByteSource,
   atomic: boolean,
+  live: ReadonlyMap<string, readonly string[]>,
 ): Promise<void> {
   let lacking: string[]
   try {
@@ -129,26 +131,32 @@ async function landAtOrigin(
     throw err
   }
   await machineWrite(accessor, machine, path, data, false, atomic, lacking.length > 0)
-  await dropOtherCopies(accessor, machine, path)
+  await dropOtherCopies(accessor, machine, path, live)
 }
 
 /**
  * Take a name off every other machine holding it as a file, once its new
- * copy has landed on `machine`, so an older copy never shows again.
- * Mirrors Python's `_drop_other_copies`.
+ * copy has landed on `machine`, so an older copy never shows again. A
+ * machine still writing the name keeps its copy: that write lands later,
+ * and the write that ends last is the one shown, as with two writers of one
+ * file. Mirrors Python's `_drop_other_copies`.
  *
  * @param accessor the mount's machines.
  * @param machine the machine the name landed on.
  * @param path the name.
+ * @param live the machines writing each name now (`MachineVFS.liveWrites`).
  */
 async function dropOtherCopies(
   accessor: MachineAccessor,
   machine: string,
   path: PathSpec,
+  live: ReadonlyMap<string, readonly string[]>,
 ): Promise<void> {
   if (!accessor.several) return
   for (const one of await holders(accessor, path)) {
-    if (one.machine !== machine && !one.isFolder) await machineUnlink(accessor, one.machine, path)
+    if (one.machine === machine || one.isFolder) continue
+    if (live.get(path.virtual)?.includes(one.machine) === true) continue
+    await machineUnlink(accessor, one.machine, path)
   }
 }
 
@@ -178,6 +186,7 @@ export class MachineVFS extends BaseVFS {
   override walkLimit: number = LOCAL_WALK_LIMIT
   readonly config: MachineVFSConfig
   override readonly accessor: MachineAccessor
+  private readonly liveWrites = new Map<string, string[]>()
 
   constructor(config: MachineVFSConfig) {
     super()
@@ -316,17 +325,45 @@ export class MachineVFS extends BaseVFS {
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
     await refuseLanding(this.accessor, machine, path, data)
-    if (originMachine(this.accessor) === machine) {
-      await landAtOrigin(this.accessor, machine, path, data, atomic)
-      return
-    }
-    await machineWrite(this.accessor, machine, path, data, false, atomic)
+    await this.liveWrite(machine, path, async () => {
+      if (originMachine(this.accessor) === machine) {
+        await landAtOrigin(this.accessor, machine, path, data, atomic, this.liveWrites)
+        return
+      }
+      await machineWrite(this.accessor, machine, path, data, false, atomic)
+    })
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
     const machine = await writeMachine(this.accessor, path)
     await refuseLanding(this.accessor, machine, path, data)
-    await machineWrite(this.accessor, machine, path, data, true)
+    await this.liveWrite(machine, path, () =>
+      machineWrite(this.accessor, machine, path, data, true),
+    )
+  }
+
+  /**
+   * Count a write of a name on a machine as live while it lands, so a write
+   * of the name landing elsewhere meanwhile leaves its copy
+   * (`dropOtherCopies`). Mirrors Python's `MachineVFS._live_write`.
+   *
+   * @param machine the machine written.
+   * @param path the name.
+   * @param write the write.
+   */
+  private async liveWrite<T>(machine: string, path: PathSpec, write: () => Promise<T>): Promise<T> {
+    let live = this.liveWrites.get(path.virtual)
+    if (live === undefined) {
+      live = []
+      this.liveWrites.set(path.virtual, live)
+    }
+    live.push(machine)
+    try {
+      return await write()
+    } finally {
+      live.splice(live.indexOf(machine), 1)
+      if (live.length === 0) this.liveWrites.delete(path.virtual)
+    }
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
@@ -480,8 +517,10 @@ export class MachineVFS extends BaseVFS {
     }
     await refuseHidden(this.accessor, machine, dst)
     const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
-    await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
-    await dropOtherCopies(this.accessor, machine, dst)
+    await this.liveWrite(machine, dst, async () => {
+      await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
+      await dropOtherCopies(this.accessor, machine, dst, this.liveWrites)
+    })
   }
 
   /**

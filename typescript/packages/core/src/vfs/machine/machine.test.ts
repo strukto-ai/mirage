@@ -21,6 +21,8 @@ import {
   type Answer,
 } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
+import { bindCaller, currentCaller } from '../../context/session_context.ts'
+import { MachineName } from '../../execution/types.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -29,6 +31,11 @@ import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
+
+/** Run `fn` as a program running on machine `name`. */
+function runningOn<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  return bindCaller({ ...currentCaller(), machine: new MachineName('scripted', name) }, fn)
+}
 
 /** A mount of /tmp over machines a, b, c, ... holding `files`. */
 function shared(...files: FakeFiles[]): MachineVFS {
@@ -708,5 +715,33 @@ describe('bytes between machines', () => {
     expect(b.files.has('/tmp/k')).toBe(false)
     expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'new\n', ''])
     await ws.close()
+  })
+})
+
+describe('a landed write', () => {
+  it("leaves another machine's live write of the name", async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    const vfs = shared(a, b)
+    let pulled = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      pulled = resolve
+    })
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* slow(): AsyncGenerator<Uint8Array> {
+      pulled()
+      await released
+      yield ENC.encode('from b\n')
+    }
+    const writing = runningOn('b', () => vfs.write(spec('/k'), slow()))
+    await started
+    await runningOn('a', () => vfs.write(spec('/k'), ENC.encode('from a\n')))
+    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', true])
+    release()
+    await writing
+    expect([a.files.has('/tmp/k'), texts(b)['/tmp/k']]).toEqual([false, 'from b\n'])
   })
 })

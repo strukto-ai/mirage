@@ -12,9 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.context.session_context import (
+    CallerToken,
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
+from mirage.execution.types import MachineName
 from mirage.policy.base import Policy
 from mirage.runtime.types import RunAnswer
 from mirage.vfs.machine.config import MachineVFSConfig
@@ -764,3 +773,42 @@ async def test_a_program_s_output_lands_on_its_machine_as_a_copy_does():
     assert "/tmp/k" not in b.files
     assert await run(ws, "cat /tmp/k") == (0, "ran\n", "")
     await ws.close()
+
+
+def running_on(name: str) -> CallerToken:
+    """Bind a program running on machine ``name`` as the caller.
+
+    Args:
+        name (str): the machine.
+    """
+    return bind_caller(
+        current_caller().changed({"machine": MachineName("scripted", name)})
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_landed_write_leaves_another_machine_s_live_write():
+    a, b = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def slow():
+        pulled.set()
+        await released.wait()
+        yield b"from b\n"
+
+    token = running_on("b")
+    try:
+        writing = asyncio.create_task(vfs.write(spec("/k"), slow()))
+    finally:
+        reset_caller(token)
+    await pulled.wait()
+    token = running_on("a")
+    try:
+        await vfs.write(spec("/k"), b"from a\n")
+    finally:
+        reset_caller(token)
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", True)
+    released.set()
+    await writing
+    assert ("/tmp/k" in a.files, b.files["/tmp/k"]) == (False, b"from b\n")

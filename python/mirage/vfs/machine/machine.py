@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from mirage.accessor.machine import MachineAccessor
@@ -95,6 +97,7 @@ async def _land_at_origin(
     path: PathSpec,
     data: ByteSource,
     atomic: bool,
+    live: Mapping[str, list[str]],
 ) -> None:
     """Land a whole file on the machine its bytes come from
     (``place.origin_machine``: a program's ``>``, or a copy made by a
@@ -108,6 +111,8 @@ async def _land_at_origin(
         path (PathSpec): the file.
         data (ByteSource): its bytes.
         atomic (bool): show nothing until the bytes have ended whole.
+        live (Mapping[str, list[str]]): the machines writing each name
+            now (``MachineVFS._live_writes``).
     """
     try:
         lacking = await place.machines_lacking_folder(
@@ -124,26 +129,36 @@ async def _land_at_origin(
         atomic=atomic,
         make_parent=bool(lacking),
     )
-    await _drop_other_copies(accessor, machine, path)
+    await _drop_other_copies(accessor, machine, path, live)
 
 
 async def _drop_other_copies(
-    accessor: MachineAccessor, machine: str, path: PathSpec
+    accessor: MachineAccessor,
+    machine: str,
+    path: PathSpec,
+    live: Mapping[str, list[str]],
 ) -> None:
     """Take a name off every other machine holding it as a file, once its
     new copy has landed on ``machine``, so an older copy never shows
-    again.
+    again. A machine still writing the name keeps its copy: that write
+    lands later, and the write that ends last is the one shown, as with
+    two writers of one file.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
         machine (str): the machine the name landed on.
         path (PathSpec): the name.
+        live (Mapping[str, list[str]]): the machines writing each name
+            now (``MachineVFS._live_writes``).
     """
     if not accessor.several:
         return
     for one in await place.holders(accessor, path):
-        if one.machine != machine and not one.is_folder:
-            await _unlink(accessor, one.machine, path)
+        if one.machine == machine or one.is_folder:
+            continue
+        if one.machine in live.get(path.virtual, ()):
+            continue
+        await _unlink(accessor, one.machine, path)
 
 
 class MachineVFS(BaseVFS):
@@ -176,6 +191,26 @@ class MachineVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = MachineAccessor(config)
+        self._live_writes: dict[str, list[str]] = {}
+
+    @contextmanager
+    def _live_write(self, machine: str, path: PathSpec) -> Iterator[None]:
+        """Count a write of a name on a machine as live while it lands, so
+        a write of the name landing elsewhere meanwhile leaves its copy
+        (``_drop_other_copies``).
+
+        Args:
+            machine (str): the machine written.
+            path (PathSpec): the name.
+        """
+        live = self._live_writes.setdefault(path.virtual, [])
+        live.append(machine)
+        try:
+            yield
+        finally:
+            live.remove(machine)
+            if not live:
+                del self._live_writes[path.virtual]
 
     def bind_machines(self, machines: MachineTable, default: str) -> None:
         """Reach the workspace's machines once it has them.
@@ -301,15 +336,24 @@ class MachineVFS(BaseVFS):
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
         await _refuse_landing(self.accessor, machine, path, data)
-        if place.origin_machine(self.accessor) == machine:
-            await _land_at_origin(self.accessor, machine, path, data, atomic)
-            return
-        await _write(self.accessor, machine, path, data, atomic=atomic)
+        with self._live_write(machine, path):
+            if place.origin_machine(self.accessor) == machine:
+                await _land_at_origin(
+                    self.accessor,
+                    machine,
+                    path,
+                    data,
+                    atomic,
+                    self._live_writes,
+                )
+                return
+            await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         machine = await place.write_machine(self.accessor, path)
         await _refuse_landing(self.accessor, machine, path, data)
-        await _write(self.accessor, machine, path, data, append=True)
+        with self._live_write(machine, path):
+            await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         machine = await place.write_machine(self.accessor, path)
@@ -482,15 +526,18 @@ class MachineVFS(BaseVFS):
         lacking = await place.machines_lacking_folder(
             self.accessor, [machine], dst
         )
-        await _copy_from(
-            source.accessor,
-            self.accessor,
-            machine,
-            src,
-            dst,
-            make_parent=bool(lacking),
-        )
-        await _drop_other_copies(self.accessor, machine, dst)
+        with self._live_write(machine, dst):
+            await _copy_from(
+                source.accessor,
+                self.accessor,
+                machine,
+                src,
+                dst,
+                make_parent=bool(lacking),
+            )
+            await _drop_other_copies(
+                self.accessor, machine, dst, self._live_writes
+            )
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a folder one machine holds, on that machine. A folder
