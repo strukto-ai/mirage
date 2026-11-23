@@ -1086,6 +1086,32 @@ async def test_a_deleted_workspace_releases_the_mounts_it_left():
     assert second.running == set(others.values())
 
 
+class Counted(FakeMachine):
+    """A machine that counts its connects and closes."""
+
+    def __init__(self, mount_type):
+        super().__init__(mount_type)
+        self.connects = 0
+        self.closes = 0
+
+    async def connect(self) -> None:
+        self.connects += 1
+
+    async def close(self) -> None:
+        self.closes += 1
+        await super().close()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_closes_the_connection_its_release_opened():
+    sandbox = Counted("ssh")
+    ws = workspace(sandbox, workspace_id="w1")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.delete()
+    assert (sandbox.connects, sandbox.closes) == (2, 2)
+
+
 @pytest.mark.asyncio
 async def test_a_live_workspace_keeps_its_own_mounts_through_destroy():
     sandbox = FakeMachine("ssh")
@@ -1107,9 +1133,16 @@ def test_a_macs_left_mounts_are_the_workspaces_own():
         "(macfuse)\n"
         "mirage-w1.box-0123abcd-2:/my notes on /home/u/.mirage/mnt/my notes "
         "(macfuse)\n"
+        "mirage-w1.box-0123abcd-3:/tmp/a on /b on /home/u/.mirage/mnt/x "
+        "(macfuse)\n"
         "/dev/disk1s1 on / (apfs, local)\n"
     )
-    assert darwin_left(text, "mirage-w1.box") == {"/data", "/my notes"}
+    assert darwin_left(text, "mirage-w1.box") == {
+        "/data",
+        "/my notes",
+        "/tmp/a",
+        "/tmp/a on /b",
+    }
 
 
 @pytest.mark.asyncio

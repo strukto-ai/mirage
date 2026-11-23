@@ -28,6 +28,7 @@ import {
 import { ConnectionLostError } from '../errors.ts'
 import { logger } from '../handle.ts'
 import { buildMachine } from '../registry.ts'
+import type { MachineMemory } from '../types.ts'
 import { OPEN } from '../../mount/constants.ts'
 import '../../mount/sftp.ts'
 import { answerOf } from '../../runtime/binding.ts'
@@ -869,5 +870,35 @@ describe('ContainerMachine in a workspace', () => {
     } finally {
       await ws.close()
     }
+  })
+})
+
+describe('ContainerMachine on delete', () => {
+  const memory: MachineMemory = {
+    workspaceId: 'w1',
+    recall: () => Promise.resolve(null),
+    remember: () => Promise.resolve(),
+    forget: () => Promise.resolve(),
+    remembered: () => Promise.resolve({}),
+  }
+
+  it('never starts a stopped container', async () => {
+    const box = new FakeContainer()
+    const start = vi.fn(() => Promise.resolve())
+    const machine = new ContainerMachine('box', { mountType: 'ssh' }, box, start)
+    machine.bindMemory(memory)
+    box.down = new Error('container is not running')
+    await machine.destroy()
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('releases in a running container without starting it', async () => {
+    const box = new FakeContainer()
+    const start = vi.fn(() => Promise.resolve())
+    const machine = new ContainerMachine('box', { mountType: 'ssh' }, box, start)
+    machine.bindMemory(memory)
+    await machine.destroy()
+    expect(start).not.toHaveBeenCalled()
+    expect(box.log).toContain('exec cat /proc/mounts')
   })
 })

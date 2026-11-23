@@ -439,6 +439,22 @@ function escaped(text: string, more = ''): string {
 }
 
 // Another workspace's runtime on the same sandbox.
+/** A machine that counts its connects and closes. */
+class Counted extends FakeMachine {
+  connects = 0
+  closes = 0
+
+  override connect(): Promise<void> {
+    this.connects += 1
+    return super.connect()
+  }
+
+  override async close(): Promise<void> {
+    this.closes += 1
+    await super.close()
+  }
+}
+
 function sharing(sandbox: FakeMachine, mountType: MountType, name = 'box'): FakeMachine {
   const other = new FakeMachine(mountType, [], true, true, name)
   other.table = sandbox.table
@@ -1113,6 +1129,15 @@ describe('MachineMounts', () => {
     expect(left.map((s) => second.commands.includes(killLine(s)))).toEqual([true, true])
     expect([...second.table].map(([p, [s]]) => [p, s])).toEqual(others)
     expect([...second.running].sort()).toEqual(others.map(([, s]) => s).sort())
+  })
+
+  it('closes the connection its release opened on delete', async () => {
+    const sandbox = new Counted('ssh')
+    const ws = workspace(sandbox, [], undefined, undefined, 'w1')
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.delete()
+    expect([sandbox.connects, sandbox.closes]).toEqual([2, 2])
   })
 
   it("keeps a live workspace's own mounts through destroy", async () => {
@@ -2056,8 +2081,14 @@ describe('MachineMounts on a Mac', () => {
       'mirage-w1.box-0123abcd-1:/data on /home/u/.mirage/mnt/data (macfuse, nodev)\n' +
       'mirage-w2.box-0123abcd-1:/other on /home/u/.mirage/mnt/other (macfuse)\n' +
       'mirage-w1.box-0123abcd-2:/my notes on /home/u/.mirage/mnt/my notes (macfuse)\n' +
+      'mirage-w1.box-0123abcd-3:/tmp/a on /b on /home/u/.mirage/mnt/x (macfuse)\n' +
       '/dev/disk1s1 on / (apfs, local)\n'
-    expect([...darwinLeft(text, 'mirage-w1.box')].sort()).toEqual(['/data', '/my notes'])
+    expect([...darwinLeft(text, 'mirage-w1.box')].sort()).toEqual([
+      '/data',
+      '/my notes',
+      '/tmp/a',
+      '/tmp/a on /b',
+    ])
   })
 
   it('releases the mounts a deleted workspace left', async () => {
