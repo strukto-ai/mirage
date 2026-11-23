@@ -427,3 +427,15 @@ async def test_a_middle_stage_is_placed_where_its_own_writer_put_it():
     assert (await ws.shell("gen | filter | sink")).exit_code == 0
     assert (a.ran, b.ran) == ([], ["gen", "filter", "sink"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_middle_stage_s_reader_only_another_machine_has_is_refused():
+    a = FakeFiles(programs=("sink",))
+    b = FakeFiles(programs=("gen", "filter"))
+    ws = two(a, b)
+    done = await ws.shell("gen | filter | sink")
+    assert done.exit_code == 126
+    assert await done.stderr_str() == "sink: Permission denied\n"
+    assert a.ran == []
+    await ws.close()

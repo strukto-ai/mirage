@@ -406,4 +406,15 @@ describe('a middle stage', () => {
     expect([a.ran, b.ran]).toEqual([[], ['gen', 'filter', 'sink']])
     await ws.close()
   })
+
+  it('refuses a reader only another machine has', async () => {
+    const a = new FakeFiles({}, ['sink'])
+    const b = new FakeFiles({}, ['gen', 'filter'])
+    const ws = two(a, b)
+    const done = await ws.shell('gen | filter | sink')
+    expect(done.exitCode).toBe(126)
+    expect(new TextDecoder().decode(done.stderr)).toBe('sink: Permission denied\n')
+    expect(a.ran).toEqual([])
+    await ws.close()
+  })
 })

@@ -23,6 +23,7 @@ import asyncio
 import pytest
 
 from mirage.io.spool import MEMORY_LIMIT
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import materialize
 from mirage.shell.descriptors import FileDescription
 from mirage.types import FileStat, FileType, MountMode, PathSpec
@@ -202,3 +203,34 @@ async def test_a_failed_first_write_leaves_the_offset_at_what_landed():
             dispatch, SessionState("s"), file, _a_block_then_a_byte()
         )
     assert 0 < file.offset == landed
+
+
+async def _endless():
+    while True:
+        yield b"a"
+
+
+async def _refusing_dispatch(op: str, scope: PathSpec, **kwargs):
+    if op in ("write", "append") and not kwargs.get("admit_only"):
+        await close_quietly(kwargs["data"])
+        raise PermissionError(13, "Permission denied")
+    return None, None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("append", [False, True])
+async def test_a_write_refused_unread_closes_what_feeds_it(append):
+    closed: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    file = FileDescription(_to_scope("/data/f"), append=append)
+    with pytest.raises(PermissionError):
+        await write_description(
+            _refusing_dispatch,
+            SessionState("s"),
+            file,
+            OutputStream(_endless(), close),
+        )
+    assert closed == [True]
