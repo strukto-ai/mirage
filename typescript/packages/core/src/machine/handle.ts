@@ -247,6 +247,17 @@ export class OutputWatch {
 }
 
 /**
+ * Whether a PATH names a folder by where the run stands: an entry that is
+ * empty or not absolute, which a program lookup resolves against the working
+ * folder. Mirrors Python's `_leans_on_folder`.
+ *
+ * @param path the PATH, null for the machine's own.
+ */
+function leansOnFolder(path: string | null): boolean {
+  return path?.split(':').some((entry) => !entry.startsWith('/')) ?? false
+}
+
+/**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
@@ -314,7 +325,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // waits for that, not only the one that started it.
   private waking: Promise<void> | null = null
   // Whether the machine has a program, by name, asked once each.
-  private readonly programs = new Map<string, Map<string | null, Promise<boolean>>>()
+  private readonly programs = new Map<string, Map<string, Promise<boolean>>>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -908,20 +919,29 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param name the program's name.
    */
   hasProgram(name: string): Promise<boolean> {
-    return this.programs.get(name)?.get(null) ?? this.look(name, null)
+    return this.programs.get(name)?.get(JSON.stringify([null, null])) ?? this.look(name, null, null)
   }
 
   /**
    * Whether a run started now would find a program of this name: on the PATH
    * the session exported, which the run gets, and asked again where the last
-   * answer was no, since the program may have been installed since.
+   * answer was no, since the program may have been installed since. A PATH
+   * that names a folder by where the run stands (`venv/bin:/usr/bin`) is
+   * looked on from the run's folder, and its answer is kept for that folder
+   * alone.
    *
    * @param name the program's name.
    * @param path the PATH the session exported; null for the machine's own.
+   * @param cwd the folder the run starts in.
    */
-  async findsProgram(name: string, path: string | null = null): Promise<boolean> {
-    const known = this.programs.get(name)?.get(path)
-    return (known !== undefined && (await known)) || this.look(name, path)
+  async findsProgram(
+    name: string,
+    path: string | null = null,
+    cwd: string | null = null,
+  ): Promise<boolean> {
+    const at = leansOnFolder(path) ? cwd : null
+    const known = this.programs.get(name)?.get(JSON.stringify([path, at]))
+    return (known !== undefined && (await known)) || this.look(name, path, at)
   }
 
   /**
@@ -929,17 +949,21 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    *
    * @param name the program's name.
    * @param path the PATH to look on; null for the machine's own.
+   * @param cwd the folder to look from; null for `/`. A machine without the
+   *   folder has no such program.
    */
-  private look(name: string, path: string | null): Promise<boolean> {
+  private look(name: string, path: string | null, cwd: string | null): Promise<boolean> {
+    const key = JSON.stringify([path, cwd])
+    const at = cwd === null ? '' : `cd -- ${shellQuote(cwd)} 2>/dev/null && `
     const on = path === null ? '' : `PATH=${shellQuote(path)} `
     const found = this.ensureConnected()
-      .then(() => this.setup(`${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
+      .then(() => this.setup(`${at}${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
       .then((done) => done.exitCode === 0)
-    const kept = this.programs.get(name) ?? new Map<string | null, Promise<boolean>>()
+    const kept = this.programs.get(name) ?? new Map<string, Promise<boolean>>()
     this.programs.set(name, kept)
-    kept.set(path, found)
+    kept.set(key, found)
     found.catch(() => {
-      if (kept.get(path) === found) kept.delete(path)
+      if (kept.get(key) === found) kept.delete(key)
     })
     return found
   }

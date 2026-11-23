@@ -22,7 +22,7 @@ import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
-import { lookup } from '../lookup.ts'
+import { lookup, lookupAll } from '../lookup.ts'
 import { Consumer } from '../types.ts'
 import { mountMachines, pathOnMount } from './mounts.ts'
 
@@ -50,12 +50,15 @@ export function searchedMachines(registry: MountRegistry): RemoteRuntime[] {
  * @param session the session it runs in.
  * @param registry the workspace's mounts and machines.
  * @param routing the line's placement.
+ * @param pastFunctions the program a function of the same name shadows is
+ *   the one asked about (`which`).
  */
 export function isSearched(
   name: string,
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  pastFunctions = false,
 ): boolean {
   if (routing === undefined || routing.machine !== undefined) return false
   const bindings = routing.bindings
@@ -64,7 +67,10 @@ export function isSearched(
   const first = bindings[EXTERNAL_COMMANDS]
   if (!(first instanceof RemoteRuntime) || first.refusesSession()) return false
   if (searchedMachines(registry).length < 2) return false
-  return lookup(name, session, registry, routing) === Consumer.EXTERNAL
+  if (!pastFunctions) return lookup(name, session, registry, routing) === Consumer.EXTERNAL
+  return lookupAll(name, session, registry, routing).every(
+    (layer) => layer === Consumer.FUNCTION || layer === Consumer.EXTERNAL,
+  )
 }
 
 /**
@@ -114,15 +120,17 @@ async function pathMachines(path: string, registry: MountRegistry): Promise<stri
  *
  * @param name the program's name.
  * @param path the PATH the run gets; null for each machine's own.
+ * @param cwd the folder the run starts in.
  * @param machines the machines to ask.
  */
 async function machinesWith(
   name: string,
   path: string | null,
+  cwd: string,
   machines: readonly RemoteRuntime[],
 ): Promise<RemoteRuntime[]> {
   const asked = await Promise.allSettled(
-    machines.map((machine) => machine.handle().findsProgram(name, path)),
+    machines.map((machine) => machine.handle().findsProgram(name, path, cwd)),
   )
   const having: RemoteRuntime[] = []
   for (const [at, machine] of machines.entries()) {
@@ -187,6 +195,8 @@ export async function nearestMachine(
  * @param cwd the folder it runs from; null for the session's own.
  * @param path the PATH the command's own prefix sets (`PATH=/opt/bin tool`),
  *   which its run gets; null for the one the session exported.
+ * @param pastFunctions the program a function of the same name shadows is
+ *   the one asked about (`which`).
  */
 export async function searchedMachine(
   name: string,
@@ -196,13 +206,15 @@ export async function searchedMachine(
   routing: RouteDecision<Runtime> | undefined,
   cwd: string | null = null,
   path: string | null = null,
+  pastFunctions = false,
 ): Promise<RemoteRuntime | null> {
-  if (!isSearched(name, session, registry, routing)) return null
+  if (!isSearched(name, session, registry, routing, pastFunctions)) return null
+  const here = cwd ?? session.cwd
   const on = path ?? envSnapshot(session).PATH ?? null
-  const having = await machinesWith(name, on, searchedMachines(registry))
+  const having = await machinesWith(name, on, here, searchedMachines(registry))
   const picked = await nearestMachine(
     having.map((machine) => machine.defaultMachine),
-    cwd ?? session.cwd,
+    here,
     paths,
     session,
     registry,

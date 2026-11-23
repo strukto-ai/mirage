@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine, failed } from '../../../../tests/fixtures/machine.ts'
 import { FakeFiles, two } from '../../../../tests/fixtures/machine_files.ts'
-import type { Action } from '../../../policy/types.ts'
+import type { Action, CommandContext, Route } from '../../../policy/types.ts'
 import type { RunAnswer } from '../../../runtime/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -242,6 +242,57 @@ describe('searchedMachine', () => {
     a.programs.delete('tool')
     expect((await ws.shell('tool')).exitCode).toBe(127)
     expect((await ws.shell('tool')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([['tool'], ['tool']])
+    await ws.close()
+  })
+
+  it('looks on a PATH that leans on the folder from that folder', async () => {
+    const files = new FakeFiles({ '/tmp/w/k': 'k' }, ['smi'])
+    const second = new ScriptedMachine('b', files.answer)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', new FakeFiles().answer), b: second },
+      },
+    )
+    await ws.shell('cd /tmp/w && PATH=bin:/usr/bin smi')
+    const looked = "PATH='bin:/usr/bin' command -v smi >/dev/null 2>&1"
+    expect(second.lines).toContain(`cd -- /tmp/w 2>/dev/null && ${looked}`)
+    expect(files.ran).toEqual(['smi'])
+    await ws.close()
+  })
+
+  it('runs the program of a /usr/bin path where search finds it', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({}, ['tool'])
+    const ws = two(a, b)
+    await ws.shell('/usr/bin/tool -x')
+    expect([a.ran, b.ran]).toEqual([[], ['tool -x']])
+    await ws.close()
+  })
+
+  it('asks the machine search picks for a lookup past a function', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({}, ['smi'])
+    const ws = two(a, b)
+    await ws.shell('smi() { :; }; which smi')
+    expect([a.ran, b.ran]).toEqual([[], ['which smi']])
+    await ws.close()
+  })
+
+  it('lets a route that comes with the redirect decide over the search', async () => {
+    const a = new FakeFiles({}, ['tool'])
+    const b = new FakeFiles({}, ['tool'])
+    const ws = two(a, b)
+    ws.policies.add({
+      preCommand: (ctx: CommandContext): Route | null =>
+        ctx.paths.some((path) => path.virtual === '/tmp/out')
+          ? { kind: 'route', machine: 'b' }
+          : null,
+    })
+    await ws.shell('tool')
+    await ws.shell('tool > /tmp/out')
     expect([a.ran, b.ran]).toEqual([['tool'], ['tool']])
     await ws.close()
   })

@@ -24,7 +24,7 @@ from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.machine.machine import MachineVFS
-from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.lookup import lookup, lookup_all
 from mirage.workspace.lookup.machine.mounts import (
     mount_machines,
     path_on_mount,
@@ -56,6 +56,7 @@ def is_searched(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
+    past_functions: bool = False,
 ) -> bool:
     """Whether search order places a program: one a machine runs because
     no name captures it, on a line that names no machine and no runtime
@@ -68,6 +69,8 @@ def is_searched(
         session (SessionState): the session it runs in.
         registry (MountRegistry): the workspace's mounts and machines.
         routing (RouteDecision | None): the line's placement.
+        past_functions (bool): the program a function of the same
+            name shadows is the one asked about (``which``).
     """
     if routing is None or routing.machine is not None:
         return False
@@ -79,7 +82,12 @@ def is_searched(
         return False
     if len(searched_machines(registry)) < 2:
         return False
-    return lookup(name, session, registry, routing) is Consumer.EXTERNAL
+    if not past_functions:
+        return lookup(name, session, registry, routing) is Consumer.EXTERNAL
+    return all(
+        layer in (Consumer.FUNCTION, Consumer.EXTERNAL)
+        for layer in lookup_all(name, session, registry, routing)
+    )
 
 
 def _unasked(failure: BaseException, what: str) -> None:
@@ -127,7 +135,10 @@ async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
 
 
 async def _machines_with(
-    name: str, path: str | None, machines: Sequence[RemoteRuntime]
+    name: str,
+    path: str | None,
+    cwd: str,
+    machines: Sequence[RemoteRuntime],
 ) -> list[RemoteRuntime]:
     """The machines a run started now would find a program on
     (``finds_program``), in the order given. One that cannot be asked,
@@ -137,10 +148,11 @@ async def _machines_with(
         name (str): the program's name.
         path (str | None): the PATH the run gets; None for each
             machine's own.
+        cwd (str): the folder the run starts in.
         machines (Sequence[RemoteRuntime]): the machines to ask.
     """
     asked = await asyncio.gather(
-        *(m.handle().finds_program(name, path) for m in machines),
+        *(m.handle().finds_program(name, path, cwd) for m in machines),
         return_exceptions=True,
     )
     having: list[RemoteRuntime] = []
@@ -198,6 +210,7 @@ async def searched_machine(
     routing: RouteDecision[RuntimeIdentity] | None,
     cwd: str | None = None,
     path: str | None = None,
+    past_functions: bool = False,
 ) -> RemoteRuntime | None:
     """The machine a program named by its name runs on when nothing says
     which (``is_searched``): among the machines a run started now would
@@ -217,14 +230,17 @@ async def searched_machine(
         path (str | None): the PATH the command's own prefix sets
             (``PATH=/opt/bin tool``), which its run gets; None for
             the one the session exported.
+        past_functions (bool): the program a function of the same
+            name shadows is the one asked about (``which``).
     """
-    if not is_searched(name, session, registry, routing):
+    if not is_searched(name, session, registry, routing, past_functions):
         return None
+    here = session.cwd if cwd is None else cwd
     on = env_snapshot(session).get("PATH") if path is None else path
-    having = await _machines_with(name, on, searched_machines(registry))
+    having = await _machines_with(name, on, here, searched_machines(registry))
     picked = await nearest_machine(
         [m.default_machine for m in having],
-        session.cwd if cwd is None else cwd,
+        here,
         paths,
         session,
         registry,

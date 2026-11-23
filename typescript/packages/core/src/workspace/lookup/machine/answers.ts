@@ -222,7 +222,16 @@ export async function machineAnswers(
   for (const name of new Set(names)) {
     const runtime = lookupMachine(name, session, registry, routing, pastFunctions)
     if (runtime === null) continue
-    const searched = await searchedMachine(name, [], session, registry, routing)
+    const searched = await searchedMachine(
+      name,
+      [],
+      session,
+      registry,
+      routing,
+      null,
+      null,
+      pastFunctions,
+    )
     asked.set(name, searched ?? runtime)
   }
   const found = await Promise.all(

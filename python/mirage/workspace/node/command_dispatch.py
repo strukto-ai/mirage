@@ -99,6 +99,7 @@ from mirage.utils.path import (
     parent,
     resolve_path,
 )
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import (
     accepts_line,
@@ -1027,6 +1028,8 @@ async def _run_argv(
             here = context.frame.routing
             if route is None or here is None:
                 return
+            if searched is not None and unplaced is not None:
+                here = unplaced
             try:
                 context.frame.routing = routed(
                     registry.runtime_entries,
@@ -1187,7 +1190,14 @@ async def _run_argv(
     # (``cat > /tmp/out``) is no program of that machine: what it
     # writes goes where Mirage's own writes go.
     unplaced = context.frame.routing
-    searched = _searched_program(name, argv.args, session, registry, unplaced)
+    searched = _searched_program(
+        name,
+        argv.args,
+        session,
+        registry,
+        unplaced,
+        namespace.session_links(session),
+    )
     if searched is not None:
         denied = await guard((), stdin)
         if denied is not None:
@@ -1285,9 +1295,11 @@ def _searched_program(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
+    links: NamespaceReader,
 ) -> str | None:
     """The program a command runs that search order places
-    (``is_searched``), through the wrappers Mirage runs (``nice gen``);
+    (``is_searched``), through the wrappers Mirage runs (``nice gen``)
+    and by the ``/usr/bin`` path a lookup prints for it (``bin_program``);
     None for any other command. It is placed before the command's
     redirects open, since what they make lands on its machine, and once
     the command is admitted: a refused one never reaches a machine.
@@ -1298,10 +1310,13 @@ def _searched_program(
         session (SessionState): the session.
         registry (MountRegistry): the mount registry.
         routing (RouteDecision | None): the line's placement.
+        links (NamespaceReader): the session's link table.
     """
     if not name or routing is None or routing.machine is not None:
         return None
     head = program_head(registry, [name, *args], session, routing)
+    if "/" in head:
+        head = bin_program(head, session, registry, links, routing) or head
     return head if is_searched(head, session, registry, routing) else None
 
 

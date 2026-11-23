@@ -246,7 +246,12 @@ async def machine_answers(
         )
         if runtime is not None:
             searched = await searched_machine(
-                name, [], session, registry, routing
+                name,
+                [],
+                session,
+                registry,
+                routing,
+                past_functions=past_functions,
             )
             asked[name] = runtime if searched is None else searched
     found = await asyncio.gather(

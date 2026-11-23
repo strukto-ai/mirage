@@ -139,6 +139,7 @@ import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
 import { preferredMachine } from '../lookup/machine/preferred.ts'
 import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
+import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -994,7 +995,7 @@ async function runArgv(
       const line = context.frame.routing
       let nested = executeFn
       const place = (answer: Route | null): void => {
-        const here = context.frame.routing
+        const here = searched !== null && unplaced !== undefined ? unplaced : context.frame.routing
         if (answer === null || here === undefined) return
         let routing: RouteDecision<Runtime>
         try {
@@ -1169,7 +1170,14 @@ async function runArgv(
   // own that a machine runs whole (`cat > /tmp/out`) is no program of that
   // machine: what it writes goes where Mirage's own writes go.
   const unplaced = context.frame.routing
-  const searched = searchedProgram(name, argv.args, session, registry, unplaced)
+  const searched = searchedProgram(
+    name,
+    argv.args,
+    session,
+    registry,
+    unplaced,
+    namespace.sessionLinks(session),
+  )
   if (searched !== null) {
     const denied = await guard([], stdin)
     if (denied !== null) return denied
@@ -1218,7 +1226,8 @@ async function runArgv(
 
 /**
  * The program a command runs that search order places (`isSearched`),
- * through the wrappers Mirage runs (`nice gen`); null for any other command.
+ * through the wrappers Mirage runs (`nice gen`) and by the `/usr/bin` path a
+ * lookup prints for it (`binProgram`); null for any other command.
  * It is placed before the command's redirects open, since what they make
  * lands on its machine, and once the command is admitted: a refused one
  * never reaches a machine. Mirrors Python's `_searched_program`.
@@ -1229,9 +1238,13 @@ function searchedProgram(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
+  links: NamespaceReader,
 ): string | null {
   if (name === '' || routing === undefined || routing.machine !== undefined) return null
-  const head = programHead(registry, [name, ...args], session, routing)
+  const typed = programHead(registry, [name, ...args], session, routing)
+  const head = typed.includes('/')
+    ? (binProgram(typed, session, registry, links, routing) ?? typed)
+    : typed
   return isSearched(head, session, registry, routing) ? head : null
 }
 

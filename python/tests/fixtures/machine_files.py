@@ -140,6 +140,8 @@ class FakeFiles:
     def _one(self, words: list[str], data: bytes | None) -> RunAnswer:
         if words[0].startswith("PATH="):
             words = words[1:]
+        if words[:2] == ["cd", "--"]:
+            return ok() if words[2] in self.dirs else failed(b"")
         if words[:2] == ["command", "-v"]:
             return ok() if words[2] in self.programs else failed(b"")
         if words[:3] == ["readlink", "-f", "--"]:

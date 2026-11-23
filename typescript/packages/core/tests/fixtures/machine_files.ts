@@ -162,6 +162,7 @@ export class FakeFiles {
   private one(words: string[], data: Uint8Array | null): RunAnswer {
     const w = words[0]?.startsWith('PATH=') === true ? words.slice(1) : words
     const [head = '', second = ''] = w
+    if (head === 'cd' && second === '--') return this.dirs.has(w[2] ?? '') ? ok() : failed('')
     if (head === 'command' && second === '-v')
       return this.programs.has(w[2] ?? '') ? ok() : failed('')
     if (w.slice(0, 3).join(' ') === 'readlink -f --') {

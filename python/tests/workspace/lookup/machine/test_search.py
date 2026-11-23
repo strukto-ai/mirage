@@ -16,6 +16,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy.base import Policy
+from mirage.policy.types import Route
 from mirage.runtime.types import RunAnswer
 from tests.fixtures.machine import ScriptedMachine, failed
 from tests.fixtures.machine_files import FakeFiles, two
@@ -265,5 +266,57 @@ async def test_a_program_removed_since_the_last_look_is_looked_for_again():
     a.programs.discard("tool")
     assert (await ws.shell("tool")).exit_code == 127
     assert (await ws.shell("tool")).exit_code == 0
+    assert (a.ran, b.ran) == (["tool"], ["tool"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_path_that_leans_on_the_folder_is_looked_on_from_it():
+    files = FakeFiles({"/tmp/w/k": b"k"}, programs=("smi",))
+    second = ScriptedMachine("b", files.answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": ScriptedMachine("a", FakeFiles().answer), "b": second},
+    )
+    await ws.shell("cd /tmp/w && PATH=bin:/usr/bin smi")
+    looked = "PATH='bin:/usr/bin' command -v smi >/dev/null 2>&1"
+    assert f"cd -- /tmp/w 2>/dev/null && {looked}" in second.lines
+    assert files.ran == ["smi"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_usr_bin_path_runs_its_program_where_search_finds_it():
+    a, b = FakeFiles(), FakeFiles(programs=("tool",))
+    ws = two(a, b)
+    await ws.shell("/usr/bin/tool -x")
+    assert (a.ran, b.ran) == ([], ["tool -x"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_past_a_function_asks_the_machine_search_picks():
+    a, b = FakeFiles(), FakeFiles(programs=("smi",))
+    ws = two(a, b)
+    await ws.shell("smi() { :; }; which smi")
+    assert (a.ran, b.ran) == ([], ["which smi"])
+    await ws.close()
+
+
+class ByOutput(Policy):
+    """Routes a command to machine ``b`` once it writes ``/tmp/out``."""
+
+    def pre_command(self, ctx):
+        wrote = any(p.virtual == "/tmp/out" for p in ctx.paths)
+        return Route(machine="b") if wrote else None
+
+
+@pytest.mark.asyncio
+async def test_a_route_that_comes_with_the_redirect_decides_over_the_search():
+    a, b = FakeFiles(programs=("tool",)), FakeFiles(programs=("tool",))
+    ws = two(a, b, policies=[ByOutput()])
+    await ws.shell("tool")
+    await ws.shell("tool > /tmp/out")
     assert (a.ran, b.ran) == (["tool"], ["tool"])
     await ws.close()
