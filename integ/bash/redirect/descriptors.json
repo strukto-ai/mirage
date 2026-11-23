@@ -1939,6 +1939,41 @@
         "stdout": "A\nB\nC\nD\nF\nE\nJ\nK\nnoclobber=1\nclosed=1\n",
         "stderr": "bash: line 1: 3: Bad file descriptor\n"
       }
+    },
+    {
+      "id": "a_redirected_group_s_copied_stdout_keeps_its_order",
+      "seq": 1380041,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ { echo a; echo b >&2; echo c; } >&3; } 3>&1 2>&1; v=$({ { echo d; echo e >&2; } >&3; } 3>&1 2>&1); echo \"$v\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nb\nc\nd\ne\n",
+        "stderr": ""
+      }
     }
   ]
 }

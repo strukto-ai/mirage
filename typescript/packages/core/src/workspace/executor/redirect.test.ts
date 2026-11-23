@@ -1785,6 +1785,7 @@ describe('a redirected compound', () => {
     ['true && { echo d; sleep 30; } 2>&1', 'stdout'],
     ['echo x | { echo d; sleep 30; } 2>&1', 'stdout'],
     ['{ echo d >&2; sleep 30; } >/dev/null', 'stderr'],
+    ['{ { echo d; sleep 30; } >&3; } 3>&1 2>&1', 'stdout'],
   ])('streams what it prints: %j', async (line, stream) => {
     const ws = new Workspace({})
     try {

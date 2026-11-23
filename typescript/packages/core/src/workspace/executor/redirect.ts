@@ -315,7 +315,7 @@ export class PipeRecorder extends Recorder {
   constructor(
     private readonly dispatch: DispatchFn,
     private readonly streams: Map<Channel, PathSpec>,
-    private readonly forward: Map<Channel, Channel>,
+    private readonly forward: Map<Channel, Channel | Inherited>,
     private readonly sink: JobConsole | null,
     private readonly live: boolean,
   ) {
@@ -378,9 +378,10 @@ export class PipeRecorder extends Recorder {
     }
     const scope = this.streams.get(channel)
     if (scope === undefined) {
-      const channelTo = this.forward.get(channel)
-      if (this.sink !== null && channelTo !== undefined) await this.sink.emit(channelTo, data)
-      else await super.emit(channel, data)
+      const to = this.forward.get(channel)
+      if (this.sink === null || to === undefined) await super.emit(channel, data)
+      else if (to instanceof Inherited) await this.emitTo(to, data)
+      else await this.sink.emit(to, data)
     } else if (data.byteLength > 0) {
       await this.dispatch('append', scope, [data])
     }
@@ -670,7 +671,7 @@ function outputRecorder(
   session: SessionState,
 ): PipeRecorder {
   const streams = new Map<Channel, PathSpec>()
-  const forward = new Map<Channel, Channel>()
+  const forward = new Map<Channel, Channel | Inherited>()
   for (const [fd, channel] of [
     [1, Channel.STDOUT],
     [2, Channel.STDERR],
@@ -678,6 +679,7 @@ function outputRecorder(
     const target = outputs.get(fd)
     if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
     else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
+    else if (target instanceof Inherited) forward.set(channel, target)
     else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
   }
   // Held for a deferred open: bash never runs a command whose open fails.
@@ -685,7 +687,7 @@ function outputRecorder(
   const recorder = new PipeRecorder(
     dispatch,
     streams,
-    live ? forward : new Map<Channel, Channel>(),
+    live ? forward : new Map<Channel, Channel | Inherited>(),
     sink ?? null,
     live,
   )

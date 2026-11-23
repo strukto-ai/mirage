@@ -224,7 +224,8 @@ class PipeRecorder(Recorder):
     Args:
         dispatch (DispatchFn): op dispatcher the pipe writes go through.
         streams (dict[Channel, PathSpec]): channels bound to output pipes.
-        forward (dict[Channel, Channel]): terminal channels sent through.
+        forward (dict[Channel, Channel | Inherited]): terminal channels,
+            or the copied streams, sent through.
         sink (JobConsole | None): where the level writes.
         live (bool): whether terminal output goes out as it is written.
     """
@@ -233,7 +234,7 @@ class PipeRecorder(Recorder):
         self,
         dispatch: DispatchFn,
         streams: dict[Channel, PathSpec],
-        forward: dict[Channel, Channel],
+        forward: dict[Channel, Channel | Inherited],
         sink: JobConsole | None,
         live: bool,
     ) -> None:
@@ -453,10 +454,13 @@ class PipeRecorder(Recorder):
                 return
         scope = self.streams.get(channel)
         if scope is None:
-            if self.sink is not None and channel in self.forward:
-                await self.sink.emit(self.forward[channel], data)
-            else:
+            to = self.forward.get(channel)
+            if self.sink is None or to is None:
                 await super().emit(channel, data)
+            elif isinstance(to, Inherited):
+                await self.emit_to(to, data)
+            else:
+                await self.sink.emit(to, data)
         elif data:
             await self.dispatch("append", scope, data=data)
 
@@ -863,13 +867,15 @@ def _output_recorder(
             enclosing join holds under.
     """
     streams: dict[Channel, PathSpec] = {}
-    forward: dict[Channel, Channel] = {}
+    forward: dict[Channel, Channel | Inherited] = {}
     for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
         target = outputs[fd]
         if target is _TO_STDOUT or target is _TO_STDERR:
             forward[channel] = (
                 Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
             )
+        elif isinstance(target, Inherited):
+            forward[channel] = target
         elif isinstance(target, FileDescription) and target.pipe:
             streams[channel] = target.scope
     # Held for a deferred open: bash never runs a command whose open fails.
