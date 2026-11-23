@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import subprocess
+import sys
+import threading
+
 import pytest
 
 pytest.importorskip("agent.terminal_env_provider")
@@ -102,9 +106,37 @@ def test_secret_pointers_in_the_yaml_resolve(tmp_path, monkeypatch):
         provider.close()
 
 
-def test_close_shuts_the_workspace(config):
+def loop_threads() -> set[threading.Thread]:
+    return {t for t in threading.enumerate() if t.name == "mirage-hermes"}
+
+
+def test_close_shuts_the_workspace_and_its_loop(config):
+    before = loop_threads()
     provider = MirageTerminalProvider(lambda: str(config))
     environment = provider.create_environment(cwd="/", timeout=30, task_id="c")
     provider.close()
     assert environment.execute("echo hi")["returncode"] != 0
     environment.cleanup()
+    assert loop_threads() <= before
+
+
+EXIT_SCRIPT = """
+import logging, sys
+logging.basicConfig(level=logging.WARNING, stream=sys.stderr)
+from mirage.agents.hermes import MirageTerminalProvider
+provider = MirageTerminalProvider(lambda: sys.argv[1])
+environment = provider.create_environment(cwd="/", timeout=30, task_id="x")
+print(environment.execute("echo hi")["output"].strip())
+"""
+
+
+def test_exit_closes_the_workspace_while_thread_pools_still_run(config):
+    result = subprocess.run(
+        [sys.executable, "-c", EXIT_SCRIPT, str(config)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "hi"
+    assert "closing a mirage workspace failed" not in result.stderr

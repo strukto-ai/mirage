@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import atexit
 import logging
 import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -53,7 +53,9 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         self._lock = threading.Lock()
         self._workspaces: dict[Path, Workspace] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
-        atexit.register(self.close)
+        self._thread: threading.Thread | None = None
+        # Registered after the thread pools' own hook, so it runs first.
+        threading._register_atexit(self.close)  # type: ignore[attr-defined]
 
     def _path(self) -> Path | None:
         value = self._config_path()
@@ -89,11 +91,15 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
     def _owner(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
-            threading.Thread(
+            self._loop.set_default_executor(
+                ThreadPoolExecutor(thread_name_prefix="mirage-hermes")
+            )
+            self._thread = threading.Thread(
                 target=self._loop.run_forever,
                 name="mirage-hermes",
                 daemon=True,
-            ).start()
+            )
+            self._thread.start()
         return self._loop
 
     def _workspace(self) -> Workspace:
@@ -113,13 +119,14 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         return workspace
 
     def close(self) -> None:
-        """Close every workspace this provider built; hermes calls none
-        between tasks, so this runs when the process exits."""
+        """Close every workspace this provider built, then its loop; hermes
+        calls none between tasks, so this runs when the process exits."""
         with self._lock:
             workspaces = list(self._workspaces.values())
             self._workspaces.clear()
-            loop = self._loop
-        if loop is None:
+            loop, thread = self._loop, self._thread
+            self._loop = self._thread = None
+        if loop is None or thread is None:
             return
         for workspace in workspaces:
             try:
@@ -127,7 +134,12 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
                     workspace.close(), loop
                 ).result()
             except Exception as exc:
-                logger.debug("closing a mirage workspace failed: %r", exc)
+                logger.warning(
+                    "closing a mirage workspace failed: %r", exc, exc_info=True
+                )
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join()
+        loop.close()
 
 
 async def build_owned_workspace(path: Path) -> Workspace:
