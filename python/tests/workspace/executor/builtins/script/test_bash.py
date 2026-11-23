@@ -133,6 +133,26 @@ def test_parse_bash_args_dash_c_refuses_options_bash_refuses(args, invalid):
 
 
 @pytest.mark.parametrize(
+    "args,name",
+    [
+        (["-o", "nosuch", "-c", "echo hi"], "nosuch"),
+        (["+o", "nosuch", "-c", "echo hi"], "nosuch"),
+        (["-c", "-o", "nosuch"], "nosuch"),
+        (["-o", "nosuch", "-q", "-c", ":"], "nosuch"),
+        (["-o", "pipefail", "-o", "NOUNSET", "-c", ":"], "NOUNSET"),
+        (["-o", "nosuch"], "nosuch"),
+    ],
+)
+def test_parse_bash_args_refuses_an_unknown_option_name(args, name):
+    assert parse_bash_args(args).invalid_name == name
+
+
+def test_parse_bash_args_refuses_an_earlier_bad_option_first():
+    parsed = parse_bash_args(["-q", "-o", "nosuch", "-c", ":"])
+    assert (parsed.invalid, parsed.invalid_name) == ("-q", None)
+
+
+@pytest.mark.parametrize(
     "args,field,expected",
     [
         (["--version", "--help"], "help", True),

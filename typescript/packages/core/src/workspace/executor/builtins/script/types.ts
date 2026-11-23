@@ -26,6 +26,8 @@ export interface BashArgs {
   invalid: string | null
   // The option given no argument.
   needsValue: string | null
+  // The `-o` name bash has no option for.
+  invalidName: string | null
   // `--help` was given; bash answers it before `--version` and before
   // reading anything else.
   help: boolean

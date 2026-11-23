@@ -74,7 +74,8 @@ def parse_bash_args(args: list[str]) -> BashArgs:
     and ``--`` end option parsing. ``-c`` is a flag: its program is the
     first word after the options, so ``-cx 'echo hi'``, ``-c -x 'echo hi'``
     and ``-c -- 'echo hi'`` all run ``echo hi``. ``-O`` is refused, where
-    GNU takes a shopt name.
+    GNU takes a shopt name. An ``-o`` name ``set -o`` lacks is refused
+    where it is read, before a later bad option or a missing program.
 
     Args:
         args (list[str]): words after the head word.
@@ -122,6 +123,9 @@ def parse_bash_args(args: list[str]) -> BashArgs:
         refused = [ch for ch in word.other if ch not in BASH_START_FLAGS]
         if refused:
             return BashArgs(invalid=tok[0] + refused[0])
+        for option, _ in word.settings:
+            if option not in SET_OPTION_NAMES:
+                return BashArgs(invalid_name=option)
         settings.extend(word.settings)
         read_stdin = read_stdin or "s" in word.other
         command = command or "c" in word.other
@@ -208,6 +212,12 @@ async def handle_bash(
     if parsed.needs_value is not None:
         return script_error(
             name, f"{parsed.needs_value}: option requires an argument", 2
+        )
+    if parsed.invalid_name is not None:
+        return script_error(
+            name,
+            f"line 0: {name}: {parsed.invalid_name}: invalid option name",
+            2,
         )
     script = parsed.script
     named = script is not None and bool(parsed.argv)

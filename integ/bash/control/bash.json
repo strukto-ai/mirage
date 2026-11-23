@@ -629,6 +629,41 @@
         "stdout": "A 1 B\npipefail=1\nZ\nY\nrc=127\nrc=2\nrc=2\n",
         "stderr": "+ echo A 1 B\nbash: line 1: -x: command not found\nbash: -c: option requires an argument\nbash: --: unsupported option\n"
       }
+    },
+    {
+      "id": "ctl_bash_refuses_an_unknown_option_name",
+      "seq": 502847,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -o nosuch -c 'echo hi'; echo rc=$?; bash -c -o nosuch; echo rc=$?; bash +o NOUNSET -q -c :; echo rc=$?; bash -o pipefail -c 'false | true; echo pipefail=$?'",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\npipefail=1\n",
+        "stderr": "bash: line 0: bash: nosuch: invalid option name\nbash: line 0: bash: nosuch: invalid option name\nbash: line 0: bash: NOUNSET: invalid option name\n"
+      }
     }
   ]
 }
