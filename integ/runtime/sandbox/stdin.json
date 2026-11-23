@@ -27,6 +27,7 @@
       "runtimes": [
         "ssh",
         "e2b",
+        "microsandbox",
         "kubernetes"
       ],
       "steps": [
