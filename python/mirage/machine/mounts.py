@@ -1458,14 +1458,18 @@ class MachineMounts:
         ``prefix``, then unmount it: unmounted alone, it stays blocked on
         its dead pipe. The next serve may take the same source, so a failed
         unmount fails loud rather than leaving the old mount to pass for
-        the new one.
+        the new one. Each command is let go after ``UNMOUNT_WAIT_SECONDS``.
 
         Args:
             source (str): the stale mount's source.
             prefix (str): its mountpoint.
         """
-        await self._run(self._kill_line(source))
-        done = await self._run(self._unmount_line(prefix))
+        await asyncio.wait_for(
+            self._run(self._kill_line(source)), UNMOUNT_WAIT_SECONDS
+        )
+        done = await asyncio.wait_for(
+            self._run(self._unmount_line(prefix)), UNMOUNT_WAIT_SECONDS
+        )
         if done.exit_code != 0:
             raise RuntimeError(
                 f"{self._provider}: cannot unmount {prefix}, which this "

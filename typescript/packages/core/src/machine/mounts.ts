@@ -1267,10 +1267,17 @@ export class MachineMounts {
    * `prefix`, then unmount it: unmounted alone, it stays blocked on its dead
    * pipe. The next serve may take the same source, so a failed unmount
    * fails loud rather than leaving the old mount to pass for the new one.
+   * Each command is let go after `UNMOUNT_WAIT_SECONDS`.
    */
   private async reclaim(source: string, prefix: string, signal?: AbortSignal): Promise<void> {
-    await this.run(this.killLine(source), signal)
-    const done = await this.run(this.unmountLine(prefix), signal)
+    await this.run(
+      this.killLine(source),
+      mergeSignals(signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000)),
+    )
+    const done = await this.run(
+      this.unmountLine(prefix),
+      mergeSignals(signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000)),
+    )
     if (done.exitCode !== 0) {
       throw new Error(
         `${this.provider}: cannot unmount ${prefix}, which this workspace served before a restart: ${said(done.stderr)}`,
