@@ -434,7 +434,7 @@ jobs:
           PY
           done
 
-      # hermes builds no wheel, so its backend's tests run on an editable install of the release plugin.yaml floors.
+      # hermes builds no wheel, so its backend's tests run in hermes' own locked environment, at the release plugin.yaml floors.
       - name: hermes terminal backend against hermes' release
         working-directory: python
         env:
@@ -443,10 +443,11 @@ jobs:
           mkdir -p "$RUNNER_TEMP/hermes"
           curl -fsSL "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$HERMES_REF.tar.gz" \
             | tar xz -C "$RUNNER_TEMP/hermes" --strip-components 1
-          uv venv .venv-hermes
-          uv pip install --python .venv-hermes/bin/python -e "$RUNNER_TEMP/hermes" . pytest
-          .venv-hermes/bin/python -c "import agent.terminal_env_provider, tools.environments.base, mirage.agents.hermes"
-          .venv-hermes/bin/python - <<'PY'
+          uv sync --frozen --project "$RUNNER_TEMP/hermes"
+          HERMES_PYTHON="$RUNNER_TEMP/hermes/.venv/bin/python"
+          uv pip install --python "$HERMES_PYTHON" . pytest
+          "$HERMES_PYTHON" -c "import agent.terminal_env_provider, tools.environments.base, mirage.agents.hermes"
+          "$HERMES_PYTHON" - <<'PY'
           import importlib.util
 
           spec = importlib.util.spec_from_file_location("hermes_plugin", "../plugins/hermes/__init__.py")
@@ -454,7 +455,7 @@ jobs:
           spec.loader.exec_module(plugin)
           assert callable(plugin.register)
           PY
-          .venv-hermes/bin/python -m pytest tests/agents/hermes -p no:cacheprovider -rs
+          "$HERMES_PYTHON" -m pytest tests/agents/hermes -p no:cacheprovider -rs
 
       # Informational: a fresh advisory reports without failing the job.
       - name: Audit dependencies for known vulnerabilities (informational)
