@@ -149,7 +149,7 @@ export class MachineAccessor extends Accessor {
     signal?: AbortSignal,
   ): AsyncGenerator<Uint8Array> {
     const handle = this.handle(machine)
-    await handle.ensureConnected()
+    await handle.ensureConnected(signal)
     yield* handle.streamLine(command, { ...handle.config.env }, '/', failed, signal)
   }
 
