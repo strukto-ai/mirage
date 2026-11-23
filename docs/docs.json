@@ -134,6 +134,13 @@
                 ]
               },
               {
+                "group": "Personal Agents",
+                "icon": "user",
+                "pages": [
+                  "home/agents/hermes"
+                ]
+              },
+              {
                 "group": "Access",
                 "icon": "plug",
                 "pages": [
