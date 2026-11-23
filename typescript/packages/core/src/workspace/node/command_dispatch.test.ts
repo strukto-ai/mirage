@@ -1133,4 +1133,16 @@ describe('a pipe between machines', () => {
     expect(b.ran).toEqual(['sink'])
     await ws.close()
   })
+
+  it("lands a handed reader's redirect on its writer's machine", async () => {
+    const a = new FakeFiles({}, ['uname'])
+    const b = new FakeFiles({}, ['gen', 'uname'])
+    b.dirs.add('/srv/b')
+    const ws = two(a, b, { '/srv/b': '@b' })
+    const done = await ws.shell('gen | uname -s > /srv/b/out')
+    expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([0, ''])
+    expect([a.ran, b.ran]).toEqual([[], ['gen', 'uname -s']])
+    expect(new TextDecoder().decode(b.files.get('/srv/b/out'))).toBe('ran\n')
+    await ws.close()
+  })
 })

@@ -26,6 +26,7 @@ import {
   askedMachines,
   chosen,
   commandMachine,
+  copyMachine,
   crossingRefused,
   existingHolders,
   holders,
@@ -76,22 +77,6 @@ import type { ConfigState, Handed } from '../types.ts'
 import { MachineVFSConfig } from './config.ts'
 
 /**
- * A machine's own files at a prefix, reached through the exec the workspace
- * already holds for the machine: what its programs read and write, without
- * serving or copying anything.
- *
- * Over several machines the mount shows one tree, as one machine would hold
- * it. A name several machines hold is the copy written last, for every look
- * at it and every change to it; a removal or a rename takes the name off
- * every machine; a new name lands where its folder is, on the machine the
- * command is about when that machine holds the folder; and a directory
- * lists every machine's entries once. No file is copied between machines to
- * keep them alike: a program opens its own machine's disk, whatever another
- * machine holds. `"@<machine>"` in a mount table is this VFS over that
- * machine at the same path, so Mirage and the machine's programs name a
- * file the same way. Mirrors Python's `MachineVFS`.
- */
-/**
  * Refuse bytes landing on a machine they may not go to (`refuseCrossing`),
  * closing what would have been written so its writer stops. Mirrors
  * Python's `_refuse_landing`.
@@ -116,6 +101,72 @@ async function refuseLanding(
   }
 }
 
+/**
+ * Land a copy made by a read and a write on its source's machine as a
+ * direct copy lands (`MachineVFS.copyFrom`): its folder made there when
+ * only another machine holds it, and no other machine's copy of the name
+ * left to show again. Mirrors Python's `_land_copy`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the source's machine.
+ * @param path the copy.
+ * @param data its bytes.
+ * @param atomic show nothing until the bytes have ended whole.
+ */
+async function landCopy(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+  data: ByteSource,
+  atomic: boolean,
+): Promise<void> {
+  let lacking: string[]
+  try {
+    lacking = await machinesLackingFolder(accessor, [machine], path)
+  } catch (err) {
+    await closeQuietly(data)
+    throw err
+  }
+  await machineWrite(accessor, machine, path, data, false, atomic, lacking.length > 0)
+  await dropOtherCopies(accessor, machine, path)
+}
+
+/**
+ * Take a name off every other machine holding it as a file, once its new
+ * copy has landed on `machine`, so an older copy never shows again.
+ * Mirrors Python's `_drop_other_copies`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the name landed on.
+ * @param path the name.
+ */
+async function dropOtherCopies(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<void> {
+  if (!accessor.several) return
+  for (const one of await holders(accessor, path)) {
+    if (one.machine !== machine && !one.isFolder) await machineUnlink(accessor, one.machine, path)
+  }
+}
+
+/**
+ * A machine's own files at a prefix, reached through the exec the workspace
+ * already holds for the machine: what its programs read and write, without
+ * serving or copying anything.
+ *
+ * Over several machines the mount shows one tree, as one machine would hold
+ * it. A name several machines hold is the copy written last, for every look
+ * at it and every change to it; a removal or a rename takes the name off
+ * every machine; a new name lands where its folder is, on the machine the
+ * command is about when that machine holds the folder; and a directory
+ * lists every machine's entries once. No file is copied between machines to
+ * keep them alike: a program opens its own machine's disk, whatever another
+ * machine holds. `"@<machine>"` in a mount table is this VFS over that
+ * machine at the same path, so Mirage and the machine's programs name a
+ * file the same way. Mirrors Python's `MachineVFS`.
+ */
 export class MachineVFS extends BaseVFS {
   override readonly name = VFSName.MACHINE
   // Programs change these files behind Mirage's back.
@@ -264,6 +315,10 @@ export class MachineVFS extends BaseVFS {
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
     await refuseLanding(this.accessor, machine, path, data)
+    if (copyMachine(this.accessor) === machine) {
+      await landCopy(this.accessor, machine, path, data, atomic)
+      return
+    }
     await machineWrite(this.accessor, machine, path, data, false, atomic)
   }
 
@@ -425,11 +480,7 @@ export class MachineVFS extends BaseVFS {
     await refuseHidden(this.accessor, machine, dst)
     const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
     await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
-    if (!this.accessor.several) return
-    for (const one of await holders(this.accessor, dst)) {
-      if (one.machine !== machine && !one.isFolder)
-        await machineUnlink(this.accessor, one.machine, dst)
-    }
+    await dropOtherCopies(this.accessor, machine, dst)
   }
 
   /**

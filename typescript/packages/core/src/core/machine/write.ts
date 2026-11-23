@@ -20,7 +20,7 @@ import type { ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { runChecked, machinePath } from './utils.ts'
+import { inFolder, runChecked, machinePath } from './utils.ts'
 
 /**
  * The line that writes what it is fed to a file: in place, at its end, or
@@ -49,6 +49,8 @@ export function writeCommand(target: string, append: boolean, atomic: boolean): 
  * @param data the bytes, consumed once.
  * @param append add them to the end instead.
  * @param atomic show nothing until the stream has ended whole.
+ * @param makeParent make the file's folder there first, when only another
+ *   machine holds it.
  */
 export async function write(
   accessor: MachineAccessor,
@@ -57,6 +59,7 @@ export async function write(
   data: ByteSource,
   append = false,
   atomic = false,
+  makeParent = false,
 ): Promise<void> {
   if (!accessor.handle(machine).takesInput) {
     await closeQuietly(data)
@@ -71,7 +74,8 @@ export async function write(
     }
   }
   try {
-    const command = writeCommand(machinePath(accessor, path), append, atomic)
+    const target = machinePath(accessor, path)
+    const command = inFolder(writeCommand(target, append, atomic), target, makeParent)
     await runChecked(accessor, machine, command, path, counted())
   } finally {
     await closeQuietly(data)

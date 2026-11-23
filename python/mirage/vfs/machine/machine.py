@@ -89,6 +89,62 @@ async def _refuse_landing(
         raise
 
 
+async def _land_copy(
+    accessor: MachineAccessor,
+    machine: str,
+    path: PathSpec,
+    data: ByteSource,
+    atomic: bool,
+) -> None:
+    """Land a copy made by a read and a write on its source's machine as
+    a direct copy lands (``MachineVFS.copy_from``): its folder made there
+    when only another machine holds it, and no other machine's copy of
+    the name left to show again.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the source's machine.
+        path (PathSpec): the copy.
+        data (ByteSource): its bytes.
+        atomic (bool): show nothing until the bytes have ended whole.
+    """
+    try:
+        lacking = await place.machines_lacking_folder(
+            accessor, [machine], path
+        )
+    except BaseException:
+        await close_quietly(data)
+        raise
+    await _write(
+        accessor,
+        machine,
+        path,
+        data,
+        atomic=atomic,
+        make_parent=bool(lacking),
+    )
+    await _drop_other_copies(accessor, machine, path)
+
+
+async def _drop_other_copies(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> None:
+    """Take a name off every other machine holding it as a file, once its
+    new copy has landed on ``machine``, so an older copy never shows
+    again.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the name landed on.
+        path (PathSpec): the name.
+    """
+    if not accessor.several:
+        return
+    for one in await place.holders(accessor, path):
+        if one.machine != machine and not one.is_folder:
+            await _unlink(accessor, one.machine, path)
+
+
 class MachineVFS(BaseVFS):
     """A machine's own files at a prefix, reached through the exec the
     workspace already holds for the machine: what its programs read and
@@ -244,6 +300,9 @@ class MachineVFS(BaseVFS):
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
         await _refuse_landing(self.accessor, machine, path, data)
+        if place.copy_machine(self.accessor) == machine:
+            await _land_copy(self.accessor, machine, path, data, atomic)
+            return
         await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
@@ -430,11 +489,7 @@ class MachineVFS(BaseVFS):
             dst,
             make_parent=bool(lacking),
         )
-        if not self.accessor.several:
-            return
-        for one in await place.holders(self.accessor, dst):
-            if one.machine != machine and not one.is_folder:
-                await _unlink(self.accessor, one.machine, dst)
+        await _drop_other_copies(self.accessor, machine, dst)
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a folder one machine holds, on that machine. A folder

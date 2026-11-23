@@ -684,3 +684,21 @@ async def test_a_copy_by_a_read_and_a_write_keeps_its_bytes_on_their_machine():
     assert await run(ws, "cp /srv/a/k /tmp/k") == (0, "", "")
     assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"key\n", False)
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_copy_by_a_read_and_a_write_lands_as_a_direct_copy_does():
+    a = FakeFiles({"/srv/a/k": b"new\n"})
+    b = FakeFiles({"/tmp/k": b"old\n"})
+    b.dirs.add("/tmp/only")
+    b.written["/tmp/k"] = 2 * 10**9
+    ws = two(a, b, mounts={"/srv/a": "@a"}, policies=[Judged()])
+    assert await run(ws, "cp /srv/a/k /tmp/only/k") == (0, "", "")
+    assert (a.files["/tmp/only/k"], "/tmp/only/k" in b.files) == (
+        b"new\n",
+        False,
+    )
+    assert await run(ws, "cp /srv/a/k /tmp/k") == (0, "", "")
+    assert "/tmp/k" not in b.files
+    assert await run(ws, "cat /tmp/k") == (0, "new\n", "")
+    await ws.close()

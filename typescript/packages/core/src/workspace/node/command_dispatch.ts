@@ -1247,10 +1247,6 @@ async function runArgv(
       )
     }
     machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-    if (byPath || handed) {
-      const [held] = await heldMachine(argv, deps, context, stdin)
-      if (held?.runtime) machine = held.runtime.machine
-    }
     const preferred = await preferredMachine(
       session,
       registry,
@@ -1261,6 +1257,15 @@ async function runArgv(
       context.frame.folderHolders,
     )
     const outer = currentCaller()
+    if (byPath || handed) {
+      const [held] =
+        preferred === outer.preferredMachine
+          ? await heldMachine(argv, deps, context, stdin)
+          : await bindCaller({ ...outer, preferredMachine: preferred }, () =>
+              heldMachine(argv, deps, context, stdin),
+            )
+      if (held?.runtime) machine = held.runtime.machine
+    }
     if (
       (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
       preferred === outer.preferredMachine

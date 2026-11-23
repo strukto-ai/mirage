@@ -1290,13 +1290,6 @@ async def _run_argv(
         machine = _running_machine(
             name, argv.args, session, registry, context.frame.routing
         )
-        if by_path or handed:
-            held, _ = await _held_machine(argv, deps, context, stdin)
-            machine = (
-                machine
-                if held is None or held.runtime is None
-                else held.runtime.machine
-            )
         preferred = await preferred_machine(
             session,
             registry,
@@ -1307,6 +1300,22 @@ async def _run_argv(
             context.frame.folder_holders,
         )
         caller = current_caller()
+        if by_path or handed:
+            asking = (
+                bind_caller(caller.changed({"preferred_machine": preferred}))
+                if preferred != caller.preferred_machine
+                else None
+            )
+            try:
+                held, _ = await _held_machine(argv, deps, context, stdin)
+            finally:
+                if asking is not None:
+                    reset_caller(asking)
+            machine = (
+                machine
+                if held is None or held.runtime is None
+                else held.runtime.machine
+            )
         staged = (
             bind_caller(
                 caller.changed(

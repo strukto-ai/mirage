@@ -18,21 +18,7 @@ import { singleQuote } from '../../utils/quote.ts'
 import { COPIED } from '../posix/constants.ts'
 import { copyTreeCommand } from '../posix/copy.ts'
 import { refusal } from '../posix/errors.ts'
-import { runChecked, machinePath } from './utils.ts'
-
-/**
- * A copy's line, the new name's folder made first when asked.
- *
- * @param line the copy.
- * @param target the new name's path on the machine.
- * @param makeParent make its folder there first.
- */
-function inFolder(line: string, target: string, makeParent: boolean): string {
-  if (!makeParent) return line
-  const cut = target.lastIndexOf('/')
-  const parent = cut > 0 ? target.slice(0, cut) : '/'
-  return `mkdir -p -- ${singleQuote(parent)} && ${line}`
-}
+import { inFolder, runChecked, machinePath } from './utils.ts'
 
 /**
  * Copy a file on the source's machine.

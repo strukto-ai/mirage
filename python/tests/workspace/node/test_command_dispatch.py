@@ -1172,3 +1172,16 @@ async def test_the_pipe_check_judges_the_input_and_machine_a_reader_ends_with():
     assert await routed.stderr_str() == "sink: Permission denied\n"
     assert b.ran == ["sink"]
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_handed_reader_s_redirect_lands_on_its_writer_s_machine():
+    a = FakeFiles(programs=("uname",))
+    b = FakeFiles(programs=("gen", "uname"))
+    b.dirs.add("/srv/b")
+    ws = two(a, b, mounts={"/srv/b": "@b"})
+    done = await ws.shell("gen | uname -s > /srv/b/out")
+    assert (done.exit_code, await done.stderr_str()) == (0, "")
+    assert (a.ran, b.ran) == ([], ["gen", "uname -s"])
+    assert b.files["/srv/b/out"] == b"ran\n"
+    await ws.close()
