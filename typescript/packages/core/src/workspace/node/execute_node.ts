@@ -175,9 +175,13 @@ async function recurseReassociated(
   callStack: CallStack | null,
   opts?: ExecuteNodeOpts,
 ): Promise<RedirectResult> {
-  if (node.id !== right.id) return recurse(node, context, stdin, callStack, opts)
+  const bound = opts?.sink === undefined ? deps : { ...deps, sink: opts.sink }
+  if (node.id !== right.id) {
+    const through = bound.sink === undefined ? opts : { ...opts, sink: bound.sink }
+    return recurse(node, context, stdin, callStack, through)
+  }
   return runRedirected(
-    opts?.sink === undefined ? deps : { ...deps, sink: opts.sink },
+    bound,
     recurse,
     right,
     withOwnRedirects(right, redirects),
@@ -245,7 +249,16 @@ async function recurseStage(
   if (targets.includes(node)) {
     bound.push(new Redirect({ fd: 2, target: 1, kind: RedirectKind.STDERR_TO_STDOUT }))
   }
-  return runRedirected(deps, recurse, node, bound, processes, context, stdin, callStack)
+  return runRedirected(
+    opts?.sink === undefined ? deps : { ...deps, sink: opts.sink },
+    recurse,
+    node,
+    bound,
+    processes,
+    context,
+    stdin,
+    callStack,
+  )
 }
 
 /**
@@ -397,12 +410,7 @@ async function runRedirected(
     // and subshell bodies keep the whole-body redirect (bash group
     // semantics).
     const [left, op, right] = getListParts(command)
-    let bare = deps
-    if (deps.sink !== undefined) {
-      bare = { ...deps }
-      delete bare.sink
-    }
-    const wrapped = recurseReassociated.bind(null, bare, recurse, redirects, right, processes)
+    const wrapped = recurseReassociated.bind(null, deps, recurse, redirects, right, processes)
     return handleConnection(
       wrapped,
       left,
@@ -416,13 +424,8 @@ async function runRedirected(
     )
   }
   if (command !== null && command.type === NT.PIPELINE) {
-    let bare = deps
-    if (deps.sink !== undefined) {
-      bare = { ...deps }
-      delete bare.sink
-    }
     return runPipeline(
-      bare,
+      deps,
       recurse,
       getPipelineStages(command, redirects),
       context,

@@ -1834,6 +1834,21 @@
         "stdout": "a=1\nb=0\nc=1\n",
         "stderr": "bash: line 1: /dev/fd/0: No such file or directory\nbash: line 1: /dev/stdout: No such file or directory\n"
       }
+    },
+    {
+      "id": "a_redirected_group_cut_short_keeps_what_it_printed",
+      "seq": 1380038,
+      "targets": [
+        "ram",
+        "disk",
+        "opfs"
+      ],
+      "command": "timeout 1 bash -c '{ echo d; sleep 3; } 2>&1'; echo \"rc=$?\"; timeout 1 bash -c 'for i in 1 2; do echo \"i$i\"; sleep 3; done 2>&1'; echo \"rc=$?\"; timeout 1 bash -c '( echo s; sleep 3 ) 2>/dev/null'; echo \"rc=$?\"; timeout 1 bash -c 'true && { echo t; sleep 3; } 2>&1'; echo \"rc=$?\"; timeout 1 bash -c 'echo x | { echo p; sleep 3; } 2>&1'; echo \"rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "d\nrc=124\ni1\nrc=124\ns\nrc=124\nt\nrc=124\np\nrc=124\n",
+        "stderr": ""
+      }
     }
   ]
 }

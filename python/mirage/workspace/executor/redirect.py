@@ -213,9 +213,10 @@ _Input = ByteSource | None | _Unreadable
 class PipeRecorder(Recorder):
     """Send FIFO writes immediately; preserve ordinary redirect recording.
 
-    While a pipe is in play (``live``), terminal output goes out as it is
-    written, through a copied descriptor too, so it keeps the command's
-    order. A write into a pipe whose reader has gone raises ``PipeClosed``.
+    While ``live``, terminal output goes out as it is written, through a
+    copied descriptor too, so it keeps the command's order and a command
+    cut short has shown what it wrote. A write into a pipe whose reader
+    has gone raises ``PipeClosed``.
     A channel ``stream_to`` binds goes into its file as it is written;
     two channels bound to one description share its writer, so they keep
     their order (``> f 2>&1``).
@@ -225,7 +226,7 @@ class PipeRecorder(Recorder):
         streams (dict[Channel, PathSpec]): channels bound to output pipes.
         forward (dict[Channel, Channel]): terminal channels sent through.
         sink (JobConsole | None): where the level writes.
-        live (bool): whether any input or output of the level is a pipe.
+        live (bool): whether terminal output goes out as it is written.
     """
 
     def __init__(
@@ -841,7 +842,7 @@ def _output_recorder(
     dispatch: DispatchFn,
     outputs: dict[int, _FdDest],
     files: list[FileDescription],
-    piped: set[int],
+    deferred: FileDescription | None,
     sink: JobConsole | None,
     command: TSNodeLike | None,
     follow: Callable[[str], str] | None,
@@ -853,7 +854,8 @@ def _output_recorder(
         dispatch (DispatchFn): the session's op dispatcher.
         outputs (dict[int, _FdDest]): where each descriptor writes.
         files (list[FileDescription]): the files the redirections opened.
-        piped (set[int]): the descriptors reading a pipe.
+        deferred (FileDescription | None): the final target the write
+            of an output-only command opens.
         sink (JobConsole | None): the enclosing console, if any.
         command (TSNodeLike | None): the redirected command, if any.
         follow (Callable[[str], str] | None): resolves a path's links.
@@ -870,7 +872,8 @@ def _output_recorder(
             )
         elif isinstance(target, FileDescription) and target.pipe:
             streams[channel] = target.scope
-    live = bool(streams) or bool(piped)
+    # Held for a deferred open: bash never runs a command whose open fails.
+    live = deferred is None
     recorder = PipeRecorder(
         dispatch, streams, forward if live else {}, sink, live
     )
@@ -1582,10 +1585,17 @@ async def _handle_redirect(
         if failure is not None:
             return failure
     redirects = expanded
-    files, piped, targets = opened.files, opened.piped, opened.targets
+    files, targets = opened.files, opened.targets
 
     recorder = _output_recorder(
-        dispatch, outputs, files, piped, sink, command, follow, session
+        dispatch,
+        outputs,
+        files,
+        opened.deferred,
+        sink,
+        command,
+        follow,
+        session,
     )
     unwound: Exception | None = None
     refused = False

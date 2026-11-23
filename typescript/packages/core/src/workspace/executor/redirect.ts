@@ -154,11 +154,11 @@ const STREAM_OUTPUT_BUILTINS = new Set([
 ])
 
 /**
- * Send FIFO writes immediately; preserve ordinary redirect recording. While a
- * pipe is in play (`live`), terminal output goes out as it is written, through
- * a copied descriptor too, so it keeps the command's order. A write into a
- * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
- * PipeRecorder.
+ * Send FIFO writes immediately; preserve ordinary redirect recording. While
+ * `live`, terminal output goes out as it is written, through a copied
+ * descriptor too, so it keeps the command's order and a command cut short has
+ * shown what it wrote. A write into a pipe whose reader has gone throws
+ * `PipeClosed`. Mirrors Python's PipeRecorder.
  */
 export class PipeRecorder extends Recorder {
   // A channel `streamTo` binds goes into its file as it is written; two
@@ -663,7 +663,7 @@ function outputRecorder(
   dispatch: DispatchFn,
   outputs: Map<number, FdDest>,
   files: readonly FileDescription[],
-  piped: ReadonlySet<number>,
+  deferred: FileDescription | null,
   sink: JobConsole | undefined,
   command: TSNodeLike | null,
   follow: ((path: string) => string) | null,
@@ -680,7 +680,8 @@ function outputRecorder(
     else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
     else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
   }
-  const live = streams.size > 0 || piped.size > 0
+  // Held for a deferred open: bash never runs a command whose open fails.
+  const live = deferred === null
   const recorder = new PipeRecorder(
     dispatch,
     streams,
@@ -1195,7 +1196,7 @@ async function runRedirects(
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   const [inputs, outputs, closed] = openDescriptors(context, stdin)
   const opened = new Opened(dispatch, session, sink, stdin, inputs, outputs, closed)
-  const { files, piped, targets } = opened
+  const { files, targets } = opened
   const expanded: Redirect[] = []
   const admissionStdin =
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
@@ -1250,7 +1251,16 @@ async function runRedirects(
     if (failure !== null) return failure
   }
   redirects = expanded
-  const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow, session)
+  const recorder = outputRecorder(
+    dispatch,
+    outputs,
+    files,
+    opened.deferred,
+    sink,
+    command,
+    follow,
+    session,
+  )
   const streamed: Caller['streamed'] = [
     ...currentCaller().streamed,
     ...[...new Set(recorder.bound.values())].map(
