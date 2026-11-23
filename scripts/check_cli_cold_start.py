@@ -47,6 +47,7 @@ PY_HEAVY = (
     "mirage.vfs.base",
     "mirage.config",
     "mirage.agents",
+    "mirage.environments",
     "mirage.server.app",
     "fastapi",
     "aioboto3",

@@ -441,7 +441,7 @@ needs both outputs.
 
 ```mermaid
 flowchart LR
-    PY["python/**<br/>minus server, cli, agents"] --> battery & hosting
+    PY["python/**<br/>minus server, cli, agents, environments"] --> battery & hosting
     SRV["python/mirage/server"] --> hosting
     TSX["typescript/**<br/>core · node · browser"] --> ts & battery & hosting & cloudflare & database
     SRVTS["server package"] --> ts & hosting & cloudflare
@@ -503,7 +503,8 @@ The `src/clis/` entries that install ast-grep, gh, office and the PDF tools
 reaches them through the runners and Node's entry points, the browser job
 through `integ/browser/suite.ts`, and the cloudflare job through the test
 Worker's imports.
-The agent adapter packages, `openai-agents` among them, select no job.
+The agent adapter packages, `openai-agents` among them, and the environment
+adapters under `python/mirage/environments` select no job.
 Rust filename sanitization (`rust/mirage-rs/src/sanitize.rs`), its mirrored
 `utils/sanitize` adapters, `core/generic/types`, and the condition `errors`
 modules stay under the same whole-host Python and TypeScript filters.

@@ -5,7 +5,7 @@ description: Connect a coding agent or an agent framework to a Mirage workspace.
 icon: robot
 ---
 
-Connect an agent in one of three ways. Every call it makes through Mirage goes
+Connect an agent in one of four ways. Every call it makes through Mirage goes
 through its mounts, modes and policy.
 
 ## Coding agents
@@ -49,3 +49,12 @@ shell and file tools run in Mirage.
 | --- | --- | --- |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenAI Agents API](/python/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/home/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Managed Agents](/python/agents/claude-managed-agents) | `mirage_tools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |
+
+## RL & eval environments
+
+A trainer or an eval runner drives the agent, and each episode gets its own
+copy of the workspace.
+
+| Framework | Hand it | The agent gets |
+| --- | --- | --- |
+| <span style={{ whiteSpace: 'nowrap' }}><img noZoom src="/images/openenv-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenEnv](/python/environments/openenv)</span> | `MirageOpenEnv(ws)` | Mirage's seven tools as structured actions, plus every `vfs_<call>` over MCP |

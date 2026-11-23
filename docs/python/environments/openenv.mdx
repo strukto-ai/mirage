@@ -1,0 +1,174 @@
+---
+title: OpenEnv in Python
+sidebarTitle: OpenEnv
+description: Train agents with OpenEnv on a Mirage workspace, with a fresh copy of the workspace for every episode.
+icon: /images/openenv-logo.svg
+---
+
+[OpenEnv](https://github.com/openenv/OpenEnv) is a Gym-style interface for agentic reinforcement learning: an environment answers `reset()` and `step()`, and training libraries such as Hugging Face TRL, Unsloth and SkyRL drive it over HTTP, WebSocket or MCP. `MirageOpenEnv` is an OpenEnv environment backed by a Mirage workspace. Each episode gets its own copy of the workspace, so a reset takes a snapshot, not a container, and the agent's shell and file calls run under the workspace's mounts and the session's profile.
+
+## Install
+
+```bash
+uv add mirage-ai "openenv @ git+https://github.com/openenv/OpenEnv"
+```
+
+This installs OpenEnv from its main branch because the latest release on PyPI, 0.14.0, needs `mcp<2` and Mirage needs `mcp>=2.3`. OpenEnv's main branch already supports `mcp` 2. Once an OpenEnv release supports `mcp>=2.3`, install it from PyPI instead:
+
+```bash
+uv add mirage-ai openenv
+```
+
+## Usage
+
+```python
+import asyncio
+
+from openenv.core.env_server.types import Action, Observation
+
+from mirage import MountMode, RAMVFS, Workspace
+from mirage.environments.openenv import MirageAction, MirageOpenEnv
+from mirage.workspace.workspace import Session
+
+base = Workspace(
+    {"/repo": RAMVFS()},
+    mode=MountMode.WRITE,
+    profiles={"default": {"commands": {"rm": "deny"}}},
+)
+
+
+async def reward(session: Session, action: Action, observation: Observation) -> float:
+    return 1.0 if await session.vfs.exists("/repo/answer.txt") else 0.0
+
+
+async def main() -> None:
+    await base.shell("printf 'a\\nb\\nc\\n' > /repo/lines.txt")
+    env = MirageOpenEnv(base, reward=reward, max_steps=8)
+    await env.reset_async(seed=0)
+    obs = await env.step_async(
+        MirageAction(tool="shell", arguments={"command": "wc -l < /repo/lines.txt > /repo/answer.txt"})
+    )
+    print(obs.exit_code, obs.reward, obs.done)
+    obs = await env.step_async(
+        MirageAction(tool="shell", arguments={"command": "rm /repo/lines.txt"})
+    )
+    print(obs.exit_code, obs.refusal.reason)
+    await env.aclose()
+    await base.close()
+
+
+asyncio.run(main())
+```
+
+Output:
+
+```text
+0 1.0 False
+126 rm is not allowed
+```
+
+The next `reset_async()` starts from a new copy of `base`, so `answer.txt` is gone and `base` never changes.
+
+## Episodes
+
+- `MirageOpenEnv(ws)` copies `ws` for every episode with [`ws.copy()`](/python/access/in-app#workspace-methods). RAM and disk mounts are rebuilt from the workspace's state, so an episode's writes never reach `ws`. Remote mounts such as S3 are shared with `ws`, so an episode's writes to them do.
+- A copy keeps `ws`'s profiles, so a profile's `deny` rules refuse in every episode. It does not keep `ws`'s `policies=[...]` instances, which hold state. To refuse with a policy instance, build each episode's workspace with `factory=`, with fresh instances.
+- `MirageOpenEnv(factory=build)` builds every episode's workspace with `await build(spec)` instead. `spec` is an `EpisodeSpec` with the reset's `episode_id`, `seed` and every other reset parameter in `options`, such as a task's split and index.
+- `setup=` runs `await setup(session, spec)` after the episode's workspace is built, to write the task's files.
+- `profile=` runs the agent as a session created under that [profile](/home/configuration/session), named by the episode id. Without it, the agent acts as the workspace's default session.
+- An action sent before the first reset starts an episode, as `reset()` would.
+
+## Actions and observations
+
+`MirageAction(tool=..., arguments=...)` names one of Mirage's seven tools, `shell`, `read`, `write`, `edit`, `ls`, `grep` or `glob`, with that tool's MCP input. The arguments are checked against the tool's schema when the action is built, so an OpenEnv server answers a malformed action with a validation error.
+
+`MirageObservation` reports:
+
+| Field | Meaning |
+| --- | --- |
+| `stdout`, `stderr` | The shell line's streams. A file tool's answer is its stdout, or its stderr when it failed. |
+| `exit_code` | The status. A failed file tool answers 1, a timeout 124, and a tool the session's profile does not offer 126. |
+| `refusal` | Why a policy refused the shell line: `kind`, `reason`, `policy` and `ask_id`. |
+| `timed_out` | Whether the action ran past `timeout_s`. The session keeps working. |
+| `cwd` | The session's working directory. `cd` carries across steps. |
+| `reward`, `done` | Set by the hooks below. |
+
+`env.state` is a `MirageState` with the episode's `episode_id`, `step_count`, `seed`, `workspace_id`, `session_id` and `cwd`.
+
+## Rewards
+
+- `reward=` scores each step with `await reward(session, action, observation)`. The session reads the files the step changed.
+- `rubric=` takes an OpenEnv `Rubric` and scores with it when `reward=` is not set. A reset resets the rubric.
+- `done=` ends the episode when `await done(session, action, observation)` is true, and `max_steps=` ends it after that many steps.
+- `timeout_s=` sets the default time limit of one action, and `step(action, timeout_s=...)` sets the limit of one step. A `MirageAction` has no limit without either. A `CallToolAction` without either gets OpenEnv's MCP default of 30 seconds. A limit that is zero, negative or not finite raises `ValueError`.
+
+A hook that raises fails the step: the exception reaches the caller.
+
+## MCP
+
+`step()` also takes OpenEnv's `ListToolsAction` and `CallToolAction`. They reach the episode's session through Mirage's MCP server in process, which serves the seven tools and every VFS call as a `vfs_<call>` tool, such as `vfs_stat` and `vfs_readdir`. A tool call counts as a step and gets a reward. Listing the tools does not.
+
+An MCP client that the OpenEnv server holds open, such as `env.mcp_session()`, follows the episode across resets.
+
+A trainer that uses OpenEnv's `MCPToolClient` gets a tool's text back from `call_tool()`, as it would from a FastMCP tool that returns a string, and a failed call raises `RuntimeError`. Calls that come in on the server's `/mcp` JSON-RPC route reach the tools without going through `step()`, so they get no reward, `done` or step count.
+
+To use a workspace that a Mirage server holds, point `MirageServerEnv` at its `/v1/workspaces/{id}/mcp` endpoint:
+
+```python
+from mirage.environments.openenv import MirageServerEnv
+
+env = MirageServerEnv("http://127.0.0.1:8765", workspace_id, token=token)
+```
+
+The server keeps the workspace, so `reset()` starts a new step count and rubric trajectory, but the files stay as they are. `mirage_server_transport()` returns the same endpoint as a FastMCP transport.
+
+## Serve it
+
+OpenEnv's `create_app` serves the environment to trainers over HTTP and WebSocket. Each WebSocket session gets its own `MirageOpenEnv`, and so its own episode workspace:
+
+```python
+from openenv.core.env_server.http_server import create_app
+
+from mirage.environments.openenv import MirageAction, MirageObservation, MirageOpenEnv, MirageState
+
+app = create_app(
+    lambda: MirageOpenEnv(base),
+    MirageAction,
+    MirageObservation,
+    env_name="mirage",
+    max_concurrent_envs=8,
+    state_cls=MirageState,
+)
+```
+
+For MCP-style clients such as OpenEnv's `MCPToolClient`, pass `CallToolAction` and `CallToolObservation` instead of `MirageAction` and `MirageObservation`.
+
+## Sync and async
+
+The async methods `reset_async`, `step_async` and `aclose` do the work. `reset`, `step` and `close` run them on one event loop that the environment owns, and refuse to run on that loop: inside `async` code, await the async method. `close()` and `aclose()` close the episode's workspace and leave the base workspace open for its owner. After that, `reset` and `step` raise `RuntimeError`.
+
+## Exports
+
+{/* generated: exports openenv start */}
+| Symbol | Purpose |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageOpenEnv</code> | A Mirage workspace as an OpenEnv environment. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageAction</code> | One call into the episode's session: a shell line or one of Mirage's file tools, with the tool's MCP input. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageObservation</code> | What one action left: its output, its status and the session's working directory after it. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageState</code> | The episode the environment is in. |
+| <code style={{ whiteSpace: 'nowrap' }}>Refusal</code> | Why Mirage's policy refused a shell line, beside its stderr. |
+| <code style={{ whiteSpace: 'nowrap' }}>EpisodeSpec</code> | The reset request an episode starts from. |
+| <code style={{ whiteSpace: 'nowrap' }}>WorkspaceFactory</code> | Builds the workspace an episode runs in, once per reset. |
+| <code style={{ whiteSpace: 'nowrap' }}>SetupHook</code> | Prepares an episode's session after reset builds it. |
+| <code style={{ whiteSpace: 'nowrap' }}>RewardHook</code> | Scores one step, with the session to inspect what it changed. |
+| <code style={{ whiteSpace: 'nowrap' }}>DoneHook</code> | Says whether a step ended the episode. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageServerEnv</code> | A workspace a Mirage server holds, as an OpenEnv MCP environment. |
+| <code style={{ whiteSpace: 'nowrap' }}>MirageMCPTransport</code> | An in-process MCP connection to a low-level MCP server, such as ``MirageMcpServer(ws).server``. |
+| <code style={{ whiteSpace: 'nowrap' }}>mirage_server_transport</code> | The MCP endpoint of a workspace a Mirage server holds, ``/v1/workspaces/{id}/mcp``, as a FastMCP transport. |
+| <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
+| <code style={{ whiteSpace: 'nowrap' }}>build_system_prompt</code> | Build a system prompt with optional mount info and extra instructions. |
+{/* generated: exports openenv end */}
+
+## Examples
+
+- [`openenv_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/environments/openenv/openenv_example.py) runs two episodes over one base workspace, with a reward hook, a policy refusal and MCP tool calls.

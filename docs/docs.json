@@ -517,6 +517,13 @@
                   "python/agents/openai-agents-api",
                   "python/agents/claude-managed-agents"
                 ]
+              },
+              {
+                "group": "RL & Eval Environments",
+                "icon": "dumbbell",
+                "pages": [
+                  "python/environments/openenv"
+                ]
               }
             ]
           },
