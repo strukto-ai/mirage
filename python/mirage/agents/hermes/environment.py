@@ -14,18 +14,77 @@
 
 import asyncio
 import logging
+import os
 import threading
+from collections.abc import Callable
 from functools import partial
+from typing import TextIO
 
 from tools.environments.base import BaseEnvironment
-from tools.environments.base_output import _ThreadedProcessHandle
 
 from mirage.agents.hermes.constants import SESSION_PREFIX
+from mirage.utils.abort import MirageAbortError
 from mirage.workspace.session.session import SessionState
-from mirage.workspace.tools.io_text import with_decision
+from mirage.workspace.tools.io_text import decision_line
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+
+
+class LineProcess:
+    """The process handle hermes waits on for one Mirage line.
+
+    hermes polls ``poll()``, drains ``stdout`` and calls ``kill()`` on a
+    timeout or interrupt. The line runs on a worker thread and writes
+    its output to the pipe as it prints, so what a cancelled line
+    printed still reaches hermes.
+
+    Args:
+        run (Callable[[LineProcess], int]): Runs the line, writing its
+            output through ``write``, and returns its exit status.
+        cancel (Callable[[], None]): Cancels the running line.
+    """
+
+    def __init__(
+        self, run: Callable[["LineProcess"], int], cancel: Callable[[], None]
+    ) -> None:
+        read_fd, self._write_fd = os.pipe()
+        self.stdout: TextIO = os.fdopen(
+            read_fd, "r", encoding="utf-8-sig", errors="replace"
+        )
+        self.returncode: int | None = None
+        self.ended_with_newline = True
+        self._cancel = cancel
+        self._done = threading.Event()
+        threading.Thread(target=self._work, args=(run,), daemon=True).start()
+
+    def _work(self, run: Callable[["LineProcess"], int]) -> None:
+        try:
+            self.returncode = run(self)
+        finally:
+            os.close(self._write_fd)
+            self._done.set()
+
+    def write(self, data: bytes) -> None:
+        """Hand output to hermes; dropped once hermes stops reading."""
+        if data:
+            self.ended_with_newline = data.endswith(b"\n")
+        view = memoryview(data)
+        try:
+            while view:
+                view = view[os.write(self._write_fd, view) :]
+        except OSError as exc:
+            logger.debug("hermes stopped reading a mirage line: %r", exc)
+
+    def poll(self) -> int | None:
+        return self.returncode if self._done.is_set() else None
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        self._done.wait(timeout)
+        return self.returncode
+
+    def kill(self) -> None:
+        self._cancel()
 
 
 class MirageEnvironment(BaseEnvironment):
@@ -108,34 +167,47 @@ class MirageEnvironment(BaseEnvironment):
         login: bool = False,
         timeout: int = 120,
         stdin_data: str | None = None,
-    ) -> _ThreadedProcessHandle:
-        line = f"{{ {cmd_string}\n}} 2>&1"
+    ) -> LineProcess:
         stdin = stdin_data.encode() if stdin_data else None
         cancel = asyncio.Event()
 
-        async def run(session_id: str) -> tuple[str, int]:
-            io = await self._ws.shell(
-                line, session_id=session_id, stdin=stdin, cancel=cancel
+        async def run(session_id: str, process: LineProcess) -> int:
+            execution = await self._ws.shell(
+                cmd_string,
+                session_id=session_id,
+                stdin=stdin,
+                cancel=cancel,
+                stream=True,
             )
-            output = await io.stdout_str() + await io.stderr_str()
-            return with_decision(output, io.decision), io.exit_code
+            async with execution:
+                async for event in execution.events:
+                    await asyncio.to_thread(process.write, event.data)
+                result = await execution.wait()
+            note = decision_line(result.decision)
+            if note:
+                lead = "" if process.ended_with_newline else "\n"
+                await asyncio.to_thread(
+                    process.write, f"{lead}{note}".encode()
+                )
+            return result.exit_code
 
-        def execute() -> tuple[str, int]:
+        def execute(process: LineProcess) -> int:
             try:
                 session_id = self._acquire()
                 try:
                     return self._ws._run_sync(
-                        partial(run, session_id), "shell"
+                        partial(run, session_id, process), "shell"
                     )
                 finally:
                     self._release(session_id)
+            except MirageAbortError:
+                return 130
             except Exception as exc:
                 logger.debug("mirage line failed: %r", exc)
-                return f"mirage: {exc}\n", 1
+                process.write(f"mirage: {exc}\n".encode())
+                return 1
 
-        return _ThreadedProcessHandle(
-            execute, cancel_fn=partial(self._cancel, cancel)
-        )
+        return LineProcess(execute, partial(self._cancel, cancel))
 
     def cleanup(self) -> None:
         with self._lock:

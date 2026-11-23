@@ -18,6 +18,18 @@
       "supports_pty"
     ]
   },
+  "python/mirage/agents/hermes/environment.py": {
+    "reason": "hermes' BaseEnvironment hook, which its execute() and init_session() call.",
+    "names": [
+      "_run_bash"
+    ]
+  },
+  "python/mirage/agents/hermes/provider.py": {
+    "reason": "A class flag of hermes' TerminalEnvironmentProvider, which hermes reads when it picks a starting directory.",
+    "names": [
+      "default_cwd"
+    ]
+  },
   "python/mirage/environments/openenv/env.py": {
     "reason": "OpenEnv's MCPEnvironment hooks and class flags, which its server and base class call and read.",
     "names": [

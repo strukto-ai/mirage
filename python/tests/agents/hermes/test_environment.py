@@ -77,6 +77,12 @@ def test_timeout_cancels_the_mirage_line(env):
     assert env.execute("test -e /data/late")["returncode"] == 1
 
 
+def test_a_timed_out_command_keeps_what_it_printed(env):
+    result = env.execute("echo diagnostic; sleep 5", timeout=1)
+    assert result["returncode"] == 124
+    assert "diagnostic" in result["output"], result
+
+
 def test_background_job_is_polled_to_its_exit(env):
     registry = ProcessRegistry()
     session = registry.spawn_via_env(env, "sleep 1; echo done", cwd="/data")
