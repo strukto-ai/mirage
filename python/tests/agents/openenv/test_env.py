@@ -385,6 +385,33 @@ async def test_a_reset_waits_for_the_step_it_replaces():
 
 
 @pytest.mark.asyncio
+async def test_a_tool_call_runs_in_the_episode_its_step_started_in():
+    async def setup(session: Session, spec: EpisodeSpec) -> None:
+        await session.vfs.write("/data/id", f"{spec.episode_id}\n".encode())
+
+    env = MirageOpenEnv(factory=Factory(), setup=setup)
+    await env.reset_async(episode_id="first")
+    step = asyncio.create_task(
+        env.step_async(
+            CallToolAction(
+                tool_name="shell",
+                arguments={"command": "sleep 0.1; cat /data/id"},
+            )
+        )
+    )
+    await asyncio.sleep(0)
+    reset = asyncio.create_task(env.reset_async(episode_id="second"))
+    called = await step
+    await reset
+    state = env.state
+    await env.aclose()
+
+    assert called.result.content[0].text == "first\n"
+    assert state.episode_id == "second"
+    assert state.step_count == 0
+
+
+@pytest.mark.asyncio
 async def test_a_cancelled_reset_leaves_the_episode_in_place():
     factory = Factory()
     judging = asyncio.Event()
