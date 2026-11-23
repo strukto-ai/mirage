@@ -34,6 +34,8 @@ class BashArgs:
         invalid (str | None): the option the shell refuses, as bash
             names it.
         needs_value (str | None): the option given no argument.
+        invalid_name (str | None): the ``-o`` name bash has no option
+            for.
         help (bool): ``--help`` was given; bash answers it before
             ``--version`` and before reading anything else.
         version (bool): ``--version`` was given.
@@ -45,5 +47,6 @@ class BashArgs:
     settings: tuple[tuple[str, bool], ...] = ()
     invalid: str | None = None
     needs_value: str | None = None
+    invalid_name: str | None = None
     help: bool = False
     version: bool = False
