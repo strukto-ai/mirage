@@ -4,7 +4,7 @@ members = ["fuse", "gh-wasm", "mirage-rs", "pdf-wasm", "python", "shell-wasm", "
 exclude = ["vendor/grep-regex"]
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/strukto-ai/mirage"
