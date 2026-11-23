@@ -439,6 +439,7 @@ jobs:
         working-directory: python
         env:
           HERMES_REF: v0.23.3
+          PYTHONSAFEPATH: "1"
         run: |
           mkdir -p "$RUNNER_TEMP/hermes"
           curl -fsSL "https://github.com/NousResearch/hermes-agent/archive/refs/tags/$HERMES_REF.tar.gz" \
