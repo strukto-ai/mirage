@@ -146,7 +146,8 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
       this.database.exec('COMMIT')
       return out
     } catch (e) {
-      this.database.exec('ROLLBACK')
+      // SQLite rolls back by itself after some failures, a refused write among them.
+      if (!this.database.idle) this.database.exec('ROLLBACK')
       throw e
     }
   }
