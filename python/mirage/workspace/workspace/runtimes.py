@@ -19,6 +19,7 @@ from typing import Any
 from mirage.execution.machine.table import MachineTable
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.table import (
@@ -216,10 +217,28 @@ class Runtimes:
     def _install(
         self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]
     ) -> None:
+        """Make the entries the workspace's, logging each capture an
+        earlier entry already takes while no route policy can reach the
+        later one. ``@external`` on a later machine is not such a
+        capture: search order runs a program there that the machines
+        before it lack (``searched_machine``).
+
+        Args:
+            entries (list[Runtime]): the entries, in precedence order.
+            bindings (dict[str, Runtime]): each capture's first entry.
+        """
         routed = self._registry.policies.has_placement()
+        searched = {
+            entry.name
+            for entry in entries
+            if isinstance(entry, RemoteRuntime)
+            and EXTERNAL_COMMANDS in entry.captures
+        }
         for capture, winner, shadowed in (
             [] if routed else shadowed_captures(entries)
         ):
+            if capture == EXTERNAL_COMMANDS and {winner, shadowed} <= searched:
+                continue
             logger.warning(
                 "machine %r runs %r only when a route names it: %r, "
                 "listed before it, takes it",

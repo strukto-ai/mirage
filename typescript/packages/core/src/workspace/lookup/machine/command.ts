@@ -14,6 +14,7 @@
 
 import { SPECS, parseCommand } from '../../../commands/spec/index.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
+import { holders } from '../../../core/machine/place.ts'
 import { findLayout } from '../../../rs/find.ts'
 import { isFsError } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -23,6 +24,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { norm } from '../../../utils/path.ts'
+import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import type { NamespaceReader } from '../../dispatcher/reader.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -32,11 +34,12 @@ import { Consumer, type ExternalTarget } from '../types.ts'
 import {
   isPiped,
   machineHoldingAll,
-  machineMount,
   machineMounts,
   mountMachines,
   onlyMachine,
+  pathOnMount,
 } from './mounts.ts'
+import { nearestMachine } from './search.ts'
 
 /**
  * The paths a command's options name (`grep -f /data/patterns`), which the
@@ -239,9 +242,11 @@ export function statedMachine(
  * The machine a program named by its path runs on, when the file is one
  * machine's own at that path: the `venv/bin/python` a machine's `python -m
  * venv` made in /tmp runs there, as bash runs it, where Mirage would read the
- * binary and refuse it. The path is asked of the dispatcher first, so a
- * hidden or refused path stays with Mirage, which words the refusal. Mirrors
- * Python's `program_machine`.
+ * binary and refuse it. A file several machines hold runs on the one the line
+ * names when it holds the file, else on the one search order picks among
+ * them (`nearestMachine`), and is never read into Mirage. The path is asked
+ * of the dispatcher first, so a hidden or refused path stays with Mirage,
+ * which words the refusal. Mirrors Python's `program_machine`.
  *
  * @param path the head word, as typed.
  * @param session the session it runs in.
@@ -250,6 +255,9 @@ export function statedMachine(
  * @param dispatch op dispatcher, which applies the session's hides and
  *   policies to the path.
  * @param stdin what is piped into it.
+ * @param named the machine the line names.
+ * @param paths the absolute paths the command names.
+ * @param cwd the folder it runs from; null for the session's own.
  */
 export async function programMachine(
   path: string,
@@ -258,9 +266,14 @@ export async function programMachine(
   links: NamespaceReader,
   dispatch: DispatchFn,
   stdin: ByteSource | null,
+  named: string | null = null,
+  paths: readonly string[] = [],
+  cwd: string | null = null,
 ): Promise<RemoteRuntime | null> {
   const spec = PathSpec.fromStrPath(path, undefined, session.cwd)
-  if (machineMount(registry, links, spec.virtual, false) === null) return null
+  const mounts = machineMounts([[spec.virtual, false]], session, registry, links)
+  const entry = mounts?.[0]
+  if (entry === undefined || !(entry.vfs instanceof MachineVFS)) return null
   try {
     await dispatch('stat', spec)
   } catch (err) {
@@ -268,5 +281,16 @@ export async function programMachine(
     console.debug(`${path}: not run on its machine: ${String(err)}`)
     return null
   }
-  return machineHoldingAll([[spec.virtual, false]], session, registry, links, stdin)
+  if (await registry.policies.wantsFor('preVfs', session.sessionId)) return null
+  const held = (await holders(entry.vfs.accessor, pathOnMount(entry, spec.virtual))).map(
+    (one) => one.machine,
+  )
+  const machine =
+    named !== null && held.includes(named)
+      ? named
+      : await nearestMachine(held, cwd ?? session.cwd, paths, session, registry)
+  const runtime = onlyMachine(machine === null ? [] : [machine], registry)
+  if (runtime === null) return null
+  if (isPiped(stdin) && !runtime.handle().takesInput) return null
+  return runtime
 }

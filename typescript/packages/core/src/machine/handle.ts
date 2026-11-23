@@ -13,7 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller, missingProgram } from '../context/session_context.ts'
+import {
+  DEFAULT_UMASK,
+  currentCaller,
+  missingProgram,
+  sessionUmask,
+} from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
@@ -486,8 +491,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       sink = outExit.write
     }
     const watch = new OutputWatch()
+    const mask = sessionUmask()
     const execution = this.execArgv(
-      runArgv(tag, nonce, run, missing, currentCaller().joinsErrors),
+      runArgv(
+        tag,
+        nonce,
+        run,
+        missing,
+        currentCaller().joinsErrors,
+        mask === DEFAULT_UMASK ? null : mask,
+      ),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
@@ -894,15 +907,37 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param name the program's name.
    */
   hasProgram(name: string): Promise<boolean> {
-    let known = this.programs.get(name)
-    if (known === undefined) {
-      known = this.ensureConnected()
-        .then(() => this.setup(`command -v ${shellQuote(name)} >/dev/null 2>&1`))
-        .then((done) => done.exitCode === 0)
-      known.catch(() => this.programs.delete(name))
-      this.programs.set(name, known)
-    }
-    return known
+    return this.programs.get(`\n${name}`) ?? this.look(name, null)
+  }
+
+  /**
+   * Whether a run started now would find a program of this name: on the PATH
+   * the session exported, which the run gets, and asked again where the last
+   * answer was no, since the program may have been installed since.
+   *
+   * @param name the program's name.
+   * @param path the PATH the session exported; null for the machine's own.
+   */
+  async findsProgram(name: string, path: string | null = null): Promise<boolean> {
+    const known = this.programs.get(`${path ?? ''}\n${name}`)
+    return (known !== undefined && (await known)) || this.look(name, path)
+  }
+
+  /**
+   * Ask the machine for a program on a PATH, and keep the answer.
+   *
+   * @param name the program's name.
+   * @param path the PATH to look on; null for the machine's own.
+   */
+  private look(name: string, path: string | null): Promise<boolean> {
+    const key = `${path ?? ''}\n${name}`
+    const on = path === null ? '' : `PATH=${shellQuote(path)} `
+    const found = this.ensureConnected()
+      .then(() => this.setup(`${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
+      .then((done) => done.exitCode === 0)
+    found.catch(() => this.programs.delete(key))
+    this.programs.set(key, found)
+    return found
   }
 
   /**

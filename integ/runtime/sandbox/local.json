@@ -724,6 +724,191 @@
           }
         }
       ]
+    },
+    {
+      "id": "programs_on_two_machines",
+      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. A session that hides a name is still refused its programs, not told the program is missing.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "@external"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-search.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"$1\"' dash $d && dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash /usr/local/bin/mirage-search-tool from-second",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool > $d/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/out.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat $d/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool | tee $d/piped.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/piped.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "which mirage-search-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/mirage-search-tool\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash $d/tool.sh first-file",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash $d/tool.sh second-file",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "$d/tool.sh",
+          "expect": {
+            "exit": 0,
+            "stdout": "first-file\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "$d/tool.sh",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "second-file\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "umask 077; dash -c 'touch \"$1/masked.txt\" && stat -c %a \"$1/masked.txt\"' dash $d; umask 022",
+          "expect": {
+            "exit": 0,
+            "stdout": "600\n",
+            "stderr": ""
+          }
+        },
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/tmp/mirage-search-hidden"
+              ]
+            }
+          }
+        },
+        {
+          "command": "mirage-search-tool",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
+          }
+        },
+        {
+          "profile": {}
+        },
+        {
+          "command": "dash -c 'rm -rf \"$1\" /usr/local/bin/mirage-search-tool; test -e \"$1\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

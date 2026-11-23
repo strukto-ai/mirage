@@ -1,0 +1,192 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import asyncio
+import dataclasses
+from collections.abc import Sequence
+
+from mirage.core.machine.place import holders
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
+from mirage.runtime.machine import RemoteRuntime
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.vfs.machine.machine import MachineVFS
+from mirage.workspace.lookup.lookup import lookup
+from mirage.workspace.lookup.machine.mounts import (
+    mount_machines,
+    path_on_mount,
+)
+from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.mount import MountRegistry
+from mirage.workspace.session import SessionState, env_snapshot
+
+
+def searched_machines(registry: MountRegistry) -> list[RemoteRuntime]:
+    """The machines a program no name captures is searched for on, in
+    the order ``machines:`` lists them.
+
+    Args:
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    return [
+        entry
+        for entry in registry.runtime_entries
+        if isinstance(entry, RemoteRuntime)
+        and EXTERNAL_COMMANDS in entry.captures
+    ]
+
+
+def is_searched(
+    name: str,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> bool:
+    """Whether search order places a program: one a machine runs because
+    no name captures it, on a line that names no machine and no runtime
+    takes whole, in a workspace where several machines take such
+    programs. A machine that refuses the session's runs is asked nothing,
+    so its refusal stays the answer.
+
+    Args:
+        name (str): the program's name.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if routing is None or routing.machine is not None:
+        return False
+    bindings = routing.bindings
+    if not name or "/" in name or name in bindings or WHOLE_LINE in bindings:
+        return False
+    first = bindings.get(EXTERNAL_COMMANDS)
+    if not isinstance(first, RemoteRuntime) or first.refuses_session():
+        return False
+    if len(searched_machines(registry)) < 2:
+        return False
+    return lookup(name, session, registry, routing) is Consumer.EXTERNAL
+
+
+async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
+    """The machines holding a path as their own file or folder, by the
+    machine mount showing it; none for a path in a store, and for a name
+    no machine holds yet.
+
+    Args:
+        path (str): an absolute virtual path.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    entry = registry.try_mount_for(path)
+    if entry is None or not isinstance(entry.vfs, MachineVFS):
+        return []
+    shown = mount_machines(entry, registry)
+    if len(shown) < 2:
+        return shown
+    held = await holders(entry.vfs.accessor, path_on_mount(entry, path))
+    return [one.machine for one in held]
+
+
+async def nearest_machine(
+    machines: Sequence[str],
+    cwd: str,
+    paths: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+) -> str | None:
+    """Of the machines that can run a program, the one search order
+    picks: one the session's folder is on, then one holding the paths
+    the command names, then the first ``machines:`` lists. Each step
+    narrows the machines left only when it leaves any, so a folder every
+    machine has decides nothing and the paths are asked next.
+
+    Where a coded file policy speaks for the session no machine is asked
+    about a path, which the policy judges inside the command that opens
+    it: the first machine is the answer.
+
+    Args:
+        machines (Sequence[str]): the machines that can run it, in the
+            order ``machines:`` lists them.
+        cwd (str): the session's folder.
+        paths (Sequence[str]): the absolute paths the command names.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    left = list(machines)
+    if len(left) < 2:
+        return left[0] if left else None
+    if await registry.policies.wants_for("pre_vfs", session.session_id):
+        return left[0]
+    for path in (cwd, *paths):
+        if len(left) < 2:
+            break
+        holding = await _path_machines(path, registry)
+        left = [m for m in left if m in holding] or left
+    return left[0]
+
+
+async def searched_machine(
+    name: str,
+    paths: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    cwd: str | None = None,
+) -> RemoteRuntime | None:
+    """The machine a program named by its name runs on when nothing says
+    which (``is_searched``): among the machines a run started now would
+    find the program on (``finds_program``), the one search order picks
+    (``nearest_machine``). None where search
+    order does not place the program, and where no machine has it, so
+    the first machine answers ``command not found`` as it does today.
+
+    Args:
+        name (str): the program's name.
+        paths (Sequence[str]): the absolute paths the command names.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+        cwd (str | None): the folder it runs from; None for the
+            session's own.
+    """
+    if not is_searched(name, session, registry, routing):
+        return None
+    machines = searched_machines(registry)
+    path = env_snapshot(session).get("PATH")
+    found = await asyncio.gather(
+        *(m.handle().finds_program(name, path) for m in machines)
+    )
+    having = [m for m, has in zip(machines, found, strict=True) if has]
+    picked = await nearest_machine(
+        [m.default_machine for m in having],
+        session.cwd if cwd is None else cwd,
+        paths,
+        session,
+        registry,
+    )
+    return next((m for m in having if m.default_machine == picked), None)
+
+
+def bound_to(
+    routing: RouteDecision[RuntimeIdentity], name: str, runtime: RemoteRuntime
+) -> RouteDecision[RuntimeIdentity]:
+    """A line's placement with one program bound to the machine search
+    order picked for it, for that program's run alone.
+
+    Args:
+        routing (RouteDecision): the line's placement.
+        name (str): the program's name.
+        runtime (RemoteRuntime): the machine that runs it.
+    """
+    return dataclasses.replace(
+        routing, bindings={**routing.bindings, name: runtime}
+    )

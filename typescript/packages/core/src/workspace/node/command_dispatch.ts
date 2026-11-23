@@ -126,6 +126,7 @@ import {
 } from '../lookup/constants.ts'
 import {
   externalTarget,
+  programHead,
   programRuntime,
   resolveTarget,
   runsAs,
@@ -137,6 +138,7 @@ import { operandMachine, programMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
 import { preferredMachine } from '../lookup/machine/preferred.ts'
+import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
@@ -1160,32 +1162,83 @@ async function runArgv(
   // admitted: a refused one never reaches a machine. A command of Mirage's
   // own that a machine runs whole (`cat > /tmp/out`) is no program of that
   // machine: what it writes goes where Mirage's own writes go.
-  let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-  if (
-    name.includes('/') &&
-    (runner !== null || redirects.length > 0) &&
-    severalMachines(registry)
-  ) {
+  const unplaced = context.frame.routing
+  const searched = searchedProgram(name, argv.args, session, registry, unplaced)
+  if (searched !== null) {
     const denied = await guard([], stdin)
     if (denied !== null) return denied
-    const [held] = await heldMachine(argv, deps, context, stdin)
-    if (held?.runtime) machine = held.runtime.machine
   }
-  const preferred = await preferredMachine(
-    session,
-    registry,
-    context.frame.routing,
-    context.frame.stdinWriter,
-    deps.namespace,
-    deps.dispatch,
-  )
-  const outer = currentCaller()
-  if (
-    (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
-    preferred === outer.preferredMachine
-  )
-    return run()
-  return bindCaller({ ...outer, machine, preferredMachine: preferred }, run)
+  const routedByPolicy = (): boolean => (admitted?.route ?? null) !== null
+  try {
+    if (searched !== null && unplaced !== undefined && !routedByPolicy())
+      context.frame.routing = await searchedRouting(searched, argv, session, registry, unplaced)
+    let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
+    if (
+      name.includes('/') &&
+      (runner !== null || redirects.length > 0) &&
+      severalMachines(registry)
+    ) {
+      const denied = await guard([], stdin)
+      if (denied !== null) return denied
+      const [held] = await heldMachine(argv, deps, context, stdin)
+      if (held?.runtime) machine = held.runtime.machine
+    }
+    const preferred = await preferredMachine(
+      session,
+      registry,
+      context.frame.routing,
+      context.frame.stdinWriter,
+      deps.namespace,
+      deps.dispatch,
+    )
+    const outer = currentCaller()
+    if (
+      (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
+      preferred === outer.preferredMachine
+    )
+      return await run()
+    return await bindCaller({ ...outer, machine, preferredMachine: preferred }, run)
+  } finally {
+    if (unplaced !== undefined) context.frame.routing = unplaced
+  }
+}
+
+/**
+ * The program a command runs that search order places (`isSearched`),
+ * through the wrappers Mirage runs (`nice gen`); null for any other command.
+ * It is placed before the command's redirects open, since what they make
+ * lands on its machine, and once the command is admitted: a refused one
+ * never reaches a machine. Mirrors Python's `_searched_program`.
+ */
+function searchedProgram(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): string | null {
+  if (name === '' || routing === undefined || routing.machine !== undefined) return null
+  const head = programHead(registry, [name, ...args], session, routing)
+  return isSearched(head, session, registry, routing) ? head : null
+}
+
+/**
+ * A line's placement with a program on the machine search order picks for it
+ * (`searchedMachine`), for the command's run alone; the placement as it is
+ * where no machine has the program. Mirrors Python's `_searched_routing`.
+ */
+async function searchedRouting(
+  program: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime>,
+): Promise<RouteDecision<Runtime>> {
+  const paths = argv.operands
+    .filter((w): w is PathSpec => w instanceof PathSpec)
+    .map((w) => unmarkGlobs(w.virtual))
+  const found = await searchedMachine(program, paths, session, registry, routing)
+  return found === null ? routing : boundTo(routing, program, found)
 }
 
 /**
@@ -1260,6 +1313,10 @@ async function heldMachine(
       namespace.sessionLinks(session),
       dispatch,
       stdin,
+      placed.machine ?? null,
+      argv.operands
+        .filter((w): w is PathSpec => w instanceof PathSpec)
+        .map((w) => unmarkGlobs(w.virtual)),
     )
     return [held === null ? null : { kind: Consumer.EXTERNAL, runtime: held }, argv]
   }

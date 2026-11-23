@@ -238,7 +238,7 @@ class Reporting(ScriptedMachine):
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
         if is_run(argv) and argv[RUN_PROGRAM_AT] not in self.programs:
-            lead, reason = argv[5], argv[6]
+            lead, reason = argv[RUN_PROGRAM_AT - 4 : RUN_PROGRAM_AT - 2]
             await errors(f"{lead}{reason}\n".encode())
             return RunResult(127)
         return await super()._exec_argv(argv, stdin, env, cwd, output, errors)

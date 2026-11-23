@@ -24,6 +24,7 @@ import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
 import { programMachine } from './command.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
+import { searchedMachine } from './search.ts'
 
 /**
  * The machine a command Mirage runs itself is about
@@ -101,7 +102,11 @@ async function writerMachine(
       namespace.sessionLinks(session),
       dispatch,
       null,
+      null,
+      [],
+      fedBy.cwd,
     )
+  runtime ??= await searchedMachine(head, [], session, registry, routing, fedBy.cwd)
   runtime ??= programRuntime(registry, fedBy.words, session, routing)
   if (!(runtime instanceof RemoteRuntime)) return null
   const name = runtime.defaultMachine

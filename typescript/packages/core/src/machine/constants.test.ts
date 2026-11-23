@@ -80,6 +80,20 @@ it('gives a run its words and says how its program ended', () => {
   expect(done.stderr.toString().endsWith(`err\n${mark}3\n`)).toBe(true)
 })
 
+// A run carries the umask the session set to its program, and leaves the
+// machine's own where the session set none.
+it("starts a run's program under the session's umask", () => {
+  const program = ['sh', '-c', 'umask; printf "%s|" "$@"', 'sh', 'a b']
+  const masked = runArgv('w:7', 'n1', program, undefined, false, 0o077)
+  expect([masked.slice(RUN_PROGRAM_AT), runTag(masked)]).toEqual([program, 'w:7'])
+  const done = spawnSync(masked[0] ?? '', masked.slice(1))
+  const ended = new TextDecoder().decode(runDoneMark('n1'))
+  expect(done.stdout.toString()).toBe(`0077\na b|${ended}0\n`)
+  const own = spawnSync('sh', ['-c', 'umask 0027; exec "$@"', 'sh', ...runArgv('w', 'n', program)])
+  const left = new TextDecoder().decode(runDoneMark('n'))
+  expect(own.stdout.toString()).toBe(`0027\na b|${left}0\n`)
+})
+
 // A joined run (`2>&1`) writes the program's stderr into its stdout where the
 // program writes it, so the two keep its order; the wrapper's own pid and exit
 // lines stay on stderr, and the check that reports a program the machine

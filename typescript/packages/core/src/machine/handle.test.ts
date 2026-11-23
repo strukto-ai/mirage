@@ -52,7 +52,7 @@ import type { MachineConfig } from './config.ts'
 import type { RunStatus } from './types.ts'
 import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
-import { machineRuntime, on } from '../../tests/fixtures/machine.ts'
+import { ScriptedMachine, machineRuntime, on } from '../../tests/fixtures/machine.ts'
 import { FIRST_PID } from '../execution/process/constants.ts'
 
 const ENC = new TextEncoder()
@@ -1242,6 +1242,24 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+// The umask a session sets reaches the programs its lines run on a machine, a
+// subshell's own included; a session that set none leaves the machine's own.
+it('starts a program under the umask the session set', async () => {
+  const box = new ScriptedMachine('box', () => ({
+    exitCode: 0,
+    stdout: new Uint8Array(),
+    stderr: new Uint8Array(),
+  }))
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, machines: { box } })
+  try {
+    await ws.shell('tool one')
+    await ws.shell('umask 077; tool two; (umask 027; tool three); tool 4')
+  } finally {
+    await ws.close()
+  }
+  expect(box.umasks).toEqual(['', '0077', '0027', '0077'])
 })
 
 // A process substitution a program reads by path becomes a named pipe on the

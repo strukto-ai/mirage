@@ -18,7 +18,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy import Deny
 from mirage.policy.base import Policy
 from tests.fixtures.machine import ScriptedMachine
-from tests.fixtures.machine_files import TOOLS, FakeFiles, one, out
+from tests.fixtures.machine_files import TOOLS, FakeFiles, one, out, two
 
 
 @pytest.mark.asyncio
@@ -258,4 +258,31 @@ async def test_find_exec_naming_another_mount_s_file_stays_with_mirage():
     line = r"find /tmp/d -maxdepth 0 -exec cat /data/x \;"
     assert await out(ws, line) == "y\n"
     assert files.ran == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_file_two_machines_hold_runs_by_search_order():
+    a = FakeFiles({"/tmp/tool": b"\x7fELF"})
+    b = FakeFiles({"/tmp/tool": b"\x7fELF", "/srv/k": b"k", "/tmp/in": b"i"})
+    ws = two(a, b, mounts={"/srv": "@b"})
+    assert (await ws.shell("/tmp/tool first")).exit_code == 0
+    await ws.shell("/tmp/tool named", machine="b")
+    await ws.shell("cd /srv && /tmp/tool folder")
+    await ws.shell("/tmp/tool /tmp/in")
+    assert a.ran == ["/tmp/tool first"]
+    assert b.ran == [
+        "/tmp/tool named",
+        "/tmp/tool folder",
+        "/tmp/tool /tmp/in",
+    ]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_file_one_machine_holds_runs_there_whoever_is_named():
+    a, b = FakeFiles(), FakeFiles({"/tmp/tool": b"\x7fELF"})
+    ws = two(a, b)
+    await ws.shell("/tmp/tool", machine="a")
+    assert (a.ran, b.ran) == ([], ["/tmp/tool"])
     await ws.close()

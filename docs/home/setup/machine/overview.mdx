@@ -41,8 +41,11 @@ Each entry names its `provider`: `in_process`, `host`, `remote` or a
 [provider](#providers). The entry's other keys are its settings, snake_case in
 YAML for both SDKs; a key it does not take is refused.
 
-With two `@external` machines the first one runs every program, and the
-second runs what it names on its own:
+With two `@external` machines a program runs on one that has it. Mirage
+looks in this order: the machine the session's folder is on, the machine
+holding the paths the command names, then the first listed. A program file
+both machines hold at the same path runs by the same order. A program a
+machine captures by name always runs there:
 
 ```yaml
 machines:

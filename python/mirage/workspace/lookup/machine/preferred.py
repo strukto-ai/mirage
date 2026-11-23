@@ -23,6 +23,7 @@ from mirage.workspace.lookup.machine.mounts import (
     folder_machines,
     several_machines,
 )
+from mirage.workspace.lookup.machine.search import searched_machine
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
@@ -86,7 +87,8 @@ async def _writer_machine(
     for a program Mirage runs itself, and for one that would not start in
     that folder as far as the mounts tell, which writes nothing: it
     starts where the folder is ``/``, the machine's own, or Mirage's
-    mounts are served into the machine.
+    mounts are served into the machine. A program no name captures is on
+    the machine search order picks from that folder (``searched_machine``).
 
     A path is looked up only when no file policy speaks for the session:
     the lookup asks the dispatcher before the reader is admitted, and a
@@ -112,6 +114,11 @@ async def _writer_machine(
             namespace.session_links(session),
             dispatch,
             None,
+            cwd=fed_by.cwd,
+        )
+    if runtime is None:
+        runtime = await searched_machine(
+            head, [], session, registry, routing, fed_by.cwd
         )
     if runtime is None:
         runtime = program_runtime(registry, fed_by.words, session, routing)

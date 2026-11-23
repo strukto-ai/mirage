@@ -47,6 +47,7 @@ export class ScriptedMachine extends MachineHandle {
   readonly fed: (Uint8Array | null)[] = []
   readonly cwds: string[] = []
   readonly joined: boolean[] = []
+  readonly umasks: string[] = []
 
   constructor(
     name: string,
@@ -73,6 +74,7 @@ export class ScriptedMachine extends MachineHandle {
     if (isRun(argv)) {
       this.cwds.push(cwd)
       this.joined.push(joined)
+      this.umasks.push(argv[RUN_PROGRAM_AT - 6] ?? '')
     }
     const run = isRun(argv) ? argv.slice(RUN_PROGRAM_AT) : argv
     const line = run[0] === '/bin/sh' && run[1] === '-c' ? (run[2] ?? '') : shellJoin(run)

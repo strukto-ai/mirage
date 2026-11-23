@@ -159,7 +159,8 @@ export class FakeFiles {
     return failed(`${tool}: '${path}': No such file or directory\n`)
   }
 
-  private one(w: string[], data: Uint8Array | null): RunAnswer {
+  private one(words: string[], data: Uint8Array | null): RunAnswer {
+    const w = words[0]?.startsWith('PATH=') === true ? words.slice(1) : words
     const [head = '', second = ''] = w
     if (head === 'command' && second === '-v')
       return this.programs.has(w[2] ?? '') ? ok() : failed('')

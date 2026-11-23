@@ -56,7 +56,7 @@ from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
-from tests.fixtures.machine import machine_runtime, on
+from tests.fixtures.machine import ScriptedMachine, machine_runtime, on
 
 
 class RecordingMachine(MachineHandle):
@@ -185,6 +185,23 @@ async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
     fed = [(line, data) for line, data, _ in box.execs if "exec cat" in line]
     assert fed == [(f"[ -p {fifo} ] && exec cat > {fifo}", b"hi\n")]
     assert lines.index(f"exec 3<>{fifo}; exec 3>&-; rm -f {fifo}") > ran
+
+
+# The umask a session sets reaches the programs its lines run on a
+# machine, a subshell's own included; a session that set none leaves the
+# machine's own.
+@pytest.mark.asyncio
+async def test_a_program_starts_under_the_umask_the_session_set():
+    box = ScriptedMachine("box", lambda line, data: RunAnswer(0, b"", b""))
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, machines={"box": box}
+    )
+    try:
+        await ws.shell("tool one")
+        await ws.shell("umask 077; tool two; (umask 027; tool three); tool 4")
+    finally:
+        await ws.close()
+    assert box.umasks == ["", "0077", "0027", "0077"]
 
 
 # A function's program reads the substitution its call was given.

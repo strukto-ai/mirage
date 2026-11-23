@@ -167,6 +167,7 @@ from mirage.workspace.lookup.constants import (
 from mirage.workspace.lookup.lookup import (
     CliTarget,
     external_target,
+    program_head,
     program_runtime,
     resolve_target,
     runs_as,
@@ -182,6 +183,11 @@ from mirage.workspace.lookup.machine.command import (
 from mirage.workspace.lookup.machine.links import link_machine
 from mirage.workspace.lookup.machine.mounts import several_machines
 from mirage.workspace.lookup.machine.preferred import preferred_machine
+from mirage.workspace.lookup.machine.search import (
+    bound_to,
+    is_searched,
+    searched_machine,
+)
 from mirage.workspace.lookup.types import ExternalTarget, FunctionTarget
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -1173,48 +1179,66 @@ async def _run_argv(
     # machine. A command of Mirage's own that a machine runs whole
     # (``cat > /tmp/out``) is no program of that machine: what it
     # writes goes where Mirage's own writes go.
-    machine = _running_machine(
-        name, argv.args, session, registry, context.frame.routing
-    )
-    if (
-        "/" in name
-        and (runner is not None or redirects)
-        and several_machines(registry)
-    ):
+    unplaced = context.frame.routing
+    searched = _searched_program(name, argv.args, session, registry, unplaced)
+    if searched is not None:
         denied = await guard((), stdin)
         if denied is not None:
             return denied
-        held, _ = await _held_machine(argv, deps, context, stdin)
-        machine = (
-            machine
-            if held is None or held.runtime is None
-            else held.runtime.machine
-        )
-    preferred = await preferred_machine(
-        session,
-        registry,
-        context.frame.routing,
-        context.frame.stdin_writer,
-        deps.namespace,
-        deps.dispatch,
-    )
-    caller = current_caller()
-    staged = (
-        bind_caller(
-            caller.changed(
-                {"machine": machine, "preferred_machine": preferred}
-            )
-        )
-        if (machine, preferred) != (caller.machine, caller.preferred_machine)
-        else None
-    )
     try:
-        if runner is not None:
-            return await runner(run_redirected, guard, name, tuple(argv.args))
-        return await run_redirected(stdin, sink, redirects)
+        if searched is not None and (
+            admitted is None or admitted.route is None
+        ):
+            context.frame.routing = await _searched_routing(
+                searched, argv, session, registry, unplaced
+            )
+        machine = _running_machine(
+            name, argv.args, session, registry, context.frame.routing
+        )
+        if (
+            "/" in name
+            and (runner is not None or redirects)
+            and several_machines(registry)
+        ):
+            denied = await guard((), stdin)
+            if denied is not None:
+                return denied
+            held, _ = await _held_machine(argv, deps, context, stdin)
+            machine = (
+                machine
+                if held is None or held.runtime is None
+                else held.runtime.machine
+            )
+        preferred = await preferred_machine(
+            session,
+            registry,
+            context.frame.routing,
+            context.frame.stdin_writer,
+            deps.namespace,
+            deps.dispatch,
+        )
+        caller = current_caller()
+        staged = (
+            bind_caller(
+                caller.changed(
+                    {"machine": machine, "preferred_machine": preferred}
+                )
+            )
+            if (machine, preferred)
+            != (caller.machine, caller.preferred_machine)
+            else None
+        )
+        try:
+            if runner is not None:
+                return await runner(
+                    run_redirected, guard, name, tuple(argv.args)
+                )
+            return await run_redirected(stdin, sink, redirects)
+        finally:
+            if staged is not None:
+                reset_caller(staged)
     finally:
-        if staged is not None:
-            reset_caller(staged)
+        context.frame.routing = unplaced
 
 
 async def _matched(
@@ -1246,6 +1270,61 @@ async def _matched(
         args=tuple(unmark_globs(word_text(w)) for w in words),
         operands=tuple(words),
     )
+
+
+def _searched_program(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> str | None:
+    """The program a command runs that search order places
+    (``is_searched``), through the wrappers Mirage runs (``nice gen``);
+    None for any other command. It is placed before the command's
+    redirects open, since what they make lands on its machine, and once
+    the command is admitted: a refused one never reaches a machine.
+
+    Args:
+        name (str): the command's name.
+        args (Sequence[str]): its words.
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if not name or routing is None or routing.machine is not None:
+        return None
+    head = program_head(registry, [name, *args], session, routing)
+    return head if is_searched(head, session, registry, routing) else None
+
+
+async def _searched_routing(
+    program: str,
+    argv: Argv,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> RouteDecision[RuntimeIdentity] | None:
+    """A line's placement with a program on the machine search order
+    picks for it (``searched_machine``), for the command's run alone;
+    the placement as it is where no machine has the program.
+
+    Args:
+        program (str): the program search order places.
+        argv (Argv): the command, whose paths its machine may hold.
+        session (SessionState): the session.
+        registry (MountRegistry): the mount registry.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if routing is None:
+        return routing
+    paths = [
+        unmark_globs(w.virtual)
+        for w in argv.operands
+        if isinstance(w, PathSpec)
+    ]
+    found = await searched_machine(program, paths, session, registry, routing)
+    return routing if found is None else bound_to(routing, program, found)
 
 
 def _running_machine(
@@ -1307,6 +1386,12 @@ async def _held_machine(
             namespace.session_links(session),
             deps.dispatch,
             stdin,
+            placed.machine,
+            [
+                unmark_globs(w.virtual)
+                for w in argv.operands
+                if isinstance(w, PathSpec)
+            ],
         )
         return (None if held is None else ExternalTarget(held)), argv
     if consumer is None:

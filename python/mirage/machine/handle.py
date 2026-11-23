@@ -23,7 +23,12 @@ from types import ModuleType
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller, missing_program
+from mirage.context.session_context import (
+    DEFAULT_UMASK,
+    current_caller,
+    missing_program,
+    session_umask,
+)
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
@@ -354,7 +359,7 @@ class MachineHandle:
         # started it.
         self._waking: asyncio.Event | None = None
         # Whether the machine has a program, by name, asked once each.
-        self._programs: dict[str, bool] = {}
+        self._programs: dict[tuple[str, str | None], bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -558,11 +563,17 @@ class MachineHandle:
             filters = [out_exit, out_pid, *filters]
             sink = out_exit.write
         watch = OutputWatch()
+        mask = session_umask()
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
                 run_argv(
-                    tag, nonce, run, missing, current_caller().joins_errors
+                    tag,
+                    nonce,
+                    run,
+                    missing,
+                    current_caller().joins_errors,
+                    None if mask == DEFAULT_UMASK else mask,
                 ),
                 ctx.stdin,
                 {**given, **clock},
@@ -995,14 +1006,37 @@ class MachineHandle:
         Args:
             name (str): the program's name.
         """
-        known = self._programs.get(name)
-        if known is None:
-            await self.ensure_connected()
-            done = await self._setup(
-                f"command -v {shell_quote(name)} >/dev/null 2>&1"
-            )
-            known = self._programs[name] = done.exit_code == 0
-        return known
+        known = self._programs.get((name, None))
+        return await self._look(name, None) if known is None else known
+
+    async def finds_program(self, name: str, path: str | None = None) -> bool:
+        """Whether a run started now would find a program of this name:
+        on the PATH the session exported, which the run gets, and asked
+        again where the last answer was no, since the program may have
+        been installed since.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH the session exported; None for
+                the machine's own.
+        """
+        return self._programs.get((name, path)) or await self._look(name, path)
+
+    async def _look(self, name: str, path: str | None) -> bool:
+        """Ask the machine for a program on a PATH, and keep the answer.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH to look on; None for the
+                machine's own.
+        """
+        await self.ensure_connected()
+        on = "" if path is None else f"PATH={shell_quote(path)} "
+        done = await self._setup(
+            f"{on}command -v {shell_quote(name)} >/dev/null 2>&1"
+        )
+        found = self._programs[(name, path)] = done.exit_code == 0
+        return found
 
     async def look_up(self, line: str, env: Mapping[str, str]) -> RunAnswer:
         """Run a lookup the agent typed (``which perl``) as the machine

@@ -1,0 +1,177 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { holders } from '../../../core/machine/place.ts'
+import type { Runtime } from '../../../runtime/base.ts'
+import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../../runtime/constants.ts'
+import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
+import type { RouteDecision } from '../../../runtime/types.ts'
+import { MachineVFS } from '../../../vfs/machine/machine.ts'
+import type { MountRegistry } from '../../mount/registry.ts'
+import type { SessionState } from '../../session/session.ts'
+import { envSnapshot } from '../../session/state.ts'
+import { lookup } from '../lookup.ts'
+import { Consumer } from '../types.ts'
+import { mountMachines, pathOnMount } from './mounts.ts'
+
+/**
+ * The machines a program no name captures is searched for on, in the order
+ * `machines:` lists them. Mirrors Python's `searched_machines`.
+ *
+ * @param registry the workspace's mounts and machines.
+ */
+export function searchedMachines(registry: MountRegistry): RemoteRuntime[] {
+  return registry.runtimeEntries.filter(
+    (entry): entry is RemoteRuntime =>
+      entry instanceof RemoteRuntime && entry.captures.includes(EXTERNAL_COMMANDS),
+  )
+}
+
+/**
+ * Whether search order places a program: one a machine runs because no name
+ * captures it, on a line that names no machine and no runtime takes whole, in
+ * a workspace where several machines take such programs. A machine that
+ * refuses the session's runs is asked nothing, so its refusal stays the
+ * answer. Mirrors Python's `is_searched`.
+ *
+ * @param name the program's name.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ */
+export function isSearched(
+  name: string,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  if (routing === undefined || routing.machine !== undefined) return false
+  const bindings = routing.bindings
+  if (name === '' || name.includes('/')) return false
+  if (Object.hasOwn(bindings, name) || Object.hasOwn(bindings, WHOLE_LINE)) return false
+  const first = bindings[EXTERNAL_COMMANDS]
+  if (!(first instanceof RemoteRuntime) || first.refusesSession()) return false
+  if (searchedMachines(registry).length < 2) return false
+  return lookup(name, session, registry, routing) === Consumer.EXTERNAL
+}
+
+/**
+ * The machines holding a path as their own file or folder, by the machine
+ * mount showing it; none for a path in a store, and for a name no machine
+ * holds yet.
+ *
+ * @param path an absolute virtual path.
+ * @param registry the workspace's mounts and machines.
+ */
+async function pathMachines(path: string, registry: MountRegistry): Promise<string[]> {
+  const entry = registry.tryMountFor(path)
+  if (entry === null || !(entry.vfs instanceof MachineVFS)) return []
+  const shown = mountMachines(entry, registry)
+  if (shown.length < 2) return shown
+  const held = await holders(entry.vfs.accessor, pathOnMount(entry, path))
+  return held.map((one) => one.machine)
+}
+
+/**
+ * Of the machines that can run a program, the one search order picks: one
+ * the session's folder is on, then one holding the paths the command names,
+ * then the first `machines:` lists. Each step narrows the machines left only
+ * when it leaves any, so a folder every machine has decides nothing and the
+ * paths are asked next.
+ *
+ * Where a coded file policy speaks for the session no machine is asked about
+ * a path, which the policy judges inside the command that opens it: the
+ * first machine is the answer. Mirrors Python's `nearest_machine`.
+ *
+ * @param machines the machines that can run it, in the order `machines:`
+ *   lists them.
+ * @param cwd the session's folder.
+ * @param paths the absolute paths the command names.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ */
+export async function nearestMachine(
+  machines: readonly string[],
+  cwd: string,
+  paths: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+): Promise<string | null> {
+  let left = [...machines]
+  if (left.length < 2) return left[0] ?? null
+  if (await registry.policies.wantsFor('preVfs', session.sessionId)) return left[0] ?? null
+  for (const path of [cwd, ...paths]) {
+    if (left.length < 2) break
+    const holding = await pathMachines(path, registry)
+    const kept = left.filter((machine) => holding.includes(machine))
+    if (kept.length > 0) left = kept
+  }
+  return left[0] ?? null
+}
+
+/**
+ * The machine a program named by its name runs on when nothing says which
+ * (`isSearched`): among the machines a run started now would find the
+ * program on (`findsProgram`), the one search order picks
+ * (`nearestMachine`). Null where search order does not place the
+ * program, and where no machine has it, so the first machine answers
+ * `command not found` as it does today. Mirrors Python's `searched_machine`.
+ *
+ * @param name the program's name.
+ * @param paths the absolute paths the command names.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param cwd the folder it runs from; null for the session's own.
+ */
+export async function searchedMachine(
+  name: string,
+  paths: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  cwd: string | null = null,
+): Promise<RemoteRuntime | null> {
+  if (!isSearched(name, session, registry, routing)) return null
+  const machines = searchedMachines(registry)
+  const path = envSnapshot(session).PATH ?? null
+  const found = await Promise.all(
+    machines.map((machine) => machine.handle().findsProgram(name, path)),
+  )
+  const having = machines.filter((_, at) => found[at] === true)
+  const picked = await nearestMachine(
+    having.map((machine) => machine.defaultMachine),
+    cwd ?? session.cwd,
+    paths,
+    session,
+    registry,
+  )
+  return having.find((machine) => machine.defaultMachine === picked) ?? null
+}
+
+/**
+ * A line's placement with one program bound to the machine search order
+ * picked for it, for that program's run alone. Mirrors Python's `bound_to`.
+ *
+ * @param routing the line's placement.
+ * @param name the program's name.
+ * @param runtime the machine that runs it.
+ */
+export function boundTo(
+  routing: RouteDecision<Runtime>,
+  name: string,
+  runtime: RemoteRuntime,
+): RouteDecision<Runtime> {
+  return { ...routing, bindings: { ...routing.bindings, [name]: runtime } }
+}

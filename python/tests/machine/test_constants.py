@@ -114,6 +114,28 @@ def test_a_run_gives_its_program_its_words_and_says_how_it_ended():
     assert done.stderr.endswith(b"err\n" + run_exit_mark("n1") + b"3\n")
 
 
+# A run carries the umask the session set to its program, and leaves the
+# machine's own where the session set none.
+def test_a_run_starts_its_program_under_the_session_s_umask():
+    program = ("sh", "-c", 'umask; printf "%s|" "$@"', "sh", "a b")
+    masked = run_argv("w:7", "n1", program, umask=0o077)
+    assert (masked[RUN_PROGRAM_AT:], run_tag(masked)) == (program, "w:7")
+    done = subprocess.run(masked, capture_output=True, check=False)
+    assert done.stdout == b"0077\na b|" + run_done_mark("n1") + b"0\n"
+    own = subprocess.run(
+        (
+            "sh",
+            "-c",
+            'umask 0027; exec "$@"',
+            "sh",
+            *run_argv("w", "n", program),
+        ),
+        capture_output=True,
+        check=False,
+    )
+    assert own.stdout == b"0027\na b|" + run_done_mark("n") + b"0\n"
+
+
 # A joined run (`2>&1`) writes the program's stderr into its stdout where
 # the program writes it, so the two keep its order; the wrapper's own pid
 # and exit lines stay on stderr, and the check that reports a program the

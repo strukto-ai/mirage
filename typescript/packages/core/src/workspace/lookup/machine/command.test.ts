@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
-import { FakeFiles, TOOLS, one, out } from '../../../../tests/fixtures/machine_files.ts'
+import { FakeFiles, TOOLS, one, out, two } from '../../../../tests/fixtures/machine_files.ts'
 import { SessionProfile } from '../../../policy/profile.ts'
 import type { Action, CommandContext } from '../../../policy/types.ts'
 import { MountMode } from '../../../types.ts'
@@ -217,6 +217,28 @@ describe('operand routing', () => {
     await ws.shell('echo y > /data/x')
     expect(await out(ws, 'find /tmp/d -maxdepth 0 -exec cat /data/x \\;')).toBe('y\n')
     expect(files.ran).toEqual([])
+    await ws.close()
+  })
+
+  it('runs a program file two machines hold by search order', async () => {
+    const a = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF', '/srv/k': 'k', '/tmp/in': 'i' })
+    const ws = two(a, b, { '/srv': '@b' })
+    expect((await ws.shell('/tmp/tool first')).exitCode).toBe(0)
+    await ws.shell('/tmp/tool named', { machine: 'b' })
+    await ws.shell('cd /srv && /tmp/tool folder')
+    await ws.shell('/tmp/tool /tmp/in')
+    expect(a.ran).toEqual(['/tmp/tool first'])
+    expect(b.ran).toEqual(['/tmp/tool named', '/tmp/tool folder', '/tmp/tool /tmp/in'])
+    await ws.close()
+  })
+
+  it('runs a program file one machine holds there whoever is named', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
+    const ws = two(a, b)
+    await ws.shell('/tmp/tool', { machine: 'a' })
+    expect([a.ran, b.ran]).toEqual([[], ['/tmp/tool']])
     await ws.close()
   })
 })
