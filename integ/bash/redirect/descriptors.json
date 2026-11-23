@@ -1974,6 +1974,76 @@
         "stdout": "a\nb\nc\nd\ne\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "a_redirected_group_reads_and_writes_copied_descriptors",
+      "seq": 1380042,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "{ cat <&3; } 3<<< hi; { cat <&3; } 3<<< 'q t'; (exec 4>&2; { echo y >&4; } 2>&1); (exec 4>&1; { echo z >&4; } > /dev/null); x='a b'; { echo w; } > $x; echo s=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nq t\nz\ns=1\n",
+        "stderr": "y\nbash: line 1: $x: ambiguous redirect\n"
+      }
+    },
+    {
+      "id": "exec_reads_a_here_string_and_opens_a_new_file_both_ways",
+      "seq": 1380043,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(exec 3<<< hi; cat <&3); (exec 1>&2; echo e); (exec 3>&-; exec 3>&-; echo c=$?); (d={mount}/exec_rw; mkdir -p $d; exec 3<> $d/new; echo hi >&3; cat $d/new; rm -r $d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nc=0\nhi\n",
+        "stderr": "e\n"
+      }
     }
   ]
 }
