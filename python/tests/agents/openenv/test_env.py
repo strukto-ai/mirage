@@ -349,6 +349,41 @@ async def test_max_steps_ends_the_episode():
     assert [first.done, second.done, again.done] == [False, True, False]
 
 
+@pytest.mark.asyncio
+async def test_a_reset_waits_for_the_step_it_replaces():
+    factory = Factory()
+    judging = asyncio.Event()
+    release = asyncio.Event()
+    open_while_judged: list[bool] = []
+
+    async def reward(
+        session: Session, action: Action, observation: Observation
+    ) -> float:
+        judging.set()
+        await release.wait()
+        open_while_judged.append(not await closed(factory.built[0]))
+        return 1.0
+
+    env = MirageOpenEnv(factory=factory, reward=reward, max_steps=1)
+    await env.reset_async()
+    step = asyncio.create_task(env.step_async(shell("true")))
+    await judging.wait()
+    reset = asyncio.create_task(env.reset_async())
+    await asyncio.sleep(0.05)
+    reset_waited = not reset.done()
+    release.set()
+    observation = await step
+    await reset
+    first_closed = await closed(factory.built[0])
+    await env.aclose()
+
+    assert reset_waited
+    assert open_while_judged == [True]
+    assert observation.done is True
+    assert first_closed
+    assert env.state.step_count == 0
+
+
 class ExitCodeRubric(Rubric):
     def __init__(self) -> None:
         super().__init__()

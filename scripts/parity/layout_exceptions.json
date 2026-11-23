@@ -8,7 +8,7 @@
    "agents/agno": "Ecosystem split: agno is a python-only framework.",
    "agents/antigravity": "Ecosystem split: Google's Antigravity SDK is python-only.",
    "agents/pydantic_ai": "Ecosystem split: pydantic-ai is a python-only framework.",
-   "agents/openenv": "Ecosystem split: OpenEnv is a python-only reinforcement learning library, and its trainers (TRL, verl, SkyRL) are python-only.",
+   "agents/openenv": "Ecosystem split: OpenEnv is a python-only reinforcement learning library, and the training libraries it lists (TRL, Unsloth, SkyRL) are python-only.",
    "runtime/python/wasi": "CPython on Wasmtime is a Python host adapter. TypeScript hosts CPython through Pyodide, whose engine-specific subtree is excused separately."
   },
   "typescript_only": {

@@ -16,7 +16,7 @@ import asyncio
 import logging
 import math
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from types import TracebackType
 from typing import Any, Self
@@ -94,7 +94,14 @@ def check_timeout(timeout_s: float | None) -> None:
         )
 
 
-@dataclass(frozen=True, slots=True)
+def idle_event() -> asyncio.Event:
+    """An event that starts set: a new episode runs no step."""
+    event = asyncio.Event()
+    event.set()
+    return event
+
+
+@dataclass(slots=True)
 class Episode:
     """The workspace one episode runs in and the session its agent
     acts as.
@@ -103,11 +110,17 @@ class Episode:
         workspace (Workspace): The episode's own workspace.
         session (Session): The agent's session in it.
         server (MirageMcpServer): The session's MCP tools.
+        state (MirageState): The episode's step count and ids.
+        steps (int): Steps of this episode still running.
+        idle (asyncio.Event): Set while no step of this episode runs.
     """
 
     workspace: Workspace
     session: Session
     server: MirageMcpServer
+    state: MirageState
+    steps: int = 0
+    idle: asyncio.Event = field(default_factory=idle_event)
 
 
 class MirageOpenEnv(MCPEnvironment):
@@ -226,8 +239,13 @@ class MirageOpenEnv(MCPEnvironment):
         **kwargs: JsonValue,
     ) -> Observation:
         spec = EpisodeSpec(episode_id or str(uuid.uuid4()), seed, dict(kwargs))
-        async with self._lock:
-            episode = await self._begin(spec)
+        previous: Episode | None = None
+        try:
+            async with self._lock:
+                previous, self._episode = self._episode, None
+                episode = await self._begin(spec)
+        finally:
+            await self._retire(previous)
         return self._apply_transform(
             MirageObservation(cwd=episode.session.state.cwd)
         )
@@ -252,6 +270,18 @@ class MirageOpenEnv(MCPEnvironment):
     ) -> Observation:
         check_timeout(timeout_s)
         episode = await self._current()
+        episode.steps += 1
+        episode.idle.clear()
+        try:
+            return await self._step(episode, action, timeout_s)
+        finally:
+            episode.steps -= 1
+            if episode.steps == 0:
+                episode.idle.set()
+
+    async def _step(
+        self, episode: Episode, action: Action, timeout_s: float | None
+    ) -> Observation:
         timeout = timeout_s if timeout_s is not None else self._timeout_s
         if isinstance(action, ListToolsAction):
             return await super().step_async(action, timeout_s=timeout)
@@ -265,7 +295,7 @@ class MirageOpenEnv(MCPEnvironment):
                 "MirageOpenEnv takes MirageAction, ListToolsAction or "
                 f"CallToolAction, not {type(action).__name__}"
             )
-        return await self._judge(episode.session, action, observation)
+        return await self._judge(episode, action, observation)
 
     def step(
         self,
@@ -333,7 +363,6 @@ class MirageOpenEnv(MCPEnvironment):
         if self._shut:
             raise RuntimeError("the environment is closed")
         await self._reset_rubric_async()
-        await self._end()
         workspace = (
             await self._base.copy()
             if self._base is not None
@@ -356,30 +385,32 @@ class MirageOpenEnv(MCPEnvironment):
             workspace,
             session,
             MirageMcpServer(workspace, session_id=session_id, all_calls=True),
+            MirageState(
+                episode_id=spec.episode_id,
+                workspace_id=workspace.workspace_id,
+                session_id=session.session_id,
+                cwd=session.state.cwd,
+                seed=spec.seed,
+            ),
         )
         self._episode = episode
-        self._state = MirageState(
-            episode_id=spec.episode_id,
-            workspace_id=workspace.workspace_id,
-            session_id=session.session_id,
-            cwd=session.state.cwd,
-            seed=spec.seed,
-        )
+        self._state = episode.state
         return episode
 
     async def _build(self, spec: EpisodeSpec) -> Workspace:
         assert self._factory is not None
         return await self._factory(spec)
 
-    async def _end(self) -> None:
-        episode, self._episode = self._episode, None
+    async def _retire(self, episode: Episode | None) -> None:
         if episode is not None:
+            await episode.idle.wait()
             await episode.workspace.close()
 
     @on_owner_loop
     async def _finish(self) -> None:
         async with self._lock:
-            await self._end()
+            episode, self._episode = self._episode, None
+        await self._retire(episode)
 
     async def _current(self) -> Episode:
         async with self._lock:
@@ -425,10 +456,11 @@ class MirageOpenEnv(MCPEnvironment):
         return tool_to_observation(action.tool, result, session.state.cwd)
 
     async def _judge(
-        self, session: Session, action: Action, observation: Observation
+        self, episode: Episode, action: Action, observation: Observation
     ) -> Observation:
-        self._state.step_count += 1
-        self._state.cwd = session.state.cwd
+        session = episode.session
+        episode.state.step_count += 1
+        episode.state.cwd = session.state.cwd
         if self._reward is not None:
             observation.reward = await self._reward(
                 session, action, observation
@@ -439,7 +471,7 @@ class MirageOpenEnv(MCPEnvironment):
             )
         observation.done = (
             self._max_steps is not None
-            and self._state.step_count >= self._max_steps
+            and episode.state.step_count >= self._max_steps
         ) or (
             self._done is not None
             and await self._done(session, action, observation)

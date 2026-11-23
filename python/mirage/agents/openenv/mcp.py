@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import ipaddress
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Any, Literal
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import anyio
 from mcp import ClientSession
@@ -115,6 +116,25 @@ class MirageMCPTransport(ClientTransport):
             raise failure
 
 
+def secure_for_token(base_url: str) -> bool:
+    """Whether a bearer token may travel to ``base_url``: over https,
+    or over plain http to a loopback host.
+
+    Args:
+        base_url (str): The server's base URL.
+    """
+    parts = urlsplit(base_url)
+    if parts.scheme != "http":
+        return True
+    host = parts.hostname or ""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def mirage_server_transport(
     base_url: str,
     workspace_id: str,
@@ -132,12 +152,22 @@ def mirage_server_transport(
         workspace_id (str): The workspace to serve.
         token (str | None): The bearer token, sent in the
             ``Authorization`` header; None for a server without auth.
+            Over plain ``http://`` it goes to a loopback host only.
         session_id (str | None): The session the tools act as; None is
             the workspace's default session.
         calls (Literal["tools", "all"]): ``all`` also serves every VFS
             call as a ``vfs_<call>`` tool; ``tools`` serves the seven
             tools only.
+
+    Raises:
+        ValueError: A token over plain ``http://`` to a host that is not
+            loopback.
     """
+    if token is not None and not secure_for_token(base_url):
+        raise ValueError(
+            f"refusing to send a bearer token over plain http to {base_url}; "
+            "use https or a loopback host"
+        )
     query: dict[str, str] = {"calls": calls}
     if session_id is not None:
         query["session_id"] = session_id

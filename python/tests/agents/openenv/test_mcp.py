@@ -41,10 +41,13 @@ async def daemon(
         )
     )
     task = asyncio.create_task(server.serve())
-    while not server.started:
-        await asyncio.sleep(0.01)
-    port = server.servers[0].sockets[0].getsockname()[1]
     try:
+        async with asyncio.timeout(10):
+            while not server.started:
+                if task.done():
+                    raise RuntimeError("the server stopped before it started")
+                await asyncio.sleep(0.01)
+        port = server.servers[0].sockets[0].getsockname()[1]
         yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
@@ -100,6 +103,23 @@ def test_the_server_transport_names_the_workspace_endpoint():
     assert tools_only.url == (
         "http://127.0.0.1:8765/v1/workspaces/abc/mcp?calls=tools"
     )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["http://localhost:8765", "http://[::1]:8765", "https://mirage.example"],
+)
+def test_the_server_transport_sends_a_token_over_a_safe_url(base_url):
+    transport = mirage_server_transport(base_url, "abc", token="secret")
+
+    assert transport.url.startswith(base_url)
+
+
+def test_the_server_transport_refuses_a_token_over_remote_http():
+    with pytest.raises(ValueError, match="plain http"):
+        mirage_server_transport(
+            "http://mirage.example:8765", "abc", token="secret"
+        )
 
 
 class Succeeded(Rubric):
