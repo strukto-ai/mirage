@@ -119,6 +119,7 @@
                 "icon": "laptop-code",
                 "pages": [
                   "home/agents/claude-code",
+                  "home/agents/codewhale",
                   "home/agents/codex",
                   "home/agents/t3code",
                   "home/agents/antigravity",
