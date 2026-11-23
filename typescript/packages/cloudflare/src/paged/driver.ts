@@ -94,6 +94,7 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
   private blobBytes = 0
   private turned = Date.now()
   private turning: Promise<void> | null = null
+  private closed = false
 
   private constructor(
     private readonly database: PagedDatabase,
@@ -160,6 +161,8 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
   }
 
   close(): Promise<void> {
+    if (this.closed) return Promise.resolve()
+    this.closed = true
     try {
       this.database.close()
     } finally {
