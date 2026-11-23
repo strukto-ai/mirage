@@ -54,6 +54,7 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         self._workspaces: dict[Path, Workspace] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
+        self._closed = False
         # Registered after the thread pools' own hook, so it runs first.
         threading._register_atexit(self.close)  # type: ignore[attr-defined]
 
@@ -110,6 +111,8 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
                 f"{SETTING} to a Mirage workspace YAML"
             )
         with self._lock:
+            if self._closed:
+                raise RuntimeError("the mirage backend has shut down")
             workspace = self._workspaces.get(path)
             if workspace is None:
                 workspace = asyncio.run_coroutine_threadsafe(
@@ -119,27 +122,30 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         return workspace
 
     def close(self) -> None:
-        """Close every workspace this provider built, then its loop; hermes
-        calls none between tasks, so this runs when the process exits."""
+        """Close every workspace this provider built, then its loop. hermes
+        calls none between tasks, so this runs once, when the process exits,
+        and the provider builds no workspace after it."""
         with self._lock:
-            workspaces = list(self._workspaces.values())
-            self._workspaces.clear()
+            self._closed = True
             loop, thread = self._loop, self._thread
+            if loop is None or thread is None:
+                return
+            for workspace in self._workspaces.values():
+                try:
+                    asyncio.run_coroutine_threadsafe(
+                        workspace.close(), loop
+                    ).result()
+                except Exception as exc:
+                    logger.warning(
+                        "closing a mirage workspace failed: %r",
+                        exc,
+                        exc_info=True,
+                    )
+            self._workspaces.clear()
+            loop.call_soon_threadsafe(loop.stop)
+            thread.join()
+            loop.close()
             self._loop = self._thread = None
-        if loop is None or thread is None:
-            return
-        for workspace in workspaces:
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    workspace.close(), loop
-                ).result()
-            except Exception as exc:
-                logger.warning(
-                    "closing a mirage workspace failed: %r", exc, exc_info=True
-                )
-        loop.call_soon_threadsafe(loop.stop)
-        thread.join()
-        loop.close()
 
 
 async def build_owned_workspace(path: Path) -> Workspace:

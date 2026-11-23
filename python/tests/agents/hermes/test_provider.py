@@ -118,6 +118,9 @@ def test_close_shuts_the_workspace_and_its_loop(config):
     assert environment.execute("echo hi")["returncode"] != 0
     environment.cleanup()
     assert loop_threads() <= before
+    with pytest.raises(RuntimeError, match="shut down"):
+        provider.create_environment(cwd="/", timeout=30, task_id="d")
+    assert loop_threads() <= before
 
 
 EXIT_SCRIPT = """
