@@ -123,7 +123,10 @@ describe('the paged sql driver of a Durable Object', () => {
     await expect(async () => {
       await driver.query('SELECT 1')
     }).rejects.toThrow('the paged database is closed')
-    expect(await (await open(storage)).query('SELECT count(*) AS n FROM t')).toEqual([{ n: 0 }])
+    const next = await open(storage)
+    expect(await next.query('SELECT count(*) AS n FROM t')).toEqual([{ n: 0 }])
+    await driver.close()
+    await expect(open(storage)).rejects.toThrow('already open on this storage')
   })
 
   it('binds a statement run again with fewer parameters to NULL, not to the last values', async () => {
