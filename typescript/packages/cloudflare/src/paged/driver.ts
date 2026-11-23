@@ -41,6 +41,10 @@ export interface PagedSqlOptions {
   readonly pageCacheBytes?: number
 }
 
+// The storages a driver is open on: two would each write rows the other
+// knows nothing of.
+const opened = new WeakSet<DurableObjectStorageLike>()
+
 // One location a storage, as `DurableObjectSqlDriver` labels its own: the
 // database inside is not the storage's, so it takes another name.
 const labels = new WeakMap<DurableObjectStorageLike, string>()
@@ -67,6 +71,8 @@ function labelOf(storage: DurableObjectStorageLike): string {
  * What statements change stays in memory until `flush`, so a host calls it
  * before it answers a request; `close` flushes too. A flush is whole or
  * absent, and an object that stops before one loses what it had not flushed.
+ * One driver holds a storage at a time: an object opens its own once and
+ * keeps it, and `close` lets another be opened.
  *
  * The driver is a `DurableObjectStorageLike` as well: `sql.exec` and
  * `transactionSync` run in the database inside, for tables of the host's own.
@@ -91,6 +97,7 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
 
   private constructor(
     private readonly database: PagedDatabase,
+    private readonly storage: DurableObjectStorageLike,
     readonly location: string,
   ) {}
 
@@ -99,14 +106,24 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
    *
    * @param storage the object's `ctx.storage`.
    * @param options the SQLite build and the memory the driver may hold.
+   * @throws when a driver is open on `storage` already.
    */
   static async open(
     storage: DurableObjectStorageLike,
     options: PagedSqlOptions = {},
   ): Promise<DurableObjectPagedSqlDriver> {
-    const wasm = options.wasm ?? (await import('./wasm.ts')).default
-    const database = await PagedDatabase.open(storage, wasm, options)
-    return new DurableObjectPagedSqlDriver(database, labelOf(storage))
+    if (opened.has(storage)) {
+      throw new Error('a paged sql driver is already open on this storage: close it first')
+    }
+    opened.add(storage)
+    try {
+      const wasm = options.wasm ?? (await import('./wasm.ts')).default
+      const database = await PagedDatabase.open(storage, wasm, options)
+      return new DurableObjectPagedSqlDriver(database, storage, labelOf(storage))
+    } catch (e) {
+      opened.delete(storage)
+      throw e
+    }
   }
 
   query(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
@@ -143,7 +160,11 @@ export class DurableObjectPagedSqlDriver implements SqlDriver, DurableObjectStor
   }
 
   close(): Promise<void> {
-    this.database.flush()
+    try {
+      this.database.close()
+    } finally {
+      opened.delete(this.storage)
+    }
     return Promise.resolve()
   }
 

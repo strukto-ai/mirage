@@ -102,7 +102,8 @@ keeps the mount in a SQLite database inside the storage, and writes what
 changed as a few large rows: a command that changed thousands of rows writes
 one or two. Changes reach the storage at `flush()`, so call it before a
 request is answered. A Durable Object that stops before a flush loses what it
-had not flushed, and a flush lands whole or not at all.
+had not flushed, and a flush lands whole or not at all. One driver holds a
+storage at a time: a Durable Object opens its driver once and keeps it.
 
 ```ts
 import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-cloudflare'
