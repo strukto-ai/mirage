@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from importlib import import_module
 from time import monotonic
@@ -71,7 +71,7 @@ from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.utils.clock import bound_system_clock
 from mirage.utils.quote import shell_quote
 
@@ -611,6 +611,8 @@ class MachineHandle:
             done = RunResult(exit_code=HANGUP_EXIT_CODE)
         finally:
             self._executing -= 1
+        if done.exit_code == NOT_FOUND_STATUS:
+            self._forget_programs(argv)
         if self._mounts is None:
             return done
         if done.exit_code == CANNOT_EXECUTE_STATUS:
@@ -1021,6 +1023,19 @@ class MachineHandle:
                 the machine's own.
         """
         return self._programs.get((name, path)) or await self._look(name, path)
+
+    def _forget_programs(self, words: Sequence[str]) -> None:
+        """Drop what is kept of the programs a run names, once it ended
+        with ``command not found``: one removed from the machine since it
+        was last asked is asked for again, so the next search leaves the
+        machine out.
+
+        Args:
+            words (Sequence[str]): the run's words.
+        """
+        named = set(words)
+        for key in [key for key in self._programs if key[0] in named]:
+            del self._programs[key]
 
     async def _look(self, name: str, path: str | None) -> bool:
         """Ask the machine for a program on a PATH, and keep the answer.

@@ -29,7 +29,7 @@ import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MachineMemory, MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
-import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
@@ -314,7 +314,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // waits for that, not only the one that started it.
   private waking: Promise<void> | null = null
   // Whether the machine has a program, by name, asked once each.
-  private readonly programs = new Map<string, Promise<boolean>>()
+  private readonly programs = new Map<string, Map<string | null, Promise<boolean>>>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -530,6 +530,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } finally {
       this.runs -= 1
     }
+    if (done.exitCode === NOT_FOUND_STATUS) this.forgetPrograms(argv)
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
     const lost =
@@ -907,7 +908,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param name the program's name.
    */
   hasProgram(name: string): Promise<boolean> {
-    return this.programs.get(`\n${name}`) ?? this.look(name, null)
+    return this.programs.get(name)?.get(null) ?? this.look(name, null)
   }
 
   /**
@@ -919,7 +920,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param path the PATH the session exported; null for the machine's own.
    */
   async findsProgram(name: string, path: string | null = null): Promise<boolean> {
-    const known = this.programs.get(`${path ?? ''}\n${name}`)
+    const known = this.programs.get(name)?.get(path)
     return (known !== undefined && (await known)) || this.look(name, path)
   }
 
@@ -930,14 +931,28 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param path the PATH to look on; null for the machine's own.
    */
   private look(name: string, path: string | null): Promise<boolean> {
-    const key = `${path ?? ''}\n${name}`
     const on = path === null ? '' : `PATH=${shellQuote(path)} `
     const found = this.ensureConnected()
       .then(() => this.setup(`${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
       .then((done) => done.exitCode === 0)
-    found.catch(() => this.programs.delete(key))
-    this.programs.set(key, found)
+    const kept = this.programs.get(name) ?? new Map<string | null, Promise<boolean>>()
+    this.programs.set(name, kept)
+    kept.set(path, found)
+    found.catch(() => {
+      if (kept.get(path) === found) kept.delete(path)
+    })
     return found
+  }
+
+  /**
+   * Drop what is kept of the programs a run names, once it ended with
+   * `command not found`: one removed from the machine since it was last
+   * asked is asked for again, so the next search leaves the machine out.
+   *
+   * @param words the run's words.
+   */
+  private forgetPrograms(words: readonly string[]): void {
+    for (const word of words) this.programs.delete(word)
   }
 
   /**

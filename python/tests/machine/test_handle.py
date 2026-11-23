@@ -57,6 +57,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 from tests.fixtures.machine import ScriptedMachine, machine_runtime, on
+from tests.fixtures.machine_files import FakeFiles
 
 
 class RecordingMachine(MachineHandle):
@@ -185,6 +186,19 @@ async def test_a_substitution_a_program_names_is_a_pipe_on_its_machine():
     fed = [(line, data) for line, data, _ in box.execs if "exec cat" in line]
     assert fed == [(f"[ -p {fifo} ] && exec cat > {fifo}", b"hi\n")]
     assert lines.index(f"exec 3<>{fifo}; exec 3>&-; rm -f {fifo}") > ran
+
+
+# A program is asked for under each PATH, the empty one too, whatever the
+# machine's own PATH holds.
+@pytest.mark.asyncio
+async def test_a_program_is_asked_for_again_under_another_path():
+    box = ScriptedMachine("box", FakeFiles(programs=("tool",)).answer)
+    assert await box.has_program("tool")
+    assert await box.finds_program("tool", "")
+    assert box.lines == [
+        "command -v tool >/dev/null 2>&1",
+        "PATH='' command -v tool >/dev/null 2>&1",
+    ]
 
 
 # The umask a session sets reaches the programs its lines run on a

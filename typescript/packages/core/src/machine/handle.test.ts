@@ -53,6 +53,7 @@ import type { RunStatus } from './types.ts'
 import { ProcessTable } from '../execution/process/table.ts'
 import { runAsProcess } from '../context/session_context.ts'
 import { ScriptedMachine, machineRuntime, on } from '../../tests/fixtures/machine.ts'
+import { FakeFiles } from '../../tests/fixtures/machine_files.ts'
 import { FIRST_PID } from '../execution/process/constants.ts'
 
 const ENC = new TextEncoder()
@@ -1242,6 +1243,18 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+// A program is asked for under each PATH, the empty one too, whatever the
+// machine's own PATH holds.
+it('asks for a program again under another PATH', async () => {
+  const box = new ScriptedMachine('box', new FakeFiles({}, ['tool']).answer)
+  expect(await box.hasProgram('tool')).toBe(true)
+  expect(await box.findsProgram('tool', '')).toBe(true)
+  expect(box.lines).toEqual([
+    'command -v tool >/dev/null 2>&1',
+    "PATH='' command -v tool >/dev/null 2>&1",
+  ])
 })
 
 // The umask a session sets reaches the programs its lines run on a machine, a

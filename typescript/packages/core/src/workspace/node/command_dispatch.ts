@@ -650,6 +650,7 @@ export async function executeCommand(
       seedPrefix,
       expanded,
       new Set(prefixAssignments.map(([k]) => k)),
+      new Map(prefixAssignments).get('PATH') ?? null,
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     // A run that starts as its output is read still runs under the prefix,
@@ -760,6 +761,7 @@ async function runCommandBody(
   seedPrefix?: (command: string) => void,
   expanded?: ExpandedWords,
   assigned: ReadonlySet<string> = new Set(),
+  prefixPath: string | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const stdin = stdinIn
@@ -804,6 +806,7 @@ async function runCommandBody(
     redirectRunnerFor(node),
     seedPrefix,
     assigned,
+    prefixPath,
   )
   bindLastWord(session, argv.name !== '' ? [argv.name, ...argv.args] : [])
   let stdout = ranStdout
@@ -864,6 +867,9 @@ async function runArgv(
   runner: RedirectRunner | null = null,
   seedPrefix?: (name: string) => void,
   assigned: ReadonlySet<string> = new Set(),
+  // The PATH the command's prefix sets (`PATH=/opt/bin tool`), which its
+  // program is looked up on; null when it sets none.
+  prefixPath: string | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const name = argv.name
@@ -1171,7 +1177,14 @@ async function runArgv(
   const routedByPolicy = (): boolean => (admitted?.route ?? null) !== null
   try {
     if (searched !== null && unplaced !== undefined && !routedByPolicy())
-      context.frame.routing = await searchedRouting(searched, argv, session, registry, unplaced)
+      context.frame.routing = await searchedRouting(
+        searched,
+        argv,
+        session,
+        registry,
+        unplaced,
+        prefixPath,
+      )
     let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
     if (
       name.includes('/') &&
@@ -1233,11 +1246,12 @@ async function searchedRouting(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime>,
+  prefixPath: string | null = null,
 ): Promise<RouteDecision<Runtime>> {
   const paths = argv.operands
     .filter((w): w is PathSpec => w instanceof PathSpec)
     .map((w) => unmarkGlobs(w.virtual))
-  const found = await searchedMachine(program, paths, session, registry, routing)
+  const found = await searchedMachine(program, paths, session, registry, routing, null, prefixPath)
   return found === null ? routing : boundTo(routing, program, found)
 }
 

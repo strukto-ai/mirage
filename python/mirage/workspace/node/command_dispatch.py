@@ -622,6 +622,7 @@ async def execute_command(
             seed_prefix,
             expanded,
             assigned=frozenset(k for k, _ in prefix_assignments),
+            prefix_path=dict(prefix_assignments).get("PATH"),
         )
         if refused:
             io.stderr = refused + (await materialize(io.stderr))
@@ -749,6 +750,7 @@ async def _run_command_body(
     seed_prefix: Callable[[str], None],
     expanded: ExpandedWords | None = None,
     assigned: frozenset[str] = frozenset(),
+    prefix_path: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     # The command's place on the line, as the pass computed it, and
     # the entry point its nested evaluations re-enter through: a word that
@@ -800,6 +802,7 @@ async def _run_command_body(
         seed_prefix=seed_prefix,
         claimant=claimant,
         assigned=assigned,
+        prefix_path=prefix_path,
     )
     # Capture xtrace before the body runs so `set -x` itself is not
     # traced (bash enables tracing only for the following commands).
@@ -849,6 +852,7 @@ async def _run_argv(
     seed_prefix: Callable[[str], None] | None = None,
     claimant: Claimant | None = None,
     assigned: frozenset[str] = frozenset(),
+    prefix_path: str | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Route one expanded command to its builtin or mount handler.
 
@@ -877,6 +881,9 @@ async def _run_argv(
         claimant (Claimant | None): the command and its line.
         assigned (frozenset[str]): the names the command's prefix
             assignments set.
+        prefix_path (str | None): the PATH the command's prefix sets
+            (``PATH=/opt/bin tool``), which its program is looked up
+            on; None when it sets none.
     """
     registry = deps.registry
     namespace = deps.namespace
@@ -1190,7 +1197,7 @@ async def _run_argv(
             admitted is None or admitted.route is None
         ):
             context.frame.routing = await _searched_routing(
-                searched, argv, session, registry, unplaced
+                searched, argv, session, registry, unplaced, prefix_path
             )
         machine = _running_machine(
             name, argv.args, session, registry, context.frame.routing
@@ -1304,6 +1311,7 @@ async def _searched_routing(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
+    prefix_path: str | None = None,
 ) -> RouteDecision[RuntimeIdentity] | None:
     """A line's placement with a program on the machine search order
     picks for it (``searched_machine``), for the command's run alone;
@@ -1315,6 +1323,7 @@ async def _searched_routing(
         session (SessionState): the session.
         registry (MountRegistry): the mount registry.
         routing (RouteDecision | None): the line's placement.
+        prefix_path (str | None): the PATH the command's prefix sets.
     """
     if routing is None:
         return routing
@@ -1323,7 +1332,9 @@ async def _searched_routing(
         for w in argv.operands
         if isinstance(w, PathSpec)
     ]
-    found = await searched_machine(program, paths, session, registry, routing)
+    found = await searched_machine(
+        program, paths, session, registry, routing, path=prefix_path
+    )
     return routing if found is None else bound_to(routing, program, found)
 
 

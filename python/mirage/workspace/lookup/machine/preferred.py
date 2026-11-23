@@ -15,7 +15,9 @@
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
+from mirage.utils.glob_walk import unmark_globs
 from mirage.utils.path import norm
+from mirage.workspace.expand.classify.heuristic import classify_word
 from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup.lookup import program_head, program_runtime
 from mirage.workspace.lookup.machine.command import program_machine
@@ -72,6 +74,24 @@ async def preferred_machine(
     return shown[0] if len(shown) == 1 else None
 
 
+def _writer_paths(fed_by: PipeWriter, registry: MountRegistry) -> list[str]:
+    """The absolute paths a pipe's writer names, read as its run reads
+    its words (``classify_word``), so the writer is placed where it runs
+    (``gen /srv/gpu/in | tee log``); a word only known when it runs names
+    none.
+
+    Args:
+        fed_by (PipeWriter): the pipe's writer.
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    read = (
+        classify_word(word, registry, fed_by.cwd)
+        for word in fed_by.words[1:]
+        if word is not None
+    )
+    return [unmark_globs(w.virtual) for w in read if isinstance(w, PathSpec)]
+
+
 async def _writer_machine(
     fed_by: PipeWriter,
     session: SessionState,
@@ -103,6 +123,7 @@ async def _writer_machine(
         dispatch (DispatchFn): op dispatcher, which the path is asked of.
     """
     head = program_head(registry, fed_by.words, session, routing)
+    paths = _writer_paths(fed_by, registry)
     runtime: RuntimeIdentity | None = None
     if "/" in head and not (
         await registry.policies.wants_for("pre_vfs", session.session_id)
@@ -114,11 +135,12 @@ async def _writer_machine(
             namespace.session_links(session),
             dispatch,
             None,
+            paths=paths,
             cwd=fed_by.cwd,
         )
     if runtime is None:
         runtime = await searched_machine(
-            head, [], session, registry, routing, fed_by.cwd
+            head, paths, session, registry, routing, fed_by.cwd
         )
     if runtime is None:
         runtime = program_runtime(registry, fed_by.words, session, routing)

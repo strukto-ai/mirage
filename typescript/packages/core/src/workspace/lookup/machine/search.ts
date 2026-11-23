@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { holders } from '../../../core/machine/place.ts'
+import { CommandTimeoutError } from '../../../errors/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../../runtime/constants.ts'
 import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
@@ -67,9 +68,27 @@ export function isSearched(
 }
 
 /**
+ * Note a machine that could not be asked, which search order then counts
+ * out; a run that was killed or timed out stops instead. Mirrors Python's
+ * `_unasked`.
+ *
+ * @param failure what asking threw.
+ * @param what what was asked, for the log.
+ */
+function unasked(failure: unknown, what: string): void {
+  if (
+    failure instanceof CommandTimeoutError ||
+    (failure instanceof Error && failure.name === 'AbortError')
+  )
+    throw failure
+  console.debug(`${what}: not asked, so it decides nothing: ${String(failure)}`)
+}
+
+/**
  * The machines holding a path as their own file or folder, by the machine
- * mount showing it; none for a path in a store, and for a name no machine
- * holds yet.
+ * mount showing it; none for a path in a store, for a name no machine holds
+ * yet, and where a machine cannot be asked, so a machine that is down keeps
+ * no program from running on another.
  *
  * @param path an absolute virtual path.
  * @param registry the workspace's mounts and machines.
@@ -79,8 +98,40 @@ async function pathMachines(path: string, registry: MountRegistry): Promise<stri
   if (entry === null || !(entry.vfs instanceof MachineVFS)) return []
   const shown = mountMachines(entry, registry)
   if (shown.length < 2) return shown
-  const held = await holders(entry.vfs.accessor, pathOnMount(entry, path))
-  return held.map((one) => one.machine)
+  try {
+    const held = await holders(entry.vfs.accessor, pathOnMount(entry, path))
+    return held.map((one) => one.machine)
+  } catch (err) {
+    unasked(err, path)
+    return []
+  }
+}
+
+/**
+ * The machines a run started now would find a program on (`findsProgram`),
+ * in the order given. One that cannot be asked, such as a machine that is
+ * down, counts as lacking it. Mirrors Python's `_machines_with`.
+ *
+ * @param name the program's name.
+ * @param path the PATH the run gets; null for each machine's own.
+ * @param machines the machines to ask.
+ */
+async function machinesWith(
+  name: string,
+  path: string | null,
+  machines: readonly RemoteRuntime[],
+): Promise<RemoteRuntime[]> {
+  const asked = await Promise.allSettled(
+    machines.map((machine) => machine.handle().findsProgram(name, path)),
+  )
+  const having: RemoteRuntime[] = []
+  for (const [at, machine] of machines.entries()) {
+    const found = asked[at]
+    if (found === undefined) continue
+    if (found.status === 'rejected') unasked(found.reason, `${machine.defaultMachine} for ${name}`)
+    else if (found.value) having.push(machine)
+  }
+  return having
 }
 
 /**
@@ -134,6 +185,8 @@ export async function nearestMachine(
  * @param registry the workspace's mounts and machines.
  * @param routing the line's placement.
  * @param cwd the folder it runs from; null for the session's own.
+ * @param path the PATH the command's own prefix sets (`PATH=/opt/bin tool`),
+ *   which its run gets; null for the one the session exported.
  */
 export async function searchedMachine(
   name: string,
@@ -142,14 +195,11 @@ export async function searchedMachine(
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
   cwd: string | null = null,
+  path: string | null = null,
 ): Promise<RemoteRuntime | null> {
   if (!isSearched(name, session, registry, routing)) return null
-  const machines = searchedMachines(registry)
-  const path = envSnapshot(session).PATH ?? null
-  const found = await Promise.all(
-    machines.map((machine) => machine.handle().findsProgram(name, path)),
-  )
-  const having = machines.filter((_, at) => found[at] === true)
+  const on = path ?? envSnapshot(session).PATH ?? null
+  const having = await machinesWith(name, on, searchedMachines(registry))
   const picked = await nearestMachine(
     having.map((machine) => machine.defaultMachine),
     cwd ?? session.cwd,

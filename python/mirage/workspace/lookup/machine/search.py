@@ -14,12 +14,15 @@
 
 import asyncio
 import dataclasses
+import logging
 from collections.abc import Sequence
 
 from mirage.core.machine.place import holders
+from mirage.errors.types import CommandTimeoutError
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.lookup.lookup import lookup
 from mirage.workspace.lookup.machine.mounts import (
@@ -29,6 +32,8 @@ from mirage.workspace.lookup.machine.mounts import (
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
+
+logger = logging.getLogger(__name__)
 
 
 def searched_machines(registry: MountRegistry) -> list[RemoteRuntime]:
@@ -77,10 +82,31 @@ def is_searched(
     return lookup(name, session, registry, routing) is Consumer.EXTERNAL
 
 
+def _unasked(failure: BaseException, what: str) -> None:
+    """Note a machine that could not be asked, which search order then
+    counts out; a run that was killed or timed out stops instead.
+
+    Args:
+        failure (BaseException): what asking raised.
+        what (str): what was asked, for the log.
+
+    Raises:
+        BaseException: the failure, when it ends the run.
+    """
+    if not isinstance(failure, Exception) or isinstance(
+        failure, (CommandTimeoutError, MirageAbortError)
+    ):
+        raise failure
+    logger.debug(
+        "%s: not asked, so it decides nothing", what, exc_info=failure
+    )
+
+
 async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
     """The machines holding a path as their own file or folder, by the
-    machine mount showing it; none for a path in a store, and for a name
-    no machine holds yet.
+    machine mount showing it; none for a path in a store, for a name no
+    machine holds yet, and where a machine cannot be asked, so a machine
+    that is down keeps no program from running on another.
 
     Args:
         path (str): an absolute virtual path.
@@ -92,8 +118,38 @@ async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
     shown = mount_machines(entry, registry)
     if len(shown) < 2:
         return shown
-    held = await holders(entry.vfs.accessor, path_on_mount(entry, path))
+    try:
+        held = await holders(entry.vfs.accessor, path_on_mount(entry, path))
+    except Exception as exc:
+        _unasked(exc, path)
+        return []
     return [one.machine for one in held]
+
+
+async def _machines_with(
+    name: str, path: str | None, machines: Sequence[RemoteRuntime]
+) -> list[RemoteRuntime]:
+    """The machines a run started now would find a program on
+    (``finds_program``), in the order given. One that cannot be asked,
+    such as a machine that is down, counts as lacking it.
+
+    Args:
+        name (str): the program's name.
+        path (str | None): the PATH the run gets; None for each
+            machine's own.
+        machines (Sequence[RemoteRuntime]): the machines to ask.
+    """
+    asked = await asyncio.gather(
+        *(m.handle().finds_program(name, path) for m in machines),
+        return_exceptions=True,
+    )
+    having: list[RemoteRuntime] = []
+    for machine, found in zip(machines, asked, strict=True):
+        if isinstance(found, BaseException):
+            _unasked(found, f"{machine.default_machine} for {name}")
+        elif found:
+            having.append(machine)
+    return having
 
 
 async def nearest_machine(
@@ -141,6 +197,7 @@ async def searched_machine(
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
     cwd: str | None = None,
+    path: str | None = None,
 ) -> RemoteRuntime | None:
     """The machine a program named by its name runs on when nothing says
     which (``is_searched``): among the machines a run started now would
@@ -157,15 +214,14 @@ async def searched_machine(
         routing (RouteDecision | None): the line's placement.
         cwd (str | None): the folder it runs from; None for the
             session's own.
+        path (str | None): the PATH the command's own prefix sets
+            (``PATH=/opt/bin tool``), which its run gets; None for
+            the one the session exported.
     """
     if not is_searched(name, session, registry, routing):
         return None
-    machines = searched_machines(registry)
-    path = env_snapshot(session).get("PATH")
-    found = await asyncio.gather(
-        *(m.handle().finds_program(name, path) for m in machines)
-    )
-    having = [m for m, has in zip(machines, found, strict=True) if has]
+    on = env_snapshot(session).get("PATH") if path is None else path
+    having = await _machines_with(name, on, searched_machines(registry))
     picked = await nearest_machine(
         [m.default_machine for m in having],
         session.cwd if cwd is None else cwd,

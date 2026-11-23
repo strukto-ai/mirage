@@ -16,7 +16,9 @@ import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import type { DispatchFn, RouteDecision } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
+import { unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { norm } from '../../../utils/path.ts'
+import { classifyWord } from '../../expand/classify/heuristic.ts'
 import type { PipeWriter } from '../../frame.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
@@ -64,6 +66,24 @@ export async function preferredMachine(
 }
 
 /**
+ * The absolute paths a pipe's writer names, read as its run reads its words
+ * (`classifyWord`), so the writer is placed where it runs
+ * (`gen /srv/gpu/in | tee log`); a word only known when it runs names none.
+ * Mirrors Python's `_writer_paths`.
+ *
+ * @param fedBy the pipe's writer.
+ * @param registry the workspace's mounts and machines.
+ */
+function writerPaths(fedBy: PipeWriter, registry: MountRegistry): string[] {
+  return fedBy.words
+    .slice(1)
+    .filter((word) => word !== null)
+    .map((word) => classifyWord(word, registry, fedBy.cwd))
+    .filter((word): word is PathSpec => word instanceof PathSpec)
+    .map((word) => unmarkGlobs(word.virtual))
+}
+
+/**
  * The machine a pipe's writer runs on, placed as it runs, from the folder
  * its pipeline started in: by its words, through the wrappers Mirage runs
  * (`nice gen | tee log`), and one named by its path on the machine holding
@@ -93,6 +113,7 @@ async function writerMachine(
   dispatch: DispatchFn,
 ): Promise<string | null> {
   const head = programHead(registry, fedBy.words, session, routing)
+  const paths = writerPaths(fedBy, registry)
   let runtime: Runtime | null | undefined = null
   if (head.includes('/') && !(await registry.policies.wantsFor('preVfs', session.sessionId)))
     runtime = await programMachine(
@@ -103,10 +124,10 @@ async function writerMachine(
       dispatch,
       null,
       null,
-      [],
+      paths,
       fedBy.cwd,
     )
-  runtime ??= await searchedMachine(head, [], session, registry, routing, fedBy.cwd)
+  runtime ??= await searchedMachine(head, paths, session, registry, routing, fedBy.cwd)
   runtime ??= programRuntime(registry, fedBy.words, session, routing)
   if (!(runtime instanceof RemoteRuntime)) return null
   const name = runtime.defaultMachine

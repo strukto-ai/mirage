@@ -16,7 +16,8 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy.base import Policy
-from tests.fixtures.machine import ScriptedMachine
+from mirage.runtime.types import RunAnswer
+from tests.fixtures.machine import ScriptedMachine, failed
 from tests.fixtures.machine_files import FakeFiles, two
 
 
@@ -188,4 +189,81 @@ async def test_one_machine_asks_nothing_before_it_runs_a_program():
     ws = Workspace({}, mode=MountMode.WRITE, machines={"a": machine})
     await ws.shell("smi")
     assert machine.lines == ["smi"]
+    await ws.close()
+
+
+class Down(ScriptedMachine):
+    """A machine that cannot be reached."""
+
+    async def connect(self) -> None:
+        raise ConnectionError("unreachable")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("down", ["a", "b"])
+async def test_a_machine_that_is_down_keeps_no_program_off_another(down):
+    files = FakeFiles(programs=("smi",))
+    machines = {
+        name: Down(name, FakeFiles().answer)
+        if name == down
+        else ScriptedMachine(name, files.answer)
+        for name in ("a", "b")
+    }
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, machines=machines
+    )
+    await ws.shell("cd /data && smi")
+    assert files.ran == ["smi"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_s_writer_is_placed_by_the_paths_it_names():
+    a = FakeFiles(programs=("py",))
+    b = FakeFiles({"/srv/job.py": b"j"}, programs=("py",))
+    ws = two(a, b, mounts={"/srv": "@b"})
+    assert (await ws.shell("py /srv/job.py | tee /tmp/piped")).exit_code == 0
+    assert (a.ran, b.ran) == ([], ["py /srv/job.py"])
+    assert ("/tmp/piped" in a.files, "/tmp/piped" in b.files) == (False, True)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_is_looked_for_on_the_path_its_own_prefix_sets():
+    second = ScriptedMachine("b", FakeFiles(programs=("smi",)).answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": ScriptedMachine("a", FakeFiles().answer), "b": second},
+    )
+    await ws.shell("PATH=/opt/bin smi")
+    assert second.lines == [
+        "PATH=/opt/bin command -v smi >/dev/null 2>&1",
+        "smi",
+    ]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_removed_since_the_last_look_is_looked_for_again():
+    a, b = FakeFiles(programs=("tool",)), FakeFiles(programs=("tool",))
+
+    def first(line: str, data: bytes | None) -> RunAnswer:
+        if line == "tool" and "tool" not in a.programs:
+            return failed(b"tool: command not found\n", 127)
+        return a.answer(line, data)
+
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", first),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    await ws.shell("tool")
+    a.programs.discard("tool")
+    assert (await ws.shell("tool")).exit_code == 127
+    assert (await ws.shell("tool")).exit_code == 0
+    assert (a.ran, b.ran) == (["tool"], ["tool"])
     await ws.close()

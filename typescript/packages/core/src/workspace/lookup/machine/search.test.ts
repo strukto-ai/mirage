@@ -13,12 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
+import { ScriptedMachine, failed } from '../../../../tests/fixtures/machine.ts'
 import { FakeFiles, two } from '../../../../tests/fixtures/machine_files.ts'
 import type { Action } from '../../../policy/types.ts'
+import type { RunAnswer } from '../../../runtime/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+
+/** A machine that cannot be reached. */
+class Down extends ScriptedMachine {
+  override connect(): Promise<void> {
+    return Promise.reject(new Error('unreachable'))
+  }
+}
 
 describe('searchedMachine', () => {
   it('runs a program only a later machine has there', async () => {
@@ -173,6 +181,68 @@ describe('searchedMachine', () => {
     const ws = new Workspace({}, { mode: MountMode.WRITE, machines: { a: machine } })
     await ws.shell('smi')
     expect(machine.lines).toEqual(['smi'])
+    await ws.close()
+  })
+
+  it.each(['a', 'b'])('keeps no program off another when %s is down', async (down) => {
+    const files = new FakeFiles({}, ['smi'])
+    const machines = Object.fromEntries(
+      ['a', 'b'].map((name) => [
+        name,
+        name === down
+          ? new Down(name, new FakeFiles().answer)
+          : new ScriptedMachine(name, files.answer),
+      ]),
+    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, machines })
+    await ws.shell('cd /data && smi')
+    expect(files.ran).toEqual(['smi'])
+    await ws.close()
+  })
+
+  it("places a pipe's writer by the paths it names", async () => {
+    const a = new FakeFiles({}, ['py'])
+    const b = new FakeFiles({ '/srv/job.py': 'j' }, ['py'])
+    const ws = two(a, b, { '/srv': '@b' })
+    expect((await ws.shell('py /srv/job.py | tee /tmp/piped')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([[], ['py /srv/job.py']])
+    expect([a.files.has('/tmp/piped'), b.files.has('/tmp/piped')]).toEqual([false, true])
+    await ws.close()
+  })
+
+  it('looks for a program on the PATH its own prefix sets', async () => {
+    const second = new ScriptedMachine('b', new FakeFiles({}, ['smi']).answer)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', new FakeFiles().answer), b: second },
+      },
+    )
+    await ws.shell('PATH=/opt/bin smi')
+    expect(second.lines).toEqual(['PATH=/opt/bin command -v smi >/dev/null 2>&1', 'smi'])
+    await ws.close()
+  })
+
+  it('looks again for a program removed since the last look', async () => {
+    const a = new FakeFiles({}, ['tool'])
+    const b = new FakeFiles({}, ['tool'])
+    const first = (line: string, data: Uint8Array | null): RunAnswer =>
+      line === 'tool' && !a.programs.has('tool')
+        ? failed('tool: command not found\n', 127)
+        : a.answer(line, data)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', first), b: new ScriptedMachine('b', b.answer) },
+      },
+    )
+    await ws.shell('tool')
+    a.programs.delete('tool')
+    expect((await ws.shell('tool')).exitCode).toBe(127)
+    expect((await ws.shell('tool')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([['tool'], ['tool']])
     await ws.close()
   })
 })
