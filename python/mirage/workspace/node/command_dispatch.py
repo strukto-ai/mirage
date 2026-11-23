@@ -176,18 +176,16 @@ from mirage.workspace.lookup.lookup import (
     runs_wrapper,
     target_consumer,
 )
+from mirage.workspace.lookup.machine.about import fact_machine
 from mirage.workspace.lookup.machine.answers import bin_program
-from mirage.workspace.lookup.machine.command import (
-    fact_machine,
-    operand_machine,
-    program_machine,
-)
+from mirage.workspace.lookup.machine.command import operand_machine
 from mirage.workspace.lookup.machine.links import link_machine
 from mirage.workspace.lookup.machine.mounts import several_machines
 from mirage.workspace.lookup.machine.preferred import (
     asks_machines,
     preferred_machine,
 )
+from mirage.workspace.lookup.machine.program import program_machine
 from mirage.workspace.lookup.machine.search import (
     bound_to,
     is_searched,
@@ -1194,7 +1192,9 @@ async def _run_argv(
     # open, once the command is admitted: a refused one never reaches a
     # machine. A command of Mirage's own that a machine runs whole
     # (``cat > /tmp/out``) is no program of that machine: what it
-    # writes goes where Mirage's own writes go.
+    # writes goes where Mirage's own writes go. Search order, the holder
+    # of a program file and the machine a command prefers each ask the
+    # machines, so the command is admitted once, before any of them.
     unplaced = context.frame.routing
     searched = _searched_program(
         name,
@@ -1204,7 +1204,22 @@ async def _run_argv(
         unplaced,
         namespace.session_links(session),
     )
-    if searched is not None:
+    by_path = (
+        "/" in name
+        and (runner is not None or redirects)
+        and several_machines(registry)
+    )
+    if (
+        searched is not None
+        or by_path
+        or asks_machines(
+            session,
+            registry,
+            unplaced,
+            context.frame.stdin_writer,
+            context.frame.folder_holders,
+        )
+    ):
         denied = await guard((), stdin)
         if denied is not None:
             return denied
@@ -1218,30 +1233,13 @@ async def _run_argv(
         machine = _running_machine(
             name, argv.args, session, registry, context.frame.routing
         )
-        if (
-            "/" in name
-            and (runner is not None or redirects)
-            and several_machines(registry)
-        ):
-            denied = await guard((), stdin)
-            if denied is not None:
-                return denied
+        if by_path:
             held, _ = await _held_machine(argv, deps, context, stdin)
             machine = (
                 machine
                 if held is None or held.runtime is None
                 else held.runtime.machine
             )
-        if asks_machines(
-            session,
-            registry,
-            context.frame.routing,
-            context.frame.stdin_writer,
-            context.frame.folder_holders,
-        ):
-            denied = await guard((), stdin)
-            if denied is not None:
-                return denied
         preferred = await preferred_machine(
             session,
             registry,

@@ -134,10 +134,12 @@ import {
   runsWrapper,
 } from '../lookup/lookup.ts'
 import { binProgram } from '../lookup/machine/answers.ts'
-import { factMachine, operandMachine, programMachine } from '../lookup/machine/command.ts'
+import { factMachine } from '../lookup/machine/about.ts'
+import { operandMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
 import { asksMachines, preferredMachine } from '../lookup/machine/preferred.ts'
+import { programMachine } from '../lookup/machine/program.ts'
 import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -1169,7 +1171,9 @@ async function runArgv(
   // only then is it asked before the redirects open, once the command is
   // admitted: a refused one never reaches a machine. A command of Mirage's
   // own that a machine runs whole (`cat > /tmp/out`) is no program of that
-  // machine: what it writes goes where Mirage's own writes go.
+  // machine: what it writes goes where Mirage's own writes go. Search order,
+  // the holder of a program file and the machine a command prefers each ask
+  // the machines, so the command is admitted once, before any of them.
   const unplaced = context.frame.routing
   const searched = searchedProgram(
     name,
@@ -1179,7 +1183,19 @@ async function runArgv(
     unplaced,
     namespace.sessionLinks(session),
   )
-  if (searched !== null) {
+  const byPath =
+    name.includes('/') && (runner !== null || redirects.length > 0) && severalMachines(registry)
+  if (
+    searched !== null ||
+    byPath ||
+    asksMachines(
+      session,
+      registry,
+      unplaced,
+      context.frame.stdinWriter,
+      context.frame.folderHolders,
+    )
+  ) {
     const denied = await guard([], stdin)
     if (denied !== null) return denied
   }
@@ -1195,27 +1211,9 @@ async function runArgv(
         prefixPath,
       )
     let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-    if (
-      name.includes('/') &&
-      (runner !== null || redirects.length > 0) &&
-      severalMachines(registry)
-    ) {
-      const denied = await guard([], stdin)
-      if (denied !== null) return denied
+    if (byPath) {
       const [held] = await heldMachine(argv, deps, context, stdin)
       if (held?.runtime) machine = held.runtime.machine
-    }
-    if (
-      asksMachines(
-        session,
-        registry,
-        context.frame.routing,
-        context.frame.stdinWriter,
-        context.frame.folderHolders,
-      )
-    ) {
-      const denied = await guard([], stdin)
-      if (denied !== null) return denied
     }
     const preferred = await preferredMachine(
       session,

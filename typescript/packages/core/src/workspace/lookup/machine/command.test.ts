@@ -13,19 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ScriptedMachine, failed } from '../../../../tests/fixtures/machine.ts'
-import { FakeFiles, TOOLS, one, out, two } from '../../../../tests/fixtures/machine_files.ts'
-import { SessionProfile } from '../../../policy/profile.ts'
+import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
+import { FakeFiles, TOOLS, one, out } from '../../../../tests/fixtures/machine_files.ts'
 import type { Action, CommandContext } from '../../../policy/types.ts'
-import type { RunAnswer } from '../../../runtime/types.ts'
 import { MountMode } from '../../../types.ts'
-import { LOCALHOST_WORD } from '../constants.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-const REQUEST = 'http://127.0.0.1:1/x'
-const CLIENTS = ['curl', 'wget']
 
 describe('operand routing', () => {
   it("runs a command on the machine's paths there whole", async () => {
@@ -124,41 +119,6 @@ describe('operand routing', () => {
     await ws.close()
   })
 
-  it('runs a program named by a path the machine holds there', async () => {
-    const files = new FakeFiles({ '/tmp/venv/bin/python': '\x7fELF\x00' })
-    const ws = one(files)
-    expect(await out(ws, 'cd /tmp && venv/bin/python -V')).toBe('ran\n')
-    expect(await out(ws, '/tmp/venv/bin/python -V')).toBe('ran\n')
-    expect(files.ran).toEqual(['venv/bin/python -V', '/tmp/venv/bin/python -V'])
-    await ws.close()
-  })
-
-  // The machine runs its own /tmp/ls or /tmp/perl, so a closed tree refuses the
-  // path as it refuses one no machine holds, and a deny of the program's name
-  // refuses it by that name.
-
-  it.each([
-    [{ '*': 'deny', ls: 'allow' }, '/tmp/ls'],
-    [{ perl: 'deny' }, '/tmp/perl -e 1'],
-  ] as const)('refuses a program the machine holds under %j', async (commands, line) => {
-    const files = new FakeFiles({ '/tmp/ls': '\x7fELF\x00', '/tmp/perl': '\x7fELF\x00' })
-    const ws = one(files, {}, { profiles: { agent: SessionProfile({ commands }) } })
-    const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell(line)).exitCode).toBe(126)
-    expect(files.ran).toEqual([])
-    await ws.close()
-  })
-
-  it('keeps a hidden program path with Mirage', async () => {
-    const files = new FakeFiles({ '/tmp/secret/run': '\x7fELF\x00' })
-    const ws = one(files, {}, { profiles: { agent: { paths: { hide: ['/tmp/secret'] } } } })
-    const agent = await ws.session('agent', { profile: 'agent' })
-    const done = await agent.shell('/tmp/secret/run')
-    expect(done.exitCode).not.toBe(0)
-    expect(files.ran).toEqual([])
-    await ws.close()
-  })
-
   it('leaves a read loop its input', async () => {
     const files = new FakeFiles({ '/tmp/a.py': 'x' }, TOOLS)
     const ws = one(files)
@@ -222,191 +182,5 @@ describe('operand routing', () => {
     expect(await out(ws, 'find /tmp/d -maxdepth 0 -exec cat /data/x \\;')).toBe('y\n')
     expect(files.ran).toEqual([])
     await ws.close()
-  })
-
-  it('runs a program file two machines hold by search order', async () => {
-    const a = new FakeFiles({ '/tmp/tool': '\x7fELF' })
-    const b = new FakeFiles({ '/tmp/tool': '\x7fELF', '/srv/k': 'k', '/tmp/in': 'i' })
-    const ws = two(a, b, { '/srv': '@b' })
-    expect((await ws.shell('/tmp/tool first')).exitCode).toBe(0)
-    await ws.shell('/tmp/tool named', { machine: 'b' })
-    await ws.shell('cd /srv && /tmp/tool folder')
-    await ws.shell('/tmp/tool /tmp/in')
-    expect(a.ran).toEqual(['/tmp/tool first'])
-    expect(b.ran).toEqual(['/tmp/tool named', '/tmp/tool folder', '/tmp/tool /tmp/in'])
-    await ws.close()
-  })
-
-  it('runs a program file one machine holds there whoever is named', async () => {
-    const a = new FakeFiles()
-    const b = new FakeFiles({ '/tmp/tool': '\x7fELF' })
-    const ws = two(a, b)
-    await ws.shell('/tmp/tool', { machine: 'a' })
-    expect([a.ran, b.ran]).toEqual([[], ['/tmp/tool']])
-    await ws.close()
-  })
-
-  it('asks a machine fact of the machine the command is about', async () => {
-    const a = new FakeFiles({}, ['uname'])
-    const b = new FakeFiles({ '/srv/k': 'k' }, ['uname'])
-    const first = new ScriptedMachine('a', a.answer)
-    const ws = new Workspace(
-      { '/srv': '@b', '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, machines: { a: first, b: new ScriptedMachine('b', b.answer) } },
-    )
-    await ws.shell('cd /data && uname -m')
-    await ws.shell('cd /data && uname -r', { machine: 'b' })
-    await ws.shell('cd /srv && uname -s')
-    expect([a.ran, b.ran]).toEqual([['uname -m'], ['uname -r', 'uname -s']])
-    expect(first.cwds).toEqual(['/'])
-    await ws.close()
-  })
-
-  it('leaves the fact to Mirage where no machine has the program', async () => {
-    const a = new FakeFiles()
-    const b = new FakeFiles()
-    const ws = two(a, b)
-    expect(await out(ws, 'uname -s')).toBe('Linux\n')
-    expect([a.ran, b.ran]).toEqual([[], []])
-    await ws.close()
-  })
-
-  it('runs a request to localhost on the machine it is about', async () => {
-    const a = new FakeFiles({}, ['curl'])
-    const b = new FakeFiles({}, ['curl'])
-    const ws = two(a, b, { '/data': new RAMVFS() })
-    await ws.shell('cd /data && curl -s localhost:8000/health')
-    await ws.shell('curl -s http://127.0.0.1:8000/x', { machine: 'b' })
-    expect(a.ran).toEqual(['curl -s localhost:8000/health'])
-    expect(b.ran).toEqual(['curl -s http://127.0.0.1:8000/x'])
-    await ws.close()
-  })
-
-  it('keeps a request to localhost with Mirage under a network policy', async () => {
-    const a = new FakeFiles({}, ['curl'])
-    const b = new FakeFiles({}, ['curl'])
-    const ws = two(a, b)
-    ws.policies.add({ preNetwork: (): Action | null => null })
-    const done = await ws.shell('curl -s --max-time 2 http://127.0.0.1:1/x')
-    expect(done.exitCode).not.toBe(0)
-    expect([a.ran, b.ran]).toEqual([[], []])
-    await ws.close()
-  })
-
-  it.each([
-    [`curl -s --max-time 2 ${REQUEST}`, 'network'],
-    [`cd /srv && curl -s --max-time 2 ${REQUEST}`, 'network'],
-    ['cd /srv && curl -s --max-time 2 http://0.0.0.0:1/x', 'network'],
-    [`cd /srv && wget -q -T 2 -O - ${REQUEST}`, 'network'],
-    [`curl -s --max-time 2 ${REQUEST}`, 'policy'],
-    [`cd /srv && curl -s --max-time 2 ${REQUEST}`, 'policy'],
-    ['cd /srv && curl -s --max-time 2 http://0.0.0.0:1/x', 'policy'],
-    [`cd /srv && wget -q -T 2 -O - ${REQUEST}`, 'policy'],
-  ])('keeps %s with Mirage on a watched %s', async (line, limit) => {
-    const a = new FakeFiles({}, CLIENTS)
-    const b = new FakeFiles({ '/srv/k': 'k' }, CLIENTS)
-    const ws = two(a, b, { '/srv': '@b' }, limit === 'network' ? { network: false } : {})
-    if (limit === 'policy') ws.policies.add({ postNetwork: (): Action | null => null })
-    await ws.shell(line)
-    expect([a.ran, b.ran]).toEqual([[], []])
-    await ws.close()
-  })
-
-  it("runs a request where the files it reads are the machine's", async () => {
-    const a = new FakeFiles({}, CLIENTS)
-    const b = new FakeFiles({ '/srv/k': 'k' }, CLIENTS)
-    const ws = two(a, b, { '/srv': '@b', '/data': new RAMVFS() })
-    await ws.shell('echo d > /data/body')
-    await ws.shell(`cd /srv && curl -s -d @k -b jar -w @k ${REQUEST}`)
-    await ws.shell(`cd /srv && curl -s --data-binary @/data/body ${REQUEST}`)
-    await ws.shell(`cd /srv && curl -s --data-urlencode n@/data/body ${REQUEST}`)
-    await ws.shell(`cd /srv && curl -s -F f=@k ${REQUEST}`)
-    await ws.shell(`cd /srv && curl -s -T k ${REQUEST}`)
-    await ws.shell(`cd /data && curl -s -d @body ${REQUEST}`)
-    expect(a.ran).toEqual([])
-    expect(b.ran).toEqual([`curl -s -d @k -b jar -w @k ${REQUEST}`])
-    await ws.close()
-  })
-
-  it('keeps a request reading a file with Mirage under a file policy', async () => {
-    const a = new FakeFiles({}, CLIENTS)
-    const b = new FakeFiles({ '/srv/k': 'k' }, CLIENTS)
-    const ws = two(a, b, { '/srv': '@b' })
-    ws.policies.add({ preVfs: (): Action | null => null })
-    await ws.shell(`cd /srv && curl -s --data-binary @/srv/k ${REQUEST}`)
-    await ws.shell(`cd /srv && curl -s ${REQUEST}`)
-    expect([a.ran, b.ran]).toEqual([[], [`curl -s ${REQUEST}`]])
-    await ws.close()
-  })
-
-  it('lands a download in the folder only its machine holds', async () => {
-    const a = new FakeFiles({}, CLIENTS)
-    const b = new FakeFiles({ '/srv/k': 'k' }, CLIENTS)
-    const ws = two(a, b, { '/srv': '@b', '/data': new RAMVFS() })
-    await ws.shell(`cd /data && wget -q -T 2 ${REQUEST}`)
-    await ws.shell(`cd /data && wget -q -T 2 ${REQUEST} /srv/out`)
-    await ws.shell(`cd /data && wget -q -T 2 -O - ${REQUEST}`)
-    await ws.shell(`cd /data && wget -q -T 2 --spider ${REQUEST}`)
-    await ws.shell(`cd /srv && wget -q -T 2 ${REQUEST}`)
-    expect(a.ran).toEqual([`wget -q -T 2 -O - ${REQUEST}`, `wget -q -T 2 --spider ${REQUEST}`])
-    expect(b.ran).toEqual([`wget -q -T 2 ${REQUEST}`])
-    await ws.close()
-  })
-
-  it('asks a fact from a shared folder of the machine holding it', async () => {
-    const a = new FakeFiles({}, ['uname'])
-    const b = new FakeFiles({ '/tmp/only/k': 'k' }, ['uname'])
-    const ws = two(a, b)
-    await ws.shell('cd /tmp/only && echo x | uname -s')
-    expect([a.ran, b.ran]).toEqual([[], ['uname -s']])
-    await ws.close()
-  })
-
-  it('lands a new download in the shared folder its machine holds', async () => {
-    const a = new FakeFiles({}, CLIENTS)
-    const b = new FakeFiles({ '/tmp/only/k': 'k' }, CLIENTS)
-    const ws = two(a, b)
-    await ws.shell(`cd /tmp/only && wget -q -T 2 ${REQUEST}`)
-    await ws.shell(`cd /tmp/only && curl -s -o new.txt ${REQUEST}`)
-    await ws.shell(`cd /tmp/only && curl -s -o /tmp/new.txt ${REQUEST}`)
-    expect(a.ran).toEqual([])
-    expect(b.ran).toEqual([`wget -q -T 2 ${REQUEST}`, `curl -s -o new.txt ${REQUEST}`])
-    await ws.close()
-  })
-
-  it("leaves a fact to Mirage where the run's PATH finds nothing", async () => {
-    const a = new FakeFiles({}, ['uname'])
-    const b = new FakeFiles({}, ['uname'])
-    const lost = (line: string, data: Uint8Array | null): RunAnswer =>
-      line.includes('command -v') && line.includes('PATH=/empty ')
-        ? failed('')
-        : a.answer(line, data)
-    const ws = new Workspace(
-      {},
-      {
-        mode: MountMode.WRITE,
-        machines: { a: new ScriptedMachine('a', lost), b: new ScriptedMachine('b', b.answer) },
-      },
-    )
-    expect(await out(ws, 'PATH=/empty uname -s')).toBe('Linux\n')
-    await ws.shell('uname -s')
-    expect([a.ran, b.ran]).toEqual([['uname -s'], []])
-    await ws.close()
-  })
-
-  it.each([
-    ['localhost', true],
-    ['localhost:8000/health', true],
-    ['http://LOCALHOST/', true],
-    ['https://127.0.0.1:8443/a?b=1', true],
-    ['http://[::1]:80/', true],
-    ['user@localhost:8000', true],
-    ['http://localhost.example.com/', false],
-    ['http://localhost@example.com/', false],
-    ['localhosts', false],
-    ['Host: localhost', false],
-    ['example.com', false],
-  ])('tells whether %s addresses its own machine', (word, local) => {
-    expect(LOCALHOST_WORD.test(word)).toBe(local)
   })
 })

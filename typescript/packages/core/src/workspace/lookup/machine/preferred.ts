@@ -24,7 +24,7 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
-import { programMachine } from './command.ts'
+import { programMachine } from './program.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
 import { folderHolders, searchedMachine } from './search.ts'
 
