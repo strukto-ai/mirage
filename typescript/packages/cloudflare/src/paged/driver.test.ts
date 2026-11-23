@@ -180,6 +180,11 @@ describe('the paged sql driver of a Durable Object', () => {
       { a: 2, b: 'x' },
       { a: 3, b: 'y' },
     ])
+    expect(driver.sql.exec('SELECT ? AS v;\ufeff', 7).toArray()).toEqual([{ v: 7 }])
+    expect(() => driver.sql.exec('INSERT INTO t VALUES (?, NULL); SELECT 1', 5)).toThrow(
+      'only the last statement of a script takes parameters',
+    )
+    expect(driver.sql.exec('SELECT count(*) AS n FROM t').toArray()).toEqual([{ n: 3 }])
     expect(() => driver.sql.exec('DELETE FROM t; SELECT * FROM missing')).toThrow(
       'no such table: missing',
     )
