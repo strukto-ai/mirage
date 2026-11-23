@@ -29,8 +29,9 @@ const encoder = new TextEncoder()
 // A text is answered as stored, a byte order mark at its start too.
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
-// Whether a script has no statement left in `rest`: blanks, semicolons and
-// comments may follow its last one.
+// Whether a script has no statement left in `rest`: what SQLite reads as
+// blank (a byte order mark too), semicolons and comments may follow its last
+// one. Anything else counts as a statement to come.
 function ends(rest: string): boolean {
   let at = 0
   while (at < rest.length) {
@@ -40,9 +41,9 @@ function ends(rest: string): boolean {
       at = line + 1
     } else if (rest.startsWith('/*', at)) {
       const close = rest.indexOf('*/', at + 2)
-      if (close < 0) return true
+      if (close < 0) return rest.length > at + 2
       at = close + 2
-    } else if (' \t\n\f\r;'.includes(rest.charAt(at))) at += 1
+    } else if (' \t\n\f\r;\ufeff'.includes(rest.charAt(at))) at += 1
     else return false
   }
   return true
@@ -277,6 +278,7 @@ export class PagedDatabase {
   private readonly reset: Call<number>
   private readonly finalize: Call<number>
   private readonly clearBindings: Call<number>
+  private readonly parameterCount: Call<number>
   private readonly closeDatabase: Call<number>
   private readonly bindBlob: Call<number>
   private readonly bindDouble: Call<number>
@@ -310,6 +312,7 @@ export class PagedDatabase {
     this.reset = call('sqlite3_reset', n, [n])
     this.finalize = call('sqlite3_finalize', n, [n])
     this.clearBindings = call('sqlite3_clear_bindings', n, [n])
+    this.parameterCount = call('sqlite3_bind_parameter_count', n, [n])
     this.closeDatabase = call('sqlite3_close', n, [n])
     this.bindBlob = call('sqlite3_bind_blob', n, [n, n, n, n, n])
     this.bindDouble = call('sqlite3_bind_double', n, [n, n, n])
@@ -379,6 +382,7 @@ export class PagedDatabase {
    *
    * @param sql one statement, or several run in turn, of which the last one's rows are answered.
    * @param params the values of the `?` parameters of the last statement.
+   * @throws when a statement before the last takes parameters.
    */
   exec(sql: string, params: readonly unknown[] = []): SqlRow[] {
     if (this.closed) throw new Error('the paged database is closed')
@@ -406,6 +410,12 @@ export class PagedDatabase {
           return this.run(statement, params, sql)
         }
         try {
+          // Its parameters would stay unbound: refused, never run with NULL.
+          if (!last && this.parameterCount(statement) > 0) {
+            throw new Error(
+              `${sql.slice(0, 80)}: only the last statement of a script takes parameters`,
+            )
+          }
           rows = this.run(statement, last ? params : [], sql)
         } finally {
           this.finalize(statement)
