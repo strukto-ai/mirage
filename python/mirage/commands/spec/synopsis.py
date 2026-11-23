@@ -55,6 +55,7 @@ SYNOPSES: dict[str, str] = {
     "gunzip": "gunzip [OPTION]... [FILE]...",
     "gzip": "gzip [OPTION]... [FILE]...",
     "head": "head [OPTION]... [FILE]...",
+    "hexdump": "hexdump [options] <file>...",
     "hostid": "hostid [OPTION]",
     "hostname": "hostname [-b] {hostname|-F file}         set host name "
     "(from file)",

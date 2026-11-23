@@ -202,6 +202,24 @@ Commands for structured data, encodings, checksums and archives, beside the
     <ResponseField name="-X" />
   </Expandable>
 </ResponseField>
+<ResponseField name="hexdump">
+  Dump bytes through display formats or format strings.
+  <Expandable title="13 flags">
+    <ResponseField name="-b, --one-byte-octal" />
+    <ResponseField name="-X, --one-byte-hex" />
+    <ResponseField name="-c, --one-byte-char" />
+    <ResponseField name="-C, --canonical" />
+    <ResponseField name="-d, --two-bytes-decimal" />
+    <ResponseField name="-o, --two-bytes-octal" />
+    <ResponseField name="-x, --two-bytes-hex" />
+    <ResponseField name="-L[<text>], --color[=<text>]" />
+    <ResponseField name="-e, --format <text>" />
+    <ResponseField name="-f, --format-file <path>" />
+    <ResponseField name="-n, --length <text>" />
+    <ResponseField name="-s, --skip <text>" />
+    <ResponseField name="-v, --no-squeezing" />
+  </Expandable>
+</ResponseField>
 <ResponseField name="md5">
   Print an MD5 digest.
 </ResponseField>

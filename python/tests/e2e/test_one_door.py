@@ -112,7 +112,7 @@ ROWS: dict[str, str] = {
     **{
         name: f"{name} /t/a.txt"
         for name in (
-            "b2sum base64 expand fmt md5 md5sum nl rev sha1sum sha224sum"
+            "b2sum base64 expand fmt hexdump md5 md5sum nl rev sha1sum sha224sum"
             " sha256sum sha384sum sha512sum strings tac unexpand uniq wc xxd"
         ).split()
     },

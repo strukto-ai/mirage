@@ -143,6 +143,27 @@ export const SPECS: Record<string, CommandSpec> = {
       PATHS_OPERAND,
     ],
   }),
+  // util-linux's hexdump: each display option and format string adds its
+  // formats where it stands, so they read in the order typed, and an
+  // abbreviated long name is ambiguous in the order listed here.
+  hexdump: new CommandSpec({
+    arguments: [
+      new Argument(['-b', '--one-byte-octal'], { action: 'store_true' }),
+      new Argument(['-X', '--one-byte-hex'], { action: 'store_true' }),
+      new Argument(['-c', '--one-byte-char'], { action: 'store_true' }),
+      new Argument(['-C', '--canonical'], { action: 'store_true' }),
+      new Argument(['-d', '--two-bytes-decimal'], { action: 'store_true' }),
+      new Argument(['-o', '--two-bytes-octal'], { action: 'store_true' }),
+      new Argument(['-x', '--two-bytes-hex'], { action: 'store_true' }),
+      new Argument(['-L', '--color'], { nargs: '?', attachedOnly: true }),
+      new Argument(['-e', '--format'], { action: 'append' }),
+      new Argument(['-f', '--format-file'], { type: 'path', action: 'append' }),
+      new Argument(['-n', '--length']),
+      new Argument(['-s', '--skip']),
+      new Argument(['-v', '--no-squeezing'], { action: 'store_true' }),
+      PATHS_OPERAND,
+    ],
+  }),
   rev: new CommandSpec({
     arguments: [new Argument(['-0', '--zero'], { action: 'store_true' }), PATHS_OPERAND],
   }),

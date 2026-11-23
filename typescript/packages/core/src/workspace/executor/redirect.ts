@@ -114,6 +114,7 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'fold',
   'fmt',
   'od',
+  'hexdump',
   'strings',
   'rev',
   'tac',

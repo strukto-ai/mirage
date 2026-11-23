@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "id": "xm_hexdump_across_mounts",
+      "seq": 18900201,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab' > /data/xm_rt_hexdump; printf 'c' > /data2/xm_rt_hexdump; hexdump -C /data/xm_rt_hexdump /data2/xm_rt_hexdump; rm /data/xm_rt_hexdump /data2/xm_rt_hexdump",
+      "expect": {
+        "exit": 0,
+        "stdout": "00000000  61 62 63                                          |abc|\n00000003\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

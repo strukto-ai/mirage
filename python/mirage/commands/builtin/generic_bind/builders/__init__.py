@@ -38,6 +38,7 @@ from mirage.commands.builtin.generic_bind.builders import grep
 from mirage.commands.builtin.generic_bind.builders import gunzip
 from mirage.commands.builtin.generic_bind.builders import gzip
 from mirage.commands.builtin.generic_bind.builders import head
+from mirage.commands.builtin.generic_bind.builders import hexdump
 from mirage.commands.builtin.generic_bind.builders import iconv
 from mirage.commands.builtin.generic_bind.builders import join
 from mirage.commands.builtin.generic_bind.builders import jq
@@ -108,6 +109,7 @@ BUILDERS = (
     gunzip.BUILDER,
     gzip.BUILDER,
     head.BUILDER,
+    hexdump.BUILDER,
     iconv.BUILDER,
     join.BUILDER,
     jq.BUILDER,
