@@ -65,6 +65,8 @@ TRANSIENT_FIELDS = (
     "pending_signals",
     "signal_trap_running",
     "signal_arrived",
+    "fatal_signal",
+    "status_before_signal",
     "_positional_held",
     "_env_held",
 )

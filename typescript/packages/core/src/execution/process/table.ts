@@ -37,6 +37,9 @@ export class ProcessTable {
   private stopped = false
   // What `kill -STOP` holds, by pid, and the signal each was sent meanwhile.
   private readonly pauses = new Map<number, PauseGate>()
+  // What waits for a shell that runs its EXIT action for a signal to end, by
+  // pid: a group's signal to the shell above it (`deliverPastExits`).
+  private readonly pastExits = new Map<number, (() => void)[]>()
   private readonly heldSignals = new Map<
     number,
     readonly [signal: number, group: boolean, whole: boolean]
@@ -215,6 +218,9 @@ export class ProcessTable {
         this.history.set(id, { generation: entry.generation, record: handle.record })
         this.prune()
         this.resume(handle)
+        const waiting = this.pastExits.get(id) ?? []
+        this.pastExits.delete(id)
+        for (const then of waiting) then()
         try {
           this.ended?.(handle.record)
         } catch (err) {
@@ -399,7 +405,8 @@ export class ProcessTable {
    * goes on at CONT, taking then the signal it was sent while paused as it was
    * sent, since only KILL ends a stopped program; a kept signal leaves it as it is, and
    * any other stops it unless the shell running a statement in it traps or
-   * ignores it (`catcher`). One of a group leaves what it started to their own
+   * ignores it (`catcher`), or takes it to run its EXIT action first
+   * (`exitCatcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
    * if it ignores the signal nothing happens. A signal sent to the whole group
@@ -437,12 +444,45 @@ export class ProcessTable {
       if (caught === true && whole) handle.interrupt(signal)
       if (caught === true || (caught === false && !handle.ignores.has(signal))) return true
     }
+    if (
+      signal !== SIGKILL &&
+      !handle.ignores.has(signal) &&
+      handle.exitCatcher?.(signal, handle.record.id.pid) === true
+    ) {
+      // The shell leaves at once: the program it runs right now stops, the
+      // shells it started go on.
+      handle.exiting = true
+      handle.interrupt(signal)
+      return true
+    }
     let found = true
-    if (group) deliver(handle, signal)
+    if (group) this.deliverPastExits(handle, signal)
     else
       found = handle.ignores.has(signal) || handle.terminate(signal, handle.record.parent !== null)
     this.resume(handle)
     return found
+  }
+
+  /**
+   * Deliver a group's signal to one runner (`deliver`) once each shell under
+   * it that took the signal to run its EXIT action first (`exiting`) has
+   * ended, since the runner's stop would stop them with it: it lands as the
+   * last of them ends, before whoever waits for that one goes on. Python's
+   * reap leaves such a runner to its end the same way.
+   */
+  private deliverPastExits(handle: ProcessHandle, signal: number): void {
+    const below = this.under(handle.record.id.pid).find((child) => child.exiting)
+    if (below === undefined) {
+      deliver(handle, signal)
+      return
+    }
+    const pid = below.record.id.pid
+    this.pastExits.set(pid, [
+      ...(this.pastExits.get(pid) ?? []),
+      () => {
+        this.deliverPastExits(handle, signal)
+      },
+    ])
   }
 
   /**

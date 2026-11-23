@@ -155,7 +155,13 @@ export async function executeBody(
         mergedIo,
       )
       mergedIo = await land(
-        await runSignalTraps(executeFn, session, statementStdin(session, stdin, bound), callStack),
+        await runSignalTraps(
+          executeFn,
+          session,
+          statementStdin(session, stdin, bound),
+          callStack,
+          sink,
+        ),
         sink,
         allStdout,
         mergedIo,

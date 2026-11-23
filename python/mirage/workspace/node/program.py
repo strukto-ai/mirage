@@ -450,6 +450,7 @@ async def _run_program(
                     session,
                     statement_stdin(session, stdin, bound),
                     call_stack,
+                    sink,
                 ),
                 sink,
                 all_stdout,

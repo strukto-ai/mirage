@@ -235,6 +235,9 @@ export async function handleKill(
     signalled = true
   }
   const code = signalled ? 0 : 1
+  // One it takes to run its EXIT action first lands as kill ends, so the
+  // action finds kill's status.
+  if (session !== null && session.fatalSignal !== null) session.statusBeforeSignal = code
   const stderr = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   return [
     null,

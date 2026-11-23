@@ -267,6 +267,10 @@ async def handle_kill(
         # lands here, before its next statement.
         raise asyncio.CancelledError
     code = 0 if signalled else 1
+    if session is not None and session.fatal_signal is not None:
+        # One it takes to run its EXIT action first lands as kill ends, so
+        # the action finds kill's status.
+        session.status_before_signal = code
     err = encode_text("\n".join(errors) + "\n") if errors else b""
     node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err)
     return None, IOResult(exit_code=code, stderr=err or None), node

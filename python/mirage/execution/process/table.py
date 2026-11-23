@@ -510,7 +510,8 @@ class ProcessTable:
         while paused as it was sent, since only KILL ends a stopped
         program; a kept
         signal leaves it as it is, and any other stops it unless the shell
-        running a statement in it traps or ignores it (``catcher``). One of
+        running a statement in it traps or ignores it (``catcher``), or
+        takes it to run its EXIT action first (``exit_catcher``). One of
         a group
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
@@ -556,6 +557,18 @@ class ProcessTable:
                 handle.interrupt(signal)
             if caught or (caught is False and signal not in handle.ignores):
                 return True
+        ending = handle.exit_catcher
+        if (
+            signal != SIGKILL
+            and signal not in handle.ignores
+            and ending is not None
+            and ending(signal, handle.record.pid)
+        ):
+            # The shell leaves at once: the program it runs right now
+            # stops, the shells it started go on.
+            handle.exiting = True
+            handle.interrupt(signal)
+            return True
         if group:
             _deliver(handle, signal)
             found = True

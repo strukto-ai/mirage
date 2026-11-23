@@ -492,7 +492,8 @@ def report_jobs(
     the shell has an action for is, for good. The
     signal is the one ``kill`` stopped a job with, or the one that ended
     the native program a job's status is. A substitution's shell tells
-    of none.
+    of none, nor one a signal ends (``fatal_signal``), which leaves at
+    once.
 
     Args:
         context (EvaluationContext): the shell.
@@ -503,6 +504,7 @@ def report_jobs(
         job_table is None
         or session.process_id is None
         or context.frame.substitution
+        or session.fatal_signal is not None
     ):
         return b""
     told = []
@@ -537,7 +539,8 @@ def report_reaped(
 ) -> None:
     """Queue bash's report of a child its shell waited for that a signal
     ended (``signal_report``), empty when it prints none, to follow the
-    reaping command's stderr with those of the shell's jobs.
+    reaping command's stderr with those of the shell's jobs. A shell a
+    signal ends (``fatal_signal``) leaves at once, and tells nothing.
 
     Args:
         context (EvaluationContext): the evaluation of the reaping
@@ -545,7 +548,7 @@ def report_reaped(
         reaped (Sequence[tuple[ProcessHandle, int, TSNodeLike]]): each
             process of the child, its status and the command it ran.
     """
-    if context.frame.substitution:
+    if context.frame.substitution or context.session.fatal_signal is not None:
         return
     ended = reaped[-1][0].ended_by
     listed = signal_reported(ended)
@@ -680,7 +683,8 @@ def _program_report(
     """bash's report of a program its shell ran that a signal ended. The
     program has no pid of its own to list, so only a report naming the
     signal alone is told: TERM's, and one the shell has an action for,
-    whose signal reached the program as one of the shell's group.
+    whose signal reached the program as one of the shell's group. A shell
+    the signal ends (``fatal_signal``) leaves at once, and tells nothing.
 
     Args:
         context (EvaluationContext): the shell.
@@ -689,7 +693,11 @@ def _program_report(
         signal (int): the signal that ended it.
     """
     trapped = own_action(context.session, signal)
-    if context.frame.substitution or not (signal == SIGTERM or trapped):
+    if (
+        context.frame.substitution
+        or context.session.fatal_signal is not None
+        or not (signal == SIGTERM or trapped)
+    ):
         return b""
     row = (shell.record.pid, code, signal, "")
     return encode_text(signal_report(shell_voice(), [row], True, trapped))

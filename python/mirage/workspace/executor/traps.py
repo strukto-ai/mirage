@@ -22,7 +22,7 @@ from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import (
     ERR_TRAP_EXEMPT_TYPES,
     SHELL_IGNORED_SIGNALS,
@@ -37,6 +37,7 @@ from mirage.shell.types import TSNodeLike
 from mirage.workspace.executor.statement import (
     Written,
     as_written,
+    land,
     record_status,
     restore_status,
     snapshot_status,
@@ -150,7 +151,9 @@ def _drop_job_ignores(session: SessionState, signals: frozenset[int]) -> None:
 def arm_signals(session: SessionState) -> None:
     """Make the shell the one that answers a signal its process gets, as
     it runs a statement there: one it traps or ignores, it takes
-    (``SessionState.catch_signal``), any other does what it does. A
+    (``SessionState.catch_signal``), one it would die of it takes to run
+    its EXIT action first (``SessionState.takes_fatal_signal``), any
+    other does what it does. A
     process hosts each shell that runs in place in it in turn (a script,
     a job's own subshell), so the innermost shell running answers.
 
@@ -161,6 +164,11 @@ def arm_signals(session: SessionState) -> None:
     if process is not None:
         process.catcher = (
             session.catch_signal if session.signal_traps else None
+        )
+        process.exit_catcher = (
+            session.takes_fatal_signal
+            if session.exit_trap and not session.exit_trap_inherited
+            else None
         )
 
 
@@ -380,6 +388,7 @@ async def run_signal_traps(
     session: SessionState,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    sink: JobConsole | None = None,
 ) -> list[Written]:
     """Run the action of each trapped signal that arrived while the last
     command ran, in signal order, as bash does once that command ends.
@@ -387,7 +396,11 @@ async def run_signal_traps(
     ``$?`` is the command's status while each runs and again after it;
     an ``exit`` in one ends the shell, a ``return`` the function it runs
     in. One that arrives while an action runs waits for the next command
-    boundary after it.
+    boundary after it. A signal the shell took to run its EXIT action
+    before it dies of it (``takes_fatal_signal``) then ends it as an
+    ``exit`` does, with 128 plus the signal, even inside an action; the
+    EXIT action writes into ``sink`` as it runs, so a second signal that
+    cuts it short leaves what it wrote.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs a line in the
@@ -395,35 +408,54 @@ async def run_signal_traps(
         session (SessionState): the shell the signals reached.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames the actions run in.
+        sink (JobConsole | None): where the shell's statements write.
 
     Returns:
         list[Written]: what the actions wrote, for the caller to land;
         empty when none runs.
     """
-    if (
-        execute_fn is None
-        or not session.pending_signals
-        or session.signal_trap_running
-    ):
-        return []
     written: list[Written] = []
-    session.signal_trap_running = True
-    try:
-        while session.pending_signals:
-            signal = min(session.pending_signals)
-            session.pending_signals.discard(signal)
-            action = session.signal_traps.get(signal)
-            if not action or session.signal_traps_inherited:
-                continue
-            try:
-                written += await _run_action(
-                    execute_fn, action, "trap", session, stdin, call_stack
-                )
-            except (ExitSignal, ReturnSignal) as sig:
-                await _lead_with(sig, written)
-                raise
-    finally:
-        session.signal_trap_running = False
+    if (
+        execute_fn is not None
+        and session.pending_signals
+        and not session.signal_trap_running
+    ):
+        session.signal_trap_running = True
+        try:
+            while session.pending_signals:
+                signal = min(session.pending_signals)
+                session.pending_signals.discard(signal)
+                action = session.signal_traps.get(signal)
+                if not action or session.signal_traps_inherited:
+                    continue
+                try:
+                    written += await _run_action(
+                        execute_fn, action, "trap", session, stdin, call_stack
+                    )
+                except (ExitSignal, ReturnSignal) as sig:
+                    await _lead_with(sig, written)
+                    raise
+        finally:
+            session.signal_trap_running = False
+    if session.fatal_signal is not None:
+        code = 128 + session.fatal_signal
+        if sink is not None:
+            await land(written, sink, [], IOResult())
+            written = []
+        cleanup = await run_exit_trap(
+            execute_fn, session, code, stdin, call_stack, sink
+        )
+        if cleanup is None:
+            ended = ExitSignal(code)
+        else:
+            out = await cleanup.materialize_stdout()
+            ended = ExitSignal(
+                code, stderr=await cleanup.materialize_stderr(), stdout=out
+            )
+            ended.cleanup = out
+        ended.unrouted = bool(written)
+        await _lead_with(ended, written)
+        raise ended
     return written
 
 
@@ -514,6 +546,7 @@ async def run_exit_trap(
     status: int,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
+    sink: JobConsole | None = None,
 ) -> IOResult | None:
     """Run the shell's EXIT action as the shell ends with ``status``.
 
@@ -523,8 +556,11 @@ async def run_exit_trap(
     the shell ends with stays ``status`` unless the action exits, or
     fails where ``set -e`` acts (not in a test, the left of ``&&``/``||``
     or after ``!``), which exits too; its commands answer ERR and RETURN
-    afresh. Hard stops (cancellation, a killed job, a closed workspace)
-    are not an end the shell reaches, and never get here.
+    afresh. A shell a signal ends (``fatal_signal``) starts ``$?`` at the
+    status the signal found and ends with 128 plus it whatever the
+    action does, its process ended by it. Hard stops (cancellation, a
+    killed job, a closed workspace) are not an end the shell reaches,
+    and never get here.
 
     Args:
         execute_fn (Callable[..., Any] | None): runs a line in the
@@ -534,6 +570,58 @@ async def run_exit_trap(
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames the action runs in:
             the function that called ``exit`` is still on them.
+        sink (JobConsole | None): where the action writes as it runs;
+            None to return what it wrote.
+
+    Returns:
+        IOResult | None: what the action wrote and the shell's final
+        status; None when no action of this shell's own is set.
+    """
+    fatal = session.fatal_signal
+    if fatal is None:
+        return await _run_exit_action(
+            execute_fn, session, status, status, stdin, call_stack, sink
+        )
+    session.fatal_signal = None
+    ended = await _run_exit_action(
+        execute_fn,
+        session,
+        session.status_before_signal,
+        128 + fatal,
+        stdin,
+        call_stack,
+        sink,
+    )
+    record_status(session, 128 + fatal)
+    process = current_caller().process
+    if process is not None and process.record.pid == session.process_id:
+        process.program_signaled(fatal)
+    if ended is not None:
+        ended.exit_code = 128 + fatal
+    return ended
+
+
+async def _run_exit_action(
+    execute_fn: Callable[..., Any] | None,
+    session: SessionState,
+    found: int,
+    status: int,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    sink: JobConsole | None,
+) -> IOResult | None:
+    """Run the EXIT action (``run_exit_trap``), ``$?`` starting at
+    ``found`` and the shell ending with ``status`` unless it exits.
+
+    Args:
+        execute_fn (Callable[..., Any] | None): runs a line in the
+            caller's frames; None where nothing can run one.
+        session (SessionState): the shell that is ending.
+        found (int): ``$?`` as the action starts.
+        status (int): the status the shell ends with.
+        stdin (ByteSource | None): the shell's standard input.
+        call_stack (CallStack | None): the frames the action runs in.
+        sink (JobConsole | None): where it writes as it runs, if any.
 
     Returns:
         IOResult | None: what the action wrote and the shell's final
@@ -550,7 +638,7 @@ async def run_exit_trap(
     session.exit_trap = None
     if not action:
         return None
-    record_status(session, status)
+    record_status(session, found)
     saved = session._trap_status
     session._trap_status = status
     outer_head = session._parse_head
@@ -558,6 +646,7 @@ async def run_exit_trap(
     exiting = session.errexit_exiting
     session.errexit_exiting = False
     final = status
+    streams = {} if sink is None else {"sink": sink}
     try:
         io = await execute_fn(
             action,
@@ -568,6 +657,7 @@ async def run_exit_trap(
                 if call_stack is not None
                 else CallStack(session.shell_nesting)
             ),
+            **streams,
         )
         stdout = await materialize(io.stdout)
         stderr = await materialize(io.stderr)

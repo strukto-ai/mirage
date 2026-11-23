@@ -116,3 +116,18 @@ def test_catch_signal_takes_caught_and_ignored_signals_only():
     session.signal_traps_inherited = True
     assert session.catch_signal(15, 7) is None
     assert session.catch_signal(10, 7) is False
+
+
+def test_a_shell_takes_a_fatal_signal_for_its_own_exit_action_only():
+    session = make_session()
+    session.process_id = 7
+    session.last_exit_code = 4
+    for action, inherited in ((None, False), ("", False), ("echo b", True)):
+        session.exit_trap, session.exit_trap_inherited = action, inherited
+        assert not session.takes_fatal_signal(15, 7)
+    session.exit_trap_inherited = False
+    assert not session.takes_fatal_signal(15, 8)
+    assert session.takes_fatal_signal(15, 7)
+    session.last_exit_code = 143
+    assert session.takes_fatal_signal(1, 7)
+    assert (session.fatal_signal, session.status_before_signal) == (15, 4)

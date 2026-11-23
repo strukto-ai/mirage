@@ -560,6 +560,11 @@ export class SessionState {
   // once it ends; a child shell starts with none.
   pendingSignals = new Set<number>()
   signalTrapRunning = false
+  // The signal this shell ends of once its EXIT action has run, as bash runs
+  // it before it dies of a signal it neither traps nor ignores, and `$?` as it
+  // came; null while none has. A child shell starts with none.
+  fatalSignal: number | null = null
+  statusBeforeSignal = 0
   // Resolved when a trapped signal arrives while `wait` waits.
   signalArrived: (() => void) | null = null
   trapStatus: number | null = null
@@ -1165,6 +1170,29 @@ export class SessionState {
       return null
     if (action === '') return false
     this.pendingSignals.add(signal)
+    this.signalArrived?.()
+    return true
+  }
+
+  /**
+   * Whether this shell takes `signal` sent to `pid`, one it neither traps nor
+   * ignores, to run its EXIT action before it ends of it, as bash does: at
+   * once, its running command cut short and a `wait` too, with `$?` as the
+   * signal found it. Only an EXIT action of its own counts, and none while it
+   * runs. Mirrors Python's takes_fatal_signal.
+   */
+  takesFatalSignal(signal: number, pid: number): boolean {
+    if (
+      this.exitTrap === null ||
+      this.exitTrap === '' ||
+      this.exitTrapInherited ||
+      (this.processId !== null && pid !== this.processId)
+    )
+      return false
+    if (this.fatalSignal === null) {
+      this.fatalSignal = signal
+      this.statusBeforeSignal = this.lastExitCode
+    }
     this.signalArrived?.()
     return true
   }

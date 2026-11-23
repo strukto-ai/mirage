@@ -430,6 +430,7 @@ export async function handleConnection(
       session,
       statementStdin(session, stdin, bound),
       callStack,
+      sink,
     )
     if (written.length > 0 && sink !== null) {
       // What the left command wrote goes ahead of what the actions write, a
@@ -671,7 +672,13 @@ export async function handleSubshell(
       )
       mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
       mergedIo = await land(
-        await runSignalTraps(runAction, session, statementStdin(session, stdin, bound), callStack),
+        await runSignalTraps(
+          runAction,
+          session,
+          statementStdin(session, stdin, bound),
+          callStack,
+          sink,
+        ),
         sink,
         allStdout,
         mergedIo,

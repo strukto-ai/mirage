@@ -386,8 +386,9 @@ async def handle_pipe(
     finally:
         for pipe in pipes:
             pipe.close_reader()
-        for task in tasks:
-            if not task.done():
+        for task, stage in zip(tasks, stages):
+            # A stage running its EXIT action for the signal ends on its own.
+            if not task.done() and (stage is None or not stage.exiting):
                 task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         if failed:
@@ -488,6 +489,7 @@ async def handle_connection(
             session,
             statement_stdin(session, stdin, bound),
             call_stack,
+            sink,
         )
         if written and sink is not None:
             # What the left command wrote goes ahead of what the actions
@@ -774,6 +776,7 @@ async def handle_subshell(
                     session,
                     statement_stdin(session, stdin, bound),
                     call_stack,
+                    sink,
                 ),
                 sink,
                 all_stdout,

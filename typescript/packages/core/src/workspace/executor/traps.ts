@@ -17,7 +17,7 @@ import { asyncChain } from '../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { Channel } from '../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
 import { currentCaller, isProgramInvocation, voiceName } from '../../context/session_context.ts'
@@ -27,6 +27,7 @@ import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
 import {
   asWritten,
+  land,
   recordStatus,
   restoreStatus,
   snapshotStatus,
@@ -128,16 +129,21 @@ function dropJobIgnores(session: SessionState, signals: ReadonlySet<number>): vo
 /**
  * Make the shell the one that answers a signal its process gets, as it runs
  * a statement there: one it traps or ignores, it takes
- * (`SessionState.catchSignal`), any other does what it does. A process hosts
- * each shell that runs in place in it in turn (a script, a job's own
- * subshell), so the innermost shell running answers. Mirrors Python's
- * arm_signals.
+ * (`SessionState.catchSignal`), one it would die of it takes to run its EXIT
+ * action first (`SessionState.takesFatalSignal`), any other does what it
+ * does. A process hosts each shell that runs in place in it in turn (a
+ * script, a job's own subshell), so the innermost shell running answers.
+ * Mirrors Python's arm_signals.
  */
 export function armSignals(session: SessionState): void {
   const process = currentCaller().process
-  if (process !== null)
-    process.catcher =
-      session.signalTraps.size > 0 ? (signal, pid) => session.catchSignal(signal, pid) : null
+  if (process === null) return
+  process.catcher =
+    session.signalTraps.size > 0 ? (signal, pid) => session.catchSignal(signal, pid) : null
+  process.exitCatcher =
+    session.exitTrap !== null && session.exitTrap !== '' && !session.exitTrapInherited
+      ? (signal, pid) => session.takesFatalSignal(signal, pid)
+      : null
 }
 
 /**
@@ -328,34 +334,58 @@ export async function runReturnTrap(
  * ran, in signal order, as bash does once that command ends. `$?` is the
  * command's status while each runs and again after it; an `exit` in one ends
  * the shell, a `return` the function it runs in. One that arrives while an
- * action runs waits for the next command boundary after it. Returns what the
- * actions wrote, for the caller to land. Mirrors Python's run_signal_traps.
+ * action runs waits for the next command boundary after it. A signal the
+ * shell took to run its EXIT action before it dies of it (`takesFatalSignal`)
+ * then ends it as an `exit` does, with 128 plus the signal, even inside an
+ * action; the EXIT action writes into `sink` as it runs, so a second signal
+ * that cuts it short leaves what it wrote. Returns what the actions wrote,
+ * for the caller to land. Mirrors Python's run_signal_traps.
  */
 export async function runSignalTraps(
   executeFn: ExecuteFn | null,
   session: SessionState,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  sink: JobConsole | null = null,
 ): Promise<Written[]> {
-  if (executeFn === null || session.pendingSignals.size === 0 || session.signalTrapRunning)
-    return []
-  const written: Written[] = []
-  session.signalTrapRunning = true
-  try {
-    while (session.pendingSignals.size > 0) {
-      const signal = Math.min(...session.pendingSignals)
-      session.pendingSignals.delete(signal)
-      const action = session.signalTraps.get(signal)
-      if (action === undefined || action === '' || session.signalTrapsInherited) continue
-      try {
-        written.push(...(await runAction(executeFn, action, 'trap', session, stdin, callStack)))
-      } catch (err) {
-        if (err instanceof ExitSignal || err instanceof ReturnSignal) await leadWith(err, written)
-        throw err
+  let written: Written[] = []
+  if (executeFn !== null && session.pendingSignals.size > 0 && !session.signalTrapRunning) {
+    session.signalTrapRunning = true
+    try {
+      while (session.pendingSignals.size > 0) {
+        const signal = Math.min(...session.pendingSignals)
+        session.pendingSignals.delete(signal)
+        const action = session.signalTraps.get(signal)
+        if (action === undefined || action === '' || session.signalTrapsInherited) continue
+        try {
+          written.push(...(await runAction(executeFn, action, 'trap', session, stdin, callStack)))
+        } catch (err) {
+          if (err instanceof ExitSignal || err instanceof ReturnSignal) await leadWith(err, written)
+          throw err
+        }
       }
+    } finally {
+      session.signalTrapRunning = false
     }
-  } finally {
-    session.signalTrapRunning = false
+  }
+  if (session.fatalSignal !== null) {
+    const code = 128 + session.fatalSignal
+    if (sink !== null) {
+      await land(written, sink, [], new IOResult())
+      written = []
+    }
+    const cleanup = await runExitTrap(executeFn, session, code, stdin, callStack, sink)
+    let ended: ExitSignal
+    if (cleanup === null) {
+      ended = new ExitSignal(code)
+    } else {
+      const out = await materialize(cleanup.stdout)
+      ended = new ExitSignal(code, await cleanup.materializeStderr(), out)
+      ended.cleanup = out
+    }
+    ended.unrouted = written.length > 0
+    await leadWith(ended, written)
+    throw ended
   }
   return written
 }
@@ -433,11 +463,14 @@ async function runAction(
  * bare `exit` keeps it. The status the shell ends with stays `status`
  * unless the action exits, or fails where `set -e` acts (not in a test,
  * the left of `&&`/`||` or after `!`), which exits too; its commands
- * answer ERR and RETURN afresh. Hard stops (cancellation, a killed job, a
- * closed workspace) are not an end the shell reaches, and never get here.
- * `callStack` holds the frames the action runs in: the function that
- * called `exit` is still on them. Returns null when no action of this
- * shell's own is set.
+ * answer ERR and RETURN afresh. A shell a signal ends (`fatalSignal`)
+ * starts `$?` at the status the signal found and ends with 128 plus it
+ * whatever the action does, its process ended by it. Hard stops
+ * (cancellation, a killed job, a closed workspace) are not an end the shell
+ * reaches, and never get here. `callStack` holds the frames the action runs
+ * in: the function that called `exit` is still on them, and `sink` is where
+ * the action writes as it runs, null to return what it wrote. Returns null
+ * when no action of this shell's own is set.
  */
 export async function runExitTrap(
   executeFn: ExecuteFn | null,
@@ -445,6 +478,42 @@ export async function runExitTrap(
   status: number,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
+  sink: JobConsole | null = null,
+): Promise<IOResult | null> {
+  const fatal = session.fatalSignal
+  if (fatal === null)
+    return runExitAction(executeFn, session, status, status, stdin, callStack, sink)
+  session.fatalSignal = null
+  const ended = await runExitAction(
+    executeFn,
+    session,
+    session.statusBeforeSignal,
+    128 + fatal,
+    stdin,
+    callStack,
+    sink,
+  )
+  recordStatus(session, 128 + fatal)
+  const process = currentCaller().process
+  if (process !== null && process.record.id.pid === session.processId)
+    process.programSignaled(fatal)
+  if (ended !== null) ended.exitCode = 128 + fatal
+  return ended
+}
+
+/**
+ * Run the EXIT action (`runExitTrap`), `$?` starting at `found` and the
+ * shell ending with `status` unless it exits; `sink` is where it writes as it
+ * runs, if anywhere. Mirrors Python's _run_exit_action.
+ */
+async function runExitAction(
+  executeFn: ExecuteFn | null,
+  session: SessionState,
+  found: number,
+  status: number,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  sink: JobConsole | null,
 ): Promise<IOResult | null> {
   const action = session.exitTrap
   if (
@@ -457,7 +526,7 @@ export async function runExitTrap(
   }
   session.exitTrap = null
   if (action === '') return null
-  recordStatus(session, status)
+  recordStatus(session, found)
   const saved = session.trapStatus
   session.trapStatus = status
   const outerHead = session.parseHead
@@ -473,6 +542,7 @@ export async function runExitTrap(
       session,
       stdin,
       callStack: callStack ?? new CallStack(session.shellNesting),
+      ...(sink === null ? {} : { sink }),
     })
     stdout = await materialize(io.stdout)
     stderr = await io.materializeStderr()

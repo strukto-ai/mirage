@@ -1612,7 +1612,7 @@
       }
     },
     {
-      "id": "shell_trap_kill_skips_cleanup",
+      "id": "shell_trap_kill_runs_cleanup",
       "seq": 512043,
       "targets": [
         "ram",
@@ -1639,10 +1639,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "{ trap 'echo BAD > {mount}/trap-kill-late' EXIT; echo ready > {mount}/trap-kill-ready; sleep 30; } & victim=$!; while ! test -e {mount}/trap-kill-ready; do sleep .01; done; kill $victim; wait $victim >/dev/null 2>/dev/null; test -e {mount}/trap-kill-late; echo present:$?",
+      "command": "{ trap 'echo ran > {mount}/trap-kill-late' EXIT; echo ready > {mount}/trap-kill-ready; sleep 30; } & victim=$!; while ! test -e {mount}/trap-kill-ready; do sleep .01; done; kill $victim; wait $victim >/dev/null 2>/dev/null; test -e {mount}/trap-kill-late; echo present:$?",
       "expect": {
         "exit": 0,
-        "stdout": "present:1\n",
+        "stdout": "present:0\n",
         "stderr": ""
       }
     },
