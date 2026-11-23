@@ -186,14 +186,14 @@ describe('the paged sql driver of a Durable Object', () => {
     expect(driver.sql.exec('SELECT count(*) AS n FROM t').toArray()).toEqual([{ n: 0 }])
   })
 
-  it('answers a text as it was bound, a NUL in it too', async () => {
+  it('answers a text as it was bound, a NUL in it and a byte order mark before it too', async () => {
     const driver = await open(new ObjectStorage())
     driver.sql.exec('CREATE TABLE t (k INTEGER PRIMARY KEY, a TEXT)')
     const long = `${'x'.repeat(40)}\0y`
-    const texts = ['a\0b', 'é😀', 'ab\udc80cd', long]
+    const texts = ['a\0b', 'é😀', 'ab\udc80cd', long, '\ufeffmarked']
     texts.forEach((text, k) => driver.sql.exec('INSERT INTO t VALUES (?, ?)', k, text))
     const rows = driver.sql.exec('SELECT a FROM t ORDER BY k').toArray()
-    expect(rows.map((row) => row.a)).toEqual(['a\0b', 'é😀', 'ab\ufffdcd', long])
+    expect(rows.map((row) => row.a)).toEqual(['a\0b', 'é😀', 'ab\ufffdcd', long, '\ufeffmarked'])
     expect(driver.sql.exec("SELECT 'é😀' AS a").toArray()).toEqual([{ a: 'é😀' }])
   })
 
