@@ -733,6 +733,28 @@ async def test_a_foreground_timeout_ends_the_shell_it_runs():
         await ws.close()
 
 
+# A shell with a signal action of its own keeps its last program a child, so
+# the program answers the group's signal as sent and the shell's action
+# still runs once it ends.
+@pytest.mark.asyncio
+async def test_a_trapping_shell_runs_its_action_after_its_last_program():
+    box = _Handler("a", 15)
+    ws = _sleepers(a=box)
+    try:
+        said = await asyncio.wait_for(
+            ws.shell(
+                "timeout --preserve-status 0.1 "
+                "sh -c 'trap \"exit 3\" TERM; train 1'"
+            ),
+            5,
+        )
+        assert said.exit_code == 3
+        assert {signum for _, signum in box.sent} == {15}
+    finally:
+        box.ended.set()
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_a_foreground_timeout_leaves_a_shell_s_background_program():
     box = _Handler("a", 10)

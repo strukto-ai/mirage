@@ -348,13 +348,19 @@ class Runtime(ABC, Generic[E]):
         # A line's own process is its session's ``$$``, which each of its
         # lines takes in turn, so it stays the shell; and only the shell's
         # own input runs its last command in place, not a line ``eval``,
-        # ``source`` or a trap runs, each of which names its own parse.
+        # ``source`` or a trap runs, each of which names its own parse, nor
+        # a shell with an action of its own for EXIT or a signal, which it
+        # still has to run.
         if (
             node is not None
             and shell.record.parent is not None
             and session._parse_head
             in (None, f"{voice_name(session)}: command substitution: ")
             and (session.exit_trap is None or session.exit_trap_inherited)
+            and (
+                session.signal_traps_inherited
+                or not any(session.signal_traps.values())
+            )
             and not is_program_invocation(session)
             and ends_line(node)
         ):

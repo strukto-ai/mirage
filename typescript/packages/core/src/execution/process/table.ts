@@ -463,8 +463,9 @@ export class ProcessTable {
    * before its children so a shell does not see its child die first, and
    * Mirage's own at once (`signalOwn`), deepest first, so a native program
    * knows the signal before the shell that waits for it stops. A runner that
-   * ignores it, a shell, hands it to the program it runs right now, unless a
-   * process of that program, a child a scan found, got it as sent. Mirrors
+   * ignores it, or traps it, a shell, hands it to the program it runs right
+   * now, unless a process of that program, a child a scan found or a native
+   * program it started, got it as sent and answers it itself. Mirrors
    * Python's `signal_members`.
    *
    * @param members the runners, deepest first.
@@ -477,15 +478,11 @@ export class ProcessTable {
     )
     const reached = new Set([...sending].filter(([, sent]) => sent !== null).map(([pid]) => pid))
     for (const member of members) {
-      if (
-        !reached.has(member.record.id.pid) &&
-        (!member.ignores.has(signal) ||
-          !members.some(
-            (other) =>
-              other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
-          ))
+      if (reached.has(member.record.id.pid)) continue
+      const took = members.some(
+        (other) => other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
       )
-        this.signalOwn(member, signal, true, true)
+      if (!member.ignores.has(signal) || !took) this.signalOwn(member, signal, true, !took)
     }
     await Promise.all([...sending.values()].filter((sent) => sent !== null))
   }

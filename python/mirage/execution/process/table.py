@@ -590,9 +590,10 @@ class ProcessTable:
         sent, a parent before its children so a shell does not see its
         child die first, and Mirage's own at once (``_signal_own``),
         deepest first, so a native program knows the signal before the
-        shell that waits for it stops. A runner that ignores it, a shell,
-        hands it to the program it runs right now, unless a process of
-        that program, a child a scan found, got it as sent.
+        shell that waits for it stops. A runner that ignores it, or traps
+        it, a shell, hands it to the program it runs right now, unless a
+        process of that program, a child a scan found or a native program
+        it started, got it as sent and answers it itself.
 
         Args:
             members (list[ProcessHandle]): the runners, deepest first.
@@ -606,15 +607,15 @@ class ProcessTable:
         }
         reached = {pid for pid, sent in sending.items() if sent is not None}
         for member in members:
-            if member.record.pid not in reached and (
-                signal not in member.ignores
-                or not any(
-                    other.record.parent == member.record.pid
-                    and other.record.pid in reached
-                    for other in members
-                )
-            ):
-                self._signal_own(member, signal, True, whole=True)
+            if member.record.pid in reached:
+                continue
+            took = any(
+                other.record.parent == member.record.pid
+                and other.record.pid in reached
+                for other in members
+            )
+            if signal not in member.ignores or not took:
+                self._signal_own(member, signal, True, whole=not took)
         await asyncio.gather(*(s for s in sending.values() if s is not None))
 
     def _sees(

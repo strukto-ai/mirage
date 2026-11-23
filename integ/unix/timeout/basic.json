@@ -684,11 +684,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?; timeout 1 /usr/bin/bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "caught\nafter\nrc=124\n",
-        "stderr": "Terminated\n"
+        "stdout": "caught\nafter\nrc=124\ncaught\nafter\nrc=124\n",
+        "stderr": "Terminated\nTerminated\n"
       }
     },
     {

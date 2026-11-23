@@ -729,6 +729,65 @@ async def test_a_group_signal_a_shell_traps_still_ends_its_program():
     assert outcome == [(None, 15), (0, None)]
 
 
+# A native program a trapping shell started gets the group's signal as sent
+# and answers it itself, so the shell's wait for it goes on.
+@pytest.mark.asyncio
+async def test_a_group_signal_leaves_a_trapping_shells_native_program():
+    processes = ProcessTable()
+    sent: list[int] = []
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def delivered() -> bool:
+        return True
+
+    def sender(handle: ProcessHandle, signum: int) -> Awaitable[bool] | None:
+        if handle.record.command != "native":
+            return None
+        sent.append(signum)
+        return delivered()
+
+    processes.sender = sender
+
+    async def native() -> int:
+        await finish.wait()
+        return 0
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        return 0
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = lambda signal, pid: True
+    started_native = processes.start(
+        session_id="a",
+        command="native",
+        cwd=PathSpec.from_str_path("/"),
+        run=native,
+        parent=child.record.pid,
+    )
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal_group(child.record.group, 15)
+        await asyncio.sleep(0)
+        finish.set()
+        assert (await child.join()).exit == 0
+        assert (await started_native.join()).exit == 0
+    assert sent == [15]
+    assert outcome == [(0, None)]
+
+
 # A signal a stopped shell is sent waits for its CONT, then goes as it was
 # sent, however the CONT came: one sent to the whole group still ends the
 # program the shell runs, one sent to the shell alone leaves it running.

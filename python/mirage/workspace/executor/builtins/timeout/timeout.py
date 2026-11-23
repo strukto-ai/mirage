@@ -79,6 +79,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import program_text
 from mirage.workspace.executor.builtins.timeout.constants import (
@@ -93,7 +94,7 @@ from mirage.workspace.executor.statement import (
     reported_command,
 )
 from mirage.workspace.executor.traps import ignored_signals, own_action
-from mirage.workspace.lookup.lookup import execs
+from mirage.workspace.lookup.lookup import execs, path_program
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -269,6 +270,7 @@ async def handle_timeout(
     stdin: ByteSource | None = None,
     registry: MountRegistry | None = None,
     processes: ProcessTable | None = None,
+    links: NamespaceReader | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run `timeout [OPTION] DURATION COMMAND [ARG...]` (GNU timeout).
 
@@ -298,6 +300,8 @@ async def handle_timeout(
             looked up; None runs every name.
         processes (ProcessTable | None): the workspace's processes, which
             the command joins; None starts a table of its own.
+        links (NamespaceReader | None): the session's links, which a
+            path-spelled command word follows to its program.
     """
     session = context.session
     parse = parse_shell_options(SHELL_SPECS["timeout"], args or [])
@@ -371,7 +375,32 @@ async def handle_timeout(
         parse.flags,
         command[0],
         processes if processes is not None else ProcessTable(),
+        _nested_shell(command[0], session, registry, links),
     )
+
+
+def _nested_shell(
+    word: str,
+    session: SessionState,
+    registry: MountRegistry | None,
+    links: NamespaceReader | None,
+) -> bool:
+    """Whether timeout's command is a nested shell, which runs as the
+    process timeout starts, as timeout execs it: ``bash``, or a path to
+    it (``/bin/bash``).
+
+    Args:
+        word (str): the command word.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry | None): where a path-spelled word finds
+            its program; None takes the word as typed.
+        links (NamespaceReader | None): the session's links.
+    """
+    if word in NESTED_SHELLS:
+        return True
+    if registry is None:
+        return False
+    return path_program(word, session, registry, links) in NESTED_SHELLS
 
 
 async def _supervise(
@@ -385,6 +414,7 @@ async def _supervise(
     flags: dict[str, str | bool],
     name: str,
     processes: ProcessTable,
+    nested: bool,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Start the inner line under the deadline and hand back its stdout
     as it writes it, as GNU's command writes to timeout's own stdout; the
@@ -402,6 +432,7 @@ async def _supervise(
         flags (dict[str, str | bool]): the parsed options.
         name (str): the command word, which -v names.
         processes (ProcessTable): where the command's process starts.
+        nested (bool): the command is a nested shell (``_nested_shell``).
     """
     foreground = flags.get("f") is True
     preserve = flags.get("p") is True
@@ -440,7 +471,7 @@ async def _supervise(
         child.session.process_id = process.record.pid
         # timeout execs its command, so a nested shell runs as this
         # process, and answers the signals it gets (`trap ... TERM`).
-        child.frame.shell = None if name in NESTED_SHELLS else process
+        child.frame.shell = None if nested else process
 
     try:
         process = processes.start(
@@ -848,4 +879,5 @@ async def timeout_builtin(call: BuiltinCall) -> Result:
         call.stdin,
         call.registry,
         call.job_table.processes if call.job_table is not None else None,
+        call.namespace.session_links(call.context.session),
     )

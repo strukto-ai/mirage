@@ -61,7 +61,8 @@ import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../u
 import { PathSpec } from '../../../../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../../../evaluation.ts'
-import { execs } from '../../../lookup/lookup.ts'
+import { execs, pathProgram } from '../../../lookup/lookup.ts'
+import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -330,6 +331,7 @@ export async function handleTimeout(
   registry: MountRegistry | null = null,
   lineSignal?: AbortSignal,
   processes: ProcessTable = new ProcessTable(),
+  links: NamespaceLinks | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.timeout, args)
@@ -384,6 +386,7 @@ export async function handleTimeout(
     return refuse(encodeText(timeoutMissing(name)), NOT_FOUND_STATUS)
   }
 
+  const nested = nestedShell(name, session, registry, links)
   const sink = new PipeConsole()
   // The inner result lands here as soon as it exists.
   const held: IOResult[] = []
@@ -408,7 +411,7 @@ export async function handleTimeout(
         child.session.processId = forked.record.id.pid
         // timeout execs its command, so a nested shell runs as this
         // process, and answers the signals it gets (`trap ... TERM`).
-        child.frame.shell = NESTED_SHELLS.has(name) ? null : forked
+        child.frame.shell = nested ? null : forked
       },
       ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
       programIgnores: ignoredSignals(session),
@@ -772,5 +775,23 @@ export async function timeoutBuiltin(call: BuiltinCall): Promise<RedirectResult>
     call.registry,
     call.signal,
     call.jobTable?.processes,
+    call.namespace.sessionLinks(call.context.session),
   )
+}
+
+/**
+ * Whether timeout's command is a nested shell, which runs as the process
+ * timeout starts, as timeout execs it: `bash`, or a path to it (`/bin/bash`)
+ * found through `registry` and the session's `links`. Mirrors Python's
+ * `_nested_shell`.
+ */
+function nestedShell(
+  word: string,
+  session: SessionState,
+  registry: MountRegistry | null,
+  links: NamespaceLinks | null,
+): boolean {
+  if (NESTED_SHELLS.has(word)) return true
+  if (registry === null) return false
+  return NESTED_SHELLS.has(pathProgram(word, session, registry, links) ?? '')
 }

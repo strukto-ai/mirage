@@ -275,13 +275,16 @@ export abstract class Runtime<E = unknown> {
     // A line's own process is its session's `$$`, which each of its lines
     // takes in turn, so it stays the shell; and only the shell's own input
     // runs its last command in place, not a line `eval`, `source` or a trap
-    // runs, each of which names its own parse.
+    // runs, each of which names its own parse, nor a shell with an action of
+    // its own for EXIT or a signal, which it still has to run.
     if (
       node !== null &&
       shell.record.parent !== null &&
       (session.parseHead === null ||
         session.parseHead === `${voiceName(session)}: command substitution: `) &&
       (session.exitTrap === null || session.exitTrapInherited) &&
+      (session.signalTrapsInherited ||
+        ![...session.signalTraps.values()].some((action) => action !== '')) &&
       !isProgramInvocation(session) &&
       endsLine(node)
     )
