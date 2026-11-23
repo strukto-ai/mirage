@@ -2011,7 +2011,7 @@
       }
     },
     {
-      "id": "exec_reads_a_here_string_and_opens_a_new_file_both_ways",
+      "id": "exec_reads_a_here_string_and_points_stdout_at_stderr",
       "seq": 1380043,
       "targets": [
         "ram",
@@ -2038,11 +2038,30 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(exec 3<<< hi; cat <&3); (exec 1>&2; echo e); (exec 3>&-; exec 3>&-; echo c=$?); (d={mount}/exec_rw; mkdir -p $d; exec 3<> $d/new; echo hi >&3; cat $d/new; rm -r $d)",
+      "command": "(exec 3<<< hi; cat <&3); (exec 1>&2; echo e); (exec 3>&-; exec 3>&-; echo c=$?)",
       "expect": {
         "exit": 0,
-        "stdout": "hi\nc=0\nhi\n",
+        "stdout": "hi\nc=0\n",
         "stderr": "e\n"
+      }
+    },
+    {
+      "id": "exec_opens_a_missing_file_for_reading_and_writing",
+      "seq": 1380044,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "s3-prefix",
+        "ssh"
+      ],
+      "command": "(d={mount}/exec_rw; mkdir -p $d; exec 3<> $d/new; echo hi >&3; cat $d/new; rm -r $d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n",
+        "stderr": ""
       }
     }
   ]
