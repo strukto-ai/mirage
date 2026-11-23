@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { crossingReason } from '../../core/machine/place.ts'
+import type { PipeWriter } from '../frame.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
@@ -137,10 +139,10 @@ import { binProgram } from '../lookup/machine/answers.ts'
 import { factMachine } from '../lookup/machine/about.ts'
 import { operandMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
-import { severalMachines } from '../lookup/machine/mounts.ts'
-import { asksMachines, preferredMachine } from '../lookup/machine/preferred.ts'
+import { machineNames, severalMachines } from '../lookup/machine/mounts.ts'
+import { asksMachines, pipeWriterMachine, preferredMachine } from '../lookup/machine/preferred.ts'
 import { programMachine } from '../lookup/machine/program.ts'
-import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
+import { boundTo, configPins, isSearched, searchedMachine } from '../lookup/machine/search.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -1201,7 +1203,19 @@ async function runArgv(
   }
   const routedByPolicy = (): boolean => (admitted?.route ?? null) !== null
   try {
-    if (searched !== null && unplaced !== undefined && !routedByPolicy())
+    const fedBy = context.frame.stdinWriter
+    if (searched !== null && unplaced !== undefined && !routedByPolicy()) {
+      const writer =
+        fedBy !== null && unplaced.machine === undefined
+          ? await pipeWriterMachine(
+              fedBy,
+              session,
+              registry,
+              unplaced,
+              deps.namespace,
+              deps.dispatch,
+            )
+          : null
       context.frame.routing = await searchedRouting(
         searched,
         argv,
@@ -1209,7 +1223,9 @@ async function runArgv(
         registry,
         unplaced,
         prefixPath,
+        writer,
       )
+    }
     let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
     if (byPath) {
       const [held] = await heldMachine(argv, deps, context, stdin)
@@ -1219,11 +1235,21 @@ async function runArgv(
       session,
       registry,
       context.frame.routing,
-      context.frame.stdinWriter,
+      fedBy,
       deps.namespace,
       deps.dispatch,
       context.frame.folderHolders,
     )
+    const crossed = pipeCrossing(
+      name,
+      argv,
+      machine,
+      fedBy,
+      registry,
+      routedByPolicy() ||
+        (unplaced !== undefined && configPins([name, ...argv.args], session, registry, unplaced)),
+    )
+    if (crossed !== null) return crossed
     const outer = currentCaller()
     if (
       (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
@@ -1274,6 +1300,7 @@ async function searchedRouting(
   registry: MountRegistry,
   routing: RouteDecision<Runtime>,
   prefixPath: string | null = null,
+  writer: string | null = null,
 ): Promise<RouteDecision<Runtime>> {
   const paths = argv.operands
     .filter((w): w is PathSpec => w instanceof PathSpec)
@@ -1287,8 +1314,37 @@ async function searchedRouting(
     null,
     prefixPath,
     true,
+    writer,
   )
   return found === null ? routing : boundTo(routing, program, found)
+}
+
+/**
+ * The refusal of a program that would read, on one machine, the pipe a
+ * program on another machine writes, where Mirage picked the machine of
+ * either (`gen | sink`, `sink` on another machine alone): bytes go between a machine and
+ * a store, never from one machine to another. bash's `<name>: Permission
+ * denied` at 126, the reason on the decision record. Null for any other
+ * command: one Mirage runs itself, one on its writer's machine, a pipe
+ * Mirage writes, a writer not placed (the line names a machine), and a pipe
+ * between two programs whose machines the config names (`configPins`),
+ * which streams. `pinned` says the config, or a policy's route, names the
+ * program's machine. Mirrors Python's `_pipe_crossing`.
+ */
+function pipeCrossing(
+  name: string,
+  argv: Argv,
+  machine: MachineName | null,
+  fedBy: PipeWriter | null,
+  registry: MountRegistry,
+  pinned: boolean,
+): RedirectResult | null {
+  if (machine === null || fedBy?.machine == null) return null
+  if (pinned && fedBy.pinned) return null
+  if (fedBy.machine === machine.name || !machineNames(registry).has(machine.name)) return null
+  const deny: Deny = { kind: 'deny', reason: crossingReason(fedBy.machine, machine.name) }
+  const [stderr, exitCode] = renderDeny(name, deny)
+  return refused([name, ...argv.args].join(' '), { stderr, exitCode, decision: decisionOf(deny) })
 }
 
 /**

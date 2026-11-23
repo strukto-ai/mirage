@@ -26,7 +26,7 @@ import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
 import { programMachine } from './program.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
-import { folderHolders, searchedMachine } from './search.ts'
+import { configPins, folderHolders, searchedMachine } from './search.ts'
 
 /**
  * The machine a command Mirage runs itself is about
@@ -59,14 +59,44 @@ export async function preferredMachine(
 ): Promise<string | null> {
   if (routing === undefined || !severalMachines(registry)) return null
   if (routing.machine !== undefined) return routing.machine
-  if (fedBy !== null && !fedBy.placed) {
-    fedBy.machine = await writerMachine(fedBy, session, registry, routing, namespace, dispatch)
-    fedBy.placed = true
+  if (fedBy !== null) {
+    const writer = await pipeWriterMachine(fedBy, session, registry, routing, namespace, dispatch)
+    if (writer !== null) return writer
   }
-  if (fedBy !== null && fedBy.machine !== null) return fedBy.machine
   const held = await folderHolders(session.cwd, session, registry, asked)
   const [only] = held
   return held.length === 1 && only !== undefined ? only : null
+}
+
+/**
+ * The machine the program writing a pipe runs on, placed once for the pipe
+ * (`PipeWriter.placed`), and whether the config names it
+ * (`PipeWriter.pinned`): its bytes are that machine's, so a program reading
+ * them runs there when that machine has it, and is refused on another one
+ * unless the config names both machines. Null for a writer Mirage runs
+ * itself. Mirrors Python's `pipe_writer_machine`.
+ *
+ * @param fedBy the pipe's writer.
+ * @param session the session its reader runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param namespace the link table a writer's path is read through.
+ * @param dispatch op dispatcher, which a writer's path is asked of.
+ */
+export async function pipeWriterMachine(
+  fedBy: PipeWriter,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime>,
+  namespace: Namespace,
+  dispatch: DispatchFn,
+): Promise<string | null> {
+  if (!fedBy.placed) {
+    fedBy.machine = await writerMachine(fedBy, session, registry, routing, namespace, dispatch)
+    fedBy.pinned = configPins(fedBy.words, session, registry, routing)
+    fedBy.placed = true
+  }
+  return fedBy.machine
 }
 
 /**

@@ -38,6 +38,9 @@ class PipeWriter:
             once for the pipe.
         machine (str | None): the machine the program runs on; None
             before it is asked, and for a program Mirage runs itself.
+        pinned (bool): whether the config names that machine for the
+            program (``config_pins``), rather than Mirage picking it;
+            asked with ``machine``.
     """
 
     pipe: ByteSource
@@ -45,6 +48,7 @@ class PipeWriter:
     cwd: str
     placed: bool = False
     machine: str | None = None
+    pinned: bool = False
 
 
 @dataclass

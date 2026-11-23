@@ -406,3 +406,14 @@ async def test_a_machine_that_is_down_does_not_hide_who_holds_a_path_under_a_hid
     await agent.shell("smi /tmp/only.txt")
     assert (a.ran, b.ran) == ([], ["smi /tmp/only.txt"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_reading_a_pipe_runs_on_its_writer_s_machine():
+    a = FakeFiles(programs=("both",))
+    b = FakeFiles(programs=("gen", "both"))
+    ws = two(a, b)
+    assert (await ws.shell("gen | both")).exit_code == 0
+    assert (await ws.shell("both")).exit_code == 0
+    assert (a.ran, b.ran) == (["both"], ["gen", "both"])
+    await ws.close()

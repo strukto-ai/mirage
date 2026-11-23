@@ -209,6 +209,30 @@ its own machine's disk, so it reads that machine's copy whatever another
 machine holds. "Written last" compares the modification times the machines
 report, each by its own clock.
 
+## Bytes Between Machines
+
+Bytes go between a machine and a store, never from one machine to another.
+
+| Line | Answer |
+| --- | --- |
+| `cp /srv/a/out.bin /data/out.bin`, `mv`, `cat /srv/a/out.bin > /data/out.bin`, `wc -c < /srv/a/out.bin` | Streamed through Mirage, at any size |
+| `cp /data/in.bin /srv/b/in.bin`, `prog < /data/in.bin` | Streamed through Mirage, at any size |
+| `cp /srv/a/out.bin /tmp/out.bin`, `/tmp` shared by both machines | Made on `a`, the source's machine; no bytes pass through Mirage |
+| `gen \| prog`, `prog` on both machines | `prog` runs where `gen` runs |
+| `gen \| prog`, `gen` and `prog` each in a machine's `captures` | Streamed through Mirage: the config placed them on two machines |
+| `cp /srv/a/out.bin /srv/b/out.bin`, `mv` | `cp: cannot create regular file '/srv/b/out.bin': Permission denied`, exit 1 |
+| `gen > /srv/b/out` with `gen` on `a`, a command Mirage hands to `a` (`cat /srv/a/x > /srv/b/x`) | `bash: line 1: /srv/b/out: Permission denied`, exit 1 |
+| `prog < /srv/a/in` with `prog` on `b` | `bash: line 1: /srv/a/in: Permission denied`, exit 1 |
+| `gen \| prog` with `prog` on `b` alone, either one placed by search order or by where its file is | `prog: Permission denied`, exit 126 |
+
+Each refusal puts its reason on the line's decision record. To use one
+machine's file on another, copy it through a store: `cp /srv/a/out.bin
+/data/ && cp /data/out.bin /srv/b/`. A Daytona machine's exec merges a
+line's output and its errors, so its files are still read whole, up to
+[`max_memory`](/home/limits#memory). Mirage does not judge a redirect around
+a group or a subshell (`{ gen; } > /srv/b/out`), or bytes that pass
+through one of its own commands (`gen | tee /srv/b/log`).
+
 ## Behavior
 
 - **Caching:** none. Programs change these files behind Mirage's back, so

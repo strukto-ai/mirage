@@ -32,6 +32,8 @@ import { LanguageRuntime } from '../../runtime/language.ts'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { ScriptedMachine, captured, on } from '../../../tests/fixtures/machine.ts'
+import { FakeFiles, two } from '../../../tests/fixtures/machine_files.ts'
 import { MountMode } from '../../types.ts'
 import { parse, syntaxRefusal } from '../../shell/parse/parse.ts'
 import type { WorkspaceOptions } from '../workspace/types.ts'
@@ -1077,5 +1079,38 @@ describe('a function named like a builtin that runs other words', () => {
     ws.getSession('s').commands = trees({ rm: { decision: 'deny', reason: 'no rm' } })
     expect((await ws.shell(line, { sessionId: 's' })).exitCode).toBe(0)
     expect((await ws.shell('command timeout 1 rm /data/f', { sessionId: 's' })).exitCode).toBe(126)
+  })
+})
+
+describe('a pipe between machines', () => {
+  it('lets no program read a pipe a program on another machine writes', async () => {
+    const a = new FakeFiles({}, ['gen'])
+    const b = new FakeFiles({}, ['sink'])
+    const ws = two(a, b)
+    const done = await ws.shell('gen | sink')
+    expect(done.exitCode).toBe(126)
+    expect(new TextDecoder().decode(done.stderr)).toBe('sink: Permission denied\n')
+    expect(done.decision?.reason).toBe(
+      "machine a's bytes do not go to machine b: copy them through a store",
+    )
+    expect(b.ran).toEqual([])
+    expect((await ws.shell('gen | wc -l')).exitCode).toBe(0)
+    await ws.close()
+  })
+
+  it('streams a pipe between programs the config pins to two machines', async () => {
+    const a = new FakeFiles({}, ['gen'])
+    const b = new FakeFiles({}, ['sink'])
+    const first = captured(new ScriptedMachine('a', a.answer), ['gen'])
+    const second = captured(new ScriptedMachine('b', b.answer), ['sink'])
+    const ws = new Workspace(
+      {},
+      { mode: MountMode.WRITE, machines: { ...on(first).machines, ...on(second).machines } },
+    )
+    const done = await ws.shell('gen | sink')
+    expect(done.exitCode).toBe(0)
+    expect(new TextDecoder().decode(done.stdout)).toBe('ran\n')
+    expect([a.ran, b.ran]).toEqual([['gen'], ['sink']])
+    await ws.close()
   })
 })

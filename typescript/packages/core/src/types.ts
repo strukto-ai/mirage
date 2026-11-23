@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { MachineName } from './execution/types.ts'
 import { dottedSpelling, resolvePath } from './utils/path.ts'
 import { rstripSlash, stripSlash } from './utils/slash.ts'
 
@@ -530,13 +531,17 @@ const LIMIT_AGGR: {
  * the bound the command's own registration declared,
  * when the dispatch site knows it (e.g. a CLI leaf). `native` is set when
  * a native program a runtime runs produced it, writing as it goes, so a
- * redirect writes it as it arrives.
+ * redirect writes it as it arrives. `machine` is the machine whose program
+ * produced it, one Mirage handed a command of its own to included; a
+ * redirect lands it there and never on another machine. Null or absent for
+ * output Mirage produced.
  */
 export interface Producer {
   readonly command: string
   readonly prefixes: readonly string[]
   readonly declared: Limit | null
   readonly native?: boolean
+  readonly machine?: MachineName | null
 }
 
 export type PolicyDecisionKind = 'deny' | 'pending' | 'failed'

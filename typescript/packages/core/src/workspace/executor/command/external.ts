@@ -146,6 +146,7 @@ export async function runExternal(
       declared: null,
       prefixes: registry.allMounts().map((mount) => mount.prefix),
       native: true,
+      machine: runtime.machine,
     },
     sink !== undefined ? toSink : undefined,
     stdin,

@@ -15,17 +15,23 @@
 import { MachineAccessor } from '../../accessor/machine.ts'
 import { capacity as machineCapacity } from '../../core/machine/capacity.ts'
 import { checksum as machineChecksum } from '../../core/machine/checksum.ts'
-import { copy as machineCopy, dirCopy as machineDirCopy } from '../../core/machine/copy.ts'
+import {
+  copy as machineCopy,
+  copyFrom as machineCopyFrom,
+  dirCopy as machineDirCopy,
+} from '../../core/machine/copy.ts'
 import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
 import {
   askedMachines,
   chosen,
   commandMachine,
+  crossingRefused,
   existingHolders,
   holders,
   holdingMachine,
   machinesLackingFolder,
+  refuseCrossing,
   refuseHidden,
   writeMachine,
 } from '../../core/machine/place.ts'
@@ -35,6 +41,7 @@ import {
   lastLines as machineLastLines,
   lineCount as machineLineCount,
   read as machineRead,
+  readStream as machineReadStream,
 } from '../../core/machine/read.ts'
 import { readdir as machineReaddir, tree as machineTree } from '../../core/machine/readdir.ts'
 import { rename as machineRename } from '../../core/machine/rename.ts'
@@ -47,7 +54,7 @@ import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import { eisdir, enoent, enotdir, enotempty, enotsup } from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty, enotsup, exdev } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
@@ -144,13 +151,28 @@ export class MachineVFS extends BaseVFS {
     return holderStat(leaf(path), one)
   }
 
+  /**
+   * A file's bytes from the machine holding it; a whole file as a stream,
+   * never held whole, where the machine's output can be read as it comes. A
+   * program the line runs on another machine never reads it
+   * (`refuseCrossing`).
+   *
+   * @param path the file.
+   * @param _handed unused.
+   * @param offset the first byte.
+   * @param size how many bytes; null for the rest.
+   */
   override async read(
     path: PathSpec,
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<ByteSource> {
-    return machineRead(this.accessor, await holdingMachine(this.accessor, path), path, offset, size)
+    const machine = await holdingMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path, true)
+    if (offset === 0 && size === null && this.accessor.streams(machine))
+      return machineReadStream(this.accessor, machine, path)
+    return machineRead(this.accessor, machine, path, offset, size)
   }
 
   override async firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
@@ -212,23 +234,31 @@ export class MachineVFS extends BaseVFS {
     atomic = false,
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
+    refuseCrossing(this.accessor, machine, path)
     await machineWrite(this.accessor, machine, path, data, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    await machineWrite(this.accessor, await writeMachine(this.accessor, path), path, data, true)
+    const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
+    await machineWrite(this.accessor, machine, path, data, true)
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    await machinePwrite(this.accessor, await writeMachine(this.accessor, path), path, data, offset)
+    const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
+    await machinePwrite(this.accessor, machine, path, data, offset)
   }
 
   override async create(path: PathSpec): Promise<void> {
-    await machineCreate(this.accessor, await writeMachine(this.accessor, path), path)
+    const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
+    await machineCreate(this.accessor, machine, path)
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
     await machineTruncate(this.accessor, machine, path, length, noCreate)
   }
 
@@ -334,6 +364,38 @@ export class MachineVFS extends BaseVFS {
     await refuseHidden(this.accessor, machine, dst)
     const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
     await machineCopy(this.accessor, machine, src, dst, lacking.length > 0)
+    if (!this.accessor.several) return
+    for (const one of await holders(this.accessor, dst)) {
+      if (one.machine !== machine && !one.isFolder)
+        await machineUnlink(this.accessor, one.machine, dst)
+    }
+  }
+
+  /**
+   * Copy a file another machine mount shows, on the machine holding it, when
+   * this mount shows that machine too: the copy lands where its source is
+   * and its bytes never leave the machine (`cp /srv/a/out /tmp/out`),
+   * replacing the name as `copy` does. A file of a machine this mount does
+   * not show is refused: bytes go between a machine and a store, never from
+   * one machine to another. A store's file is EXDEV, and its bytes come
+   * through Mirage.
+   *
+   * @param source the source mount's VFS.
+   * @param src the file, on `source`.
+   * @param dst the copy, on this mount.
+   * @throws FsError EXDEV for a source that is no machine's file; EACCES
+   *   for a source on a machine this mount does not show.
+   */
+  override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
+    if (!(source instanceof MachineVFS)) throw exdev(dst)
+    const machine = await holdingMachine(source.accessor, src)
+    if (!this.accessor.names().includes(machine)) {
+      const target = await writeMachine(this.accessor, dst, { replaces: true })
+      throw crossingRefused(machine, target, dst)
+    }
+    await refuseHidden(this.accessor, machine, dst)
+    const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
+    await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
     if (!this.accessor.several) return
     for (const one of await holders(this.accessor, dst)) {
       if (one.machine !== machine && !one.isFolder)

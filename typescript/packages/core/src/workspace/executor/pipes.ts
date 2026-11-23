@@ -174,7 +174,7 @@ export async function handlePipe(
       childEvaluation.frame.stdinWriter =
         words === null || words.length === 0 || input === null
           ? null
-          : { pipe: input, words, cwd: session.cwd, placed: false, machine: null }
+          : { pipe: input, words, cwd: session.cwd, placed: false, machine: null, pinned: false }
     }
     const run = async (): Promise<void> => {
       let io = new IOResult()

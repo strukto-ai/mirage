@@ -46,6 +46,7 @@ from mirage.context.session_context import (
     redirect_syntax_for,
     syntax_head,
 )
+from mirage.core.machine.place import crossing_reason
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, OutputState, materialize
@@ -154,6 +155,7 @@ from mirage.workspace.expand.globs import (
     glob_options,
     resolve_globs,
 )
+from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
@@ -180,14 +182,19 @@ from mirage.workspace.lookup.machine.about import fact_machine
 from mirage.workspace.lookup.machine.answers import bin_program
 from mirage.workspace.lookup.machine.command import operand_machine
 from mirage.workspace.lookup.machine.links import link_machine
-from mirage.workspace.lookup.machine.mounts import several_machines
+from mirage.workspace.lookup.machine.mounts import (
+    machine_names,
+    several_machines,
+)
 from mirage.workspace.lookup.machine.preferred import (
     asks_machines,
+    pipe_writer_machine,
     preferred_machine,
 )
 from mirage.workspace.lookup.machine.program import program_machine
 from mirage.workspace.lookup.machine.search import (
     bound_to,
+    config_pins,
     is_searched,
     searched_machine,
 )
@@ -1224,11 +1231,32 @@ async def _run_argv(
         if denied is not None:
             return denied
     try:
+        fed_by = context.frame.stdin_writer
         if searched is not None and (
             admitted is None or admitted.route is None
         ):
+            writer = (
+                await pipe_writer_machine(
+                    fed_by,
+                    session,
+                    registry,
+                    unplaced,
+                    deps.namespace,
+                    deps.dispatch,
+                )
+                if fed_by is not None
+                and unplaced is not None
+                and unplaced.machine is None
+                else None
+            )
             context.frame.routing = await _searched_routing(
-                searched, argv, session, registry, unplaced, prefix_path
+                searched,
+                argv,
+                session,
+                registry,
+                unplaced,
+                prefix_path,
+                writer,
             )
         machine = _running_machine(
             name, argv.args, session, registry, context.frame.routing
@@ -1244,11 +1272,27 @@ async def _run_argv(
             session,
             registry,
             context.frame.routing,
-            context.frame.stdin_writer,
+            fed_by,
             deps.namespace,
             deps.dispatch,
             context.frame.folder_holders,
         )
+        crossed = _pipe_crossing(
+            name,
+            argv,
+            machine,
+            fed_by,
+            registry,
+            (admitted is not None and admitted.route is not None)
+            or (
+                unplaced is not None
+                and config_pins(
+                    [name, *argv.args], session, registry, unplaced
+                )
+            ),
+        )
+        if crossed is not None:
+            return crossed
         caller = current_caller()
         staged = (
             bind_caller(
@@ -1347,6 +1391,7 @@ async def _searched_routing(
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
     prefix_path: str | None = None,
+    writer: str | None = None,
 ) -> RouteDecision[RuntimeIdentity] | None:
     """A line's placement with a program on the machine search order
     picks for it (``searched_machine``), for the command's run alone;
@@ -1361,6 +1406,8 @@ async def _searched_routing(
         registry (MountRegistry): the mount registry.
         routing (RouteDecision | None): the line's placement.
         prefix_path (str | None): the PATH the command's prefix sets.
+        writer (str | None): the machine the program writing the pipe
+            it reads runs on; None for no pipe.
     """
     if routing is None:
         return routing
@@ -1377,8 +1424,52 @@ async def _searched_routing(
         routing,
         path=prefix_path,
         past_functions=True,
+        writer=writer,
     )
     return routing if found is None else bound_to(routing, program, found)
+
+
+def _pipe_crossing(
+    name: str,
+    argv: Argv,
+    machine: MachineName | None,
+    fed_by: PipeWriter | None,
+    registry: MountRegistry,
+    pinned: bool,
+) -> RedirectResult | None:
+    """The refusal of a program that would read, on one machine, the
+    pipe a program on another machine writes, where Mirage picked the
+    machine of either (``gen | sink``, ``sink`` on another machine alone): bytes go
+    between a machine and a store, never from one machine to another.
+    bash's ``<name>: Permission denied`` at 126, the reason on the
+    decision record. None for any other command: one Mirage runs itself,
+    one on its writer's machine, a pipe Mirage writes, a writer not
+    placed (the line names a machine), and a pipe between two programs
+    whose machines the config names (``config_pins``), which streams.
+
+    Args:
+        name (str): the command's name.
+        argv (Argv): its words.
+        machine (MachineName | None): the machine its program runs on.
+        fed_by (PipeWriter | None): the program writing the pipe it
+            reads.
+        registry (MountRegistry): the workspace's mounts and machines.
+        pinned (bool): the config, or a policy's route, names the
+            program's machine.
+    """
+    if machine is None or fed_by is None or fed_by.machine is None:
+        return None
+    if pinned and fed_by.pinned:
+        return None
+    if fed_by.machine == machine.name or machine.name not in machine_names(
+        registry
+    ):
+        return None
+    deny = Deny(crossing_reason(fed_by.machine, machine.name))
+    err, code = render_deny(name, deny)
+    return _refused(
+        " ".join([name, *argv.args]), Refused(err, code, decision_of(deny))
+    )
 
 
 def _running_machine(

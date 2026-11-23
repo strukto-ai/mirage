@@ -52,7 +52,30 @@ async def copy(
         make_parent (bool): make the copy's folder there first, when
             only another machine holds it.
     """
-    old = single_quote(machine_path(accessor, src))
+    await copy_from(accessor, accessor, machine, src, dst, make_parent)
+
+
+async def copy_from(
+    source: MachineAccessor,
+    accessor: MachineAccessor,
+    machine: str,
+    src: PathSpec,
+    dst: PathSpec,
+    make_parent: bool = False,
+) -> None:
+    """Copy a file another machine mount shows onto this one, on the
+    machine holding it, which both mounts show: the bytes stay there.
+
+    Args:
+        source (MachineAccessor): the source mount's machines.
+        accessor (MachineAccessor): this mount's machines.
+        machine (str): the source's machine.
+        src (PathSpec): the source, on its mount.
+        dst (PathSpec): the copy, on this mount.
+        make_parent (bool): make the copy's folder there first, when
+            only another machine holds it.
+    """
+    old = single_quote(machine_path(source, src))
     new = machine_path(accessor, dst)
     line = _in_folder(f"cp -T -- {old} {single_quote(new)}", new, make_parent)
     await run_checked(accessor, machine, line, dst)

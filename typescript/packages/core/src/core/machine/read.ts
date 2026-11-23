@@ -16,6 +16,7 @@ import type { MachineAccessor } from '../../accessor/machine.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
+import { refusal } from '../posix/errors.ts'
 import { lineCount as posixLineCount } from '../posix/read.ts'
 import { runChecked, machinePath } from './utils.ts'
 
@@ -62,6 +63,33 @@ export async function read(
   )
   record('read', path.virtual, VFSName.MACHINE, data.byteLength, timer)
   return data
+}
+
+/**
+ * A whole file's bytes on its machine, handed over as they are read and
+ * never held whole, so a file of any size goes to a store in the memory of
+ * a few chunks.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine holding the file.
+ * @param path the file.
+ */
+export async function* readStream(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): AsyncGenerator<Uint8Array> {
+  const timer = startOp()
+  let sent = 0
+  for await (const chunk of accessor.stream(
+    machine,
+    readCommand(machinePath(accessor, path), 0, null),
+    (_status, err) => refusal(path, err),
+  )) {
+    sent += chunk.byteLength
+    yield chunk
+  }
+  record('read', path.virtual, VFSName.MACHINE, sent, timer)
 }
 
 /**

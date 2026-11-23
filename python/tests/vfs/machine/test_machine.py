@@ -305,12 +305,12 @@ def test_storage_location_names_the_machines_and_the_root():
 
 
 @pytest.mark.asyncio
-async def test_a_machine_file_past_the_memory_room_is_refused():
+async def test_a_machine_file_past_the_memory_room_streams():
     a = FakeFiles({"/tmp/big.bin": b"x" * 3_000_000})
     ws = two(a, FakeFiles(), max_memory="2MB")
-    code, out, err = await run(ws, "cat /tmp/big.bin | wc -c")
+    assert await run(ws, "cat /tmp/big.bin | wc -c") == (0, "3000000\n", "")
+    assert await run(ws, "wc -c < /tmp/big.bin") == (0, "3000000\n", "")
     await ws.close()
-    assert "memory exhausted" in err
 
 
 @pytest.mark.asyncio
@@ -553,4 +553,105 @@ async def test_a_new_name_below_a_file_shown_over_a_folder_is_refused():
     code, _, err = await run(ws, "echo x > /tmp/k/new")
     assert (code, "Not a directory" in err) == (1, True)
     assert sorted(a.files) == ["/tmp/k/in"]
+    await ws.close()
+
+
+CROSSING = (
+    "machine a's bytes do not go to machine b: copy them through a store"
+)
+
+
+def apart() -> tuple[FakeFiles, FakeFiles, Workspace]:
+    """Two machines, each with a folder of its own, sharing ``/tmp``,
+    and a store at ``/ram``."""
+    a = FakeFiles({"/srv/a/k": b"key\n"}, programs=("gen", "cat"))
+    b = FakeFiles(programs=("sink", "cat"))
+    b.dirs.add("/srv/b")
+    ws = two(a, b, mounts={"/srv/a": "@a", "/srv/b": "@b", "/ram": RAMVFS()})
+    return a, b, ws
+
+
+@pytest.mark.asyncio
+async def test_a_copy_from_one_machine_to_another_is_refused():
+    a, b, ws = apart()
+    for verb in ("cp", "mv"):
+        done = await ws.shell(f"{verb} /srv/a/k /srv/b/k")
+        assert done.exit_code == 1
+        assert await done.stderr_str() == (
+            f"{verb}: cannot create regular file '/srv/b/k':"
+            " Permission denied\n"
+        )
+        assert done.decision is not None
+        assert done.decision.reason == CROSSING
+    assert "/srv/b/k" not in b.files
+    assert a.files["/srv/a/k"] == b"key\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_copy_into_a_folder_its_machine_shares_lands_with_its_source():
+    a, b, ws = apart()
+    assert await run(ws, "cp /srv/a/k /tmp/k") == (0, "", "")
+    assert a.files["/tmp/k"] == b"key\n"
+    assert "/tmp/k" not in b.files
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_file_goes_to_a_store_and_on_to_another_machine():
+    a, b, ws = apart()
+    assert await run(ws, "cp /srv/a/k /ram/k") == (0, "", "")
+    assert await run(ws, "cp /ram/k /srv/b/k") == (0, "", "")
+    assert b.files["/srv/b/k"] == b"key\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_s_output_never_lands_on_another_machine():
+    a, b, ws = apart()
+    for line, target in (
+        ("gen > /srv/b/out", "/srv/b/out"),
+        ("gen 2> /srv/b/err", "/srv/b/err"),
+    ):
+        done = await ws.shell(line)
+        assert done.exit_code == 1
+        assert await done.stderr_str() == (
+            f"bash: line 1: {target}: Permission denied\n"
+        )
+        assert done.decision is not None
+        assert done.decision.reason == CROSSING
+    assert await run(ws, "gen > /tmp/out") == (0, "", "")
+    assert a.ran == ["gen"]
+    assert a.files["/tmp/out"] == b"ran\n"
+    assert ("/srv/b/out" in b.files, "/tmp/out" in b.files) == (False, False)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_reads_no_file_of_another_machine():
+    a, b, ws = apart()
+    done = await ws.shell("sink < /srv/a/k")
+    assert done.exit_code == 1
+    assert await done.stderr_str() == (
+        "bash: line 1: /srv/a/k: Permission denied\n"
+    )
+    assert done.decision is not None
+    assert done.decision.reason == CROSSING
+    assert b.ran == []
+    assert await run(ws, "wc -c < /srv/a/k") == (0, "4\n", "")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_handed_to_a_machine_lands_its_output_there():
+    a, b, ws = apart()
+    assert await run(ws, "cat /srv/a/k > /tmp/cat") == (0, "", "")
+    assert a.files["/tmp/cat"] == b"ran\n"
+    assert "/tmp/cat" not in b.files
+    done = await ws.shell("cat /srv/a/k > /srv/b/cat")
+    assert done.exit_code == 1
+    assert await done.stderr_str() == (
+        "bash: line 1: /srv/b/cat: Permission denied\n"
+    )
+    assert b.files.get("/srv/b/cat", b"") == b""
     await ws.close()

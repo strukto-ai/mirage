@@ -308,7 +308,7 @@ describe('MachineVFS', () => {
     )
   })
 
-  it('refuses a machine file past the memory room', async () => {
+  it('streams a machine file past the memory room', async () => {
     const a = new FakeFiles({ '/tmp/big.bin': 'x'.repeat(3_000_000) })
     const ws = new Workspace(
       {},
@@ -321,9 +321,9 @@ describe('MachineVFS', () => {
         },
       },
     )
-    const [, , err] = await run(ws, 'cat /tmp/big.bin | wc -c')
+    expect(await run(ws, 'cat /tmp/big.bin | wc -c')).toEqual([0, '3000000\n', ''])
+    expect(await run(ws, 'wc -c < /tmp/big.bin')).toEqual([0, '3000000\n', ''])
     await ws.close()
-    expect(err).toContain('memory exhausted')
   })
 
   it('still lists and removes machine files at the memory cap', async () => {
@@ -533,6 +533,97 @@ describe('MachineVFS', () => {
     const [code, , err] = await run(ws, 'echo x > /tmp/k/new')
     expect([code, err.includes('Not a directory')]).toEqual([1, true])
     expect(Object.keys(texts(a)).sort()).toEqual(['/tmp/k/in'])
+    await ws.close()
+  })
+})
+
+const CROSSING = "machine a's bytes do not go to machine b: copy them through a store"
+
+/** Two machines, each with a folder of its own, sharing `/tmp`, and a store at `/ram`. */
+function apart(): [FakeFiles, FakeFiles, Workspace] {
+  const a = new FakeFiles({ '/srv/a/k': 'key\n' }, ['gen', 'cat'])
+  const b = new FakeFiles({}, ['sink', 'cat'])
+  b.dirs.add('/srv/b')
+  const ws = two(a, b, { '/srv/a': '@a', '/srv/b': '@b', '/ram': new RAMVFS() })
+  return [a, b, ws]
+}
+
+describe('bytes between machines', () => {
+  it('refuses a copy from one machine to another', async () => {
+    const [a, b, ws] = apart()
+    for (const verb of ['cp', 'mv']) {
+      const done = await ws.shell(`${verb} /srv/a/k /srv/b/k`)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `${verb}: cannot create regular file '/srv/b/k': Permission denied\n`,
+      )
+      expect(done.decision?.reason).toBe(CROSSING)
+    }
+    expect(b.files.has('/srv/b/k')).toBe(false)
+    expect(texts(a)['/srv/a/k']).toBe('key\n')
+    await ws.close()
+  })
+
+  it('lands a copy into a folder its machine shares with its source', async () => {
+    const [a, b, ws] = apart()
+    expect(await run(ws, 'cp /srv/a/k /tmp/k')).toEqual([0, '', ''])
+    expect(texts(a)['/tmp/k']).toBe('key\n')
+    expect(b.files.has('/tmp/k')).toBe(false)
+    await ws.close()
+  })
+
+  it('takes a machine file to a store and on to another machine', async () => {
+    const [, b, ws] = apart()
+    expect(await run(ws, 'cp /srv/a/k /ram/k')).toEqual([0, '', ''])
+    expect(await run(ws, 'cp /ram/k /srv/b/k')).toEqual([0, '', ''])
+    expect(texts(b)['/srv/b/k']).toBe('key\n')
+    await ws.close()
+  })
+
+  it("never lands a program's output on another machine", async () => {
+    const [a, b, ws] = apart()
+    for (const [line, target] of [
+      ['gen > /srv/b/out', '/srv/b/out'],
+      ['gen 2> /srv/b/err', '/srv/b/err'],
+    ] as const) {
+      const done = await ws.shell(line)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `bash: line 1: ${target}: Permission denied\n`,
+      )
+      expect(done.decision?.reason).toBe(CROSSING)
+    }
+    expect(await run(ws, 'gen > /tmp/out')).toEqual([0, '', ''])
+    expect(a.ran).toEqual(['gen'])
+    expect(texts(a)['/tmp/out']).toBe('ran\n')
+    expect([b.files.has('/srv/b/out'), b.files.has('/tmp/out')]).toEqual([false, false])
+    await ws.close()
+  })
+
+  it('lets no program read a file of another machine', async () => {
+    const [, b, ws] = apart()
+    const done = await ws.shell('sink < /srv/a/k')
+    expect(done.exitCode).toBe(1)
+    expect(new TextDecoder().decode(done.stderr)).toBe(
+      'bash: line 1: /srv/a/k: Permission denied\n',
+    )
+    expect(done.decision?.reason).toBe(CROSSING)
+    expect(b.ran).toEqual([])
+    expect(await run(ws, 'wc -c < /srv/a/k')).toEqual([0, '4\n', ''])
+    await ws.close()
+  })
+
+  it('lands the output of a command handed to a machine there', async () => {
+    const [a, b, ws] = apart()
+    expect(await run(ws, 'cat /srv/a/k > /tmp/cat')).toEqual([0, '', ''])
+    expect(texts(a)['/tmp/cat']).toBe('ran\n')
+    expect(b.files.has('/tmp/cat')).toBe(false)
+    const done = await ws.shell('cat /srv/a/k > /srv/b/cat')
+    expect(done.exitCode).toBe(1)
+    expect(new TextDecoder().decode(done.stderr)).toBe(
+      'bash: line 1: /srv/b/cat: Permission denied\n',
+    )
+    expect(texts(b)['/srv/b/cat'] ?? '').toBe('')
     await ws.close()
   })
 })

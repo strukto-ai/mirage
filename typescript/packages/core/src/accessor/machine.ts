@@ -132,6 +132,47 @@ export class MachineAccessor extends Accessor {
   }
 
   /**
+   * Run one shell line on a machine, at `/` in its environment, its output
+   * handed over as it is read and never held whole
+   * (`MachineHandle.streamLine`).
+   *
+   * @param machine the machine's name.
+   * @param command the line, as `/bin/sh -c` reads it.
+   * @param failed the error of a line that ended with this status and
+   *   stderr.
+   */
+  async *stream(
+    machine: string,
+    command: string,
+    failed: (status: number, err: Uint8Array) => Error,
+  ): AsyncGenerator<Uint8Array> {
+    const handle = this.handle(machine)
+    await handle.ensureConnected()
+    yield* handle.streamLine(command, { ...handle.config.env }, '/', failed)
+  }
+
+  /**
+   * Whether a machine's output can be read as it comes: not on a machine
+   * whose exec merges its output and its error output (Daytona), where
+   * only the end of a line tells the two apart.
+   *
+   * @param machine the machine's name.
+   */
+  streams(machine: string): boolean {
+    return !this.handle(machine).joinsStreams
+  }
+
+  /**
+   * Whether a name is one of the workspace's machines, the ones a program
+   * the line runs can be on.
+   *
+   * @param name a machine's name under `machines:`.
+   */
+  isMachine(name: string): boolean {
+    return this.machines?.names().includes(name) ?? false
+  }
+
+  /**
    * `run` on one machine, as the shared POSIX ops take it.
    *
    * @param machine the machine's name.

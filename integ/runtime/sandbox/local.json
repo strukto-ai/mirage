@@ -977,6 +977,153 @@
           }
         }
       ]
+    },
+    {
+      "id": "bytes_between_two_machines",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "Bytes go between a machine and a store, never from one machine to another. With a folder of each machine's own and a store, cp and mv from one machine's folder to the other's are refused (Permission denied, the source kept) and go through the store instead; a program reading a pipe runs on its writer's machine when that machine has it, and is refused where only another machine has it; a program's redirect onto the other machine's folder, and the other machine's file fed to a program, are refused; a program's output goes to the store.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "@external"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "world": {
+        "mounts": {
+          "/var/tmp/mirage-one": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-one",
+              "machines": [
+                "docker"
+              ]
+            }
+          },
+          "/var/tmp/mirage-two": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-two",
+              "machines": [
+                "second"
+              ]
+            }
+          },
+          "/store": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'mkdir -p /var/tmp/mirage-one' && d=$(mktemp -d /var/tmp/mirage-one/b.XXXXXX) && n=${d##*/} && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"/var/tmp/mirage-two/$1\" && echo key > \"/var/tmp/mirage-two/$1/k\" && echo second > \"/var/tmp/mirage-where-$1\" && printf \"#!/bin/sh\\necho gen\\n\" > /usr/local/bin/mirage-bytes-gen && printf \"#!/bin/sh\\ncat\\n\" > /usr/local/bin/mirage-bytes-sink && chmod +x /usr/local/bin/mirage-bytes-gen /usr/local/bin/mirage-bytes-sink' dash $n",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo first > \"/var/tmp/mirage-where-$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "{ cp /var/tmp/mirage-two/$n/k $d/k; echo rc=$?; mv /var/tmp/mirage-two/$n/k $d/moved; echo rc=$?; } 2>&1 | sed \"s|$d|D|\"; cat /var/tmp/mirage-two/$n/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "cp: cannot create regular file 'D/k': Permission denied\nrc=1\nmv: cannot create regular file 'D/moved': Permission denied\nrc=1\nkey\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cp /var/tmp/mirage-two/$n/k /store/k && cp /store/k $d/k && cat $d/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "key\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen | dash -c 'cat > /dev/null; cat \"/var/tmp/mirage-where-$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo hi' | mirage-bytes-sink; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=126\n",
+            "stderr": "mirage-bytes-sink: Permission denied\n"
+          }
+        },
+        {
+          "command": "{ mirage-bytes-gen > $d/out; echo rc=$?; mirage-bytes-sink < $d/k; echo rc=$?; } 2>&1 | sed \"s|$d|D|\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "bash: line 1: D/out: Permission denied\nrc=1\nbash: line 1: D/k: Permission denied\nrc=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /store/gen && cat /store/gen",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf \"/var/tmp/mirage-two/$1\" \"/var/tmp/mirage-where-$1\"' dash $n",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && dash -c 'rm -f \"/var/tmp/mirage-where-$1\"' dash $n && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

@@ -19,6 +19,7 @@ from mirage.core.machine import place
 from mirage.core.machine.capacity import capacity as _capacity
 from mirage.core.machine.checksum import checksum as _checksum
 from mirage.core.machine.copy import copy as _copy
+from mirage.core.machine.copy import copy_from as _copy_from
 from mirage.core.machine.copy import dir_copy as _dir_copy
 from mirage.core.machine.create import create as _create
 from mirage.core.machine.mkdir import mkdir as _mkdir
@@ -27,6 +28,7 @@ from mirage.core.machine.read import first_lines as _first_lines
 from mirage.core.machine.read import last_lines as _last_lines
 from mirage.core.machine.read import line_count as _line_count
 from mirage.core.machine.read import read as _read
+from mirage.core.machine.read import read_stream as _read_stream
 from mirage.core.machine.readdir import readdir as _readdir
 from mirage.core.machine.readdir import tree as _tree
 from mirage.core.machine.rename import rename as _rename
@@ -41,7 +43,14 @@ from mirage.core.machine.truncate import truncate as _truncate
 from mirage.core.machine.unlink import unlink as _unlink
 from mirage.core.machine.utils import leaf as _leaf
 from mirage.core.machine.write import write as _write
-from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, enotsup
+from mirage.errors.fs import (
+    eisdir,
+    enoent,
+    enotdir,
+    enotempty,
+    enotsup,
+    exdev,
+)
 from mirage.execution.machine.table import MachineTable
 from mirage.io.types import ByteSource
 from mirage.types import (
@@ -142,7 +151,20 @@ class MachineVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
     ) -> ByteSource:
+        """A file's bytes from the machine holding it; a whole file as a
+        stream, never held whole, where the machine's output can be read
+        as it comes. A program the line runs on another machine never
+        reads it (``place.refuse_crossing``).
+
+        Args:
+            path (PathSpec): the file.
+            offset (int): the first byte.
+            size (int | None): how many bytes; None for the rest.
+        """
         machine = await place.holding_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path, reads=True)
+        if not offset and size is None and self.accessor.streams(machine):
+            return _read_stream(self.accessor, machine, path)
         return await _read(self.accessor, machine, path, offset, size)
 
     async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
@@ -196,24 +218,29 @@ class MachineVFS(BaseVFS):
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
         machine = await place.write_machine(self.accessor, path, replaces=True)
+        place.refuse_crossing(self.accessor, machine, path)
         await _write(self.accessor, machine, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         machine = await place.write_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path)
         await _write(self.accessor, machine, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         machine = await place.write_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path)
         await _pwrite(self.accessor, machine, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
         machine = await place.write_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path)
         await _create(self.accessor, machine, path)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
         machine = await place.write_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path)
         await _truncate(self.accessor, machine, path, length, no_create)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
@@ -329,6 +356,54 @@ class MachineVFS(BaseVFS):
         )
         await _copy(
             self.accessor, machine, src, dst, make_parent=bool(lacking)
+        )
+        if not self.accessor.several:
+            return
+        for one in await place.holders(self.accessor, dst):
+            if one.machine != machine and not one.is_folder:
+                await _unlink(self.accessor, one.machine, dst)
+
+    async def copy_from(
+        self, source: BaseVFS, src: PathSpec, dst: PathSpec
+    ) -> None:
+        """Copy a file another machine mount shows, on the machine
+        holding it, when this mount shows that machine too: the copy
+        lands where its source is and its bytes never leave the machine
+        (``cp /srv/a/out /tmp/out``), replacing the name as ``copy``
+        does. A file of a machine this mount does not show is refused:
+        bytes go between a machine and a store, never from one machine to
+        another. A store's file is EXDEV, and its bytes come through
+        Mirage.
+
+        Args:
+            source (BaseVFS): the source mount's VFS.
+            src (PathSpec): the file, on ``source``.
+            dst (PathSpec): the copy, on this mount.
+
+        Raises:
+            OSError: EXDEV for a source that is no machine's file.
+            PermissionError: the source is a machine this mount does not
+                show.
+        """
+        if not isinstance(source, MachineVFS):
+            raise exdev(dst)
+        machine = await place.holding_machine(source.accessor, src)
+        if machine not in self.accessor.names():
+            target = await place.write_machine(
+                self.accessor, dst, replaces=True
+            )
+            raise place.crossing_refused(machine, target, dst)
+        await place.refuse_hidden(self.accessor, machine, dst)
+        lacking = await place.machines_lacking_folder(
+            self.accessor, [machine], dst
+        )
+        await _copy_from(
+            source.accessor,
+            self.accessor,
+            machine,
+            src,
+            dst,
+            make_parent=bool(lacking),
         )
         if not self.accessor.several:
             return

@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import current_caller, note_decision
 from mirage.core.machine.constants import KERNEL_VIEWS
 from mirage.core.machine.stat import hidden_machines, stat_entry
 from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import folder_of, machine_path
-from mirage.errors.fs import enoent, enotdir
-from mirage.types import PathSpec
+from mirage.errors.fs import eacces, enoent, enotdir
+from mirage.types import PathSpec, PolicyDecision
 
 
 def running_machine(accessor: MachineAccessor) -> str | None:
@@ -36,6 +36,73 @@ def running_machine(accessor: MachineAccessor) -> str | None:
     if machine is None or machine.name not in accessor.names():
         return None
     return machine.name
+
+
+def crossing_reason(source: str, target: str) -> str:
+    """Why bytes from one machine do not go to another, for the decision
+    record of the refusal (stderr says ``Permission denied``).
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+    """
+    return (
+        f"machine {source}'s bytes do not go to machine {target}:"
+        " copy them through a store"
+    )
+
+
+def crossing_refused(
+    source: str, target: str, path: PathSpec
+) -> PermissionError:
+    """The refusal of bytes going from one machine to another: EACCES for
+    the file, the reason on the line's decision record.
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+        path (PathSpec): the file the refusal names.
+    """
+    note_decision(
+        PolicyDecision(kind="deny", reason=crossing_reason(source, target))
+    )
+    return eacces(path)
+
+
+def refuse_crossing(
+    accessor: MachineAccessor,
+    machine: str,
+    path: PathSpec,
+    reads: bool = False,
+) -> None:
+    """Refuse bytes going from one machine to another through a program
+    the line runs on a machine: a file of ``machine`` it reads
+    (``prog < /srv/b/in``), or its output landing there (``prog >
+    /srv/b/out``), when the program is on another of the workspace's
+    machines. Bytes go between a machine and a store, never from one
+    machine to another. The refusal is ``Permission denied``, its reason
+    on the line's decision record.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the op reads from or lands on.
+        path (PathSpec): the file.
+        reads (bool): the program reads the file, whose bytes go from
+            ``machine`` to it; else its bytes land on ``machine``.
+
+    Raises:
+        PermissionError: the program runs on another machine.
+    """
+    running = current_caller().machine
+    if (
+        running is None
+        or running.name == machine
+        or not accessor.is_machine(running.name)
+    ):
+        return
+    if reads:
+        raise crossing_refused(machine, running.name, path)
+    raise crossing_refused(running.name, machine, path)
 
 
 def command_machine(accessor: MachineAccessor) -> str | None:

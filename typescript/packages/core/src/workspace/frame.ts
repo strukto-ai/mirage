@@ -29,6 +29,11 @@ export interface PipeWriter {
   readonly cwd: string
   placed: boolean
   machine: string | null
+  /**
+   * Whether the config names that machine for the program (`configPins`),
+   * rather than Mirage picking it; asked with `machine`.
+   */
+  pinned: boolean
 }
 
 /** Temporary state of one evaluation; never part of a session record. */

@@ -34,6 +34,7 @@ from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
 from mirage.execution.types import MachineName, MachinePid, MachineResources
 from mirage.io.errors import PipeClosed
+from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
@@ -973,6 +974,70 @@ class MachineHandle:
                 ),
                 bounded=bounded,
             )
+
+    async def stream_line(
+        self,
+        line: str,
+        env: dict[str, str],
+        cwd: str,
+        failed: Callable[[int | None, bytes], BaseException],
+    ) -> AsyncIterator[bytes]:
+        """Execute one of Mirage's own shell lines on the machine, as
+        ``/bin/sh -c``, and hand its output over as it is read, never
+        held whole: a reader that falls behind holds the line back, and
+        one that stops early stops it. A line that fails, by its status
+        or by what it says on stderr, raises ``failed``'s error once the
+        output before it has been read.
+
+        Args:
+            line (str): the raw shell line.
+            env (dict[str, str]): the merged environment.
+            cwd (str): the working directory, passed through verbatim.
+            failed (Callable[[int | None, bytes], BaseException]): the
+                error of a line that ended with this status and stderr.
+        """
+        pipe = BytePipe()
+        said = bytearray()
+
+        async def complain(data: bytes) -> None:
+            said.extend(data)
+
+        async def execute() -> None:
+            try:
+                async with self._at_work():
+                    done = await self._exec_argv(
+                        ("/bin/sh", "-c", line),
+                        None,
+                        env,
+                        cwd,
+                        pipe.write,
+                        complain,
+                    )
+            except BaseException as exc:
+                pipe.end(exc)
+                raise
+            pipe.end(
+                failed(done.exit_code, bytes(said))
+                if done.exit_code != 0 or said
+                else None
+            )
+
+        task = asyncio.create_task(execute())
+        try:
+            async for chunk in pipe.stream():
+                yield chunk
+        finally:
+            pipe.close_reader()
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+            except Exception as exc:
+                logger.debug("%s: streamed line ended: %s", self.machine, exc)
 
     @asynccontextmanager
     async def _at_work(self) -> AsyncIterator[None]:

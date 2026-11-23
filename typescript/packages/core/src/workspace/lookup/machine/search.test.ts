@@ -384,3 +384,15 @@ describe('searchedMachine', () => {
     await ws.close()
   })
 })
+
+describe('a pipe', () => {
+  it("runs the program reading it on its writer's machine", async () => {
+    const a = new FakeFiles({}, ['both'])
+    const b = new FakeFiles({}, ['gen', 'both'])
+    const ws = two(a, b)
+    expect((await ws.shell('gen | both')).exitCode).toBe(0)
+    expect((await ws.shell('both')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([['both'], ['gen', 'both']])
+    await ws.close()
+  })
+})

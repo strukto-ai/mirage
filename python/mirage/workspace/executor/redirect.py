@@ -34,6 +34,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import CommandTimeoutError, FsCondition
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
@@ -924,6 +925,27 @@ def _output_recorder(
     return recorder
 
 
+def _producing_machine(io: IOResult) -> MachineName | None:
+    """The machine whose program produced a command's output, bound as
+    the running command's machine while the output lands in its files: a
+    command Mirage handed to a machine (``cat /srv/a/x > /tmp/x``)
+    lands its output there, as a program's does, and never on another
+    machine (``place.refuse_crossing``). None where Mirage produced the
+    output, or that machine is bound already.
+
+    Args:
+        io (IOResult): the command's result.
+    """
+    producer = io.producer
+    if (
+        producer is None
+        or producer.machine is None
+        or producer.machine == current_caller().machine
+    ):
+        return None
+    return producer.machine
+
+
 async def _before_drain(
     recorder: PipeRecorder,
     result: RedirectResult,
@@ -1676,9 +1698,21 @@ async def _handle_redirect(
                     sink=recorder,
                 )
                 refused = result[2].refused
-                await _before_drain(recorder, result, outputs, files, name)
-                _, io, exec_node = await drained(recorder, *result)
-                await recorder.finish_writer()
+                produced = _producing_machine(result[1])
+                bound = (
+                    None
+                    if produced is None
+                    else bind_caller(
+                        current_caller().changed({"machine": produced})
+                    )
+                )
+                try:
+                    await _before_drain(recorder, result, outputs, files, name)
+                    _, io, exec_node = await drained(recorder, *result)
+                    await recorder.finish_writer()
+                finally:
+                    if bound is not None:
+                        reset_caller(bound)
 
             except PipeClosed:
                 # SIGPIPE ends a forked writer alone; a builtin's write,
@@ -1731,17 +1765,27 @@ async def _handle_redirect(
         except Exception as exc:
             logger.debug("kept output not written: %s", exc)
         raise cancelled
-    stdout, unwound = await _land_output(
-        opened,
-        recorder,
-        route,
-        io,
-        redirects,
-        command,
-        refused,
-        unwound,
-        forked,
+    produced = _producing_machine(io)
+    bound = (
+        None
+        if produced is None
+        else bind_caller(current_caller().changed({"machine": produced}))
     )
+    try:
+        stdout, unwound = await _land_output(
+            opened,
+            recorder,
+            route,
+            io,
+            redirects,
+            command,
+            refused,
+            unwound,
+            forked,
+        )
+    finally:
+        if bound is not None:
+            reset_caller(bound)
     if unwound is not None:
         if (
             isinstance(unwound, ExitSignal)

@@ -26,6 +26,7 @@ from mirage.workspace.lookup.machine.mounts import (
 )
 from mirage.workspace.lookup.machine.program import program_machine
 from mirage.workspace.lookup.machine.search import (
+    config_pins,
     folder_holders,
     searched_machine,
 )
@@ -70,15 +71,48 @@ async def preferred_machine(
         return None
     if routing.machine is not None:
         return routing.machine
-    if fed_by is not None and not fed_by.placed:
+    if fed_by is not None:
+        writer = await pipe_writer_machine(
+            fed_by, session, registry, routing, namespace, dispatch
+        )
+        if writer is not None:
+            return writer
+    held = await folder_holders(session.cwd, session, registry, asked)
+    return held[0] if len(held) == 1 else None
+
+
+async def pipe_writer_machine(
+    fed_by: PipeWriter,
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity],
+    namespace: Namespace,
+    dispatch: DispatchFn,
+) -> str | None:
+    """The machine the program writing a pipe runs on, placed once for
+    the pipe (``PipeWriter.placed``), and whether the config names it
+    (``PipeWriter.pinned``): its bytes are that machine's, so a program
+    reading them runs there when that machine has it, and is refused on
+    another one unless the config names both machines. None for a writer
+    Mirage runs itself.
+
+    Args:
+        fed_by (PipeWriter): the pipe's writer.
+        session (SessionState): the session its reader runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision): the line's placement.
+        namespace (Namespace): the link table a writer's path is read
+            through.
+        dispatch (DispatchFn): op dispatcher, which a writer's path is
+            asked of.
+    """
+    if not fed_by.placed:
         fed_by.machine = await _writer_machine(
             fed_by, session, registry, routing, namespace, dispatch
         )
+        fed_by.pinned = config_pins(fed_by.words, session, registry, routing)
         fed_by.placed = True
-    if fed_by is not None and fed_by.machine is not None:
-        return fed_by.machine
-    held = await folder_holders(session.cwd, session, registry, asked)
-    return held[0] if len(held) == 1 else None
+    return fed_by.machine
 
 
 def asks_machines(

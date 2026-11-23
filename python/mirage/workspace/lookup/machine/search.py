@@ -27,7 +27,7 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.machine.machine import MachineVFS
-from mirage.workspace.lookup.lookup import lookup, lookup_all
+from mirage.workspace.lookup.lookup import lookup, lookup_all, program_head
 from mirage.workspace.lookup.machine.mounts import (
     folder_machines,
     mount_machines,
@@ -91,6 +91,32 @@ def is_searched(
     return all(
         layer in (Consumer.FUNCTION, Consumer.EXTERNAL)
         for layer in lookup_all(name, session, registry, routing)
+    )
+
+
+def config_pins(
+    words: Sequence[str | None],
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity],
+) -> bool:
+    """Whether the workspace's config says which machine runs a program:
+    a machine captures it by name, or one machine takes every program
+    nothing captures. Mirage picks the machine of a program search order
+    places (``is_searched``) and of one named by its path, which runs
+    where its file is.
+
+    Args:
+        words (Sequence[str | None]): the program's words, None for one
+            only known when it runs.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision): the line's placement, before search
+            order bound anything.
+    """
+    head = program_head(registry, words, session, routing)
+    return "/" not in head and not is_searched(
+        head, session, registry, routing
     )
 
 
@@ -206,16 +232,19 @@ async def nearest_machine(
     paths: Sequence[str],
     session: SessionState,
     registry: MountRegistry,
+    writer: str | None = None,
 ) -> str | None:
     """Of the machines that can run a program, the one search order
-    picks: one the session's folder is on, then one holding the paths
-    the command names, then the first ``machines:`` lists. Each step
-    narrows the machines left only when it leaves any, so a folder every
-    machine has decides nothing and the paths are asked next.
+    picks: one the session's folder is on, then the one whose program
+    writes the pipe it reads (``writer``), so the pipe's bytes stay on
+    their machine, then one holding the paths the command names, then
+    the first ``machines:`` lists. Each step narrows the machines left
+    only when it leaves any, so a folder every machine has decides
+    nothing and the next step is asked.
 
     Where a coded file policy speaks for the session no machine is asked
     about a path, which the policy judges inside the command that opens
-    it: the first machine is the answer.
+    it: the pipe's writer, else the first machine, is the answer.
 
     Args:
         machines (Sequence[str]): the machines that can run it, in the
@@ -224,13 +253,19 @@ async def nearest_machine(
         paths (Sequence[str]): the absolute paths the command names.
         session (SessionState): the session it runs in.
         registry (MountRegistry): the workspace's mounts and machines.
+        writer (str | None): the machine the program writing its pipe
+            runs on; None for no pipe, or one Mirage writes.
     """
     left = list(machines)
     if len(left) < 2:
         return left[0] if left else None
     if await registry.policies.wants_for("pre_vfs", session.session_id):
-        return left[0]
-    for path in (cwd, *paths):
+        return writer if writer in left else left[0]
+    holding = await holding_machines(cwd, registry)
+    left = [m for m in left if m in holding] or left
+    if writer in left:
+        return writer
+    for path in paths:
         if len(left) < 2:
             break
         holding = await holding_machines(path, registry)
@@ -281,6 +316,7 @@ async def searched_machine(
     cwd: str | None = None,
     path: str | None = None,
     past_functions: bool = False,
+    writer: str | None = None,
 ) -> RemoteRuntime | None:
     """The machine a program named by its name runs on when nothing says
     which (``is_searched``): among the machines a run started now would
@@ -303,6 +339,9 @@ async def searched_machine(
             the one the session exported.
         past_functions (bool): the program a function of the same
             name shadows is the one asked about (``which``).
+        writer (str | None): the machine the program writing the pipe
+            it reads runs on, which it then runs on when that machine
+            has it; None for no pipe.
     """
     if not is_searched(name, session, registry, routing, past_functions):
         return None
@@ -320,6 +359,7 @@ async def searched_machine(
         paths,
         session,
         registry,
+        writer,
     )
     return next((m for m in having if m.default_machine == picked), None)
 
