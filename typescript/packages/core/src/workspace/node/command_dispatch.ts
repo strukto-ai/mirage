@@ -651,7 +651,8 @@ export async function executeCommand(
       seedPrefix,
       expanded,
       new Set(prefixAssignments.map(([k]) => k)),
-      new Map(prefixAssignments).get('PATH') ?? null,
+      new Map(prefixAssignments.map(([given, v]) => [deref(session, given), v])).get('PATH') ??
+        null,
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
     // A run that starts as its output is read still runs under the prefix,

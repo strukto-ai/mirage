@@ -623,7 +623,9 @@ async def execute_command(
             seed_prefix,
             expanded,
             assigned=frozenset(k for k, _ in prefix_assignments),
-            prefix_path=dict(prefix_assignments).get("PATH"),
+            prefix_path={
+                deref(session, given): v for given, v in prefix_assignments
+            }.get("PATH"),
         )
         if refused:
             io.stderr = refused + (await materialize(io.stderr))

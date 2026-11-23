@@ -17,7 +17,8 @@ import dataclasses
 import logging
 from collections.abc import Sequence
 
-from mirage.core.machine.place import holders
+from mirage.core.machine.place import asked_machines
+from mirage.core.machine.stat import stat_entry
 from mirage.errors.types import CommandTimeoutError
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.machine import RemoteRuntime
@@ -112,9 +113,10 @@ def _unasked(failure: BaseException, what: str) -> None:
 
 async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
     """The machines holding a path as their own file or folder, by the
-    machine mount showing it; none for a path in a store, for a name no
-    machine holds yet, and where a machine cannot be asked, so a machine
-    that is down keeps no program from running on another.
+    machine mount showing it; none for a path in a store and for a name
+    no machine holds yet. A machine that cannot be asked counts as not
+    holding it, and the others' answers stand, so a machine that is down
+    neither stops a program nor hides who holds its path.
 
     Args:
         path (str): an absolute virtual path.
@@ -126,12 +128,26 @@ async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
     shown = mount_machines(entry, registry)
     if len(shown) < 2:
         return shown
+    accessor = entry.vfs.accessor
+    spec = path_on_mount(entry, path)
     try:
-        held = await holders(entry.vfs.accessor, path_on_mount(entry, path))
+        names = await asked_machines(accessor, spec)
     except Exception as exc:
         _unasked(exc, path)
         return []
-    return [one.machine for one in held]
+    found = await asyncio.gather(
+        *(stat_entry(accessor, name, spec) for name in names),
+        return_exceptions=True,
+    )
+    held: list[str] = []
+    for name, result in zip(names, found, strict=True):
+        if isinstance(result, (FileNotFoundError, NotADirectoryError)):
+            continue
+        if isinstance(result, BaseException):
+            _unasked(result, f"{name} for {path}")
+            continue
+        held.append(name)
+    return held
 
 
 async def _machines_with(

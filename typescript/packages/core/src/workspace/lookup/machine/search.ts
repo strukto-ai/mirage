@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { holders } from '../../../core/machine/place.ts'
+import { askedMachines } from '../../../core/machine/place.ts'
+import { statEntry } from '../../../core/machine/stat.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../../runtime/constants.ts'
@@ -92,9 +93,10 @@ function unasked(failure: unknown, what: string): void {
 
 /**
  * The machines holding a path as their own file or folder, by the machine
- * mount showing it; none for a path in a store, for a name no machine holds
- * yet, and where a machine cannot be asked, so a machine that is down keeps
- * no program from running on another.
+ * mount showing it; none for a path in a store and for a name no machine
+ * holds yet. A machine that cannot be asked counts as not holding it, and
+ * the others' answers stand, so a machine that is down neither stops a
+ * program nor hides who holds its path.
  *
  * @param path an absolute virtual path.
  * @param registry the workspace's mounts and machines.
@@ -104,13 +106,28 @@ async function pathMachines(path: string, registry: MountRegistry): Promise<stri
   if (entry === null || !(entry.vfs instanceof MachineVFS)) return []
   const shown = mountMachines(entry, registry)
   if (shown.length < 2) return shown
+  const accessor = entry.vfs.accessor
+  const spec = pathOnMount(entry, path)
+  let names: string[]
   try {
-    const held = await holders(entry.vfs.accessor, pathOnMount(entry, path))
-    return held.map((one) => one.machine)
+    names = await askedMachines(accessor, spec)
   } catch (err) {
     unasked(err, path)
     return []
   }
+  const found = await Promise.allSettled(names.map((name) => statEntry(accessor, name, spec)))
+  const held: string[] = []
+  for (const [at, name] of names.entries()) {
+    const result = found[at]
+    if (result === undefined) continue
+    if (result.status === 'fulfilled') {
+      held.push(name)
+      continue
+    }
+    const code = (result.reason as { code?: unknown } | null)?.code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') unasked(result.reason, `${name} for ${path}`)
+  }
+  return held
 }
 
 /**

@@ -296,4 +296,37 @@ describe('searchedMachine', () => {
     expect([a.ran, b.ran]).toEqual([['tool'], ['tool']])
     await ws.close()
   })
+
+  it('does not hide who holds a path when a machine is down', async () => {
+    const a = new FakeFiles({}, ['smi'])
+    const b = new FakeFiles({ '/tmp/only.txt': 'o' }, ['smi'])
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          a: new ScriptedMachine('a', a.answer),
+          b: new ScriptedMachine('b', b.answer),
+          c: new Down('c', new FakeFiles().answer),
+        },
+      },
+    )
+    await ws.shell('smi /tmp/only.txt')
+    expect([a.ran, b.ran]).toEqual([[], ['smi /tmp/only.txt']])
+    await ws.close()
+  })
+
+  it('searches the PATH a prefix sets through a reference', async () => {
+    const second = new ScriptedMachine('b', new FakeFiles({}, ['smi']).answer)
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: { a: new ScriptedMachine('a', new FakeFiles().answer), b: second },
+      },
+    )
+    await ws.shell('declare -n P=PATH; P=/opt/bin smi')
+    expect(second.lines).toEqual(['PATH=/opt/bin command -v smi >/dev/null 2>&1', 'smi'])
+    await ws.close()
+  })
 })

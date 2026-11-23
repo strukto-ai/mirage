@@ -320,3 +320,37 @@ async def test_a_route_that_comes_with_the_redirect_decides_over_the_search():
     await ws.shell("tool > /tmp/out")
     assert (a.ran, b.ran) == (["tool"], ["tool"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_that_is_down_does_not_hide_who_holds_a_path():
+    a = FakeFiles(programs=("smi",))
+    b = FakeFiles({"/tmp/only.txt": b"o"}, programs=("smi",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", a.answer),
+            "b": ScriptedMachine("b", b.answer),
+            "c": Down("c", FakeFiles().answer),
+        },
+    )
+    await ws.shell("smi /tmp/only.txt")
+    assert (a.ran, b.ran) == ([], ["smi /tmp/only.txt"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_that_sets_path_through_a_reference_is_the_path_searched():
+    second = ScriptedMachine("b", FakeFiles(programs=("smi",)).answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": ScriptedMachine("a", FakeFiles().answer), "b": second},
+    )
+    await ws.shell("declare -n P=PATH; P=/opt/bin smi")
+    assert second.lines == [
+        "PATH=/opt/bin command -v smi >/dev/null 2>&1",
+        "smi",
+    ]
+    await ws.close()
