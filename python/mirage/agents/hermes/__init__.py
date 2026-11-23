@@ -12,7 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.agents.hermes.environment import MirageEnvironment
-from mirage.agents.hermes.provider import MirageTerminalProvider, register
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.agents.hermes.environment import MirageEnvironment
+    from mirage.agents.hermes.provider import MirageTerminalProvider, register
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.agents.hermes.environment": ("MirageEnvironment",),
+    "mirage.agents.hermes.provider": ("MirageTerminalProvider", "register"),
+}
 
 __all__ = ["MirageEnvironment", "MirageTerminalProvider", "register"]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

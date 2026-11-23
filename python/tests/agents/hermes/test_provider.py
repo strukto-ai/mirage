@@ -78,3 +78,33 @@ def test_tasks_share_one_workspace(config):
     finally:
         first.cleanup()
         second.cleanup()
+        provider.close()
+
+
+def test_secret_pointers_in_the_yaml_resolve(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "hello.txt").write_text("hi\n")
+    monkeypatch.setenv("MIRAGE_HERMES_TEST_ROOT", str(root))
+    config = tmp_path / "workspace.yaml"
+    config.write_text(
+        WORKSPACE_YAML
+        + "  /disk:\n    vfs: disk\n"
+        + "    config: {root: {from: env, key: MIRAGE_HERMES_TEST_ROOT}}\n"
+    )
+    provider = MirageTerminalProvider(lambda: str(config))
+    environment = provider.create_environment(cwd="/", timeout=30, task_id="s")
+    try:
+        result = environment.execute("cat /disk/hello.txt")
+        assert result["output"].strip() == "hi", result
+    finally:
+        environment.cleanup()
+        provider.close()
+
+
+def test_close_shuts_the_workspace(config):
+    provider = MirageTerminalProvider(lambda: str(config))
+    environment = provider.create_environment(cwd="/", timeout=30, task_id="c")
+    provider.close()
+    assert environment.execute("echo hi")["returncode"] != 0
+    environment.cleanup()

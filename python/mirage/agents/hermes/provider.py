@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import atexit
 import logging
 import threading
 from collections.abc import Callable
@@ -24,7 +26,7 @@ from hermes_cli.plugins_context import PluginContext
 
 from mirage.agents.hermes.constants import BACKEND, SETTING
 from mirage.agents.hermes.environment import MirageEnvironment
-from mirage.config import load_config
+from mirage.server.workspace_config import build_workspace_from_config
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -50,6 +52,8 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         self._config_path = config_path
         self._lock = threading.Lock()
         self._workspaces: dict[Path, Workspace] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
+        atexit.register(self.close)
 
     def _path(self) -> Path | None:
         value = self._config_path()
@@ -82,6 +86,16 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             self._workspace(), cwd=cwd, timeout=timeout, task_id=task_id
         )
 
+    def _owner(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            threading.Thread(
+                target=self._loop.run_forever,
+                name="mirage-hermes",
+                daemon=True,
+            ).start()
+        return self._loop
+
     def _workspace(self) -> Workspace:
         path = self._path()
         if path is None:
@@ -92,11 +106,40 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         with self._lock:
             workspace = self._workspaces.get(path)
             if workspace is None:
-                workspace = Workspace(
-                    **load_config(path).to_workspace_kwargs()
-                )
+                workspace = asyncio.run_coroutine_threadsafe(
+                    build_owned_workspace(path), self._owner()
+                ).result()
                 self._workspaces[path] = workspace
         return workspace
+
+    def close(self) -> None:
+        """Close every workspace this provider built; hermes calls none
+        between tasks, so this runs when the process exits."""
+        with self._lock:
+            workspaces = list(self._workspaces.values())
+            self._workspaces.clear()
+            loop = self._loop
+        if loop is None:
+            return
+        for workspace in workspaces:
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    workspace.close(), loop
+                ).result()
+            except Exception as exc:
+                logger.debug("closing a mirage workspace failed: %r", exc)
+
+
+async def build_owned_workspace(path: Path) -> Workspace:
+    """Build the workspace a YAML describes and make the running loop its
+    owner, so hermes' threads run its lines there.
+
+    Args:
+        path (Path): The workspace YAML.
+    """
+    workspace = await build_workspace_from_config(path)
+    workspace._sync_bridge.observe()
+    return workspace
 
 
 def register(ctx: PluginContext) -> None:
