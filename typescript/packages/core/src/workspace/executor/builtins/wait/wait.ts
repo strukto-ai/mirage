@@ -98,7 +98,8 @@ async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promi
  * Wait for background jobs (`waitFor`) until they end or the shell takes a
  * signal it traps: then it answers 128 plus the signal at once, as bash's
  * does, with the operands it already refused, and the action runs as it
- * returns. Mirrors Python's handle_wait.
+ * returns. A signal it takes to run its EXIT action before it dies of it cuts
+ * the wait short the same way. Mirrors Python's handle_wait.
  */
 export async function handleWait(
   jobTable: JobTable,
@@ -107,13 +108,19 @@ export async function handleWait(
   view: SessionView | null = null,
   signal?: AbortSignal,
 ): Promise<RedirectResult> {
-  if (session === null || ![...session.signalTraps.values()].some((action) => action !== ''))
+  if (
+    session === null ||
+    !(
+      [...session.signalTraps.values()].some((action) => action !== '') ||
+      (session.exitTrap !== null && session.exitTrap !== '' && !session.exitTrapInherited)
+    )
+  )
     return waitFor(jobTable, parts, session, view, signal)
   const stop = new AbortController()
   session.signalArrived = () => {
     stop.abort()
   }
-  if (session.pendingSignals.size > 0) stop.abort()
+  if (session.pendingSignals.size > 0 || session.fatalSignal !== null) stop.abort()
   const said: string[] = []
   try {
     return await waitFor(
@@ -126,7 +133,11 @@ export async function handleWait(
     )
   } catch (err) {
     if (!stop.signal.aborted || signal?.aborted === true) throw err
-    const code = 128 + Math.min(...session.pendingSignals)
+    const code =
+      128 +
+      (session.pendingSignals.size > 0
+        ? Math.min(...session.pendingSignals)
+        : (session.fatalSignal ?? 0))
     const stderr = said.join('')
     return [
       null,

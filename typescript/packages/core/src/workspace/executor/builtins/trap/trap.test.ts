@@ -133,3 +133,29 @@ describe('catchSignal', () => {
     expect(session.catchSignal(10, 7)).toBe(false)
   })
 })
+
+describe('takesFatalSignal', () => {
+  it("takes a fatal signal for the shell's own EXIT action only", () => {
+    const session = makeSession()
+    session.processId = 7
+    session.lastExitCode = 4
+    for (const [action, inherited] of [
+      [null, false],
+      ['', false],
+      ['echo b', true],
+    ] as const) {
+      session.exitTrap = action
+      session.exitTrapInherited = inherited
+      expect(session.takesFatalSignal(15, 7)).toBe(false)
+    }
+    session.exitTrapInherited = false
+    expect(session.takesFatalSignal(15, 8)).toBe(false)
+    session.trapStatus = 143
+    expect(session.takesFatalSignal(15, 7)).toBe(false)
+    session.trapStatus = null
+    expect(session.takesFatalSignal(15, 7)).toBe(true)
+    session.lastExitCode = 143
+    expect(session.takesFatalSignal(1, 7)).toBe(true)
+    expect([session.fatalSignal, session.statusBeforeSignal]).toEqual([15, 4])
+  })
+})

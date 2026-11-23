@@ -30,6 +30,7 @@ import type { SubscriptFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { assignElement, sessionView, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { mergeSignals } from '../../../../utils/abort.ts'
 import { TARGET_RE } from '../constants.ts'
 import {
   builtinUsage,
@@ -165,6 +166,34 @@ export async function readReply(
 }
 
 /**
+ * Read until the input ends the read or the shell takes a signal to run its
+ * EXIT action before it dies of it (`takesFatalSignal`), as bash's `read`
+ * stops at once for one; a signal it traps lets it read on. Null when such a
+ * signal cut it short. Mirrors Python's _read_until_fatal.
+ */
+async function readUntilFatal<T>(
+  session: SessionState,
+  read: (signal: AbortSignal | undefined) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T | null> {
+  if (session.exitTrap === null || session.exitTrap === '' || session.exitTrapInherited)
+    return read(signal)
+  const stop = new AbortController()
+  session.signalArrived = () => {
+    if (session.fatalSignal !== null) stop.abort()
+  }
+  if (session.fatalSignal !== null) stop.abort()
+  try {
+    return await read(mergeSignals(signal, stop.signal) ?? stop.signal)
+  } catch (err) {
+    if (!stop.signal.aborted || signal?.aborted === true) throw err
+    return null
+  } finally {
+    session.signalArrived = null
+  }
+}
+
+/**
  * Read one line (or delimited record, or character count) into
  * variables, with bash's option surface. `-r` turns off backslash
  * processing; `-d C` reads to `C`; `-n N`/`-N N` bound the read; `-a
@@ -250,7 +279,20 @@ export async function handleRead(
   let line = ''
   if (buffer !== null) {
     try {
-      ;[line, complete] = await readRaw(buffer, raw, delim, nchars, exact, signal)
+      const got = await readUntilFatal(
+        session,
+        (reading) => readRaw(buffer, raw, delim, nchars, exact, reading),
+        signal,
+      )
+      if (got === null) {
+        const code = 128 + (session.fatalSignal ?? 0)
+        return [
+          null,
+          new IOResult({ exitCode: code }),
+          new ExecutionNode({ command: 'read', exitCode: code }),
+        ]
+      }
+      ;[line, complete] = got
     } catch (err) {
       if (!isFsError(err) || (err as { code?: string }).code !== 'EBADF') throw err
       // stdin is closed or write-only (`read x <&-`, `read x 0<&1`).

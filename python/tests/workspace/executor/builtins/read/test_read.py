@@ -1,3 +1,6 @@
+import asyncio
+from collections.abc import AsyncIterator
+
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
@@ -233,3 +236,29 @@ async def test_read_after_exec_reads_on_across_lines():
     await ws.shell("printf 'a\\nb\\n' > /data/f; exec < /data/f; read a")
     io = await ws.shell('read b; echo "[$a][$b]"')
     assert await materialize(io.stdout) == b"[a][b]\n"
+
+
+async def _stalls() -> AsyncIterator[bytes]:
+    yield b"partial"
+    await asyncio.Event().wait()
+
+
+# bash's read stops at once for a signal the shell dies of, to run its EXIT
+# action; a signal it traps lets it read on.
+@pytest.mark.asyncio
+async def test_read_stops_for_a_signal_the_shell_dies_of():
+    session = make_session()
+    session.exit_trap = "echo bye"
+    session.signal_traps = {10: "echo usr1"}
+    reading = asyncio.ensure_future(
+        handle_read(["v"], session, _stalls(), state=session_view(session))
+    )
+    await asyncio.sleep(0.01)
+    assert session.catch_signal(10, 1)
+    await asyncio.sleep(0.01)
+    assert not reading.done()
+    assert session.takes_fatal_signal(15, 1)
+    async with asyncio.timeout(5):
+        _, io, _ = await reading
+    assert io.exit_code == 143
+    assert "v" not in session.env

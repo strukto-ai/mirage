@@ -63,11 +63,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'trap \"echo caught; exit 3\" TERM; kill $$; echo after'; echo rc=$?",
+      "command": "bash -c 'trap \"echo caught; exit 3\" TERM; kill $$; echo after'; echo rc=$?; bash -c 'trap \"echo bye \\$?\" EXIT; false; kill $$; echo after'; echo rc=$?; bash -c 'trap \"echo int\" EXIT; kill -INT $$; echo after'; echo rc=$?; bash -c 'trap \"echo bye; exit 3\" EXIT; kill $$'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "caught\nrc=3\n",
-        "stderr": ""
+        "stdout": "caught\nrc=3\nbye 0\nrc=143\nint\nrc=130\nbye\nrc=143\n",
+        "stderr": "Terminated\nTerminated\n"
       }
     },
     {
@@ -168,10 +168,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'trap \"echo cleanup; exit 0\" TERM; while :; do sleep 0.1; done' & sleep 0.5; kill $!; wait $!; echo rc=$?",
+      "command": "bash -c 'trap \"echo cleanup; exit 0\" TERM; while :; do sleep 0.1; done' & sleep 0.5; kill $!; wait $!; echo rc=$?; bash -c 'trap \"echo bye\" EXIT; echo r > {mount}/signal-exit-ready; sleep 5 & wait; echo after' & v=$!; while ! test -e {mount}/signal-exit-ready; do sleep .01; done; kill $v; wait $v; echo w=$?; bash -c 'trap \"echo err\" ERR; trap \"echo bye \\$?\" EXIT; echo r > {mount}/signal-err-ready; sleep 5; echo after' & v=$!; while ! test -e {mount}/signal-err-ready; do sleep .01; done; kill $v; wait $v; echo e=$?",
       "expect": {
         "exit": 0,
-        "stdout": "cleanup\nrc=0\n",
+        "stdout": "cleanup\nrc=0\nbye\nw=143\nbye 0\ne=143\n",
         "stderr": ""
       }
     },
@@ -308,11 +308,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c 'trap \"echo t\" TERM; true && kill $$ && echo and; echo after'",
+      "command": "bash -c 'trap \"echo t\" TERM; true && kill $$ && echo and; echo after'; bash -c 'trap \"echo bye\" EXIT; for i in 1 2 3; do echo $i; [ $i = 2 ] && kill $$; done'; echo rc=$?; bash -c 'trap \"echo bye\" EXIT; trap \"echo t; kill \\$\\$; echo t2\" USR1; kill -USR1 $$; echo after'; echo rc=$?; bash -c 'trap \"echo bye\" EXIT; (kill $$; echo in); echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "t\nand\nafter\n",
-        "stderr": ""
+        "stdout": "t\nand\nafter\n1\n2\nbye\nrc=143\nt\nbye\nrc=143\nin\nbye\nrc=143\n",
+        "stderr": "Terminated\nTerminated\nTerminated\n"
       }
     },
     {
@@ -483,11 +483,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "bash -c '(trap \"echo sub\" TERM; kill $BASHPID; echo sub-after); echo after'",
+      "command": "bash -c '(trap \"echo sub\" TERM; kill $BASHPID; echo sub-after); echo after'; bash -c 'trap \"echo bye; kill \\$\\$; echo still\" EXIT; kill $$'; echo rc=$?; x=$(trap 'echo subbye' EXIT; kill $BASHPID; echo in); echo \"x=$x $?\"; bash -c 'trap \"\" EXIT; kill $$'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "sub\nsub-after\nafter\n",
-        "stderr": ""
+        "stdout": "sub\nsub-after\nafter\nbye\nrc=143\nx=subbye 143\nrc=143\n",
+        "stderr": "Terminated\nTerminated\n"
       }
     },
     {

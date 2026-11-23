@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { IOResult, materialize } from '../../io/types.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { Terminal, type JobConsole } from '../../shell/console/index.ts'
+import { ExitSignal } from '../../shell/errors.ts'
 import { SessionState } from '../session/session.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import {
@@ -25,6 +27,7 @@ import {
   ownAction,
   restoreFunctionTraps,
   runExitTrap,
+  runSignalTraps,
   startJobTraps,
 } from './traps.ts'
 
@@ -66,6 +69,70 @@ describe('runExitTrap', () => {
     expect(calls).toEqual([{ line: 'echo bye', stdin, callStack: frames }])
     expect(session.exitTrap).toBeNull()
     expect(await runExitTrap(run, session, 7)).toBeNull()
+  })
+})
+
+// An evaluator that notes `$?` and the sink each line gets, then answers
+// with a result or throws it.
+function watcher(
+  session: SessionState,
+  answer: IOResult | ExitSignal,
+): { run: ExecuteFn; seen: [string, number, JobConsole | undefined][] } {
+  const seen: [string, number, JobConsole | undefined][] = []
+  const run: ExecuteFn = (line, opts) => {
+    seen.push([line, session.lastExitCode, opts.sink])
+    return answer instanceof ExitSignal ? Promise.reject(answer) : Promise.resolve(answer)
+  }
+  return { run, seen }
+}
+
+describe('runSignalTraps', () => {
+  it.each<[string, () => IOResult | ExitSignal]>([
+    ['returns', () => new IOResult({ stdout: ENC.encode('bye\n') })],
+    ['exits', () => new ExitSignal(3, new Uint8Array(), ENC.encode('bye\n'))],
+  ])(
+    'runs the EXIT action for a fatal signal and keeps its status when it %s',
+    async (_, answer) => {
+      const session = makeSession('echo bye')
+      session.fatalSignal = 15
+      session.statusBeforeSignal = 4
+      session.lastExitCode = 143
+      const sink = new Terminal()
+      const { run, seen } = watcher(session, answer())
+      const raised = await runSignalTraps(run, session, null, null, sink).catch(
+        (err: unknown) => err,
+      )
+      expect(raised).toBeInstanceOf(ExitSignal)
+      expect((raised as ExitSignal).exitCode).toBe(143)
+      expect(DEC.decode((raised as ExitSignal).cleanup)).toBe('bye\n')
+      expect(seen).toEqual([['echo bye', 4, sink]])
+      expect(session.lastExitCode).toBe(143)
+      expect([session.fatalSignal, session.exitTrap]).toEqual([null, null])
+    },
+  )
+
+  it('ends a shell with no EXIT action on a fatal signal', async () => {
+    const session = makeSession()
+    session.fatalSignal = 2
+    const { run, seen } = watcher(session, new IOResult())
+    const raised = await runSignalTraps(run, session).catch((err: unknown) => err)
+    expect([(raised as ExitSignal).exitCode, seen]).toEqual([130, []])
+  })
+
+  it('runs a queued action first, with the status the fatal signal found', async () => {
+    const session = makeSession('echo bye')
+    session.signalTraps.set(10, 'echo usr1')
+    session.pendingSignals.add(10)
+    session.fatalSignal = 15
+    session.statusBeforeSignal = 4
+    session.lastExitCode = 143
+    const { run, seen } = watcher(session, new IOResult())
+    const raised = await runSignalTraps(run, session).catch((err: unknown) => err)
+    expect((raised as ExitSignal).exitCode).toBe(143)
+    expect(seen.map(([line, status]) => [line, status])).toEqual([
+      ['echo usr1', 4],
+      ['echo bye', 4],
+    ])
   })
 })
 

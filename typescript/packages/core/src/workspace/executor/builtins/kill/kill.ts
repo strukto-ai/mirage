@@ -162,6 +162,7 @@ export async function handleKill(
   const processes = jobTable.processes
   const errors: string[] = []
   let signalled = false
+  const taken = session !== null && session.fatalSignal !== null
   await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
@@ -235,6 +236,10 @@ export async function handleKill(
     signalled = true
   }
   const code = signalled ? 0 : 1
+  // One it takes to run its EXIT action first lands as kill ends, so the
+  // action finds kill's status; one taken before it ran keeps the status it
+  // found.
+  if (!taken && session !== null && session.fatalSignal !== null) session.statusBeforeSignal = code
   const stderr = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   return [
     null,

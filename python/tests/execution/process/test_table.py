@@ -729,6 +729,93 @@ async def test_a_group_signal_a_shell_traps_still_ends_its_program():
     assert outcome == [(None, 15), (0, None)]
 
 
+# A shell with an EXIT action of its own takes a signal it would die of, sent
+# to it alone too: the program it runs stops at once and the shell goes on to
+# its action. One it ignores it never takes, nor KILL.
+@pytest.mark.asyncio
+async def test_a_shell_takes_a_fatal_signal_to_run_its_exit_action():
+    processes = ProcessTable()
+    took: list[int] = []
+    started = asyncio.Event()
+
+    async def program() -> int:
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    async def shell() -> int:
+        _, stopped = await child.program(program)
+        return 128 + (stopped or 0)
+
+    async def hangs() -> int:
+        await asyncio.Event().wait()
+        return 0
+
+    def exit_catcher(signal: int, pid: int) -> bool:
+        took.append(signal)
+        return True
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+        ignores=frozenset({3}),
+    )
+    child.exit_catcher = exit_catcher
+    killed = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=hangs,
+    )
+    killed.exit_catcher = exit_catcher
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal(child, 3)
+        assert await processes.signal(child, 15)
+        assert (await child.join()).exit == 143
+        assert await processes.signal(killed, 9)
+        assert (await killed.join()).exit == 137
+    assert took == [15]
+    assert child.exiting and child.signal is None
+
+
+# KILL waits for no cleanup: a shell stopped while it waits for a shell
+# running its EXIT action stops it with it at a KILL.
+@pytest.mark.asyncio
+async def test_a_kill_waits_for_no_exit_action_below():
+    processes = ProcessTable()
+    below: list[ProcessHandle] = []
+
+    async def owner_run() -> int:
+        return await below[0].reap()
+
+    owner = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=owner_run,
+    )
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent=owner.record.pid,
+    )
+    child.exiting = True
+    below.append(child)
+    await asyncio.sleep(0)
+    assert owner.terminate(15, children=False)
+    await asyncio.sleep(0)
+    assert owner.record.state == ProcessState.STOPPING
+    async with asyncio.timeout(5):
+        assert await processes.signal(owner, 9)
+        assert (await child.join()).exit == 137
+        await owner.join()
+
+
 # A native program a trapping shell started gets the group's signal as sent
 # and answers it itself, so the shell's wait for it goes on.
 @pytest.mark.asyncio

@@ -23,6 +23,7 @@ from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.kill.kill import handle_kill
+from mirage.workspace.session.session import SessionState
 from tests.fixtures.job_runners import (
     submit_pending,
 )
@@ -86,6 +87,16 @@ _KILL_USAGE = (
 async def test_kill_refuses_in_bash_words(args, code, stderr):
     _, io, _ = await handle_kill(JobTable(), ["kill", *args])
     assert (io.exit_code, io.stderr) == (code, stderr)
+
+
+# A kill the shell runs after it took a signal to run its EXIT action
+# leaves the status that signal found for the action.
+@pytest.mark.asyncio
+async def test_a_kill_after_a_fatal_signal_keeps_the_status_it_found():
+    session = SessionState(session_id="s1")
+    session.fatal_signal, session.status_before_signal = 15, 3
+    _, io, _ = await handle_kill(JobTable(), ["kill", "999"], session)
+    assert (io.exit_code, session.status_before_signal) == (1, 3)
 
 
 @pytest.mark.asyncio

@@ -405,6 +405,30 @@ async def test_reap_answers_a_status_unless_the_host_stopped_the_runner():
     assert (await waited.join()).exit == 137
 
 
+# A runner whose shell took the signal to run its EXIT action first ends on
+# its own: a waiter cancelled meanwhile waits for that end before it stops.
+@pytest.mark.asyncio
+async def test_a_stopped_waiter_leaves_an_exiting_runner_to_its_end():
+    finish = asyncio.Event()
+
+    async def action() -> int:
+        await finish.wait()
+        return 143
+
+    exiting = ProcessHandle(_info(), action, lambda _pid: None)
+    exiting.exiting = True
+    exiting.start()
+    waiter = asyncio.create_task(exiting.reap())
+    await asyncio.sleep(0)
+    waiter.cancel()
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    finish.set()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert (await exiting.join()).exit == 143
+
+
 def test_a_deadline_names_term_and_lets_a_stopped_process_go():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
     gate: Future[None] = Future()

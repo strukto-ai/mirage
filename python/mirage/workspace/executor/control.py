@@ -179,6 +179,7 @@ async def execute_body(
                     session,
                     statement_stdin(session, stdin, bound),
                     call_stack,
+                    sink,
                 ),
                 sink,
                 all_stdout,

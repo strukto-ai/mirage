@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+from collections.abc import Coroutine
+from typing import Any
+
 from mirage._rs import Shell
 from mirage.commands.spec.shell import SHELL_SPECS, parse_shell_options
 from mirage.errors.types import BadDescriptorError
@@ -256,6 +260,45 @@ async def _read_counted(
     return text, True
 
 
+async def _read_until_fatal(
+    session: SessionState, reading: Coroutine[Any, Any, tuple[str, bool]]
+) -> tuple[str, bool] | None:
+    """Read until the input ends the read or the shell takes a signal to
+    run its EXIT action before it dies of it (``takes_fatal_signal``),
+    as bash's ``read`` stops at once for one; a signal it traps lets it
+    read on.
+
+    Args:
+        session (SessionState): the shell reading.
+        reading (Coroutine[Any, Any, tuple[str, bool]]): the read.
+
+    Returns:
+        tuple[str, bool] | None: what the read got; None when such a
+        signal cut it short.
+    """
+    if not session.exit_trap or session.exit_trap_inherited:
+        return await reading
+    task = asyncio.ensure_future(reading)
+    try:
+        while session.fatal_signal is None:
+            arrived = session.signal_arrived = asyncio.Event()
+            signalled = asyncio.ensure_future(arrived.wait())
+            try:
+                await asyncio.wait(
+                    (task, signalled), return_when=asyncio.FIRST_COMPLETED
+                )
+            finally:
+                signalled.cancel()
+            if task.done():
+                return task.result()
+    finally:
+        session.signal_arrived = None
+        if not task.done():
+            task.cancel()
+            await asyncio.wait((task,))
+    return None
+
+
 async def read_reply(buffer: AsyncLineIterator) -> str | None:
     """One line as a bare `read` stores it in REPLY: backslashes
     processed, a continuation joined, nothing split off; None at end of
@@ -383,12 +426,22 @@ async def handle_read(
     line = ""
     if buffer is not None:
         try:
-            line, complete = await _read_raw(buffer, raw, delim, nchars, exact)
+            got = await _read_until_fatal(
+                session, _read_raw(buffer, raw, delim, nchars, exact)
+            )
         except BadDescriptorError:
             # stdin is closed or write-only (`read x <&-`, `read x 0<&1`).
             return _read_refusal(
                 f"{shell_voice()}read: read error: 0: Bad file descriptor\n"
             )
+        if got is None:
+            code = 128 + (session.fatal_signal or 0)
+            return (
+                None,
+                IOResult(exit_code=code),
+                ExecutionNode(command="read", exit_code=code),
+            )
+        line, complete = got
     ifs = visible_env(session).get("IFS", " \t\n")
     whole = Shell.read_text(line, raw)
     if array_name is not None:

@@ -849,6 +849,14 @@ and `ps -p` take either kind.
       a job) ends, or `set -e` or a fatal expansion error ends the shell. `$?`
       starts at the ending status and stays it unless the cleanup calls
       `exit N` or fails under `set -e`.
+    - It runs too when a signal the shell neither traps nor ignores ends it
+      (`TERM`, `INT`, `HUP` and the rest that end a shell, not `KILL`): at
+      once, the running program cut short and `wait` and `read` too, with no
+      `ERR` action and `$?` as the signal found it. The shell still ends with
+      128 plus the signal, whatever the cleanup does, and a second signal or a
+      `KILL` to a shell above it ends the cleanup. A
+      child shell with its own `EXIT` action runs it when the signal that
+      ends it ends its parent too, as under `timeout`.
     - `trap 'commands' ERR` runs where `set -e` would end the shell, and
       `trap 'commands' RETURN` as a function or sourced file returns. A
       function runs its caller's `ERR` and `RETURN` actions only under
@@ -872,8 +880,8 @@ and `ps -p` take either kind.
       (`{ ...; } &`) lists the `INT` it ignores as `trap -- '' SIGINT` and may
       still trap or reset it; the subshells and shells it starts do not keep
       it. `KILL` and `STOP` are listed but never caught.
-    - Cancellation, timeouts and closing a session end the work without
-      cleanup. `DEBUG` is refused with
+    - Cancellation, a line's time limit and closing a session end the work
+      without cleanup, as `KILL` does. `DEBUG` is refused with
       `bash: line 1: trap: DEBUG: not supported`.
   </Accordion>
 </AccordionGroup>

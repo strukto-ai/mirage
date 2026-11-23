@@ -203,10 +203,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$(timeout -v -s CONT -k 0.1 0.1 sleep 1 2>&1); echo \"[$x] code=$?\"; timeout -v -f -s STOP -k 0.2 0.1 sleep 1; echo code=$?",
+      "command": "x=$(timeout -v -s CONT -k 0.1 0.1 sleep 1 2>&1); echo \"[$x] code=$?\"; timeout -v -f -s STOP -k 0.2 0.1 sleep 1; echo code=$?; ( timeout -k 1 1 bash -c 'trap \"echo bye; sleep 5; echo late\" EXIT; sleep 5'; echo rc=$? ) 2>/dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "[timeout: sending signal CONT to command 'sleep'\ntimeout: sending signal KILL to command 'sleep'] code=137\ncode=137\n",
+        "stdout": "[timeout: sending signal CONT to command 'sleep'\ntimeout: sending signal KILL to command 'sleep'] code=137\ncode=137\nbye\nrc=137\n",
         "stderr": "timeout: sending signal STOP to command 'sleep'\ntimeout: sending signal KILL to command 'sleep'\n"
       },
       "flags": [
@@ -684,10 +684,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?; timeout 1 /usr/bin/bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?; timeout 1 /usr/bin/bash -c 'trap \"echo caught\" TERM; sleep 5; echo after'; echo rc=$?; timeout 1 bash -c 'trap \"echo bye \\$?\" EXIT; sleep 5; echo after'; echo rc=$?; timeout --preserve-status 1 bash -c 'trap \"echo bye\" EXIT; sleep 5'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "caught\nafter\nrc=124\ncaught\nafter\nrc=124\n",
+        "stdout": "caught\nafter\nrc=124\ncaught\nafter\nrc=124\nbye 0\nrc=124\nbye\nrc=143\n",
         "stderr": "Terminated\nTerminated\n"
       }
     },
@@ -789,10 +789,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; { sleep 5; echo grp; }; echo after'; timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5 & wait; echo after $?'; timeout -s INT 1 bash -c 'trap \"echo int\" INT; sleep 5; echo after'; echo rc=$?",
+      "command": "timeout 1 bash -c 'trap \"echo caught\" TERM; { sleep 5; echo grp; }; echo after'; timeout 1 bash -c 'trap \"echo caught\" TERM; sleep 5 & wait; echo after $?'; timeout -s INT 1 bash -c 'trap \"echo int\" INT; sleep 5; echo after'; echo rc=$?; timeout 1 bash -c '(trap \"echo subbye\" EXIT; sleep 5); echo after'; echo rc=$?; timeout 1 bash -c 'bash -c \"trap \\\"echo innerbye\\\" EXIT; sleep 5\"; echo after'; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "caught\ngrp\nafter\ncaught\nafter 143\nint\nafter\nrc=124\n",
+        "stdout": "caught\ngrp\nafter\ncaught\nafter 143\nint\nafter\nrc=124\nsubbye\nrc=124\ninnerbye\nrc=124\n",
         "stderr": "Terminated\n"
       }
     },

@@ -369,7 +369,7 @@ export async function runProgram(
   sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   currentCaller().process?.programSignaled(null)
-  armSignals(context.session)
+  armSignals(context.session, context.frame.shell)
   const shell = context.frame.shell
   if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
@@ -412,7 +412,8 @@ export async function runProgram(
  * bash's report of a program its shell ran that a signal ended. The program
  * has no pid of its own to list, so only a report naming the signal alone is
  * told: TERM's, and one the shell has an action for, whose signal reached the
- * program as one of the shell's group. Mirrors Python's `_program_report`.
+ * program as one of the shell's group. A shell the signal ends (`fatalSignal`)
+ * leaves at once, and tells nothing. Mirrors Python's `_program_report`.
  */
 function programReport(
   context: EvaluationContext,
@@ -421,7 +422,12 @@ function programReport(
   signal: number,
 ): Uint8Array {
   const trapped = ownAction(context.session, signal)
-  if (context.frame.substitution || !(signal === SIGTERM || trapped)) return new Uint8Array()
+  if (
+    context.frame.substitution ||
+    context.session.fatalSignal !== null ||
+    !(signal === SIGTERM || trapped)
+  )
+    return new Uint8Array()
   return encodeText(
     signalReport(shellVoice(), [[shell.record.id.pid, code, signal, '']], true, trapped),
   )
@@ -454,12 +460,17 @@ export async function tell(
  * the TERM, INT or PIPE that ended one untold, as one the shell has an action
  * for is, for good. The signal is the one `kill`
  * stopped a job with, or the one that ended the native program a job's
- * status is. A substitution's shell tells of none. Mirrors Python's
- * report_jobs.
+ * status is. A substitution's shell tells of none, nor one a signal ends
+ * (`fatalSignal`), which leaves at once. Mirrors Python's report_jobs.
  */
 export function reportJobs(context: EvaluationContext, jobTable: JobTable | null): Uint8Array {
   const session = context.session
-  if (jobTable === null || session.processId === null || context.frame.substitution) {
+  if (
+    jobTable === null ||
+    session.processId === null ||
+    context.frame.substitution ||
+    session.fatalSignal !== null
+  ) {
     return new Uint8Array()
   }
   const told: string[] = []
@@ -490,13 +501,14 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
  * (`signalReport`), empty when it prints none, to follow the reaping
  * command's stderr with those of the shell's jobs. `context` is the
  * evaluation of the reaping command; each entry is a process of the child,
- * its status and the command it ran. Mirrors Python's report_reaped.
+ * its status and the command it ran. A shell a signal ends (`fatalSignal`)
+ * leaves at once, and tells nothing. Mirrors Python's report_reaped.
  */
 export function reportReaped(
   context: EvaluationContext,
   reaped: readonly (readonly [ProcessHandle, number, TSNodeLike])[],
 ): void {
-  if (context.frame.substitution) return
+  if (context.frame.substitution || context.session.fatalSignal !== null) return
   const ended = reaped[reaped.length - 1]?.[0].endedBy ?? null
   const listed = signalReported(ended)
   const processes = reaped.map(
