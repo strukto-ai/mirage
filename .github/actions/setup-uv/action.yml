@@ -48,9 +48,9 @@ runs:
     # minutes in some forty-five jobs a run, and cargo rebuilt it every time:
     # it judges a crate by its files' mtimes, which a checkout sets to now.
     # So maturin builds into a directory of its own, cached under the exact
-    # tree git holds for rust/, the compiler, the profile and the platform.
-    # The key has no fallback: a job that restored another tree's build and
-    # never compiled would save it under this tree's key.
+    # tree git holds for rust/, the compiler, the profile, the platform and
+    # Cargo.lock. A change under rust/ starts from the newest build under the
+    # same Cargo.lock (below), so it compiles only the workspace's own crates.
     - name: Choose the Cargo profile and build directory for mirage._rs
       id: build
       shell: bash
@@ -58,9 +58,11 @@ runs:
         PROFILE: ${{ inputs.cargo-profile }}
       run: |
         dir="${RUNNER_TEMP//\\//}/mirage-rs"
+        prefix="mirage-rs-${{ runner.os }}-${{ runner.arch }}-$PROFILE-$(rustc -V | cut -d' ' -f2)-$(git rev-parse HEAD:rust/Cargo.lock)-"
         echo "MATURIN_PEP517_ARGS=--profile $PROFILE --target-dir $dir" >> "$GITHUB_ENV"
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
-        echo "key=mirage-rs-${{ runner.os }}-${{ runner.arch }}-$PROFILE-$(rustc -V | cut -d' ' -f2)-$(git rev-parse HEAD:rust)" >> "$GITHUB_OUTPUT"
+        echo "prefix=$prefix" >> "$GITHUB_OUTPUT"
+        echo "key=$prefix$(git rev-parse HEAD:rust)" >> "$GITHUB_OUTPUT"
 
     - name: Cache the build of mirage._rs
       id: cache
@@ -68,6 +70,27 @@ runs:
       with:
         path: ${{ steps.build.outputs.dir }}
         key: ${{ steps.build.outputs.key }}
+        restore-keys: ${{ steps.build.outputs.prefix }}
+
+    # The dependencies, some 60% of a cold build, cargo judges by their
+    # version, so another tree's are fresh. The workspace's crates it judges
+    # by mtime, and once a job that never compiles saved them under this key,
+    # the dating step below would pass them off as this tree's. Without a
+    # fingerprint cargo always builds a crate, so theirs go.
+    - name: Drop the workspace's crates from another tree's build
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        DIR: ${{ steps.build.outputs.dir }}
+      run: |
+        [ -d "$DIR" ] || exit 0
+        cargo metadata --manifest-path rust/Cargo.toml --format-version 1 \
+          | jq -r '.packages[] | select(.source == null) | .name, (.targets[] | select(any(.kind[]; test("lib|proc-macro"))) | .name)' \
+          | while read -r name; do
+              crate=${name//-/_}
+              find "$DIR" \( -path '*/.fingerprint/*' -o -path '*/build/*' -o -path '*/deps/*' \) \
+                \( -name "$name-*" -o -name "$crate-*" -o -name "lib$crate-*" \) -prune -exec rm -rf {} +
+            done
 
     # The restored build was compiled from exactly these sources, so it is
     # dated after the checkout and cargo finds every crate fresh. Now, not a
