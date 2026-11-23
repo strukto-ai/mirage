@@ -28,7 +28,7 @@ except ImportError as exc:
         "pip install 'openenv @ git+https://github.com/openenv/OpenEnv'"
     ) from exc
 
-from mirage.agents.openenv.constants import INPUTS
+from mirage.environments.openenv.constants import INPUTS
 from mirage.types import PolicyDecisionKind
 from mirage.workspace.workspace import Session, Workspace
 

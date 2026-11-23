@@ -3,12 +3,12 @@ import pytest
 pytest.importorskip("openenv")
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.agents.openenv.convert import (
+from mirage.environments.openenv.convert import (
     io_to_observation,
     refusal_of,
     tool_to_observation,
 )
-from mirage.agents.openenv.types import Refusal
+from mirage.environments.openenv.types import Refusal
 from mirage.types import PolicyDecision
 from mirage.workspace.tools.tool_operations import ToolResult
 

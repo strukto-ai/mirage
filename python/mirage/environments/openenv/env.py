@@ -53,17 +53,21 @@ except ImportError as exc:
     ) from exc
 
 from mirage import __version__
-from mirage.agents.openenv.constants import (
+from mirage.bridge.sync import SyncBridge, on_owner_loop
+from mirage.environments.openenv.constants import (
     NOT_OFFERED_EXIT,
     SERVER_NAME,
     TIMEOUT_EXIT,
 )
-from mirage.agents.openenv.convert import (
+from mirage.environments.openenv.convert import (
     io_to_observation,
     tool_to_observation,
 )
-from mirage.agents.openenv.mcp import MirageMCPTransport, MirageToolClient
-from mirage.agents.openenv.types import (
+from mirage.environments.openenv.mcp import (
+    MirageMCPTransport,
+    MirageToolClient,
+)
+from mirage.environments.openenv.types import (
     DoneHook,
     EpisodeSpec,
     MirageAction,
@@ -73,7 +77,6 @@ from mirage.agents.openenv.types import (
     SetupHook,
     WorkspaceFactory,
 )
-from mirage.bridge.sync import SyncBridge, on_owner_loop
 from mirage.server.mcp import MirageMcpServer
 from mirage.workspace.workspace import Session, Workspace
 

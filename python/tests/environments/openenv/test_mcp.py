@@ -18,7 +18,7 @@ from openenv.core.env_server.types import Action, Observation
 from openenv.core.rubrics import Rubric
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.agents.openenv import (
+from mirage.environments.openenv import (
     MirageMCPTransport,
     MirageServerEnv,
     mirage_server_transport,

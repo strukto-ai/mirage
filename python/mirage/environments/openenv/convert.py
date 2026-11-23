@@ -24,7 +24,11 @@ except ImportError as exc:
         "pip install 'openenv @ git+https://github.com/openenv/OpenEnv'"
     ) from exc
 
-from mirage.agents.openenv.types import MirageObservation, Refusal, ToolName
+from mirage.environments.openenv.types import (
+    MirageObservation,
+    Refusal,
+    ToolName,
+)
 from mirage.io.types import IOResult
 from mirage.types import PolicyDecision
 from mirage.workspace.tools.tool_operations import ToolResult

@@ -4,7 +4,7 @@ pytest.importorskip("openenv")
 
 from pydantic import ValidationError
 
-from mirage.agents.openenv.types import (
+from mirage.environments.openenv.types import (
     MirageAction,
     MirageObservation,
     Refusal,

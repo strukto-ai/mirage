@@ -18,7 +18,7 @@ from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
 from openenv.core.env_server.types import Action, Observation
 
 from mirage import RAMVFS, MountMode, Workspace
-from mirage.agents.openenv import MirageAction, MirageOpenEnv
+from mirage.environments.openenv import MirageAction, MirageOpenEnv
 from mirage.workspace.workspace import Session
 
 base = Workspace(

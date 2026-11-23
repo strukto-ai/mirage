@@ -45,7 +45,7 @@ except ImportError as exc:
         "pip install 'openenv @ git+https://github.com/openenv/OpenEnv'"
     ) from exc
 
-from mirage.agents.openenv.convert import with_text_data
+from mirage.environments.openenv.convert import with_text_data
 
 
 class MirageToolClient(Client[ClientTransport]):

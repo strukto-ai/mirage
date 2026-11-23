@@ -519,10 +519,10 @@
                 ]
               },
               {
-                "group": "RL Training",
+                "group": "RL & Eval Environments",
                 "icon": "dumbbell",
                 "pages": [
-                  "python/agents/openenv"
+                  "python/environments/openenv"
                 ]
               }
             ]

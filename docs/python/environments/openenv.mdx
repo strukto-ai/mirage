@@ -27,7 +27,7 @@ import asyncio
 from openenv.core.env_server.types import Action, Observation
 
 from mirage import MountMode, RAMVFS, Workspace
-from mirage.agents.openenv import MirageAction, MirageOpenEnv
+from mirage.environments.openenv import MirageAction, MirageOpenEnv
 from mirage.workspace.workspace import Session
 
 base = Workspace(
@@ -115,7 +115,7 @@ A trainer that uses OpenEnv's `MCPToolClient` gets a tool's text back from `call
 To use a workspace that a Mirage server holds, point `MirageServerEnv` at its `/v1/workspaces/{id}/mcp` endpoint:
 
 ```python
-from mirage.agents.openenv import MirageServerEnv
+from mirage.environments.openenv import MirageServerEnv
 
 env = MirageServerEnv("http://127.0.0.1:8765", workspace_id, token=token)
 ```
@@ -129,7 +129,7 @@ OpenEnv's `create_app` serves the environment to trainers over HTTP and WebSocke
 ```python
 from openenv.core.env_server.http_server import create_app
 
-from mirage.agents.openenv import MirageAction, MirageObservation, MirageOpenEnv, MirageState
+from mirage.environments.openenv import MirageAction, MirageObservation, MirageOpenEnv, MirageState
 
 app = create_app(
     lambda: MirageOpenEnv(base),
@@ -171,4 +171,4 @@ The async methods `reset_async`, `step_async` and `aclose` do the work. `reset`,
 
 ## Examples
 
-- [`openenv_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/agents/openenv/openenv_example.py) runs two episodes over one base workspace, with a reward hook, a policy refusal and MCP tool calls.
+- [`openenv_example.py`](https://github.com/strukto-ai/mirage/blob/main/examples/python/environments/openenv/openenv_example.py) runs two episodes over one base workspace, with a reward hook, a policy refusal and MCP tool calls.

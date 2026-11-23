@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING
 from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
-    from mirage.agents.openenv.env import MirageOpenEnv
-    from mirage.agents.openenv.mcp import (
+    from mirage.agents.prompt import MIRAGE_SYSTEM_PROMPT, build_system_prompt
+    from mirage.environments.openenv.env import MirageOpenEnv
+    from mirage.environments.openenv.mcp import (
         MirageMCPTransport,
         MirageServerEnv,
         mirage_server_transport,
     )
-    from mirage.agents.openenv.types import (
+    from mirage.environments.openenv.types import (
         DoneHook,
         EpisodeSpec,
         MirageAction,
@@ -34,16 +35,15 @@ if TYPE_CHECKING:
         SetupHook,
         WorkspaceFactory,
     )
-    from mirage.agents.prompt import MIRAGE_SYSTEM_PROMPT, build_system_prompt
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.agents.openenv.env": ("MirageOpenEnv",),
-    "mirage.agents.openenv.mcp": (
+    "mirage.environments.openenv.env": ("MirageOpenEnv",),
+    "mirage.environments.openenv.mcp": (
         "MirageMCPTransport",
         "MirageServerEnv",
         "mirage_server_transport",
     ),
-    "mirage.agents.openenv.types": (
+    "mirage.environments.openenv.types": (
         "DoneHook",
         "EpisodeSpec",
         "MirageAction",
