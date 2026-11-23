@@ -565,6 +565,8 @@ struct Loading {
     line: Vec<u8>,
     /// The line begun is a comment, whose bytes are not kept.
     comment: bool,
+    /// How many of the begun line's first bytes are known to be blanks.
+    blanks: usize,
 }
 
 struct Hexdump {
@@ -649,6 +651,7 @@ impl Hexdump {
                     name: file,
                     line: Vec::new(),
                     comment: false,
+                    blanks: 0,
                 });
                 return Ok(());
             }
@@ -789,11 +792,24 @@ impl Hexdump {
             search = start;
         }
         loading.line.drain(..start);
-        if loading.line.trim_ascii_start().first() == Some(&b'#') {
+        // A new line's blanks are counted afresh; a begun one's only past
+        // those already counted.
+        if start > 0 {
+            loading.blanks = 0;
+        }
+        while loading
+            .line
+            .get(loading.blanks)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            loading.blanks += 1;
+        }
+        if loading.line.get(loading.blanks) == Some(&b'#') {
             loading.comment = true;
         }
         if loading.comment {
             loading.line.clear();
+            loading.blanks = 0;
         }
         if !reply.end {
             self.io.push(Request::Read {

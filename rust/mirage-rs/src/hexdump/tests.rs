@@ -527,6 +527,18 @@ fn a_stdin_operand_hands_back_what_a_length_leaves() {
 }
 
 #[test]
+fn a_format_file_comment_after_long_blanks_is_dropped_as_it_comes() {
+    let blanks = " ".repeat(1000);
+    let file = format!("{blanks}# {}\n{blanks}1/1 \"<%c>\"\n", "c".repeat(1000));
+    let (out, err, status) = run(
+        json!([["format_file", "ff"]]),
+        &["a"],
+        &[("a", "hi"), ("ff", &file)],
+    );
+    assert_eq!((out.as_str(), err.as_str(), status), ("<h><i>", "", 0));
+}
+
+#[test]
 fn finish_takes_one_bounded_step_and_leaves_the_rest_to_drain() {
     let mut host = Host::with(&[("a", "a")], "");
     let mut stream = hexdump(json!([["format", "1/1 \"%1000000x|\""]]), &["a"]);
