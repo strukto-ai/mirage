@@ -539,8 +539,18 @@ fn finish_takes_one_bounded_step_and_leaves_the_rest_to_drain() {
             .respond(reply.to_string().as_bytes(), &data, &mut out)
             .expect("answers");
     }
+    // A drain leaves the padding run held, and finish takes one more
+    // budget of it, no more.
+    stream.drain(&mut out).expect("drains");
+    assert!(stream.busy());
+    let before = out.len();
     stream.finish(&mut out).expect("finishes");
-    assert!(out.len() <= super::OUTPUT, "{}", out.len());
+    assert!(
+        out.len() - before <= super::OUTPUT,
+        "{}",
+        out.len() - before
+    );
+    assert!(out.len() > before);
     assert!(stream.busy());
     while stream.busy() {
         stream.drain(&mut out).expect("drains");
