@@ -1153,6 +1153,25 @@ describe('MachineMounts', () => {
     expect(sandbox.table.size).toBe(0)
   })
 
+  it('lets an unanswered kill on delete go at its deadline', async () => {
+    const sandbox = new FakeMachine('ssh')
+    sandbox.table.set('/data', ['mirage-w1.box-0123abcd-1:/data', 'fuse.sshfs'])
+    sandbox.hangKill = true
+    workspace(sandbox, [], undefined, undefined, 'w1')
+    const timeout = AbortSignal.timeout.bind(AbortSignal)
+    const short = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((ms) => timeout(ms === UNMOUNT_WAIT_SECONDS * 1000 ? 50 : ms))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await sandbox.destroy()
+      expect(sandbox.killsStopped).toBe(1)
+    } finally {
+      short.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
   it("keeps a live workspace's own mounts through destroy", async () => {
     const sandbox = new FakeMachine('ssh')
     const ws = workspace(sandbox, [], undefined, undefined, 'w1')

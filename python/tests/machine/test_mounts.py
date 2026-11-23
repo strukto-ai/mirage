@@ -1127,6 +1127,19 @@ async def test_a_delete_releases_a_mount_its_close_could_not_unmount():
 
 
 @pytest.mark.asyncio
+async def test_a_delete_lets_an_unanswered_kill_go_at_its_deadline(
+    monkeypatch,
+):
+    monkeypatch.setattr(mounts, "UNMOUNT_WAIT_SECONDS", 0.05)
+    sandbox = FakeMachine("ssh")
+    sandbox.table["/data"] = ("mirage-w1.box-0123abcd-1:/data", "fuse.sshfs")
+    sandbox.hang_kill = True
+    workspace(sandbox, workspace_id="w1")
+    await asyncio.wait_for(sandbox.destroy(), 5)
+    assert sandbox.kills_stopped == 1
+
+
+@pytest.mark.asyncio
 async def test_a_live_workspace_keeps_its_own_mounts_through_destroy():
     sandbox = FakeMachine("ssh")
     ws = workspace(sandbox, workspace_id="w1")
