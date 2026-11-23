@@ -81,4 +81,6 @@ async def hexdump(
     return hosted_stream("hexdump", config, host, io), io
 
 
-BUILDER = GenericCommand("hexdump", hexdump, read=True, streams=True)
+BUILDER = GenericCommand(
+    "hexdump", hexdump, read=True, streams=True, gives_back=True
+)

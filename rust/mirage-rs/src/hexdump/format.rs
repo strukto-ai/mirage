@@ -3,6 +3,8 @@
 //! through, and the one-letter options as the format strings they stand
 //! for.
 
+use std::collections::VecDeque;
+
 use crate::printf::number::{Rendered, render_float, render_integer};
 
 /// The format strings each one-letter display option adds, in order: the
@@ -72,6 +74,20 @@ pub(super) struct Print {
     pub(super) after: Vec<u8>,
 }
 
+impl Print {
+    /// Whether the print reads bytes of the block.
+    fn reads(&self) -> bool {
+        !matches!(self.kind, Kind::Text | Kind::Address { .. })
+    }
+
+    /// A width or a precision past C's `int`, which printf refuses: the
+    /// conversion and the text before it show nothing.
+    pub(super) fn lost(&self) -> bool {
+        let most = i32::MAX as usize;
+        self.width > most || self.precision.is_some_and(|precision| precision > most)
+    }
+}
+
 /// A format unit: its prints, run `reps` times.
 #[derive(Clone, Debug)]
 pub(super) struct Unit {
@@ -88,13 +104,21 @@ pub(super) struct Unit {
 }
 
 impl Unit {
-    /// The bytes one iteration reads.
-    pub(super) fn step(&self) -> usize {
-        self.prints.iter().map(|print| print.size).sum()
+    /// The bytes one iteration takes of the block: what its conversions
+    /// read, or, for a unit that reads none, its byte count, which moves
+    /// no conversion on.
+    pub(super) fn span(&self) -> usize {
+        if self.prints.iter().any(Print::reads) {
+            self.prints
+                .iter()
+                .fold(0usize, |sum, print| sum.saturating_add(print.size))
+        } else {
+            self.bytes.unwrap_or(0)
+        }
     }
 
     pub(super) fn total(&self) -> usize {
-        self.reps.saturating_mul(self.step())
+        self.reps.saturating_mul(self.span())
     }
 }
 
@@ -126,11 +150,15 @@ pub(super) fn parse(raw: &[u8]) -> Result<Format, String> {
                 at += 1;
             }
         }
-        if raw.get(at) == Some(&b'/') {
+        let slash = raw.get(at) == Some(&b'/');
+        if slash {
             at += 1;
             while raw.get(at).is_some_and(|&b| blank(b)) {
                 at += 1;
             }
+        }
+        // After an iteration count the byte count needs no slash.
+        if slash || counted {
             if raw.get(at).is_some_and(u8::is_ascii_digit) {
                 let count;
                 (count, at) = number(raw, at).ok_or_else(bad)?;
@@ -298,6 +326,16 @@ fn prints(unit: &Unit) -> Result<Vec<Print>, String> {
             _ => return Err(bad_conversion(&[conversion])),
         };
         at += 1;
+        // A color annotation runs to the text's last `]`; mirage writes no
+        // color, so it shows nothing.
+        if text[at..].starts_with(b"_L") {
+            let close = text[at..]
+                .starts_with(b"_L[")
+                .then(|| text[at..].iter().rposition(|&b| b == b']'))
+                .flatten()
+                .ok_or_else(|| bad_conversion(b"_L"))?;
+            at += close + 1;
+        }
         prints.push(Print {
             before: std::mem::take(&mut before),
             kind,
@@ -331,13 +369,9 @@ fn digits(raw: &[u8]) -> usize {
 }
 
 /// Give each print the bytes it reads: the unit's byte count, else the
-/// conversion's own; a unit with a byte count and no conversion reads it
-/// all the same.
+/// conversion's own.
 fn size(unit: &Unit, prints: &mut [Print]) -> Result<(), String> {
-    let reading = prints
-        .iter()
-        .filter(|print| !matches!(print.kind, Kind::Text | Kind::Address { .. }))
-        .count();
+    let reading = prints.iter().filter(|print| print.reads()).count();
     if unit.bytes.is_some() && reading > 1 {
         return Err("hexdump: byte count with multiple conversion characters".to_string());
     }
@@ -375,18 +409,93 @@ fn size(unit: &Unit, prints: &mut [Print]) -> Result<(), String> {
             },
         };
     }
-    if reading == 0
-        && let (Some(bytes), Some(text)) = (unit.bytes, prints.first_mut())
-        && text.kind == Kind::Text
-    {
-        text.size = bytes;
-    }
     Ok(())
 }
 
-/// How a print shows a value it reads from `data`, past which the block
-/// holds zeros, at `address`.
-pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out: &mut Vec<u8>) {
+/// Output held past a `drain`'s budget: bytes, or a run of one byte.
+pub(super) enum Piece {
+    Bytes(Vec<u8>),
+    Run(u8, usize),
+}
+
+/// Where output goes in one `drain`: a run of one byte is written up to
+/// `limit` and the rest of it, and all that follows, held for the next;
+/// `prints` counts down the prints the call may still run.
+pub(super) struct Sink<'a> {
+    out: &'a mut Vec<u8>,
+    limit: usize,
+    pub(super) held: VecDeque<Piece>,
+    pub(super) prints: usize,
+}
+
+impl<'a> Sink<'a> {
+    pub(super) fn new(
+        out: &'a mut Vec<u8>,
+        room: usize,
+        prints: usize,
+        held: VecDeque<Piece>,
+    ) -> Sink<'a> {
+        let limit = out.len().saturating_add(room);
+        Sink {
+            out,
+            limit,
+            held,
+            prints,
+        }
+    }
+
+    /// The output budget or the prints are spent, or output is held.
+    pub(super) fn spent(&self) -> bool {
+        !self.held.is_empty() || self.out.len() >= self.limit || self.prints == 0
+    }
+
+    pub(super) fn bytes(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        if self.held.is_empty() {
+            self.out.extend_from_slice(bytes);
+        } else {
+            self.held.push_back(Piece::Bytes(bytes.to_vec()));
+        }
+    }
+
+    pub(super) fn run(&mut self, byte: u8, count: usize) {
+        if count == 0 {
+            return;
+        }
+        if !self.held.is_empty() {
+            self.held.push_back(Piece::Run(byte, count));
+            return;
+        }
+        let now = count.min(self.limit.saturating_sub(self.out.len()));
+        self.out.resize(self.out.len() + now, byte);
+        if now < count {
+            self.held.push_back(Piece::Run(byte, count - now));
+        }
+    }
+
+    /// Write what an earlier call held, as far as the budget goes.
+    pub(super) fn release(&mut self) {
+        while let Some(piece) = self.held.pop_front() {
+            match piece {
+                Piece::Bytes(bytes) => self.out.extend_from_slice(&bytes),
+                Piece::Run(byte, count) => {
+                    let now = count.min(self.limit.saturating_sub(self.out.len()));
+                    self.out.resize(self.out.len() + now, byte);
+                    if now < count {
+                        self.held.push_front(Piece::Run(byte, count - now));
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// How a print shows a value it reads from `data`, the rest of its block,
+/// at `address`.
+pub(super) fn render(print: &Print, data: &[u8], address: u64, sink: &mut Sink) {
     let take = |size: usize| -> u64 {
         let mut word = [0u8; 8];
         let have = data.len().min(size);
@@ -402,7 +511,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
                 &print.flags,
                 as_u64(print.precision),
             );
-            pad(&rendered, &print.flags, print.width, out);
+            pad(&rendered, &print.flags, print.width, sink);
         }
         Kind::Integer(conversion) => {
             let raw = take(print.size);
@@ -414,7 +523,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
                 _ => i128::from(raw),
             };
             let rendered = render_integer(value, conversion, &print.flags, as_u64(print.precision));
-            pad(&rendered, &print.flags, print.width, out);
+            pad(&rendered, &print.flags, print.width, sink);
         }
         Kind::Float(conversion) => {
             let raw = take(print.size);
@@ -423,20 +532,16 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
                 _ => f64::from_bits(raw),
             };
             let rendered = render_float(value, conversion, &print.flags, as_u64(print.precision));
-            pad(&rendered, &print.flags, print.width, out);
+            pad(&rendered, &print.flags, print.width, sink);
         }
-        Kind::Char => text(&[data.first().copied().unwrap_or(0)], print, out),
+        Kind::Char => text(&[data.first().copied().unwrap_or(0)], print, sink),
         Kind::Str => {
-            // A count that repeats leaves the string to run to the block's
-            // end, or to a NUL.
-            let limit = match (print.precision, reps) {
-                (Some(precision), _) => precision,
-                (None, 1) => print.size,
-                (None, _) => data.len(),
-            };
+            // The string runs to a NUL or the block's end, whatever the
+            // bytes it moves the next conversion on.
+            let limit = print.precision.unwrap_or(data.len());
             let shown = &data[..data.len().min(limit)];
             let end = shown.iter().position(|&b| b == 0).unwrap_or(shown.len());
-            text(&shown[..end], print, out);
+            text(&shown[..end], print, sink);
         }
         Kind::Escaped => {
             let byte = data.first().copied().unwrap_or(0);
@@ -452,7 +557,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
                 0x20..=0x7e => vec![byte],
                 _ => format!("{byte:03o}").into_bytes(),
             };
-            text(&shown, print, out);
+            text(&shown, print, sink);
         }
         Kind::Printable => {
             let byte = data.first().copied().unwrap_or(0);
@@ -461,7 +566,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
             } else {
                 b'.'
             };
-            text(&[shown], print, out);
+            text(&[shown], print, sink);
         }
         Kind::Named => {
             let byte = data.first().copied().unwrap_or(0);
@@ -471,16 +576,16 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, reps: usize, out:
                 0x20..=0x7e => vec![byte],
                 _ => format!("{byte:02x}").into_bytes(),
             };
-            text(&shown, print, out);
+            text(&shown, print, sink);
         }
     }
 }
 
 /// What a print shows past the end of the input: as many blanks as a
 /// string conversion of its width would.
-pub(super) fn blank(print: &Print, out: &mut Vec<u8>) {
+pub(super) fn blank(print: &Print, sink: &mut Sink) {
     if print.kind != Kind::Text {
-        out.resize(out.len() + print.width, b' ');
+        sink.run(b' ', print.width);
     }
 }
 
@@ -489,39 +594,39 @@ fn as_u64(precision: Option<usize>) -> Option<u64> {
 }
 
 /// Lay a string out in the print's width, on the left under `-`.
-fn text(shown: &[u8], print: &Print, out: &mut Vec<u8>) {
+fn text(shown: &[u8], print: &Print, sink: &mut Sink) {
     let gap = print.width.saturating_sub(shown.len());
     let left = print.flags.contains(&b'-');
     if !left {
-        out.resize(out.len() + gap, b' ');
+        sink.run(b' ', gap);
     }
-    out.extend_from_slice(shown);
+    sink.bytes(shown);
     if left {
-        out.resize(out.len() + gap, b' ');
+        sink.run(b' ', gap);
     }
 }
 
 /// Lay a number out in `width`, on the left under `-`, zero-filled under
 /// `0` where the conversion allows it.
-fn pad(rendered: &Rendered, flags: &[u8], width: usize, out: &mut Vec<u8>) {
+fn pad(rendered: &Rendered, flags: &[u8], width: usize, sink: &mut Sink) {
     let len = usize::try_from(rendered.byte_len()).unwrap_or(usize::MAX);
     let gap = width.saturating_sub(len);
     let left = flags.contains(&b'-');
     let zero = rendered.allow_zero && flags.contains(&b'0') && !left;
     if !left && !zero {
-        out.resize(out.len() + gap, b' ');
+        sink.run(b' ', gap);
     }
-    out.extend_from_slice(&rendered.prefix);
+    sink.bytes(&rendered.prefix);
     if zero {
-        out.resize(out.len() + gap, b'0');
+        sink.run(b'0', gap);
     }
-    out.extend_from_slice(&rendered.body);
-    out.resize(
-        out.len() + usize::try_from(rendered.zero_tail).unwrap_or(0),
+    sink.bytes(&rendered.body);
+    sink.run(
         b'0',
+        usize::try_from(rendered.zero_tail).unwrap_or(usize::MAX),
     );
-    out.extend_from_slice(&rendered.suffix);
+    sink.bytes(&rendered.suffix);
     if left {
-        out.resize(out.len() + gap, b' ');
+        sink.run(b' ', gap);
     }
 }

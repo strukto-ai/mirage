@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'ab' > /data/xm_rt_hexdump; printf 'c' > /data2/xm_rt_hexdump; hexdump -C /data/xm_rt_hexdump /data2/xm_rt_hexdump; rm /data/xm_rt_hexdump /data2/xm_rt_hexdump",
+      "command": "printf 'ab' > /data/xm_rt_hexdump; printf 'c' > /data2/xm_rt_hexdump; hexdump -C /data/xm_rt_hexdump /data2/xm_rt_hexdump; echo rc=$?; rm /data/xm_rt_hexdump /data2/xm_rt_hexdump",
       "expect": {
         "exit": 0,
-        "stdout": "00000000  61 62 63                                          |abc|\n00000003\n",
+        "stdout": "00000000  61 62 63                                          |abc|\n00000003\nrc=0\n",
         "stderr": ""
       }
     }

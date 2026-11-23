@@ -1,7 +1,7 @@
 //! hexdump as util-linux 2.41.5 runs it in the C locale, as mirage models
 //! it: the display options and format strings read in the order typed,
 //! each a list of units a block runs through, the operands read through
-//! the host as one input, and the dump written a bounded window per
+//! the host as one input, and the dump written a bounded step per
 //! `drain`, holding the chunk in hand, a block and the one before it.
 
 mod format;
@@ -16,10 +16,16 @@ use serde_json::Value as Json;
 use crate::request::{Io, Opening, Refused, Reply, Request, bytes, read_failure};
 use crate::{Stream, StreamError, parse_config};
 
-use self::format::{Format, Kind, Unit};
+use self::format::{Format, Kind, Piece, Print, Sink};
 
 /// The input one `drain` dumps.
 const WINDOW: usize = 16 * 1024;
+/// The output one `drain` writes before it stops, but for a small last
+/// piece.
+const OUTPUT: usize = 64 * 1024;
+/// The prints one `drain` runs, so a format that writes little a print
+/// still hands back.
+const PRINTS: usize = 64 * 1024;
 /// The least skip a file opens past rather than reads through.
 const SEEK: u64 = 1 << 20;
 
@@ -31,12 +37,6 @@ struct Config {
     options: Vec<(String, Json)>,
     #[serde(deserialize_with = "crate::latin1_list")]
     operands: Vec<Vec<u8>>,
-}
-
-/// A format the options name: read now, or a file of them still to read.
-enum Source {
-    Read(Vec<Format>),
-    File(Vec<u8>),
 }
 
 /// A size as util-linux reads one: blanks, at most one `+`, digits in C's
@@ -102,18 +102,18 @@ fn size(raw: &[u8], what: &str) -> Result<u64, String> {
     };
     let multiplier = step.checked_pow(power).ok_or_else(range)?;
     let mut total = value.checked_mul(multiplier).ok_or_else(range)?;
-    if let Some(digits) = fraction.filter(|digits| !digits.is_empty()) {
-        let mut numerator: u128 = 0;
-        let mut scale: u128 = 1;
-        for &b in digits.iter().take(20) {
-            numerator = numerator * 10 + u128::from(b - b'0');
-            scale *= 10;
+    // Each fraction digit `d` at place `p` adds the multiplier over
+    // `10**p / d`, in whole numbers, as util-linux counts it: 0.9K is
+    // 1024, 0.25K is 255.
+    let mut place: u128 = 1;
+    for &b in fraction.unwrap_or_default() {
+        let Some(next) = place.checked_mul(10) else {
+            break;
+        };
+        place = next;
+        if let Some(share) = place.checked_div(u128::from(b - b'0')) {
+            total = total.checked_add(multiplier / share).ok_or_else(range)?;
         }
-        let part = numerator
-            .checked_mul(multiplier)
-            .map(|n| n / scale)
-            .ok_or_else(range)?;
-        total = total.checked_add(part).ok_or_else(range)?;
     }
     u64::try_from(total).map_err(|_| range())
 }
@@ -121,14 +121,19 @@ fn size(raw: &[u8], what: &str) -> Result<u64, String> {
 /// What the options set, read in the order typed.
 #[derive(Default)]
 struct Settings {
-    sources: Vec<Source>,
+    formats: Vec<Format>,
+    /// A display option, a format or a format file was given, so the
+    /// default display adds none.
+    chosen: bool,
     length: Option<u64>,
     skip: u64,
     verbose: bool,
 }
 
 impl Settings {
-    fn take(&mut self, name: &str, value: &Json) -> Result<(), String> {
+    /// Take one option; a format file comes back, to read before the
+    /// options after it.
+    fn take(&mut self, name: &str, value: &Json) -> Result<Option<Vec<u8>>, String> {
         let raw = value.as_str().map(bytes).unwrap_or_default();
         let preset = match name {
             "one_byte_octal" => Some(format::ONE_BYTE_OCTAL),
@@ -141,12 +146,19 @@ impl Settings {
             _ => None,
         };
         if let Some(preset) = preset {
-            self.sources.push(Source::Read(presets(preset)));
-            return Ok(());
+            self.formats.extend(presets(preset));
+            self.chosen = true;
+            return Ok(None);
         }
         match name {
-            "format" => self.sources.push(Source::Read(vec![format::parse(&raw)?])),
-            "format_file" => self.sources.push(Source::File(raw)),
+            "format" => {
+                self.formats.push(format::parse(&raw)?);
+                self.chosen = true;
+            }
+            "format_file" => {
+                self.chosen = true;
+                return Ok(Some(raw));
+            }
             "length" => self.length = Some(size(&raw, "length")?),
             "skip" => self.skip = size(&raw, "offset")?,
             "no_squeezing" => self.verbose = true,
@@ -161,6 +173,16 @@ impl Settings {
             }
             _ => return Err(format!("hexdump: unknown option '{name}'")),
         }
+        Ok(None)
+    }
+
+    /// One line of a format file: a format string, unless blank or a
+    /// comment.
+    fn line(&mut self, line: &[u8]) -> Result<(), String> {
+        let content = line.trim_ascii_start();
+        if !content.is_empty() && content[0] != b'#' {
+            self.formats.push(format::parse(line)?);
+        }
         Ok(())
     }
 }
@@ -170,6 +192,25 @@ fn presets(preset: &[&[u8]]) -> Vec<Format> {
         .iter()
         .map(|text| format::parse(text).expect("a display option's format reads"))
         .collect()
+}
+
+/// `text` less one trailing blank, as C's `isspace` reads one.
+fn trimmed(text: &[u8]) -> &[u8] {
+    match text.split_last() {
+        Some((b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r', rest)) => rest,
+        _ => text,
+    }
+}
+
+/// Where a block's output stands: the format, the unit, its iteration and
+/// print, and the byte the next conversion reads.
+#[derive(Clone, Copy, Default)]
+struct Cursor {
+    format: usize,
+    unit: usize,
+    rep: usize,
+    print: usize,
+    at: usize,
 }
 
 /// The formats a block runs through, the block's size, and the unit that
@@ -196,9 +237,9 @@ impl Layout {
             if let Some(last) = format.last_mut()
                 && used < block
                 && !last.counted
-                && last.step() > 0
+                && last.span() > 0
             {
-                last.reps += (block - used) / last.step();
+                last.reps += (block - used) / last.span();
             }
         }
         let end = formats
@@ -213,78 +254,118 @@ impl Layout {
         }
     }
 
-    /// One block at `address`; past `ends`, where the input ends, each
-    /// conversion shows blanks.
-    fn show(&self, data: &[u8], address: u64, ends: Option<u64>, out: &mut Vec<u8>) {
-        for format in &self.formats {
-            let mut at = 0usize;
-            for unit in format {
-                if unit.end {
-                    at = at.saturating_add(unit.total());
-                    continue;
-                }
-                at = self.unit(unit, data, at, address, ends, out);
-            }
-        }
-    }
-
-    fn unit(
+    /// Show the block at `address` from `cursor` on, as far as the sink
+    /// allows; true once it is all written. Past `ends`, where the input
+    /// ends, each conversion shows blanks, and each format stops at its
+    /// `%_A` unit.
+    fn show(
         &self,
-        unit: &Unit,
         data: &[u8],
-        mut at: usize,
         address: u64,
         ends: Option<u64>,
-        out: &mut Vec<u8>,
-    ) -> usize {
-        for rep in 0..unit.reps {
-            // A repeated unit's last iteration writes no trailing blanks.
-            let last = unit.reps > 1 && rep + 1 == unit.reps;
-            for (index, print) in unit.prints.iter().enumerate() {
-                let trim = last && index + 1 == unit.prints.len();
-                if trim && print.kind == Kind::Text {
-                    out.extend_from_slice(print.before.trim_ascii_end());
-                } else {
-                    out.extend_from_slice(&print.before);
+        cursor: &mut Cursor,
+        sink: &mut Sink,
+    ) -> bool {
+        while let Some(format) = self.formats.get(cursor.format) {
+            while let Some(unit) = format.get(cursor.unit) {
+                if unit.end {
+                    break;
                 }
-                if print.kind != Kind::Text {
-                    let here = address.saturating_add(at as u64);
-                    if ends.is_some_and(|end| here >= end) {
-                        format::blank(print, out);
-                    } else {
-                        let from = at.min(data.len());
-                        format::render(print, &data[from..], here, unit.reps, out);
+                while cursor.rep < unit.reps {
+                    // A repeated unit's last iteration drops one trailing
+                    // blank.
+                    let last = unit.reps > 1 && cursor.rep + 1 == unit.reps;
+                    while let Some(print) = unit.prints.get(cursor.print) {
+                        if sink.spent() {
+                            return false;
+                        }
+                        sink.prints -= 1;
+                        let trim = last && cursor.print + 1 == unit.prints.len();
+                        Self::print(
+                            print,
+                            trim,
+                            data,
+                            address.saturating_add(cursor.at as u64),
+                            ends,
+                            cursor.at,
+                            sink,
+                        );
+                        cursor.at = cursor.at.saturating_add(print.size);
+                        cursor.print += 1;
                     }
+                    cursor.print = 0;
+                    cursor.rep += 1;
                 }
-                if trim {
-                    out.extend_from_slice(print.after.trim_ascii_end());
-                } else {
-                    out.extend_from_slice(&print.after);
-                }
-                at = at.saturating_add(print.size);
+                cursor.rep = 0;
+                cursor.unit += 1;
+            }
+            *cursor = Cursor {
+                format: cursor.format + 1,
+                ..Cursor::default()
+            };
+        }
+        true
+    }
+
+    fn print(
+        print: &Print,
+        trim: bool,
+        data: &[u8],
+        here: u64,
+        ends: Option<u64>,
+        at: usize,
+        sink: &mut Sink,
+    ) {
+        if print.kind == Kind::Text {
+            sink.bytes(if trim {
+                trimmed(&print.before)
+            } else {
+                &print.before
+            });
+        } else if !print.lost() {
+            sink.bytes(&print.before);
+            if ends.is_some_and(|end| here >= end) {
+                format::blank(print, sink);
+            } else {
+                format::render(print, data.get(at..).unwrap_or_default(), here, sink);
             }
         }
-        at
+        sink.bytes(if trim {
+            trimmed(&print.after)
+        } else {
+            &print.after
+        });
     }
 
     /// The `%_A` unit, at the address the input ended: its offsets and its
     /// text, nothing it would read.
-    fn ending(&self, address: u64, out: &mut Vec<u8>) {
+    fn ending(&self, address: u64, sink: &mut Sink) {
         let Some((f, u)) = self.end else {
             return;
         };
         for print in &self.formats[f][u].prints {
             match print.kind {
-                Kind::Text => out.extend_from_slice(&print.before),
+                Kind::Text => sink.bytes(&print.before),
                 Kind::Address { .. } => {
-                    out.extend_from_slice(&print.before);
-                    format::render(print, &[], address, 1, out);
-                    out.extend_from_slice(&print.after);
+                    if !print.lost() {
+                        sink.bytes(&print.before);
+                        format::render(print, &[], address, sink);
+                    }
+                    sink.bytes(&print.after);
                 }
                 _ => {}
             }
         }
     }
+}
+
+/// A block shown in part: its bytes, where it starts, where the input
+/// ended, and how far it got.
+struct Showing {
+    data: Vec<u8>,
+    address: u64,
+    ends: Option<u64>,
+    cursor: Cursor,
 }
 
 /// What the dump has written and holds back.
@@ -296,61 +377,130 @@ struct Dump {
     previous: Vec<u8>,
     shown: bool,
     starred: bool,
+    showing: Option<Showing>,
+    held: VecDeque<Piece>,
+    /// The last, short block has been started, and the `%_A` unit written.
+    closing: bool,
+    ended: bool,
 }
 
 impl Dump {
-    fn consume(&mut self, mut data: &[u8], out: &mut Vec<u8>) {
+    fn pending(&self) -> bool {
+        self.showing.is_some() || !self.held.is_empty()
+    }
+
+    /// Write what is held and the rest of a block shown in part; true when
+    /// that is done and the sink has room for more.
+    fn resume(&mut self, sink: &mut Sink) -> bool {
+        sink.release();
+        if !sink.held.is_empty() {
+            return false;
+        }
+        if let Some(mut showing) = self.showing.take()
+            && !self.layout.show(
+                &showing.data,
+                showing.address,
+                showing.ends,
+                &mut showing.cursor,
+                sink,
+            )
+        {
+            self.showing = Some(showing);
+            return false;
+        }
+        !sink.spent()
+    }
+
+    /// Dump what of `data` the sink allows, and say how much that was.
+    fn consume(&mut self, data: &[u8], sink: &mut Sink) -> usize {
         let width = self.layout.block;
-        if !self.block.is_empty() {
-            let take = (width - self.block.len()).min(data.len());
-            self.block.extend_from_slice(&data[..take]);
-            data = &data[take..];
-            if self.block.len() < width {
-                return;
+        let mut used = 0;
+        while self.resume(sink) && used < data.len() {
+            let rest = &data[used..];
+            if self.block.is_empty() && rest.len() >= width {
+                self.full(&rest[..width], sink);
+                used += width;
+                continue;
             }
-            let block = std::mem::take(&mut self.block);
-            self.full(&block, out);
-            self.block = block;
-            self.block.clear();
+            let take = (width - self.block.len()).min(rest.len());
+            self.block.extend_from_slice(&rest[..take]);
+            used += take;
+            if self.block.len() == width {
+                let block = std::mem::take(&mut self.block);
+                self.full(&block, sink);
+                self.block = block;
+                self.block.clear();
+            }
         }
-        while data.len() >= width {
-            let (block, rest) = data.split_at(width);
-            self.full(block, out);
-            data = rest;
-        }
-        self.block.extend_from_slice(data);
+        used
     }
 
     /// A full block, or a `*` for the run of blocks repeating the last.
-    fn full(&mut self, block: &[u8], out: &mut Vec<u8>) {
-        if !self.verbose && self.shown && self.previous == block {
-            if !self.starred {
-                out.extend_from_slice(b"*\n");
-                self.starred = true;
-            }
-        } else {
-            self.layout.show(block, self.address, None, out);
-            self.starred = false;
-        }
+    fn full(&mut self, block: &[u8], sink: &mut Sink) {
+        let address = self.address;
+        self.address += block.len() as u64;
+        let repeated = !self.verbose && self.shown && self.previous == block;
         self.previous.clear();
         self.previous.extend_from_slice(block);
         self.shown = true;
-        self.address += block.len() as u64;
+        if repeated {
+            if !self.starred {
+                sink.bytes(b"*\n");
+                self.starred = true;
+            }
+            return;
+        }
+        self.starred = false;
+        let mut cursor = Cursor::default();
+        if !self.layout.show(block, address, None, &mut cursor, sink) {
+            self.showing = Some(Showing {
+                data: block.to_vec(),
+                address,
+                ends: None,
+                cursor,
+            });
+        }
     }
 
-    /// The last, short block, zero-filled, and the `%_A` unit, where some
-    /// input was read or skipped.
-    fn finish(&mut self, out: &mut Vec<u8>) {
-        if !self.block.is_empty() {
-            let mut block = std::mem::take(&mut self.block);
-            let ends = self.address + block.len() as u64;
-            block.resize(self.layout.block, 0);
-            self.layout.show(&block, self.address, Some(ends), out);
-            self.address = ends;
+    /// The last, short block, and the `%_A` unit where some input was read
+    /// or skipped; true once both are written.
+    fn tail(&mut self, sink: &mut Sink) -> bool {
+        if !self.resume(sink) {
+            return false;
         }
-        if self.address > 0 {
-            self.layout.ending(self.address, out);
+        if !self.closing {
+            self.closing = true;
+            if !self.block.is_empty() {
+                let data = std::mem::take(&mut self.block);
+                let address = self.address;
+                let ends = address + data.len() as u64;
+                self.address = ends;
+                let mut cursor = Cursor::default();
+                if !self
+                    .layout
+                    .show(&data, address, Some(ends), &mut cursor, sink)
+                {
+                    self.showing = Some(Showing {
+                        data,
+                        address,
+                        ends: Some(ends),
+                        cursor,
+                    });
+                    return false;
+                }
+            }
+            if !self.resume(sink) {
+                return false;
+            }
         }
+        if !self.ended {
+            self.ended = true;
+            if self.address > 0 {
+                self.layout.ending(self.address, sink);
+            }
+        }
+        sink.release();
+        sink.held.is_empty() && self.showing.is_none()
     }
 }
 
@@ -370,25 +520,38 @@ struct Input {
     fd: u32,
     name: Vec<u8>,
     open: Option<(Vec<u8>, Opening)>,
+    /// Standard input, which a stop at `-n` hands back what it left.
+    stdin: bool,
+    /// A read has answered, so the input opened and a failure now is a
+    /// read error.
+    begun: bool,
+}
+
+/// The format file being read: its input, its name, and the line it has
+/// begun.
+struct Loading {
+    fd: u32,
+    name: Vec<u8>,
+    line: Vec<u8>,
 }
 
 struct Hexdump {
     io: Io,
     stage: Stage,
-    sources: VecDeque<Source>,
-    formats: Vec<Format>,
-    /// The format file being read: its input, its name, and what it has
-    /// sent.
-    loading: Option<(u32, Vec<u8>, Vec<u8>)>,
+    /// The options still to read, after a format file.
+    options: VecDeque<(String, Json)>,
+    settings: Settings,
+    loading: Option<Loading>,
     files: VecDeque<(Vec<u8>, Opening)>,
     named: bool,
     input: Option<Input>,
     chunk: Vec<u8>,
+    /// The chunk in hand came from standard input.
+    on_stdin: bool,
     at: usize,
     skip: u64,
     left: Option<u64>,
     opened: bool,
-    verbose: bool,
     dump: Option<Dump>,
     stderr: Vec<u8>,
     status: i32,
@@ -403,15 +566,6 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
 }
 
 fn plan(config: Config) -> Result<Hexdump, String> {
-    let mut settings = Settings::default();
-    for (name, value) in &config.options {
-        settings.take(name, value)?;
-    }
-    if settings.sources.is_empty() {
-        settings
-            .sources
-            .push(Source::Read(presets(format::DEFAULT)));
-    }
     let mut files: VecDeque<_> = config
         .operands
         .iter()
@@ -425,18 +579,18 @@ fn plan(config: Config) -> Result<Hexdump, String> {
     let mut hexdump = Hexdump {
         io: Io::default(),
         stage: Stage::Load,
-        sources: settings.sources.into(),
-        formats: Vec::new(),
+        options: config.options.into(),
+        settings: Settings::default(),
         loading: None,
         files,
         named,
         input: None,
         chunk: Vec::new(),
+        on_stdin: false,
         at: 0,
-        skip: settings.skip,
-        left: settings.length,
+        skip: 0,
+        left: None,
         opened: false,
-        verbose: settings.verbose,
         dump: None,
         stderr: Vec::new(),
         status: 0,
@@ -446,27 +600,34 @@ fn plan(config: Config) -> Result<Hexdump, String> {
 }
 
 impl Hexdump {
-    /// Take in the formats read so far, up to the next file of them; once
-    /// all are in, size the block and start on the input.
+    /// Read the options in order up to the next format file, which is read
+    /// where it stands; once all are in, size the block and start on the
+    /// input.
     fn load(&mut self) -> Result<(), String> {
-        while let Some(source) = self.sources.pop_front() {
-            match source {
-                Source::Read(formats) => self.formats.extend(formats),
-                Source::File(name) => {
-                    let fd = self.io.fd();
-                    self.io.push(Request::Read {
-                        fd,
-                        open: Some((name.clone(), Opening::File)),
-                        least: u64::MAX,
-                    });
-                    self.loading = Some((fd, name, Vec::new()));
-                    return Ok(());
-                }
+        while let Some((name, value)) = self.options.pop_front() {
+            if let Some(file) = self.settings.take(&name, &value)? {
+                let fd = self.io.fd();
+                self.io.push(Request::Read {
+                    fd,
+                    open: Some((file.clone(), Opening::File)),
+                    least: 0,
+                });
+                self.loading = Some(Loading {
+                    fd,
+                    name: file,
+                    line: Vec::new(),
+                });
+                return Ok(());
             }
         }
-        let mut formats = std::mem::take(&mut self.formats);
+        if !self.settings.chosen {
+            self.settings.formats.extend(presets(format::DEFAULT));
+        }
+        let mut formats = std::mem::take(&mut self.settings.formats);
         format::prepare(&mut formats)?;
         let layout = Layout::new(formats);
+        self.skip = self.settings.skip;
+        self.left = self.settings.length;
         // A block of no bytes, or a length of none, shows nothing.
         if layout.block == 0 || self.left == Some(0) {
             self.stage = Stage::Done;
@@ -474,27 +635,18 @@ impl Hexdump {
         }
         self.dump = Some(Dump {
             layout,
-            verbose: self.verbose,
+            verbose: self.settings.verbose,
             address: self.skip,
             block: Vec::new(),
             previous: Vec::new(),
             shown: false,
             starred: false,
+            showing: None,
+            held: VecDeque::new(),
+            closing: false,
+            ended: false,
         });
         self.stage = Stage::Skip;
-        Ok(())
-    }
-
-    /// A format file's text: each line a format string, but blank ones and
-    /// comments.
-    fn lines(&mut self, text: &[u8]) -> Result<(), String> {
-        for line in text.split(|&b| b == b'\n') {
-            let content = line.trim_ascii_start();
-            if content.is_empty() || content[0] == b'#' {
-                continue;
-            }
-            self.formats.push(format::parse(line)?);
-        }
         Ok(())
     }
 
@@ -503,6 +655,16 @@ impl Hexdump {
         self.stderr.push(b'\n');
         self.status = 1;
         self.stage = Stage::Done;
+    }
+
+    /// The input has run out, or `-n` is spent, with nothing left in hand:
+    /// what remains is the tail.
+    fn ending_due(&self) -> bool {
+        matches!(self.stage, Stage::Skip | Stage::Dump)
+            && self.io.idle()
+            && self.at >= self.chunk.len()
+            && ((self.stage == Stage::Dump && self.left == Some(0))
+                || (self.input.is_none() && self.files.is_empty()))
     }
 
     /// Ask for the input the dump or the skip needs next.
@@ -518,6 +680,7 @@ impl Hexdump {
             let Some((name, opening)) = self.files.pop_front() else {
                 return self.end();
             };
+            let stdin = matches!(opening, Opening::Name);
             let opening = match opening {
                 Opening::Operand(operand) if self.stage == Stage::Skip && self.skip >= SEEK => {
                     Opening::Range(operand, self.skip, self.left)
@@ -528,6 +691,8 @@ impl Hexdump {
                 fd: self.io.fd(),
                 open: Some((name.clone(), opening)),
                 name,
+                stdin,
+                begun: false,
             });
         }
         if let Some(input) = &mut self.input {
@@ -556,26 +721,41 @@ impl Hexdump {
         self.stage = Stage::Ended;
     }
 
+    /// A format file's next bytes: each whole line read as it comes, the
+    /// options after the file once it ends.
     fn loaded(&mut self, reply: &Reply, data: &[u8]) -> Result<(), StreamError> {
-        let Some((fd, name, mut text)) = self.loading.take() else {
+        let Some(mut loading) = self.loading.take() else {
             return Err(StreamError::new("no format file is open"));
         };
         if let Some(error) = &reply.error {
-            let message = format!("hexdump: can't read {}: {}", crate::byte_text(&name), error);
+            let message = format!(
+                "hexdump: can't read {}: {}",
+                crate::byte_text(&loading.name),
+                error
+            );
             self.refuse(&message);
             return Ok(());
         }
-        text.extend_from_slice(data);
+        loading.line.extend_from_slice(data);
+        let mut start = 0;
+        while let Some(newline) = loading.line[start..].iter().position(|&b| b == b'\n') {
+            if let Err(message) = self.settings.line(&loading.line[start..start + newline]) {
+                self.refuse(&message);
+                return Ok(());
+            }
+            start += newline + 1;
+        }
+        loading.line.drain(..start);
         if !reply.end {
-            self.loading = Some((fd, name, text));
             self.io.push(Request::Read {
-                fd,
+                fd: loading.fd,
                 open: None,
-                least: u64::MAX,
+                least: 0,
             });
+            self.loading = Some(loading);
             return Ok(());
         }
-        if let Err(message) = self.lines(&text).and_then(|()| self.load()) {
+        if let Err(message) = self.settings.line(&loading.line).and_then(|()| self.load()) {
             self.refuse(&message);
         }
         Ok(())
@@ -588,31 +768,67 @@ impl Stream for Hexdump {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        // A host that stops before the tail is drained still gets it.
         if matches!(self.stage, Stage::Skip | Stage::Dump | Stage::Ended)
             && let Some(dump) = &mut self.dump
         {
-            dump.finish(out);
+            let mut sink = Sink::new(out, usize::MAX, usize::MAX, std::mem::take(&mut dump.held));
+            dump.tail(&mut sink);
+            dump.held = sink.held;
         }
         self.stage = Stage::Done;
         Ok(())
     }
 
     fn busy(&self) -> bool {
-        self.stage == Stage::Dump && self.at < self.chunk.len() && self.io.idle()
+        let pending = self.dump.as_ref().is_some_and(Dump::pending);
+        match self.stage {
+            Stage::Dump => {
+                pending || (self.at < self.chunk.len() && self.io.idle()) || self.ending_due()
+            }
+            Stage::Skip => self.ending_due(),
+            Stage::Ended => true,
+            Stage::Load | Stage::Done => false,
+        }
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if self.ending_due() {
+            if self.stage == Stage::Dump && self.left == Some(0) {
+                self.stage = Stage::Ended;
+            } else {
+                self.end();
+            }
+        }
+        let Some(dump) = self.dump.as_mut() else {
+            return Ok(());
+        };
+        let mut sink = Sink::new(out, OUTPUT, PRINTS, std::mem::take(&mut dump.held));
+        if self.stage == Stage::Ended {
+            if dump.tail(&mut sink) {
+                self.stage = Stage::Done;
+            }
+            dump.held = sink.held;
+            return Ok(());
+        }
         let mut take = (self.chunk.len() - self.at).min(WINDOW);
         if let Some(left) = self.left {
             take = take.min(usize::try_from(left).unwrap_or(usize::MAX));
         }
-        if let Some(dump) = &mut self.dump {
-            dump.consume(&self.chunk[self.at..self.at + take], out);
-        }
-        self.at += take;
-        if let Some(left) = &mut self.left {
-            *left -= take as u64;
+        let used = dump.consume(&self.chunk[self.at..self.at + take], &mut sink);
+        dump.held = sink.held;
+        self.at += used;
+        if let Some(left) = &mut self.left
+            && used > 0
+        {
+            *left -= used as u64;
             if *left == 0 {
+                // What `-n` leaves of standard input is the next command's.
+                if self.on_stdin {
+                    self.io.push(Request::Unread {
+                        data: self.chunk[self.at..].to_vec(),
+                    });
+                }
                 self.at = self.chunk.len();
             }
         }
@@ -650,12 +866,14 @@ impl Stream for Hexdump {
         if self.stage == Stage::Load {
             return self.loaded(&reply, data);
         }
-        let Some(input) = self.input.take() else {
+        let Some(mut input) = self.input.take() else {
             return Err(StreamError::new("no input is open"));
         };
         if reply.error.is_some() {
-            // A directory opens, and reads as an error that fails nothing.
-            if reply.names(&["EISDIR"]) {
+            // An input that opened and then fails to read, as a directory
+            // does, reports it and fails nothing; one that cannot open
+            // fails the run.
+            if input.begun || reply.names(&["EISDIR"]) {
                 self.opened = true;
             } else {
                 self.status = 1;
@@ -665,11 +883,9 @@ impl Stream for Hexdump {
             return Ok(());
         }
         self.opened = true;
+        input.begun = true;
         self.skip -= reply.skipped.unwrap_or(0).min(self.skip);
         if !reply.end || !data.is_empty() {
-            if !reply.end {
-                self.input = Some(input);
-            }
             let spent = if self.stage == Stage::Skip {
                 usize::try_from(self.skip)
                     .unwrap_or(usize::MAX)
@@ -680,7 +896,11 @@ impl Stream for Hexdump {
             self.skip -= spent as u64;
             self.chunk.clear();
             self.chunk.extend_from_slice(&data[spent..]);
+            self.on_stdin = input.stdin;
             self.at = 0;
+        }
+        if !reply.end {
+            self.input = Some(input);
         }
         if self.stage == Stage::Skip && self.skip == 0 {
             self.stage = Stage::Dump;

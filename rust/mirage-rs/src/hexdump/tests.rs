@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use crate::host::Host;
+use crate::host::{Fault, Host};
 use crate::open;
 
 use super::size;
@@ -283,4 +283,187 @@ fn sizes_read_as_util_linux_reads_them() {
         size(b"99999999999999999999", "length"),
         Err("hexdump: failed to parse length: '99999999999999999999': Numerical result out of range".into())
     );
+}
+
+/// The output of one format over `data`.
+fn shows(format: &str, data: &str) -> String {
+    run(json!([["format", format]]), &["a"], &[("a", data)]).0
+}
+
+#[test]
+fn a_byte_count_after_an_iteration_count_needs_no_slash() {
+    assert_eq!(shows("2 1 \"%02x\" \"\\n\"", "ab"), "6162\n");
+    assert_eq!(shows("1 1 \"%02x\" \"\\n\"", "ab"), "61\n62\n");
+}
+
+#[test]
+fn a_color_annotation_shows_nothing() {
+    assert_eq!(shows("1/1 \"%02x_L[red]|\" \"\\n\"", "ab"), "61|\n62|\n");
+    // It runs to the text's last `]`, over what lies between.
+    assert_eq!(shows("1/1 \"%02x_L[a]b]c]|\" \"\\n\"", "ab"), "61|\n62|\n");
+    assert_eq!(shows("1/1 \"%02x|_L[red]\" \"\\n\"", "a"), "61|_L[red]\n");
+    let refused = run(
+        json!([["format", "1/1 \"%02x_Lx\""]]),
+        &["a"],
+        &[("a", "x")],
+    )
+    .1;
+    assert_eq!(refused, "hexdump: bad conversion character %_L\n");
+}
+
+#[test]
+fn a_unit_with_a_byte_count_and_no_conversion_takes_block_room_alone() {
+    assert_eq!(
+        shows("1/2 \"tag\" 1/1 \"%02x\" \"\\n\"", "abcd"),
+        "tag61\ntag64\n"
+    );
+    assert_eq!(
+        shows("1/4 \"%_ad \" 1/1 \"%02x\" \"\\n\"", "abcdefgh"),
+        "0 61\n5 66\n"
+    );
+    let grown = run(
+        json!([["format", "4/1 \"%02x\" \"\\n\""], ["format", "/2 \"t\""]]),
+        &["a"],
+        &[("a", "abcd")],
+    );
+    assert_eq!(grown.0, "61626364\ntt");
+}
+
+#[test]
+fn a_string_runs_to_a_nul_or_the_block_end() {
+    assert_eq!(
+        shows("1/2 \"%s|\" 1/2 \"%04x\" \"\\n\"", "abZ\0"),
+        "abZ|005a\n"
+    );
+    assert_eq!(
+        shows("1/2 \"%s|\" 1/2 \"%04x\" \"\\n\"", "abcdef"),
+        "abcd|6463\nef|    \n"
+    );
+    assert_eq!(shows("1/2 \"%.3s|\" \"\\n\"", "abcd"), "ab|\ncd|\n");
+}
+
+#[test]
+fn a_format_stops_at_its_end_unit_in_each_block() {
+    assert_eq!(
+        shows("1/1 \"%02x\" \":%_Ad\\n\" 1/1 \"%02x\"", "ab"),
+        "61:2\n"
+    );
+    let two = run(
+        json!([
+            ["format", "1/1 \"%02x\" \":%_Ad\\n\" 1/1 \"%02x\""],
+            ["format", "\"[\" 2/1 \"%02x\" \"]\\n\""]
+        ]),
+        &["a"],
+        &[("a", "ab")],
+    );
+    assert_eq!(two.0, "61[6162]\n:2\n");
+}
+
+#[test]
+fn the_last_iteration_drops_one_trailing_blank() {
+    assert_eq!(shows("2/1 \"%02x  \" \"|\\n\"", "ab"), "61  62 |\n");
+    assert_eq!(shows("2/1 \"%02x \\n\" \"|\\n\"", "ab"), "61 \n62 |\n");
+    assert_eq!(
+        shows("1/1 \"%02x \" 3 \"ab  \" \"|\\n\"", "a"),
+        "61 ab  ab  ab |\n"
+    );
+    assert_eq!(shows("2/1 \"%-4x\" \"|\\n\"", "ab"), "61  62  |\n");
+}
+
+#[test]
+fn fraction_digits_count_as_util_linux_counts_them() {
+    for (raw, want) in [
+        ("0.9K", 1024),
+        ("0.7K", 1024),
+        ("0.3K", 341),
+        ("0.25K", 255),
+        ("0.99K", 1117),
+        ("0.123K", 125),
+        ("0.0009M", 943),
+        ("0.95KB", 1050),
+        ("0.K", 0),
+    ] {
+        assert_eq!(size(raw.as_bytes(), "length"), Ok(want), "{raw}");
+    }
+}
+
+#[test]
+fn a_format_file_is_read_where_it_stands_among_the_options() {
+    let refusal =
+        |options: serde_json::Value| run(options, &["a"], &[("a", "x"), ("bad", "\"%5\"\n")]).1;
+    assert_eq!(
+        refusal(json!([["format_file", "nofile"], ["length", "bogus"]])),
+        "hexdump: can't read nofile: No such file or directory\n"
+    );
+    assert_eq!(
+        refusal(json!([["format_file", "nofile"], ["format", "\"abc"]])),
+        "hexdump: can't read nofile: No such file or directory\n"
+    );
+    assert_eq!(
+        refusal(json!([["format", "\"abc"], ["format_file", "nofile"]])),
+        "hexdump: bad format {\"abc}\n"
+    );
+    assert_eq!(
+        refusal(json!([["format_file", "bad"], ["length", "bogus"]])),
+        "hexdump: failed to parse length: 'bogus': Invalid argument\n"
+    );
+}
+
+#[test]
+fn a_read_error_after_the_open_fails_nothing() {
+    let mut host = Host::with(&[("a", "abcd"), ("b", "ef")], "");
+    host.faults.insert(
+        "a".into(),
+        Fault {
+            after: 2,
+            errno: "EIO",
+            text: "Input/output error",
+        },
+    );
+    let mut stream = hexdump(json!([["format", "1/1 \"%c\""]]), &["a", "b"]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out, b"abef");
+    assert_eq!(host.err, b"hexdump: a: Input/output error\n");
+    let mut host = Host::with(&[("a", "abcd")], "");
+    host.faults.insert(
+        "a".into(),
+        Fault {
+            after: 0,
+            errno: "EACCES",
+            text: "Permission denied",
+        },
+    );
+    let mut stream = hexdump(json!([["format", "1/1 \"%c\""]]), &["a"]);
+    assert_eq!(host.drive(stream.as_mut()), 1);
+}
+
+#[test]
+fn a_length_hands_back_what_it_leaves_of_standard_input() {
+    let mut host = Host::with(&[], "abcdef");
+    let mut stream = hexdump(json!([["format", "1/1 \"%c\""], ["length", "2"]]), &[]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out, b"ab");
+    assert_eq!(host.stdin, b"cdef");
+}
+
+#[test]
+fn a_wide_or_long_format_writes_a_bounded_step_a_drain() {
+    let mut host = Host::with(&[("a", "a")], "");
+    let mut stream = hexdump(json!([["format", "1/1 \"%1000000x|\""]]), &["a"]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out.len(), 1_000_001);
+    assert!(host.out.ends_with(b"61|"));
+    assert!(host.drains > 1_000_000 / super::OUTPUT, "{}", host.drains);
+    // A million iterations that write nothing past the end hand back too.
+    let mut host = Host::with(&[("a", "a")], "");
+    let mut stream = hexdump(json!([["format", "1000000/1 \"%x\""]]), &["a"]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(host.out, b"61");
+    assert!(host.drains > 1_000_000 / super::PRINTS, "{}", host.drains);
+}
+
+#[test]
+fn a_width_past_int_shows_nothing_of_its_conversion() {
+    assert_eq!(shows("1/1 \"<%2147483648x|\" \"\\n\"", "ab"), "|\n|\n");
+    assert_eq!(shows("1/1 \"<%.4294967297x|\" \"\\n\"", "a"), "|\n");
 }

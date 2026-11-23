@@ -48,5 +48,6 @@ export const BUILDER: GenericCommand = {
   name: 'hexdump',
   read: true,
   streams: true,
+  givesBack: true,
   fn: hexdump,
 }
