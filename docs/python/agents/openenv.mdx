@@ -5,7 +5,7 @@ description: Train agents with OpenEnv on a Mirage workspace, with a fresh copy 
 icon: /images/openenv-logo.svg
 ---
 
-[OpenEnv](https://github.com/openenv/OpenEnv) is a Gym-style interface for agentic reinforcement learning: an environment answers `reset()` and `step()`, and trainers such as TRL, verl and SkyRL drive it over HTTP, WebSocket or MCP. `MirageOpenEnv` is an OpenEnv environment backed by a Mirage workspace. Each episode gets its own copy of the workspace, so a reset takes a snapshot, not a container, and the agent's shell and file calls run under the workspace's mounts and the session's profile.
+[OpenEnv](https://github.com/openenv/OpenEnv) is a Gym-style interface for agentic reinforcement learning: an environment answers `reset()` and `step()`, and training libraries such as Hugging Face TRL, Unsloth and SkyRL drive it over HTTP, WebSocket or MCP. `MirageOpenEnv` is an OpenEnv environment backed by a Mirage workspace. Each episode gets its own copy of the workspace, so a reset takes a snapshot, not a container, and the agent's shell and file calls run under the workspace's mounts and the session's profile.
 
 ## Install
 
