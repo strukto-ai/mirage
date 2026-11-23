@@ -976,9 +976,9 @@ Mirage runs a supported subset of Bash, not a full Bash installation.
   offset.
 - A process substitution's `/dev/fd/N` belongs to the command that opened
   it. An input producer can keep running after that command ends; the
-  command waits for output consumers. One an `exec` keeps (`exec 3<
-  <(command)`, `exec > >(tee log) 2>&1`) belongs to the shell: closing the
-  last descriptor on it ends its input, and the shell's end lets it run out
-  before the shell's caller goes on, where Bash may print its last output
-  later. `exec 3<> <(command)`, which waits forever in Bash, fails with
-  status `2`.
+  command waits for output consumers. One an `exec` keeps
+  (`exec 3< <(command)`, `exec > >(tee log) 2>&1`) belongs to the shell:
+  closing the last descriptor on it ends its input, and the shell's end lets
+  it run out before the shell's caller goes on, where Bash may print its last
+  output later. `exec 3<> <(command)`, which waits forever in Bash, fails
+  with status `2`.
