@@ -26,7 +26,8 @@ const FLOAT = 2
 const TEXT = 3
 const BLOB = 4
 const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+// A text is answered as stored, a byte order mark at its start too.
+const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
 
 // Whether a script has no statement left in `rest`: blanks, semicolons and
 // comments may follow its last one.
