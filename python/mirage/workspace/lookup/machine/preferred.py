@@ -20,11 +20,11 @@ from mirage.utils.path import norm
 from mirage.workspace.expand.classify.heuristic import classify_word
 from mirage.workspace.frame import PipeWriter
 from mirage.workspace.lookup.lookup import program_head, program_runtime
-from mirage.workspace.lookup.machine.command import program_machine
 from mirage.workspace.lookup.machine.mounts import (
     folder_machines,
     several_machines,
 )
+from mirage.workspace.lookup.machine.program import program_machine
 from mirage.workspace.lookup.machine.search import (
     folder_holders,
     searched_machine,
