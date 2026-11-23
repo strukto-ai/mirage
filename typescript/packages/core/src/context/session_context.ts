@@ -388,17 +388,24 @@ export function currentProcessId(): ProcessId | null {
 }
 
 /**
- * The process `pid` the current call runs under: the current call's when it is
- * that one or `pid` is null; on hosts without task isolation, where a
- * sibling's binding can sit in the slot, the live caller's that is. The current
- * call's when none is. Mirrors Python's caller_process.
+ * The process `pid` the current call runs under: the current call's on a host
+ * that isolates tasks, or when `pid` is null. Without task isolation a
+ * sibling's binding can sit in the slot, so it is the one live caller's
+ * process numbered `pid`, and none when no live caller's is or several are
+ * (two workspaces number their processes alike), so a shell never answers
+ * for another's. Mirrors Python's caller_process.
  *
  * @param pid the process wanted, a shell's own; null for the current call's.
  */
 export function callerProcess(pid: number | null): ProcessHandle | null {
   const process = currentCaller().process
-  if (pid === null || process?.record.id.pid === pid) return process
-  return liveCallers().find((caller) => caller.process?.record.id.pid === pid)?.process ?? process
+  if (asyncContextIsolatesTasks || pid === null) return process
+  const found = new Set(
+    liveCallers().flatMap((caller) =>
+      caller.process?.record.id.pid === pid ? [caller.process] : [],
+    ),
+  )
+  return found.size === 1 ? ([...found][0] ?? null) : null
 }
 
 /** Run `run` as the managed runner `process`. */

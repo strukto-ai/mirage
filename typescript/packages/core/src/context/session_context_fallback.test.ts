@@ -15,6 +15,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { searchScope } from '../core/slug_tree/search.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
+import { ProcessTable } from '../execution/process/table.ts'
 import { SlugTree } from '../core/slug_tree/tree.ts'
 import type { ByteSource } from '../io/types.ts'
 import { IOResult, materialize } from '../io/types.ts'
@@ -45,6 +47,7 @@ import { SessionState } from '../workspace/session/session.ts'
 import { seedVar, sessionView } from '../workspace/session/state.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import {
+  callerProcess,
   callerSignal,
   currentCaller,
   getAdmission,
@@ -99,6 +102,33 @@ async function handleXargs(
   const [out, io, node] = await streamXargs(...args)
   return [await materialize(out), io, node]
 }
+
+describe('the process a shell runs as on the fallback storage', () => {
+  it('is the one live process its pid names, and none two workspaces share', async () => {
+    const init = {
+      sessionId: 'a',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: () => new Promise<number>(() => undefined),
+    }
+    const a = new ProcessTable().start(init)
+    const b = new ProcessTable().start(init)
+    const pid = a.record.id.pid
+    expect(b.record.id.pid).toBe(pid)
+    let alone: ProcessHandle | null = null
+    let shared: ProcessHandle | null = a
+    await bindCaller({ ...currentCaller(), process: a }, async () => {
+      alone = callerProcess(pid)
+      await bindCaller({ ...currentCaller(), process: b }, () => {
+        shared = callerProcess(pid)
+        return Promise.resolve()
+      })
+    })
+    expect(alone).toBe(a)
+    expect(shared).toBeNull()
+  })
+})
 
 describe('the bound evaluation on the fallback storage', () => {
   it('a bind without an evaluation does not hide a running line', async () => {
