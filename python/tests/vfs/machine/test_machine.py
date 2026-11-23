@@ -702,3 +702,31 @@ async def test_a_copy_by_a_read_and_a_write_lands_as_a_direct_copy_does():
     assert "/tmp/k" not in b.files
     assert await run(ws, "cat /tmp/k") == (0, "new\n", "")
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policies", [[], [Judged()]])
+async def test_a_copy_never_makes_a_folder_through_a_link_to_a_hidden_one(
+    policies,
+):
+    a = FakeFiles({"/srv/a/k": b"key\n", "/tmp/secret/s": b"s"})
+    a.links["/tmp/public"] = "/tmp/secret"
+    b = FakeFiles()
+    b.dirs.update({"/tmp/public", "/tmp/public/missing"})
+    ws = two(
+        a,
+        b,
+        mounts={"/srv/a": "@a"},
+        policies=policies,
+        profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
+    )
+    agent = await ws.session("agent", profile="agent")
+    done = await agent.shell("cp /srv/a/k /tmp/public/missing/k")
+    assert (done.exit_code, await done.stderr_str()) == (
+        1,
+        "cp: cannot create regular file '/tmp/public/missing/k':"
+        " No such file or directory\n",
+    )
+    assert sorted(a.files) == ["/srv/a/k", "/tmp/secret/s"]
+    assert not any(d.endswith("/missing") for d in a.dirs)
+    await ws.close()

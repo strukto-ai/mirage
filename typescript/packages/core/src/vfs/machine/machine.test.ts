@@ -252,6 +252,33 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  it.each([false, true])(
+    'never makes a folder through a link to a hidden one (read and write: %s)',
+    async (judged) => {
+      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' })
+      a.links.set('/tmp/public', '/tmp/secret')
+      const b = new FakeFiles()
+      b.dirs.add('/tmp/public')
+      b.dirs.add('/tmp/public/missing')
+      const ws = two(
+        a,
+        b,
+        { '/srv/a': '@a' },
+        { profiles: { agent: { paths: { hide: ['/tmp/secret'] } } } },
+      )
+      if (judged) ws.policies.add({ postVfs: (): Action | null => null })
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const done = await agent.shell('cp /srv/a/k /tmp/public/missing/k')
+      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([
+        1,
+        "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n",
+      ])
+      expect(Object.keys(texts(a)).sort()).toEqual(['/srv/a/k', '/tmp/secret/s'])
+      expect([...a.dirs].some((dir) => dir.endsWith('/missing'))).toBe(false)
+      await ws.close()
+    },
+  )
+
   it('makes a folder only another machine holds for a cp into it', async () => {
     const a = new FakeFiles({ '/tmp/d/kept': 'k' })
     const b = new FakeFiles({ '/tmp/src': 's' })
