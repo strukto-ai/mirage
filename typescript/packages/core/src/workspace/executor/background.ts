@@ -38,6 +38,7 @@ import {
   FORK_FAILED,
   FORK_FAILED_STATUS,
   SHELL_IGNORED_SIGNALS,
+  SIGTERM,
   TIMEOUT_STATUS,
 } from '../../shell/constants.ts'
 import { signalReport, signalReported } from '../../shell/signals.ts'
@@ -60,7 +61,6 @@ import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { childContext } from '../evaluation.ts'
-import type { ExecutionFrame } from '../frame.ts'
 import { LineHandle } from '../../execution/line/handle.ts'
 import { newLineId } from '../../execution/context.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
@@ -78,7 +78,7 @@ import {
   reportedCommand,
   statementStdin,
 } from './statement.ts'
-import { armSignals, ignoredSignals, inheritTraps, startJobTraps } from './traps.ts'
+import { armSignals, ignoredSignals, inheritTraps, ownAction, startJobTraps } from './traps.ts'
 import { descriptorName, ForkRoute } from './builtins/exec/index.ts'
 import { CLOSED, TO_STDERR, TO_STDOUT } from './builtins/exec/constants.ts'
 import { sessionOf } from './builtins/jobspec.ts'
@@ -385,6 +385,7 @@ export async function runProgram(
     }
   })
   let result: RedirectResult
+  let reported: Uint8Array = new Uint8Array()
   if (signal === null) {
     result = ran
   } else {
@@ -396,14 +397,34 @@ export async function runProgram(
       new IOResult({ exitCode: code }),
       new ExecutionNode({ command: node.text, exitCode: code }),
     ]
+    reported = programReport(context, shell, code, signal)
   }
   if (jobTable === null) {
-    context.frame.reports.push(new Uint8Array())
+    context.frame.reports.push(reported)
     return result
   }
-  const told = reportJobs(context, jobTable)
+  const told = concat([reported, reportJobs(context, jobTable)])
   if (told.length > 0) await tell(told, result[1], result[2], sink)
   return result
+}
+
+/**
+ * bash's report of a program its shell ran that a signal ended. The program
+ * has no pid of its own to list, so only a report naming the signal alone is
+ * told: TERM's, and one the shell has an action for, whose signal reached the
+ * program as one of the shell's group. Mirrors Python's `_program_report`.
+ */
+function programReport(
+  context: EvaluationContext,
+  shell: ProcessHandle,
+  code: number,
+  signal: number,
+): Uint8Array {
+  const trapped = ownAction(context.session, signal)
+  if (context.frame.substitution || !(signal === SIGTERM || trapped)) return new Uint8Array()
+  return encodeText(
+    signalReport(shellVoice(), [[shell.record.id.pid, code, signal, '']], true, trapped),
+  )
 }
 
 /**
@@ -430,7 +451,8 @@ export async function tell(
 /**
  * bash's reports of the jobs its shell started that a signal ended since it
  * last told, as it tells once it reaped a child or waited: each once, and
- * the TERM, INT or PIPE that ended one untold. The signal is the one `kill`
+ * the TERM, INT or PIPE that ended one untold, as one the shell has an action
+ * for is, for good. The signal is the one `kill`
  * stopped a job with, or the one that ended the native program a job's
  * status is. A substitution's shell tells of none. Mirrors Python's
  * report_jobs.
@@ -448,12 +470,14 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
     }
     const ended = job.signal ?? process.endedBy
     if (ended === null || ended < 1 || job.exitCode !== 128 + ended) continue
+    const trapped = ownAction(session, ended)
     const report = signalReport(
       shellVoice(),
       [[job.shownPid, job.exitCode, ended, job.command]],
       false,
+      trapped,
     )
-    if (report !== '') {
+    if (report !== '' || trapped) {
       job.reported = true
       told.push(report)
     }
@@ -464,21 +488,23 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
 /**
  * Queue bash's report of a child its shell waited for that a signal ended
  * (`signalReport`), empty when it prints none, to follow the reaping
- * command's stderr with those of the shell's jobs. Each entry is a process
- * of the child, its status and the command it ran. Mirrors Python's
- * report_reaped.
+ * command's stderr with those of the shell's jobs. `context` is the
+ * evaluation of the reaping command; each entry is a process of the child,
+ * its status and the command it ran. Mirrors Python's report_reaped.
  */
 export function reportReaped(
-  frame: ExecutionFrame,
+  context: EvaluationContext,
   reaped: readonly (readonly [ProcessHandle, number, TSNodeLike])[],
 ): void {
-  if (frame.substitution) return
-  const listed = signalReported(reaped[reaped.length - 1]?.[0].endedBy ?? null)
+  if (context.frame.substitution) return
+  const ended = reaped[reaped.length - 1]?.[0].endedBy ?? null
+  const listed = signalReported(ended)
   const processes = reaped.map(
     ([process, code, node]) =>
       [process.record.id.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
   )
-  frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
+  const trapped = ended !== null && ownAction(context.session, ended)
+  context.frame.reports.push(encodeText(signalReport(shellVoice(), processes, true, trapped)))
 }
 
 /**

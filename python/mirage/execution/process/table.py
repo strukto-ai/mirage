@@ -102,7 +102,7 @@ class ProcessTable:
         # What ``kill -STOP`` holds, by pid, each done at the
         # ``kill -CONT``, and the signal each was sent meanwhile.
         self._pauses: dict[int, Future[None]] = {}
-        self._held_signals: dict[int, int] = {}
+        self._held_signals: dict[int, tuple[int, bool, bool]] = {}
         # The host's ceiling on any session's limit, a lifted one
         # included, whatever profile, snapshot or store set it.
         self.ceiling: int | None = None
@@ -389,24 +389,43 @@ class ProcessTable:
             int | None: the signal it was sent while held, which it
             takes now; None for none.
         """
+        held = self._resume(handle)
+        return None if held is None else held[0]
+
+    def _resume(self, handle: ProcessHandle) -> tuple[int, bool, bool] | None:
+        """Let a held process go on (``resume``), with the signal it was
+        sent while held and how it was sent: as one of a group, and to
+        the whole group.
+
+        Args:
+            handle (ProcessHandle): the process.
+        """
         pid = handle.record.pid
         with self._lock:
-            held = self._pauses.pop(pid, None)
-            signal = self._held_signals.pop(pid, None)
-        if held is not None:
-            held.set_result(None)
+            paused = self._pauses.pop(pid, None)
+            held = self._held_signals.pop(pid, None)
+        if paused is not None:
+            paused.set_result(None)
             for member in (handle, *self._under(pid)):
                 member.show_state(None)
                 member.tell_held()
-        return signal
+        return held
 
-    def hold_signal(self, handle: ProcessHandle, signal: int) -> bool:
+    def hold_signal(
+        self,
+        handle: ProcessHandle,
+        signal: int,
+        group: bool = False,
+        whole: bool = False,
+    ) -> bool:
         """Keep a signal for a held process, which takes it when it goes
-        on: only KILL ends a stopped program.
+        on, as it was sent: only KILL ends a stopped program.
 
         Args:
             handle (ProcessHandle): the process.
             signal (int): the signal.
+            group (bool): it was sent as one of a group.
+            whole (bool): it was sent to the whole group.
 
         Returns:
             bool: whether the process is held.
@@ -415,7 +434,7 @@ class ProcessTable:
         with self._lock:
             if pid not in self._pauses:
                 return False
-            self._held_signals[pid] = signal
+            self._held_signals[pid] = (signal, group, whole)
             return True
 
     def send(
@@ -480,23 +499,33 @@ class ProcessTable:
                 logger.debug("signal %d not sent: %s", signal, sent)
 
     def _signal_own(
-        self, handle: ProcessHandle, signal: int, group: bool
+        self,
+        handle: ProcessHandle,
+        signal: int,
+        group: bool,
+        whole: bool = False,
     ) -> bool:
         """What a signal does to a process Mirage runs itself. It pauses
         at STOP and goes on at CONT, taking then the signal it was sent
-        while paused, since only KILL ends a stopped program; a kept
+        while paused as it was sent, since only KILL ends a stopped
+        program; a kept
         signal leaves it as it is, and any other stops it unless the shell
         running a statement in it traps or ignores it (``catcher``). One of
         a group
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
         (``_deliver``); one signalled alone stops what it started too,
-        and if it ignores the signal nothing happens.
+        and if it ignores the signal nothing happens. A signal sent to
+        the whole group (``killpg``) reaches the program its shell runs
+        right now even when the shell traps it, as that program, a child
+        in the same group, takes the signal at its default.
 
         Args:
             handle (ProcessHandle): the process.
             signal (int): the signal.
             group (bool): it gets the signal as one of a group would.
+            whole (bool): the whole group gets it, the program the
+                process runs right now included.
 
         Returns:
             bool: whether the process was there to signal.
@@ -510,17 +539,21 @@ class ProcessTable:
             if signal == SIGSTOP:
                 self.pause(handle)
             elif signal == SIGCONT:
-                held = self.resume(handle)
+                held = self._resume(handle)
                 if held is not None:
-                    return self._signal_own(handle, held, group)
+                    return self._signal_own(handle, *held)
             return True
-        if signal != SIGKILL and self.hold_signal(handle, signal):
+        if signal != SIGKILL and self.hold_signal(
+            handle, signal, group, whole
+        ):
             return True
         catcher = handle.catcher
         if signal != SIGKILL and catcher is not None:
             # A shell's ignore of a signal its process ignores anyway
             # leaves it to that, a group's included.
             caught = catcher(signal, handle.record.pid)
+            if caught and whole:
+                handle.interrupt(signal)
             if caught or (caught is False and signal not in handle.ignores):
                 return True
         if group:
@@ -557,9 +590,10 @@ class ProcessTable:
         sent, a parent before its children so a shell does not see its
         child die first, and Mirage's own at once (``_signal_own``),
         deepest first, so a native program knows the signal before the
-        shell that waits for it stops. A runner that ignores it, a shell,
-        hands it to the program it runs right now, unless a process of
-        that program, a child a scan found, got it as sent.
+        shell that waits for it stops. A runner that ignores it, or traps
+        it, a shell, hands it to the program it runs right now, unless a
+        process of that program, a child a scan found or a native program
+        it started, got it as sent and answers it itself.
 
         Args:
             members (list[ProcessHandle]): the runners, deepest first.
@@ -573,15 +607,15 @@ class ProcessTable:
         }
         reached = {pid for pid, sent in sending.items() if sent is not None}
         for member in members:
-            if member.record.pid not in reached and (
-                signal not in member.ignores
-                or not any(
-                    other.record.parent == member.record.pid
-                    and other.record.pid in reached
-                    for other in members
-                )
-            ):
-                self._signal_own(member, signal, True)
+            if member.record.pid in reached:
+                continue
+            took = any(
+                other.record.parent == member.record.pid
+                and other.record.pid in reached
+                for other in members
+            )
+            if signal not in member.ignores or not took:
+                self._signal_own(member, signal, True, whole=not took)
         await asyncio.gather(*(s for s in sending.values() if s is not None))
 
     def _sees(

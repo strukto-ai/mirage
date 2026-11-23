@@ -21,6 +21,7 @@ from mirage.workspace.executor.traps import (
     ignored_signals,
     inherit_traps,
     lift_function_traps,
+    own_action,
     restore_function_traps,
     run_exit_trap,
     start_job_traps,
@@ -126,3 +127,15 @@ def test_what_a_shell_ignores_passes_on_but_kill_and_stop():
     session.signal_traps = {9: "", 15: "", 19: "", 2: "", 10: "echo u"}
     session.job_ignored = frozenset({2})
     assert ignored_signals(session) == frozenset({15})
+
+
+def test_only_a_shells_own_action_counts_as_its_own():
+    session = make_session()
+    session.signal_traps = {10: "echo u", 15: ""}
+    assert [own_action(session, s) for s in (10, 15, 1)] == [
+        True,
+        False,
+        False,
+    ]
+    session.signal_traps_inherited = True
+    assert not own_action(session, 10)

@@ -59,6 +59,7 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
     CONTINUE_SIGNALS,
+    NESTED_SHELLS,
     NOT_FOUND_STATUS,
     SHELL_IGNORED_SIGNALS,
     SIGCHLD,
@@ -78,6 +79,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
+from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.background import program_text
 from mirage.workspace.executor.builtins.timeout.constants import (
@@ -91,8 +93,8 @@ from mirage.workspace.executor.statement import (
     redirected_body,
     reported_command,
 )
-from mirage.workspace.executor.traps import ignored_signals
-from mirage.workspace.lookup.lookup import execs
+from mirage.workspace.executor.traps import ignored_signals, own_action
+from mirage.workspace.lookup.lookup import execs, path_program
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -268,6 +270,7 @@ async def handle_timeout(
     stdin: ByteSource | None = None,
     registry: MountRegistry | None = None,
     processes: ProcessTable | None = None,
+    links: NamespaceReader | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run `timeout [OPTION] DURATION COMMAND [ARG...]` (GNU timeout).
 
@@ -297,6 +300,8 @@ async def handle_timeout(
             looked up; None runs every name.
         processes (ProcessTable | None): the workspace's processes, which
             the command joins; None starts a table of its own.
+        links (NamespaceReader | None): the session's links, which a
+            path-spelled command word follows to its program.
     """
     session = context.session
     parse = parse_shell_options(SHELL_SPECS["timeout"], args or [])
@@ -370,7 +375,32 @@ async def handle_timeout(
         parse.flags,
         command[0],
         processes if processes is not None else ProcessTable(),
+        _nested_shell(command[0], session, registry, links),
     )
+
+
+def _nested_shell(
+    word: str,
+    session: SessionState,
+    registry: MountRegistry | None,
+    links: NamespaceReader | None,
+) -> bool:
+    """Whether timeout's command is a nested shell, which runs as the
+    process timeout starts, as timeout execs it: ``bash``, or a path to
+    it (``/bin/bash``).
+
+    Args:
+        word (str): the command word.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry | None): where a path-spelled word finds
+            its program; None takes the word as typed.
+        links (NamespaceReader | None): the session's links.
+    """
+    if word in NESTED_SHELLS:
+        return True
+    if registry is None:
+        return False
+    return path_program(word, session, registry, links) in NESTED_SHELLS
 
 
 async def _supervise(
@@ -384,6 +414,7 @@ async def _supervise(
     flags: dict[str, str | bool],
     name: str,
     processes: ProcessTable,
+    nested: bool,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Start the inner line under the deadline and hand back its stdout
     as it writes it, as GNU's command writes to timeout's own stdout; the
@@ -401,6 +432,7 @@ async def _supervise(
         flags (dict[str, str | bool]): the parsed options.
         name (str): the command word, which -v names.
         processes (ProcessTable): where the command's process starts.
+        nested (bool): the command is a nested shell (``_nested_shell``).
     """
     foreground = flags.get("f") is True
     preserve = flags.get("p") is True
@@ -437,7 +469,9 @@ async def _supervise(
 
     def forked(process: ProcessHandle) -> None:
         child.session.process_id = process.record.pid
-        child.frame.shell = process
+        # timeout execs its command, so a nested shell runs as this
+        # process, and answers the signals it gets (`trap ... TERM`).
+        child.frame.shell = None if nested else process
 
     try:
         process = processes.start(
@@ -581,6 +615,10 @@ async def _deadline(
             either, return_when=asyncio.FIRST_COMPLETED
         )
         resumed.cancel()
+    if task in done and task.cancelled():
+        # A signal from elsewhere ended the command, a nested shell that
+        # runs as it included (`bash -c 'kill $$'`).
+        return await _ended(console, held, [], 128 + (process.signal or 9))
     if task in done:
         task.result()
         stdout, io = ran[0]
@@ -635,20 +673,44 @@ async def _deadline(
         say(SIGKILL)
         said.append(killed(SIGKILL))
         return await _ended(console, held, said, 137)
-    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored:
-        code = task.result() if preserve else TIMEOUT_STATUS
-        return await _ended(console, held, said, code, finished=True)
-    if signal in SELF_KILLING_SIGNALS and (
-        not foreground or signal == SIGKILL
+    carried = signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored
+    if (
+        not carried
+        and signal in SELF_KILLING_SIGNALS
+        and (not foreground or signal == SIGKILL)
     ):
         said.append(killed(signal))
         return await _ended(console, held, said, 128 + signal)
     if not task.cancelled():
-        code = task.result() if preserve else TIMEOUT_STATUS
+        # A native program the command is may still have died of a signal
+        # (``program_signaled``), whose KILL stands as one Mirage sent.
+        ended = process.ended_by
+        code = (
+            task.result()
+            if preserve
+            else TIMEOUT_STATUS
+            if ended is None
+            else _signalled_status(ended, preserve)
+        )
         return await _ended(console, held, said, code, finished=True)
     return await _ended(
-        console, held, said, 128 + signal if preserve else TIMEOUT_STATUS
+        console, held, said, _signalled_status(process.signal, preserve)
     )
+
+
+def _signalled_status(ended: int | None, preserve: bool) -> int:
+    """timeout's status once a signal ended the command after the
+    deadline: 128 plus KILL whatever --preserve-status says, as GNU's
+    is, 128 plus the signal that ended it under --preserve-status, and
+    124 otherwise.
+
+    Args:
+        ended (int | None): the signal that ended the command; None
+            for a stop that named none, KILL's.
+        preserve (bool): --preserve-status.
+    """
+    signal = ended or SIGKILL
+    return 128 + signal if preserve or signal == SIGKILL else TIMEOUT_STATUS
 
 
 def _killed_report(
@@ -679,7 +741,8 @@ def _killed_report(
     ):
         return ""
     row = (process.record.pid, 128 + number, number, reported_command(node))
-    return signal_report(shell_voice(), [row], True)
+    trapped = own_action(context.session, number)
+    return signal_report(shell_voice(), [row], True, trapped)
 
 
 def _own_job(
@@ -825,4 +888,5 @@ async def timeout_builtin(call: BuiltinCall) -> Result:
         call.stdin,
         call.registry,
         call.job_table.processes if call.job_table is not None else None,
+        call.namespace.session_links(call.context.session),
     )

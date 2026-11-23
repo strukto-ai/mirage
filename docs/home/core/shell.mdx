@@ -802,6 +802,11 @@ and `ps -p` take either kind.
     - When time runs out, `timeout` signals its command's process group, so the
       jobs the command started stop too. It does not with `--foreground`,
       `-s INT` or `-s QUIT`.
+    - A nested shell `timeout` runs (`timeout 5 bash -c '...'`) is the process
+      `timeout` started. One that traps the signal runs its action once its
+      current program ends, and goes on, as in Bash: the group's signal ends
+      that program first, while with `--foreground` the program runs to its
+      end.
   </Accordion>
   <Accordion title="Signals">
     - `kill` takes every Linux signal `kill -l` lists, by name or number.
@@ -924,10 +929,13 @@ error exits 2.
     `bash: line 1:    12 Killed                  sleep 3`; for a background
     job, after the next program, subshell or pipeline, or at `wait`. `TERM`
     prints `Terminated` for a command and nothing for a job; `INT` and `PIPE`
-    print nothing. A command substitution reports nothing.
+    print nothing. A signal the shell traps prints only its name for a
+    command, such as `User defined signal 1`, and nothing for a job. A command
+    substitution reports nothing.
   - A program a runtime runs in the foreground is not a process of its own,
-    so no report line follows when a signal ends it; its status is still 128
-    plus the signal.
+    so only a report line without a pid follows when a signal ends it
+    (`Terminated`, or a trapped signal's name); its status is still 128 plus
+    the signal.
 </Accordion>
 
 ## Output to files

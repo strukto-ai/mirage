@@ -973,7 +973,7 @@ async function forkSubshell(
     forked,
   )
   const code = await process.reap(mergeSignals(deps.signal, context.frame.abortSignal) ?? null)
-  reportReaped(context.frame, [[process, code, node]])
+  reportReaped(context, [[process, code, node]])
   return subshellRan ?? result(getText(node), { exitCode: code })
 }
 

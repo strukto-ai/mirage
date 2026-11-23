@@ -39,6 +39,7 @@ import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import {
   CONTINUE_SIGNALS,
+  NESTED_SHELLS,
   NOT_FOUND_STATUS,
   SHELL_IGNORED_SIGNALS,
   SIGCHLD,
@@ -60,13 +61,14 @@ import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../u
 import { PathSpec } from '../../../../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../../../evaluation.ts'
-import { execs } from '../../../lookup/lookup.ts'
+import { execs, pathProgram } from '../../../lookup/lookup.ts'
+import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { programText } from '../../background.ts'
 import { redirectedBody, reportedCommand } from '../../statement.ts'
-import { ignoredSignals } from '../../traps.ts'
+import { ignoredSignals, ownAction } from '../../traps.ts'
 import type { BuiltinCall } from '../types.ts'
 import type { ExecuteFn } from '../../../expand/types.ts'
 import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
@@ -281,6 +283,11 @@ interface Supervision {
   // The command is a program that got the signal as sent, on a machine or
   // acting on signals itself.
   onMachine: () => boolean
+  // The signal left the command going: a shell that runs as it traps or
+  // ignores it (`bash -c 'trap ... TERM; ...'`).
+  goesOn: () => boolean
+  // The signal that ended the command, null while it runs or once it exited.
+  killedBy: () => number | null
   // What a `kill -STOP` of timeout itself holds it until, null while none does.
   held: () => Promise<void> | null
   // Whether its job is timeout alone, which a stop of itself holds.
@@ -324,6 +331,7 @@ export async function handleTimeout(
   registry: MountRegistry | null = null,
   lineSignal?: AbortSignal,
   processes: ProcessTable = new ProcessTable(),
+  links: NamespaceLinks | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.timeout, args)
@@ -378,6 +386,7 @@ export async function handleTimeout(
     return refuse(encodeText(timeoutMissing(name)), NOT_FOUND_STATUS)
   }
 
+  const nested = nestedShell(name, session, registry, links)
   const sink = new PipeConsole()
   // The inner result lands here as soon as it exists.
   const held: IOResult[] = []
@@ -400,7 +409,9 @@ export async function handleTimeout(
       limit: session.processes.max,
       started: (forked) => {
         child.session.processId = forked.record.id.pid
-        child.frame.shell = forked
+        // timeout execs its command, so a nested shell runs as this
+        // process, and answers the signals it gets (`trap ... TERM`).
+        child.frame.shell = nested ? null : forked
       },
       ignores: new Set([...SHELL_IGNORED_SIGNALS, ...ignoredSignals(session)]),
       programIgnores: ignoredSignals(session),
@@ -454,6 +465,8 @@ export async function handleTimeout(
     foreground,
     ignored: process.ignores.has(signal),
     onMachine: () => process.record.program || process.takesSignals,
+    goesOn: () => process.signal === null,
+    killedBy: () => process.endedBy,
     held: () => {
       const job = ownJob(processes, process, syntax, session)
       return job?.paused === true ? job.resumed() : null
@@ -512,6 +525,7 @@ function killedReport(
     shellVoice(),
     [[process.record.id.pid, 128 + number, number, reportedCommand(node)]],
     true,
+    ownAction(context.session, number),
   )
 }
 
@@ -613,11 +627,28 @@ async function supervise(
     }
     return await ended(sink, held, said, exitCode)
   }
+  // The status of a run that ended after the deadline: its own under
+  // --preserve-status; otherwise a native program the command is may still
+  // have died of a signal, whose KILL stands as one Mirage sent.
+  const finished = (late: IOResult): number => {
+    if (how.preserve) return late.exitCode
+    const killed = how.killedBy()
+    return killed === null ? TIMEOUT_STATUS : signalledStatus(killed, false)
+  }
   try {
-    const result =
-      seconds > 0 && seconds < Infinity
-        ? await raceDeadline(run, seconds, reached, how.held)
-        : await run
+    let result: IOResult | typeof TIMED_OUT
+    try {
+      result =
+        seconds > 0 && seconds < Infinity
+          ? await raceDeadline(run, seconds, reached, how.held)
+          : await run
+    } catch (err) {
+      // A signal from elsewhere ended the command, a nested shell that runs
+      // as it included (`bash -c 'kill $$'`).
+      const killed = how.killedBy()
+      if (killed === null) throw err
+      return await ended(sink, held, [], 128 + killed)
+    }
     if (result !== TIMED_OUT) {
       return [
         await sink.snapshot(Channel.STDOUT),
@@ -650,17 +681,26 @@ async function supervise(
       return await stop(said, 137)
     }
     if (carriesOn) {
-      const late = kill.at === null ? await run : await Promise.race([run, kill.at])
+      let late: IOResult | typeof TIMED_OUT
+      try {
+        late = kill.at === null ? await run : await Promise.race([run, kill.at])
+      } catch (err) {
+        const killed = how.killedBy()
+        if (killed === null) throw err
+        return await ended(sink, held, said, signalledStatus(killed, how.preserve))
+      }
       if (late === TIMED_OUT) {
         say(SIGKILL)
         said.push(how.killed(SIGKILL))
         return await stop(said, 137)
       }
-      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
+      return await ended(sink, held, said, finished(late), true)
     }
-    // A program on a machine got the signal as sent and may outlive it:
-    // only -k's KILL then ends the wait.
-    const onMachine = how.onMachine()
+    // A program on a machine got the signal as sent and may outlive it, as
+    // a shell that traps or ignores it does: only -k's KILL then ends the
+    // wait.
+    await sent
+    const onMachine = how.onMachine() || how.goesOn()
     let late: IOResult | typeof TIMED_OUT | null = null
     if (kill.at !== null || onMachine) {
       const ending = run.then(
@@ -678,14 +718,23 @@ async function supervise(
       said.push(how.killed(signal))
       return await stop(said, 128 + signal)
     }
-    if (onMachine && late !== null) {
-      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
-    }
-    return await stop(said, how.preserve ? 128 + signal : TIMEOUT_STATUS)
+    if (onMachine && late !== null) return await ended(sink, held, said, finished(late), true)
+    return await stop(said, signalledStatus(how.killedBy() ?? signal, how.preserve))
   } finally {
     settled = true
     kill.cancel()
   }
+}
+
+/**
+ * timeout's status once a signal ended the command after the deadline: 128
+ * plus KILL whatever --preserve-status says, as GNU's is, 128 plus the signal
+ * that ended it under --preserve-status, and 124 otherwise; a stop that named
+ * no signal is KILL's. Mirrors Python's `_signalled_status`.
+ */
+function signalledStatus(ended: number | null, preserve: boolean): number {
+  const signal = ended ?? SIGKILL
+  return preserve || signal === SIGKILL ? 128 + signal : TIMEOUT_STATUS
 }
 
 /**
@@ -732,5 +781,23 @@ export async function timeoutBuiltin(call: BuiltinCall): Promise<RedirectResult>
     call.registry,
     call.signal,
     call.jobTable?.processes,
+    call.namespace.sessionLinks(call.context.session),
   )
+}
+
+/**
+ * Whether timeout's command is a nested shell, which runs as the process
+ * timeout starts, as timeout execs it: `bash`, or a path to it (`/bin/bash`)
+ * found through `registry` and the session's `links`. Mirrors Python's
+ * `_nested_shell`.
+ */
+function nestedShell(
+  word: string,
+  session: SessionState,
+  registry: MountRegistry | null,
+  links: NamespaceLinks | null,
+): boolean {
+  if (NESTED_SHELLS.has(word)) return true
+  if (registry === null) return false
+  return NESTED_SHELLS.has(pathProgram(word, session, registry, links) ?? '')
 }

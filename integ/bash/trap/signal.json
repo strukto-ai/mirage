@@ -944,6 +944,41 @@
         "stdout": "rc=143\ncaught\nafter\nrc=0\n",
         "stderr": "Terminated\n"
       }
+    },
+    {
+      "id": "signal_trap_report_names_a_trapped_signal_alone",
+      "seq": 512227,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "bash -c 'trap \"echo t\" USR1 KILL ALRM; sh -c \"kill -USR1 \\$\\$\"; sh -c \"kill -KILL \\$\\$\"; sh -c \"kill -ALRM \\$\\$\"; sleep 1 & kill -USR1 $!; wait; echo after'",
+      "expect": {
+        "exit": 0,
+        "stdout": "after\n",
+        "stderr": "User defined signal 1\nKilled\nAlarm clock\n"
+      }
     }
   ]
 }

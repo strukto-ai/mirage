@@ -188,12 +188,15 @@ def signal_report(
     voice: str,
     processes: Sequence[tuple[int, int, int | None, str]],
     foreground: bool,
+    trapped: bool = False,
 ) -> str:
     """bash's report of a job a signal ended, one line per process: the
     first after the shell's voice, the rest indented after a ``|``, each
     status the process before gave left blank. Empty unless a signal
     ended the last process; INT and PIPE end it unreported, and TERM as
-    ``Terminated`` alone in the foreground and unreported behind it.
+    ``Terminated`` alone in the foreground and unreported behind it, as
+    a signal the shell has an action for is too (``User defined signal
+    1``).
 
     Args:
         voice (str): the shell's voice (``bash: line 1: ``).
@@ -201,12 +204,20 @@ def signal_report(
             process's pid, exit status, the signal that ended it (None
             for an exit) and command.
         foreground (bool): the shell waited for the job as it ran.
+        trapped (bool): the shell has an action of its own for the
+            signal that ended the last process.
     """
     signal = processes[-1][2]
     if signal == SIGTERM:
         return "Terminated\n" if foreground else ""
     if not signal_reported(signal):
         return ""
+    if trapped:
+        return (
+            f"{process_status(processes[-1][1], signal)}\n"
+            if foreground
+            else ""
+        )
     lines = []
     before = None
     for pid, code, ended, command in processes:

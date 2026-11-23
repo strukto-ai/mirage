@@ -22,6 +22,7 @@ import {
   ignoredSignals,
   inheritTraps,
   liftFunctionTraps,
+  ownAction,
   restoreFunctionTraps,
   runExitTrap,
   startJobTraps,
@@ -154,5 +155,18 @@ describe('ignoredSignals', () => {
     ])
     session.jobIgnored = new Set([2])
     expect([...ignoredSignals(session)]).toEqual([15])
+  })
+})
+
+describe('ownAction', () => {
+  it("counts only a shell's own action as its own", () => {
+    const session = makeSession()
+    session.signalTraps = new Map([
+      [10, 'echo u'],
+      [15, ''],
+    ])
+    expect([10, 15, 1].map((s) => ownAction(session, s))).toEqual([true, false, false])
+    session.signalTrapsInherited = true
+    expect(ownAction(session, 10)).toBe(false)
   })
 })

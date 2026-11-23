@@ -158,18 +158,22 @@ export function signalReported(signal: number | null): boolean {
  * after the shell's voice, the rest indented after a `|`, each status the
  * process before gave left blank. Empty unless a signal ended the last
  * process; INT and PIPE end it unreported, and TERM as `Terminated` alone in
- * the foreground and unreported behind it. Each process is its pid, exit
- * status, the signal that ended it (null for an exit) and command. Mirrors
- * Python's signal_report.
+ * the foreground and unreported behind it, as a signal the shell has an action
+ * for (`trapped`) is too (`User defined signal 1`). Each process is its pid,
+ * exit status, the signal that ended it (null for an exit) and command.
+ * Mirrors Python's signal_report.
  */
 export function signalReport(
   voice: string,
   processes: readonly (readonly [number, number, number | null, string])[],
   foreground: boolean,
+  trapped = false,
 ): string {
-  const signal = processes[processes.length - 1]?.[2] ?? null
+  const last = processes[processes.length - 1]
+  const signal = last?.[2] ?? null
   if (signal === SIGTERM) return foreground ? 'Terminated\n' : ''
   if (!signalReported(signal)) return ''
+  if (trapped) return foreground && last !== undefined ? `${processStatus(last[1], signal)}\n` : ''
   const lines: string[] = []
   let before: string | null = null
   for (const [pid, code, ended, command] of processes) {

@@ -685,6 +685,152 @@ async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest
     await outside.join()
 
 
+# A shell that traps a signal keeps it for its action, and the program it
+# runs right now goes on when the shell alone is sent it; sent to the whole
+# group, the signal reaches that program too, which ends with it.
+@pytest.mark.asyncio
+async def test_a_group_signal_a_shell_traps_still_ends_its_program():
+    processes = ProcessTable()
+    caught: list[int] = []
+    started = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+    finish = asyncio.Event()
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        outcome.append(await child.program(program))
+        return 0
+
+    def catcher(signal: int, pid: int) -> bool:
+        caught.append(signal)
+        return True
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = catcher
+    async with asyncio.timeout(5):
+        await started.wait()
+        started.clear()
+        assert await processes.signal_group(child.record.group, 15)
+        await started.wait()
+        assert await processes.signal(child, 15)
+        finish.set()
+        assert (await child.join()).exit == 0
+    assert caught == [15, 15]
+    assert outcome == [(None, 15), (0, None)]
+
+
+# A native program a trapping shell started gets the group's signal as sent
+# and answers it itself, so the shell's wait for it goes on.
+@pytest.mark.asyncio
+async def test_a_group_signal_leaves_a_trapping_shells_native_program():
+    processes = ProcessTable()
+    sent: list[int] = []
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def delivered() -> bool:
+        return True
+
+    def sender(handle: ProcessHandle, signum: int) -> Awaitable[bool] | None:
+        if handle.record.command != "native":
+            return None
+        sent.append(signum)
+        return delivered()
+
+    processes.sender = sender
+
+    async def native() -> int:
+        await finish.wait()
+        return 0
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        return 0
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = lambda signal, pid: True
+    started_native = processes.start(
+        session_id="a",
+        command="native",
+        cwd=PathSpec.from_str_path("/"),
+        run=native,
+        parent=child.record.pid,
+    )
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal_group(child.record.group, 15)
+        await asyncio.sleep(0)
+        finish.set()
+        assert (await child.join()).exit == 0
+        assert (await started_native.join()).exit == 0
+    assert sent == [15]
+    assert outcome == [(0, None)]
+
+
+# A signal a stopped shell is sent waits for its CONT, then goes as it was
+# sent, however the CONT came: one sent to the whole group still ends the
+# program the shell runs, one sent to the shell alone leaves it running.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("whole", [True, False])
+async def test_a_held_signal_keeps_how_it_was_sent(whole):
+    processes = ProcessTable()
+    started = asyncio.Event()
+    finish = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def program() -> int:
+        started.set()
+        await finish.wait()
+        return 0
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        return 0
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+    )
+    child.catcher = lambda signal, pid: True
+    group = child.record.group
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert await processes.signal(child, 19)
+        if whole:
+            assert await processes.signal_group(group, 15)
+            assert await processes.signal(child, 18)
+        else:
+            assert await processes.signal(child, 15)
+            assert await processes.signal_group(group, 18)
+        await asyncio.sleep(0)
+        finish.set()
+        assert (await child.join()).exit == 0
+    assert outcome == [(None, 15) if whole else (0, None)]
+
+
 # A pid a session's lines take in turn runs each line under it; one a live
 # runner holds is not taken twice, and later pids go on past it.
 @pytest.mark.asyncio

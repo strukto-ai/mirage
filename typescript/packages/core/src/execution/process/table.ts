@@ -37,7 +37,10 @@ export class ProcessTable {
   private stopped = false
   // What `kill -STOP` holds, by pid, and the signal each was sent meanwhile.
   private readonly pauses = new Map<number, PauseGate>()
-  private readonly heldSignals = new Map<number, number>()
+  private readonly heldSignals = new Map<
+    number,
+    readonly [signal: number, group: boolean, whole: boolean]
+  >()
   /**
    * The host's ceiling on any session's limit, a lifted one included,
    * whatever profile, snapshot or store set it. Mirrors Python's `ceiling`.
@@ -318,30 +321,41 @@ export class ProcessTable {
    * `resume`.
    */
   resume(handle: ProcessHandle): number | null {
+    return this.resumeHeld(handle)?.[0] ?? null
+  }
+
+  /**
+   * Let a held process go on (`resume`), answering the signal it was sent
+   * while held and how it was sent: as one of a group, and to the whole
+   * group. Mirrors Python's `_resume`.
+   */
+  private resumeHeld(
+    handle: ProcessHandle,
+  ): readonly [signal: number, group: boolean, whole: boolean] | null {
     const pid = handle.record.id.pid
-    const held = this.pauses.get(pid)
-    const signal = this.heldSignals.get(pid) ?? null
+    const paused = this.pauses.get(pid)
+    const held = this.heldSignals.get(pid) ?? null
     this.pauses.delete(pid)
     this.heldSignals.delete(pid)
-    if (held !== undefined) {
-      held.resolve()
+    if (paused !== undefined) {
+      paused.resolve()
       for (const member of [handle, ...this.under(pid)]) {
         member.showState(null)
         member.tellHeld()
       }
     }
-    return signal
+    return held
   }
 
   /**
-   * Keep a signal for a held process, which takes it when it goes on: only
-   * KILL ends a stopped program. Answers whether the process is held.
-   * Mirrors Python's `hold_signal`.
+   * Keep a signal for a held process, which takes it when it goes on, as it
+   * was sent (`group`, `whole`): only KILL ends a stopped program. Answers
+   * whether the process is held. Mirrors Python's `hold_signal`.
    */
-  holdSignal(handle: ProcessHandle, signal: number): boolean {
+  holdSignal(handle: ProcessHandle, signal: number, group = false, whole = false): boolean {
     const pid = handle.record.id.pid
     if (!this.pauses.has(pid)) return false
-    this.heldSignals.set(pid, signal)
+    this.heldSignals.set(pid, [signal, group, whole])
     return true
   }
 
@@ -382,15 +396,23 @@ export class ProcessTable {
 
   /**
    * What a signal does to a process Mirage runs itself. It pauses at STOP and
-   * goes on at CONT, taking then the signal it was sent while paused, since
-   * only KILL ends a stopped program; a kept signal leaves it as it is, and
+   * goes on at CONT, taking then the signal it was sent while paused as it was
+   * sent, since only KILL ends a stopped program; a kept signal leaves it as it is, and
    * any other stops it unless the shell running a statement in it traps or
    * ignores it (`catcher`). One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
-   * if it ignores the signal nothing happens. Mirrors Python's `_signal_own`.
+   * if it ignores the signal nothing happens. A signal sent to the whole group
+   * (`killpg`, `whole`) reaches the program its shell runs right now even when
+   * the shell traps it, as that program, a child in the same group, takes the
+   * signal at its default. Mirrors Python's `_signal_own`.
    */
-  private signalOwn(handle: ProcessHandle, signal: number, group: boolean): boolean | null {
+  private signalOwn(
+    handle: ProcessHandle,
+    signal: number,
+    group: boolean,
+    whole = false,
+  ): boolean | null {
     if (KEPT_SIGNALS.has(signal)) {
       // A kept signal the shell traps runs its action all the same
       // (`trap ... WINCH`), CONT going on as well; STOP is never caught, and
@@ -401,17 +423,18 @@ export class ProcessTable {
         if (!asyncContextIsolatesTasks) return null
         this.pause(handle)
       } else if (signal === SIGCONT) {
-        const held = this.resume(handle)
-        if (held !== null) return this.signalOwn(handle, held, group)
+        const held = this.resumeHeld(handle)
+        if (held !== null) return this.signalOwn(handle, ...held)
       }
       return true
     }
-    if (signal !== SIGKILL && this.holdSignal(handle, signal)) return true
+    if (signal !== SIGKILL && this.holdSignal(handle, signal, group, whole)) return true
     const catcher = handle.catcher
     if (signal !== SIGKILL && catcher !== null) {
       // A shell's ignore of a signal its process ignores anyway leaves it to
       // that, a group's included.
       const caught = catcher(signal, handle.record.id.pid)
+      if (caught === true && whole) handle.interrupt(signal)
       if (caught === true || (caught === false && !handle.ignores.has(signal))) return true
     }
     let found = true
@@ -440,8 +463,9 @@ export class ProcessTable {
    * before its children so a shell does not see its child die first, and
    * Mirage's own at once (`signalOwn`), deepest first, so a native program
    * knows the signal before the shell that waits for it stops. A runner that
-   * ignores it, a shell, hands it to the program it runs right now, unless a
-   * process of that program, a child a scan found, got it as sent. Mirrors
+   * ignores it, or traps it, a shell, hands it to the program it runs right
+   * now, unless a process of that program, a child a scan found or a native
+   * program it started, got it as sent and answers it itself. Mirrors
    * Python's `signal_members`.
    *
    * @param members the runners, deepest first.
@@ -454,15 +478,11 @@ export class ProcessTable {
     )
     const reached = new Set([...sending].filter(([, sent]) => sent !== null).map(([pid]) => pid))
     for (const member of members) {
-      if (
-        !reached.has(member.record.id.pid) &&
-        (!member.ignores.has(signal) ||
-          !members.some(
-            (other) =>
-              other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
-          ))
+      if (reached.has(member.record.id.pid)) continue
+      const took = members.some(
+        (other) => other.record.parent === member.record.id.pid && reached.has(other.record.id.pid),
       )
-        this.signalOwn(member, signal, true)
+      if (!member.ignores.has(signal) || !took) this.signalOwn(member, signal, true, !took)
     }
     await Promise.all([...sending.values()].filter((sent) => sent !== null))
   }

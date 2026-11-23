@@ -749,6 +749,24 @@ describe('MachineTable scans', () => {
     }
   }, 5000)
 
+  // A shell with a signal action of its own keeps its last program a child,
+  // so the program answers the group's signal as sent and the shell's action
+  // still runs once it ends.
+  it('runs a trapping shell action after its last program', async () => {
+    const box = new Handler('a', 15)
+    const ws = sleepers({ a: box })
+    try {
+      const said = await ws.shell(
+        'timeout --preserve-status 0.1 sh -c \'trap "exit 3" TERM; train 1\'',
+      )
+      expect(said.exitCode).toBe(3)
+      expect(new Set(box.sent.map(([, signum]) => signum))).toEqual(new Set([15]))
+    } finally {
+      box.finish()
+      await ws.close()
+    }
+  }, 5000)
+
   it("leaves a foreground timeout's shell's background program", async () => {
     const box = new Handler('a', 10)
     const ws = sleepers({ a: box })

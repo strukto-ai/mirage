@@ -277,6 +277,9 @@ export async function handleBash(
     // the shell's `$$`, whose own subshells and programs it forks.
     const runner = currentCaller().process
     if (runner !== null) {
+      // The shell runs commands of its own, so its first program is not the
+      // one the runner was started for: only its last runs in its place.
+      runner.oneCommand = false
       session.shellPid = runner.record.id.pid
       seedParent(session, runner.record.parent ?? 0)
       seedShell(session, true)
@@ -333,7 +336,7 @@ async function inProcess(
   // A program that runs it (`xargs sh -c`) is its parent, not the shell.
   const node = caller.session.lineNode
   if (node !== null && !isProgramInvocation(caller.session)) {
-    reportReaped(caller.frame, [[process, code, node]])
+    reportReaped(caller, [[process, code, node]])
   }
   return ran ?? new IOResult({ exitCode: code })
 }

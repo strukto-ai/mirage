@@ -23,13 +23,19 @@ from mirage.workspace.types import ExecutionNode
 
 class FakeShell:
     def __init__(
-        self, delay: float = 0.0, exit_code: int = 0, early: bytes = b""
+        self,
+        delay: float = 0.0,
+        exit_code: int = 0,
+        early: bytes = b"",
+        killed: int | None = None,
     ):
         self.lines: list[str] = []
         self.stdins: list[bytes | None] = []
         self.delay = delay
         self.exit_code = exit_code
         self.early = early
+        # The signal a native program the line runs dies of once it slept.
+        self.killed = killed
 
     async def __call__(
         self,
@@ -49,6 +55,9 @@ class FakeShell:
             _, signal = await shell.program(lambda: asyncio.sleep(self.delay))
             if signal is not None:
                 return IOResult(exit_code=128 + signal)
+            if self.killed is not None:
+                shell.program_signaled(self.killed)
+                return IOResult(exit_code=128 + self.killed)
         return IOResult(stdout=b"done\n", exit_code=self.exit_code)
 
 
@@ -330,9 +339,30 @@ async def test_signal_outcomes(args, code, said):
 )
 async def test_ignored_signals_let_the_command_finish(args, code):
     shell = FakeShell(delay=0.2, exit_code=3)
-    stdout, io, _ = await timed(shell, [*args, "0.05", "sh"], make_context())
+    stdout, io, _ = await timed(
+        shell, [*args, "0.05", "sleep"], make_context()
+    )
     assert io.exit_code == code
     assert stdout == b"done\n"
+
+
+# A program that outlives the deadline's signal and then dies of another
+# ends timeout with KILL's status, as GNU's does, and with the signal under
+# --preserve-status; any other signal is the deadline's 124.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args, killed, code",
+    [
+        (["-s", "CONT"], 9, 137),
+        (["-p", "-s", "CONT"], 9, 137),
+        (["-s", "CONT"], 10, 124),
+        (["-p", "-s", "CONT"], 10, 138),
+    ],
+)
+async def test_a_program_signalled_after_the_deadline(args, killed, code):
+    shell = FakeShell(delay=0.2, killed=killed)
+    _, io, _ = await timed(shell, [*args, "0.05", "sleep"], make_context())
+    assert io.exit_code == code
 
 
 @pytest.mark.asyncio
@@ -340,7 +370,7 @@ async def test_stopped_timeout_never_returns():
     shell = FakeShell(delay=0.05)
     with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(
-            timed(shell, ["-s", "STOP", "0.01", "sh"], make_context()),
+            timed(shell, ["-s", "STOP", "0.01", "sleep"], make_context()),
             timeout=0.3,
         )
 

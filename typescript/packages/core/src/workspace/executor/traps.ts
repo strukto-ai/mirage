@@ -85,6 +85,16 @@ export function ignoredSignals(session: SessionState): ReadonlySet<number> {
 }
 
 /**
+ * Whether the shell has an action of its own for `signal` (`trap ACTION
+ * USR1`), which bash's report of a foreground child the signal ended names
+ * alone; an action it only lists, its parent's, is not its own. Mirrors
+ * Python's own_action.
+ */
+export function ownAction(session: SessionState, signal: number): boolean {
+  return (session.signalTraps.get(signal) ?? '') !== '' && !session.signalTrapsInherited
+}
+
+/**
  * Start a background job's shell, or a stage of a background pipeline: with
  * job control off, one that runs commands of its own (`{ trap -p; } &`) lists
  * the INT it ignores, as bash's does, and may trap or reset it; one that runs

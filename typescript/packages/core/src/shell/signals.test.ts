@@ -71,6 +71,15 @@ describe('signals', () => {
     )
   })
 
+  it('names a trapped signal alone in the foreground', () => {
+    expect(signalReport(VOICE, [[9, 138, 10, 'sleep 3']], true, true)).toBe(
+      'User defined signal 1\n',
+    )
+    expect(signalReport(VOICE, [[9, 137, 9, 'sleep 3']], true, true)).toBe('Killed\n')
+    expect(signalReport(VOICE, [[9, 138, 10, 'sleep 3']], false, true)).toBe('')
+    expect(signalReport(VOICE, [[9, 130, 2, 'sleep 3']], true, true)).toBe('')
+  })
+
   it('lists a pipeline under its first stage', () => {
     expect(
       signalReport(
