@@ -18,21 +18,7 @@ import { singleQuote } from '../../utils/quote.ts'
 import { COPIED } from '../posix/constants.ts'
 import { copyTreeCommand } from '../posix/copy.ts'
 import { refusal } from '../posix/errors.ts'
-import { runChecked, machinePath } from './utils.ts'
-
-/**
- * A copy's line, the new name's folder made first when asked.
- *
- * @param line the copy.
- * @param target the new name's path on the machine.
- * @param makeParent make its folder there first.
- */
-function inFolder(line: string, target: string, makeParent: boolean): string {
-  if (!makeParent) return line
-  const cut = target.lastIndexOf('/')
-  const parent = cut > 0 ? target.slice(0, cut) : '/'
-  return `mkdir -p -- ${singleQuote(parent)} && ${line}`
-}
+import { inFolder, runChecked, machinePath } from './utils.ts'
 
 /**
  * Copy a file on the source's machine.
@@ -51,7 +37,30 @@ export async function copy(
   dst: PathSpec,
   makeParent = false,
 ): Promise<void> {
-  const old = singleQuote(machinePath(accessor, src))
+  await copyFrom(accessor, accessor, machine, src, dst, makeParent)
+}
+
+/**
+ * Copy a file another machine mount shows onto this one, on the machine
+ * holding it, which both mounts show: the bytes stay there.
+ *
+ * @param source the source mount's machines.
+ * @param accessor this mount's machines.
+ * @param machine the source's machine.
+ * @param src the source, on its mount.
+ * @param dst the copy, on this mount.
+ * @param makeParent make the copy's folder there first, when only another
+ *   machine holds it.
+ */
+export async function copyFrom(
+  source: MachineAccessor,
+  accessor: MachineAccessor,
+  machine: string,
+  src: PathSpec,
+  dst: PathSpec,
+  makeParent = false,
+): Promise<void> {
+  const old = singleQuote(machinePath(source, src))
   const fresh = machinePath(accessor, dst)
   const line = inFolder(`cp -T -- ${old} ${singleQuote(fresh)}`, fresh, makeParent)
   await runChecked(accessor, machine, line, dst)

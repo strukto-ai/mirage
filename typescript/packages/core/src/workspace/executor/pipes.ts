@@ -39,6 +39,7 @@ import { concat } from '../../utils/bytes.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { ExecuteNodeDeps } from './deps.ts'
+import type { PipeWriter } from '../frame.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { StatementRecorder } from '../node/program.ts'
@@ -92,6 +93,48 @@ function shellStage(cmd: TSNodeLike, session: SessionState): boolean {
   return cmd.type === NT.SUBSHELL || nestedShell(cmd, session)
 }
 
+/**
+ * The writer of the pipe each stage reads, by its program's words, each
+ * linked to the writer of the pipe that program reads in turn
+ * (`PipeWriter.upstream`), so the stage after a middle one places it as its
+ * own run does; the first stage keeps the one it was handed. Mirrors
+ * Python's `_stage_writers`.
+ *
+ * @param commands the stages.
+ * @param inputs the input each stage reads.
+ * @param first the writer of the pipe the first stage reads, if any.
+ * @param session the shell running the pipeline.
+ * @param named the stages run as processes, whose programs' words are known.
+ */
+function stageWriters(
+  commands: readonly TSNodeLike[],
+  inputs: readonly (ByteSource | null)[],
+  first: PipeWriter | null,
+  session: SessionState,
+  named: boolean,
+): (PipeWriter | null)[] {
+  const writers: (PipeWriter | null)[] = [first]
+  for (let i = 1; i < commands.length; i++) {
+    const before = commands[i - 1]
+    const words = before === undefined || !named ? null : programWords(before, session)
+    const stream = inputs[i] ?? null
+    writers.push(
+      words === null || words.length === 0 || stream === null
+        ? null
+        : {
+            pipe: stream,
+            words,
+            cwd: session.cwd,
+            placed: false,
+            machine: null,
+            pinned: false,
+            upstream: writers[i - 1] ?? null,
+          },
+    )
+  }
+  return writers
+}
+
 export async function handlePipe(
   executeNode: ExecuteNodeFn,
   commands: readonly TSNodeLike[],
@@ -133,6 +176,14 @@ export async function handlePipe(
   parentSignal?.addEventListener('abort', onAbort, { once: true })
   if (parentSignal?.aborted === true) onAbort()
 
+  const inputs: (ByteSource | null)[] = [stdin, ...pipes.slice(0, -1).map((pipe) => pipe.stream())]
+  const writers = stageWriters(
+    commands,
+    inputs,
+    context.frame.pipeWriterOf(stdin),
+    session,
+    processes !== undefined,
+  )
   let failed = false
   const tasks: Promise<void>[] = []
   const stages: (ProcessHandle | null)[] = commands.map(() => null)
@@ -164,17 +215,11 @@ export async function handlePipe(
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
-    const input = i === 0 ? stdin : (upstream?.stream() ?? null)
+    const input = inputs[i] ?? null
     const fedBy = childEvaluation.frame.stdinWriter
-    const before = commands[i - 1]
     if (i > 0) {
       childEvaluation.frame.stdin = input
-      const words =
-        before === undefined || processes === undefined ? null : programWords(before, session)
-      childEvaluation.frame.stdinWriter =
-        words === null || words.length === 0 || input === null
-          ? null
-          : { pipe: input, words, cwd: session.cwd, placed: false, machine: null }
+      childEvaluation.frame.stdinWriter = writers[i] ?? null
     }
     const run = async (): Promise<void> => {
       let io = new IOResult()

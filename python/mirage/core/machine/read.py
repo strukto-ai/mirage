@@ -12,8 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
+
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine.utils import machine_path, run_checked
+from mirage.core.posix.errors import refusal
 from mirage.core.posix.read import line_count as posix_line_count
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -56,6 +60,33 @@ async def read(
     )
     record("read", path.virtual, "machine", len(data), timer)
     return data
+
+
+async def read_stream(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> AsyncGenerator[bytes, None]:
+    """A whole file's bytes on its machine, handed over as they are read
+    and never held whole, so a file of any size goes to a store in the
+    memory of a few chunks.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine holding the file.
+        path (PathSpec): the file.
+    """
+    timer = start_op()
+    sent = 0
+    async with aclosing(
+        accessor.stream(
+            machine,
+            read_command(machine_path(accessor, path), 0, None),
+            lambda _status, err: refusal(path, err),
+        )
+    ) as chunks:
+        async for chunk in chunks:
+            sent += len(chunk)
+            yield chunk
+    record("read", path.virtual, "machine", sent, timer)
 
 
 async def first_lines(

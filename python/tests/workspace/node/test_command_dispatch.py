@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from unittest.mock import ANY, patch
 
 import pytest
@@ -34,6 +35,8 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.node.command_dispatch import parser_aliases
 from tests.fixtures.command_trees import trees
+from tests.fixtures.machine import ScriptedMachine
+from tests.fixtures.machine_files import FakeFiles, two
 
 
 def _ws() -> Workspace:
@@ -1105,3 +1108,80 @@ async def test_a_function_runs_no_words_the_builtin_would_have_run(
     assert r.exit_code == 0
     refused = await ws.shell("command timeout 1 rm /data/f", session_id="s")
     assert refused.exit_code == 126
+
+
+@pytest.mark.asyncio
+async def test_a_program_reads_no_pipe_a_program_on_another_machine_writes():
+    a = FakeFiles(programs=("gen",))
+    b = FakeFiles(programs=("sink",))
+    ws = two(a, b)
+    done = await ws.shell("gen | sink")
+    assert done.exit_code == 126
+    assert await done.stderr_str() == "sink: Permission denied\n"
+    assert done.decision is not None
+    assert done.decision.reason == (
+        "machine a's bytes do not go to machine b: copy them through a store"
+    )
+    assert b.ran == []
+    assert (await ws.shell("gen | wc -l")).exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_between_programs_the_config_pins_to_two_machines_streams():
+    a = FakeFiles(programs=("gen",))
+    b = FakeFiles(programs=("sink",))
+    first = ScriptedMachine("a", a.answer)
+    first.config = replace(first.config, captures=("gen",))
+    second = ScriptedMachine("b", b.answer)
+    second.config = replace(second.config, captures=("sink",))
+    ws = Workspace(
+        {}, mode=MountMode.WRITE, machines={"a": first, "b": second}
+    )
+    done = await ws.shell("gen | sink")
+    assert done.exit_code == 0
+    assert await done.stdout_str() == "ran\n"
+    assert (a.ran, b.ran) == (["gen"], ["sink"])
+    await ws.close()
+
+
+class RoutesSink(Policy):
+    """Routes ``sink`` to machine ``b``."""
+
+    def pre_command(self, ctx):
+        return Route(machine="b") if ctx.command == "sink" else None
+
+
+@pytest.mark.asyncio
+async def test_the_pipe_check_judges_the_input_and_machine_a_reader_ends_with():
+    a = FakeFiles(programs=("gen", "both"))
+    b = FakeFiles({"/srv/b/sink": b"#!/bin/sh\n"}, programs=("sink", "both"))
+    ws = two(
+        a,
+        b,
+        mounts={"/srv/b": "@b", "/ram": RAMVFS()},
+        policies=[RoutesSink()],
+    )
+    assert (await ws.shell("echo in > /ram/input")).exit_code == 0
+    assert (await ws.shell("gen | sink < /ram/input")).exit_code == 0
+    path = await ws.shell("gen | /srv/b/sink")
+    assert path.exit_code == 126
+    assert await path.stderr_str() == "/srv/b/sink: Permission denied\n"
+    routed = await ws.shell("gen | sink")
+    assert routed.exit_code == 126
+    assert await routed.stderr_str() == "sink: Permission denied\n"
+    assert b.ran == ["sink"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_handed_reader_s_redirect_lands_on_its_writer_s_machine():
+    a = FakeFiles(programs=("uname",))
+    b = FakeFiles(programs=("gen", "uname"))
+    b.dirs.add("/srv/b")
+    ws = two(a, b, mounts={"/srv/b": "@b"})
+    done = await ws.shell("gen | uname -s > /srv/b/out")
+    assert (done.exit_code, await done.stderr_str()) == (0, "")
+    assert (a.ran, b.ran) == ([], ["gen", "uname -s"])
+    assert b.files["/srv/b/out"] == b"ran\n"
+    await ws.close()

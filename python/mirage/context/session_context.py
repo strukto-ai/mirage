@@ -207,6 +207,9 @@ class Caller:
         joins_errors (bool): whether the running program's stderr goes
             where its stdout goes (``2>&1``), so a machine joins the two
             where the program writes them.
+        copied_from (set[str] | None): the machines whose files the copy
+            being made by a read and a write has read (``copying``),
+            where its write lands; None outside such a copy.
     """
 
     session: SessionState | None = None
@@ -257,6 +260,7 @@ class Caller:
     machine: MachineName | None = None
     preferred_machine: str | None = None
     joins_errors: bool = False
+    copied_from: set[str] | None = None
 
     @property
     def visibility(self) -> Visibility | None:
@@ -350,6 +354,15 @@ def _bind_changes(**changes: Any) -> CallerToken:
     after = before.changed(changes)
     _caller_storage.set(after)
     return CallerToken(before, after)
+
+
+def copying() -> CallerToken:
+    """Start noting the machines whose files a copy made by a read and a
+    write reads (``Caller.copied_from``), so the write lands on that
+    machine or is refused, as a copy one machine makes would be. Undone
+    with ``reset_caller``.
+    """
+    return _bind_changes(copied_from=set())
 
 
 def reset_caller(token: CallerToken) -> None:

@@ -384,3 +384,37 @@ describe('searchedMachine', () => {
     await ws.close()
   })
 })
+
+describe('a pipe', () => {
+  it("runs the program reading it on its writer's machine", async () => {
+    const a = new FakeFiles({}, ['both'])
+    const b = new FakeFiles({}, ['gen', 'both'])
+    const ws = two(a, b)
+    expect((await ws.shell('gen | both')).exitCode).toBe(0)
+    expect((await ws.shell('both')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([['both'], ['gen', 'both']])
+    await ws.close()
+  })
+})
+
+describe('a middle stage', () => {
+  it('is placed where its own writer put it', async () => {
+    const a = new FakeFiles({}, ['filter'])
+    const b = new FakeFiles({}, ['gen', 'filter', 'sink'])
+    const ws = two(a, b)
+    expect((await ws.shell('gen | filter | sink')).exitCode).toBe(0)
+    expect([a.ran, b.ran]).toEqual([[], ['gen', 'filter', 'sink']])
+    await ws.close()
+  })
+
+  it('refuses a reader only another machine has', async () => {
+    const a = new FakeFiles({}, ['filter', 'sink'])
+    const b = new FakeFiles({}, ['gen', 'filter'])
+    const ws = two(a, b)
+    const done = await ws.shell('gen | filter | sink')
+    expect(done.exitCode).toBe(126)
+    expect(new TextDecoder().decode(done.stderr)).toBe('sink: Permission denied\n')
+    expect(a.ran).toEqual([])
+    await ws.close()
+  })
+})

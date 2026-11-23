@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
-import { currentCaller } from '../../context/session_context.ts'
-import { enoent, enotdir } from '../../errors/fs.ts'
+import { currentCaller, noteDecision } from '../../context/session_context.ts'
+import { eacces, enoent, enotdir } from '../../errors/fs.ts'
+import type { FsError } from '../../errors/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { KERNEL_VIEWS } from './constants.ts'
 import { hiddenMachines, statEntry } from './stat.ts'
 import { Holder } from './types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { folderOf, machinePath } from './utils.ts'
 
 /**
@@ -33,6 +35,95 @@ export function runningMachine(accessor: MachineAccessor): string | null {
   const { machine } = currentCaller()
   if (machine === null || !accessor.names().includes(machine.name)) return null
   return machine.name
+}
+
+/**
+ * Why bytes from one machine do not go to another, for the decision record
+ * of the refusal (stderr says `Permission denied`).
+ *
+ * @param source the machine the bytes come from.
+ * @param target the machine they would go to.
+ */
+export function crossingReason(source: string, target: string): string {
+  return `machine ${source}'s bytes do not go to machine ${target}: copy them through a store`
+}
+
+/**
+ * The refusal of bytes going from one machine to another: EACCES for the
+ * file, the reason on the line's decision record.
+ *
+ * @param source the machine the bytes come from.
+ * @param target the machine they would go to.
+ * @param path the file the refusal names.
+ */
+export function crossingRefused(source: string, target: string, path: PathSpec): FsError {
+  noteDecision({
+    kind: 'deny',
+    reason: crossingReason(source, target),
+    policy: '',
+    askId: null,
+  })
+  return eacces(path)
+}
+
+/**
+ * Refuse bytes going from one machine to another through a program the line
+ * runs on a machine: a file of `machine` it reads (`prog < /srv/b/in`),
+ * or its output landing there (`prog > /srv/b/out`), when the program is
+ * on another of the workspace's machines. Bytes go between a machine and a
+ * store, never from one machine to another. The refusal is `Permission
+ * denied`, its reason on the line's decision record.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the op reads from or lands on.
+ * @param path the file.
+ * @param reads the program reads the file, whose bytes go from `machine`
+ *   to it; else its bytes land on `machine`.
+ * @throws FsError the program runs on another machine.
+ */
+export function refuseCrossing(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+  reads = false,
+): void {
+  const caller = currentCaller()
+  const running = caller.machine
+  if (running !== null && running.name !== machine && accessor.isMachine(running.name)) {
+    if (reads) throw crossingRefused(machine, running.name, path)
+    throw crossingRefused(running.name, machine, path)
+  }
+  if (reads) return
+  for (const source of [...(caller.copiedFrom ?? [])].sort(compareCodePoints)) {
+    if (source !== machine && accessor.isMachine(source))
+      throw crossingRefused(source, machine, path)
+  }
+}
+
+/**
+ * The machine whose file the copy being made by a read and a write read
+ * (`Caller.copiedFrom`), when it read one machine's file and that machine is
+ * one of the mount's; null for any other write. Mirrors Python's
+ * `copy_machine`.
+ *
+ * @param accessor the mount's machines.
+ */
+export function copyMachine(accessor: MachineAccessor): string | null {
+  const copied = currentCaller().copiedFrom
+  if (copied?.size !== 1) return null
+  const [machine] = copied
+  return machine !== undefined && accessor.names().includes(machine) ? machine : null
+}
+
+/**
+ * Note a machine whose file the copy being made by a read and a write reads
+ * (`Caller.copiedFrom`); nothing outside such a copy. Mirrors Python's
+ * `note_copy_source`.
+ *
+ * @param machine the machine holding the file read.
+ */
+export function noteCopySource(machine: string): void {
+  currentCaller().copiedFrom?.add(machine)
 }
 
 /**
@@ -251,7 +342,8 @@ export async function writeMachine(
   path: PathSpec,
   opts: { replaces?: boolean; parents?: boolean } = {},
 ): Promise<string> {
-  const running = opts.replaces === true ? runningMachine(accessor) : null
+  const running =
+    opts.replaces === true ? (runningMachine(accessor) ?? copyMachine(accessor)) : null
   if (running === null) {
     const held = await holders(accessor, path)
     if (held.length > 0) return chosen(accessor, held).machine

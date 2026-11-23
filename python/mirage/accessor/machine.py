@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator, Callable
+from contextlib import aclosing
 from functools import partial
 
 from mirage.accessor.base import Accessor
@@ -134,6 +136,49 @@ class MachineAccessor(Accessor):
         if handle.joins_streams and done.exit_code:
             return done.exit_code, b"", done.stdout
         return done.exit_code, done.stdout, done.stderr
+
+    async def stream(
+        self,
+        machine: str,
+        command: str,
+        failed: Callable[[int | None, bytes], BaseException],
+    ) -> AsyncGenerator[bytes, None]:
+        """Run one shell line on a machine, at ``/`` in its environment,
+        its output handed over as it is read and never held whole
+        (``MachineHandle.stream_line``).
+
+        Args:
+            machine (str): the machine's name.
+            command (str): the line, as ``/bin/sh -c`` reads it.
+            failed (Callable[[int | None, bytes], BaseException]): the
+                error of a line that ended with this status and stderr.
+        """
+        handle = self.handle(machine)
+        await handle.ensure_connected()
+        async with aclosing(
+            handle.stream_line(command, dict(handle.config.env), "/", failed)
+        ) as lines:
+            async for chunk in lines:
+                yield chunk
+
+    def streams(self, machine: str) -> bool:
+        """Whether a machine's output can be read as it comes: not on a
+        machine whose exec merges its output and its error output
+        (Daytona), where only the end of a line tells the two apart.
+
+        Args:
+            machine (str): the machine's name.
+        """
+        return not self.handle(machine).joins_streams
+
+    def is_machine(self, name: str) -> bool:
+        """Whether a name is one of the workspace's machines, the ones a
+        program the line runs can be on.
+
+        Args:
+            name (str): a machine's name under ``machines:``.
+        """
+        return self._machines is not None and name in self._machines.names()
 
     def runner(self, machine: str) -> RunFn:
         """``run`` on one machine, as the shared POSIX ops take it.

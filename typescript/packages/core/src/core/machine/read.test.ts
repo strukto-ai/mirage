@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { failed, ok, ScriptedMachine } from '../../../tests/fixtures/machine.ts'
 import { bound, spec } from '../../../tests/fixtures/machine_files.ts'
-import { firstLines, lastLines, lineCount, read, readCommand } from './read.ts'
+import { firstLines, lastLines, lineCount, read, readCommand, readStream } from './read.ts'
 
 describe('readCommand', () => {
   it.each<[number, number | null, string]>([
@@ -72,5 +72,26 @@ describe('lines and counts', () => {
       "tail -n 4 -- '/tmp/x.txt'",
       "env LC_ALL=C wc -l < '/tmp/x.txt'",
     ])
+  })
+})
+
+describe('readStream', () => {
+  it('hands the file over in chunks', async () => {
+    const machine = new ScriptedMachine('box', () => ok('x'.repeat(50_000)))
+    const chunks: Uint8Array[] = []
+    for await (const chunk of readStream(bound([machine], { root: '/srv' }), 'box', spec('/x.bin')))
+      chunks.push(chunk)
+    expect(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)).toBe(50_000)
+    expect(chunks.length).toBeGreaterThan(1)
+    expect(machine.lines).toEqual(["cat -- '/srv/x.bin'"])
+  })
+
+  it('raises what the tool said when it fails', async () => {
+    const said = 'cat: /tmp/x.txt: No such file or directory\n'
+    const machine = new ScriptedMachine('box', () => failed(said))
+    const drain = async (): Promise<void> => {
+      for await (const _ of readStream(bound([machine]), 'box', spec('/x.txt'))) void _
+    }
+    await expect(drain()).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

@@ -24,6 +24,7 @@ import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
 import { PipeClosed } from '../io/errors.ts'
+import { BytePipe } from '../io/pipe.ts'
 import type { ByteSource } from '../io/types.ts'
 import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
@@ -864,6 +865,67 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
         bounded,
       ),
     )
+  }
+
+  /**
+   * Execute one of Mirage's own shell lines on the machine, as `/bin/sh
+   * -c`, and hand its output over as it is read, never held whole: a reader
+   * that falls behind holds the line back, and one that stops early stops
+   * it. A line that fails, by its status or by what it says on stderr,
+   * throws `failed`'s error once the output before it has been read.
+   *
+   * @param line the raw shell line.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param failed the error of a line that ended with this status and
+   *   stderr.
+   * @param signal stops the line, a read waiting on it included.
+   */
+  async *streamLine(
+    line: string,
+    env: Record<string, string>,
+    cwd: string,
+    failed: (status: number, err: Uint8Array) => Error,
+    signal?: AbortSignal,
+  ): AsyncGenerator<Uint8Array> {
+    const pipe = new BytePipe()
+    const said: Uint8Array[] = []
+    const stop = new AbortController()
+    const cancel = (): void => {
+      stop.abort(signal?.reason)
+    }
+    if (signal?.aborted === true) cancel()
+    else signal?.addEventListener('abort', cancel, { once: true })
+    const ran = this.busyWith(() =>
+      this.execArgv(
+        ['/bin/sh', '-c', line],
+        null,
+        env,
+        cwd,
+        (chunk) => pipe.write(chunk, stop.signal),
+        (chunk) => {
+          said.push(chunk)
+          return Promise.resolve()
+        },
+        stop.signal,
+      ),
+    ).then(
+      (done) => {
+        const err = concat(said)
+        pipe.end(done.exitCode !== 0 || err.byteLength > 0 ? failed(done.exitCode, err) : undefined)
+      },
+      (error: unknown) => {
+        pipe.end(error)
+      },
+    )
+    try {
+      yield* pipe.stream()
+    } finally {
+      signal?.removeEventListener('abort', cancel)
+      pipe.closeReader()
+      stop.abort()
+      await ran
+    }
   }
 
   /**

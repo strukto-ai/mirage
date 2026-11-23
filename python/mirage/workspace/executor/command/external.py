@@ -183,6 +183,7 @@ async def run_external(
             command=argv.name,
             prefixes=tuple(m.prefix for m in registry.mounts()),
             native=True,
+            machine=runtime.machine,
         ),
         to_sink if sink is not None else None,
         stdin,

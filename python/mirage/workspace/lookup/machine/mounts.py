@@ -245,6 +245,20 @@ def folder_machines(folder: str, registry: MountRegistry) -> list[str]:
     return mount_machines(entry, registry)
 
 
+def machine_names(registry: MountRegistry) -> set[str]:
+    """The machines the workspace runs programs on, by their names under
+    ``machines:``.
+
+    Args:
+        registry (MountRegistry): the workspace's mounts and machines.
+    """
+    return {
+        e.default_machine
+        for e in registry.runtime_entries
+        if isinstance(e, RemoteRuntime)
+    }
+
+
 def several_machines(registry: MountRegistry) -> bool:
     """Whether the workspace runs programs on more than one machine, the
     only case where which machine a command runs on decides where a new
@@ -253,12 +267,7 @@ def several_machines(registry: MountRegistry) -> bool:
     Args:
         registry (MountRegistry): the workspace's mounts and machines.
     """
-    machines = {
-        e.default_machine
-        for e in registry.runtime_entries
-        if isinstance(e, RemoteRuntime)
-    }
-    return len(machines) > 1
+    return len(machine_names(registry)) > 1
 
 
 def path_on_mount(entry: MountEntry, path: str) -> PathSpec:

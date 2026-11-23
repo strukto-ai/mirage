@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { crossingReason } from '../../core/machine/place.ts'
+import type { PipeWriter } from '../frame.ts'
 import { shellVoice } from '../../shell/voice.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
@@ -62,7 +64,7 @@ import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { NodeType as NT } from '../../shell/types.ts'
+import { NodeType as NT, RedirectKind } from '../../shell/types.ts'
 import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
@@ -137,10 +139,10 @@ import { binProgram } from '../lookup/machine/answers.ts'
 import { factMachine } from '../lookup/machine/about.ts'
 import { operandMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
-import { severalMachines } from '../lookup/machine/mounts.ts'
-import { asksMachines, preferredMachine } from '../lookup/machine/preferred.ts'
+import { machineNames, severalMachines } from '../lookup/machine/mounts.ts'
+import { asksMachines, pipeWriterMachine, preferredMachine } from '../lookup/machine/preferred.ts'
 import { programMachine } from '../lookup/machine/program.ts'
-import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
+import { boundTo, configPins, isSearched, searchedMachine } from '../lookup/machine/search.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -977,6 +979,17 @@ async function runArgv(
         const command = await bindCommand(argv, routedDeps, context, given, (install) => {
           releaseInstall = install.activity.acquire()
         })
+        const crossed = pipeCrossing(
+          name,
+          argv,
+          command.target.kind === 'wrapper' ? machine : targetMachine(command.target),
+          context.frame.pipeWriterOf(given),
+          registry,
+          routedByPolicy() ||
+            (unplaced !== undefined &&
+              configPins([name, ...argv.args], session, registry, unplaced)),
+        )
+        if (crossed !== null) return crossed
         return await runResolved(
           routedDeps,
           recurse,
@@ -1175,6 +1188,9 @@ async function runArgv(
   // the holder of a program file and the machine a command prefers each ask
   // the machines, so the command is admitted once, before any of them.
   const unplaced = context.frame.routing
+  // The machine the command's program runs on, placed below before the
+  // redirects open; the pipe check reads it for a wrapper.
+  let machine: MachineName | null = null
   const searched = searchedProgram(
     name,
     argv.args,
@@ -1183,11 +1199,17 @@ async function runArgv(
     unplaced,
     namespace.sessionLinks(session),
   )
-  const byPath =
-    name.includes('/') && (runner !== null || redirects.length > 0) && severalMachines(registry)
+  const placedFirst = (runner !== null || redirects.length > 0) && severalMachines(registry)
+  const byPath = name.includes('/') && placedFirst
+  const handed =
+    placedFirst &&
+    !name.includes('/') &&
+    !inputRedirected(runner) &&
+    mayRunOnMachine(name, argv, session, registry, unplaced)
   if (
     searched !== null ||
     byPath ||
+    handed ||
     asksMachines(
       session,
       registry,
@@ -1201,7 +1223,19 @@ async function runArgv(
   }
   const routedByPolicy = (): boolean => (admitted?.route ?? null) !== null
   try {
-    if (searched !== null && unplaced !== undefined && !routedByPolicy())
+    const fedBy = context.frame.stdinWriter
+    if (searched !== null && unplaced !== undefined && !routedByPolicy()) {
+      const writer =
+        fedBy !== null && unplaced.machine === undefined
+          ? await pipeWriterMachine(
+              fedBy,
+              session,
+              registry,
+              unplaced,
+              deps.namespace,
+              deps.dispatch,
+            )
+          : null
       context.frame.routing = await searchedRouting(
         searched,
         argv,
@@ -1209,22 +1243,29 @@ async function runArgv(
         registry,
         unplaced,
         prefixPath,
+        writer,
       )
-    let machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
-    if (byPath) {
-      const [held] = await heldMachine(argv, deps, context, stdin)
-      if (held?.runtime) machine = held.runtime.machine
     }
+    machine = runningMachine(name, argv.args, session, registry, context.frame.routing)
     const preferred = await preferredMachine(
       session,
       registry,
       context.frame.routing,
-      context.frame.stdinWriter,
+      fedBy,
       deps.namespace,
       deps.dispatch,
       context.frame.folderHolders,
     )
     const outer = currentCaller()
+    if (byPath || handed) {
+      const [held] =
+        preferred === outer.preferredMachine
+          ? await heldMachine(argv, deps, context, stdin)
+          : await bindCaller({ ...outer, preferredMachine: preferred }, () =>
+              heldMachine(argv, deps, context, stdin),
+            )
+      if (held?.runtime) machine = held.runtime.machine
+    }
     if (
       (machine?.toString() ?? null) === (outer.machine?.toString() ?? null) &&
       preferred === outer.preferredMachine
@@ -1274,6 +1315,7 @@ async function searchedRouting(
   registry: MountRegistry,
   routing: RouteDecision<Runtime>,
   prefixPath: string | null = null,
+  writer: string | null = null,
 ): Promise<RouteDecision<Runtime>> {
   const paths = argv.operands
     .filter((w): w is PathSpec => w instanceof PathSpec)
@@ -1287,8 +1329,91 @@ async function searchedRouting(
     null,
     prefixPath,
     true,
+    writer,
   )
   return found === null ? routing : boundTo(routing, program, found)
+}
+
+/**
+ * Whether the command's own redirects give it the input it reads (`< f`, a
+ * here-document, `<&3`), which decides whether a machine may run it whole
+ * (`operandMachine` keeps a command anything is piped into) only once the
+ * redirects open. Mirrors Python's `_input_redirected`.
+ */
+function inputRedirected(runner: RedirectRunner | null): boolean {
+  const bound = currentCaller().redirects
+  if (runner === null || bound?.[2] !== runner) return false
+  return bound[3].some((r) => r.fd === 0 && INPUT_REDIRECTS.has(r.kind))
+}
+
+/**
+ * Whether a command is one of Mirage's own that a machine may run whole
+ * (`heldMachine`): a mount command, or a namespace command a machine
+ * answers. Asked from its words alone, before any machine. Mirrors Python's
+ * `_may_run_on_machine`.
+ */
+function mayRunOnMachine(
+  name: string,
+  argv: Argv,
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): boolean {
+  if (routing === undefined) return false
+  const consumer = resolveTarget(name, argv.args, session, registry, routing).kind
+  return (
+    consumer === Consumer.MOUNT || (consumer === Consumer.NAMESPACE && MACHINE_ANSWERED.has(name))
+  )
+}
+
+/** The redirects that give a command the input it reads on descriptor 0. */
+const INPUT_REDIRECTS: ReadonlySet<string> = new Set([
+  RedirectKind.STDIN,
+  RedirectKind.READWRITE,
+  RedirectKind.HEREDOC,
+  RedirectKind.HERESTRING,
+  RedirectKind.DUP_INPUT,
+])
+
+/**
+ * The machine a bound command's program runs on: its runtime's, or for a
+ * program named by a path no machine holds, its fallback's; null for a
+ * command Mirage runs itself. Mirrors Python's `_target_machine`.
+ */
+function targetMachine(target: ResolvedCommand['target']): MachineName | null {
+  const external = target.kind === 'path' ? target.fallback : target
+  if (external?.kind !== Consumer.EXTERNAL) return null
+  const runtime = external.runtime
+  if (runtime === null || runtime.reach === 'workspace') return null
+  return runtime.machine
+}
+
+/**
+ * The refusal of a program that would read, on one machine, the pipe a
+ * program on another machine writes, where Mirage picked the machine of
+ * either (`gen | sink`, `sink` on another machine alone): bytes go between a machine and
+ * a store, never from one machine to another. bash's `<name>: Permission
+ * denied` at 126, the reason on the decision record. Null for any other
+ * command: one Mirage runs itself, one on its writer's machine, a pipe
+ * Mirage writes, a writer not placed (the line names a machine), and a pipe
+ * between two programs whose machines the config names (`configPins`),
+ * which streams. `pinned` says the config, or a policy's route, names the
+ * program's machine. Mirrors Python's `_pipe_crossing`.
+ */
+function pipeCrossing(
+  name: string,
+  argv: Argv,
+  machine: MachineName | null,
+  fedBy: PipeWriter | null,
+  registry: MountRegistry,
+  pinned: boolean,
+): RedirectResult | null {
+  if (machine === null || fedBy?.machine == null) return null
+  if (pinned && fedBy.pinned) return null
+  if (fedBy.machine === machine.name || !machineNames(registry).has(machine.name)) return null
+  const deny: Deny = { kind: 'deny', reason: crossingReason(fedBy.machine, machine.name) }
+  const [stderr, exitCode] = renderDeny(name, deny)
+  return refused([name, ...argv.args].join(' '), { stderr, exitCode, decision: decisionOf(deny) })
 }
 
 /**

@@ -13,26 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import machine_path, run_checked
+from mirage.core.machine.utils import in_folder, machine_path, run_checked
 from mirage.core.posix.constants import COPIED
 from mirage.core.posix.copy import copy_tree_command
 from mirage.core.posix.errors import refusal
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
-
-
-def _in_folder(line: str, target: str, make_parent: bool) -> str:
-    """A copy's line, the new name's folder made first when asked.
-
-    Args:
-        line (str): the copy.
-        target (str): the new name's path on the machine.
-        make_parent (bool): make its folder there first.
-    """
-    if not make_parent:
-        return line
-    parent = target.rsplit("/", 1)[0] or "/"
-    return f"mkdir -p -- {single_quote(parent)} && {line}"
 
 
 async def copy(
@@ -52,9 +38,32 @@ async def copy(
         make_parent (bool): make the copy's folder there first, when
             only another machine holds it.
     """
-    old = single_quote(machine_path(accessor, src))
+    await copy_from(accessor, accessor, machine, src, dst, make_parent)
+
+
+async def copy_from(
+    source: MachineAccessor,
+    accessor: MachineAccessor,
+    machine: str,
+    src: PathSpec,
+    dst: PathSpec,
+    make_parent: bool = False,
+) -> None:
+    """Copy a file another machine mount shows onto this one, on the
+    machine holding it, which both mounts show: the bytes stay there.
+
+    Args:
+        source (MachineAccessor): the source mount's machines.
+        accessor (MachineAccessor): this mount's machines.
+        machine (str): the source's machine.
+        src (PathSpec): the source, on its mount.
+        dst (PathSpec): the copy, on this mount.
+        make_parent (bool): make the copy's folder there first, when
+            only another machine holds it.
+    """
+    old = single_quote(machine_path(source, src))
     new = machine_path(accessor, dst)
-    line = _in_folder(f"cp -T -- {old} {single_quote(new)}", new, make_parent)
+    line = in_folder(f"cp -T -- {old} {single_quote(new)}", new, make_parent)
     await run_checked(accessor, machine, line, dst)
 
 
@@ -76,7 +85,7 @@ async def dir_copy(
             only another machine holds it.
     """
     new = machine_path(accessor, dst)
-    line = _in_folder(
+    line = in_folder(
         copy_tree_command(machine_path(accessor, src), new), new, make_parent
     )
     status, out, err = await accessor.run(machine, line)

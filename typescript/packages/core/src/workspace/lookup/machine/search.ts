@@ -25,7 +25,7 @@ import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
-import { lookup, lookupAll } from '../lookup.ts'
+import { lookup, lookupAll, programHead } from '../lookup.ts'
 import { Consumer } from '../types.ts'
 import { folderMachines, mountMachines, pathOnMount } from './mounts.ts'
 
@@ -74,6 +74,28 @@ export function isSearched(
   return lookupAll(name, session, registry, routing).every(
     (layer) => layer === Consumer.FUNCTION || layer === Consumer.EXTERNAL,
   )
+}
+
+/**
+ * Whether the workspace's config says which machine runs a program: a
+ * machine captures it by name, or one machine takes every program nothing
+ * captures. Mirage picks the machine of a program search order places
+ * (`isSearched`) and of one named by its path, which runs where its file
+ * is. Mirrors Python's `config_pins`.
+ *
+ * @param words the program's words, null for one only known when it runs.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement, before search order bound anything.
+ */
+export function configPins(
+  words: readonly (string | null)[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime>,
+): boolean {
+  const head = programHead(registry, words, session, routing)
+  return !head.includes('/') && !isSearched(head, session, registry, routing)
 }
 
 /**
@@ -176,14 +198,16 @@ async function machinesWith(
 
 /**
  * Of the machines that can run a program, the one search order picks: one
- * the session's folder is on, then one holding the paths the command names,
- * then the first `machines:` lists. Each step narrows the machines left only
- * when it leaves any, so a folder every machine has decides nothing and the
- * paths are asked next.
+ * the session's folder is on, then the one whose program writes the pipe it
+ * reads (`writer`), so the pipe's bytes stay on their machine, then one
+ * holding the paths the command names, then the first `machines:` lists.
+ * Each step narrows the machines left only when it leaves any, so a folder
+ * every machine has decides nothing and the next step is asked.
  *
  * Where a coded file policy speaks for the session no machine is asked about
  * a path, which the policy judges inside the command that opens it: the
- * first machine is the answer. Mirrors Python's `nearest_machine`.
+ * pipe's writer, else the first machine, is the answer. Mirrors Python's
+ * `nearest_machine`.
  *
  * @param machines the machines that can run it, in the order `machines:`
  *   lists them.
@@ -191,6 +215,8 @@ async function machinesWith(
  * @param paths the absolute paths the command names.
  * @param session the session it runs in.
  * @param registry the workspace's mounts and machines.
+ * @param writer the machine the program writing its pipe runs on; null for
+ *   no pipe, or one Mirage writes.
  */
 export async function nearestMachine(
   machines: readonly string[],
@@ -198,11 +224,17 @@ export async function nearestMachine(
   paths: readonly string[],
   session: SessionState,
   registry: MountRegistry,
+  writer: string | null = null,
 ): Promise<string | null> {
   let left = [...machines]
   if (left.length < 2) return left[0] ?? null
-  if (await registry.policies.wantsFor('preVfs', session.sessionId)) return left[0] ?? null
-  for (const path of [cwd, ...paths]) {
+  if (await registry.policies.wantsFor('preVfs', session.sessionId))
+    return writer !== null && left.includes(writer) ? writer : (left[0] ?? null)
+  const atFolder = await holdingMachines(cwd, registry)
+  const inFolder = left.filter((machine) => atFolder.includes(machine))
+  if (inFolder.length > 0) left = inFolder
+  if (writer !== null && left.includes(writer)) return writer
+  for (const path of paths) {
     if (left.length < 2) break
     const holding = await holdingMachines(path, registry)
     const kept = left.filter((machine) => holding.includes(machine))
@@ -264,6 +296,8 @@ export async function folderHolders(
  *   which its run gets; null for the one the session exported.
  * @param pastFunctions the program a function of the same name shadows is
  *   the one asked about (`which`).
+ * @param writer the machine the program writing the pipe it reads runs on,
+ *   which it then runs on when that machine has it; null for no pipe.
  */
 export async function searchedMachine(
   name: string,
@@ -274,6 +308,7 @@ export async function searchedMachine(
   cwd: string | null = null,
   path: string | null = null,
   pastFunctions = false,
+  writer: string | null = null,
 ): Promise<RemoteRuntime | null> {
   if (!isSearched(name, session, registry, routing, pastFunctions)) return null
   const here = cwd ?? session.cwd
@@ -286,6 +321,7 @@ export async function searchedMachine(
     paths,
     session,
     registry,
+    writer,
   )
   return having.find((machine) => machine.defaultMachine === picked) ?? null
 }

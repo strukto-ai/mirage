@@ -29,6 +29,17 @@ export interface PipeWriter {
   readonly cwd: string
   placed: boolean
   machine: string | null
+  /**
+   * Whether the config names that machine for the program (`configPins`),
+   * rather than Mirage picking it; asked with `machine`.
+   */
+  pinned: boolean
+  /**
+   * The writer of the pipe the program reads in turn, whose machine its run
+   * prefers, so it is placed as it runs (`gen | filter | sink`); null for a
+   * first stage reading no pipe.
+   */
+  readonly upstream: PipeWriter | null
 }
 
 /** Temporary state of one evaluation; never part of a session record. */
@@ -86,9 +97,7 @@ export class ExecutionFrame {
    */
   fork(stdin: ByteSource | null = null): ExecutionFrame {
     const child = new ExecutionFrame()
-    const given = stdin instanceof SharedInput ? stdin.lines.input : stdin
-    if (this.stdinWriter !== null && given === this.stdinWriter.pipe)
-      child.stdinWriter = this.stdinWriter
+    child.stdinWriter = this.pipeWriterOf(stdin)
     child.abortSignal = this.abortSignal
     child.lineTimeout = this.lineTimeout
     child.shell = this.shell
@@ -97,5 +106,17 @@ export class ExecutionFrame {
     if (this.runsOnMachine !== undefined) child.runsOnMachine = this.runsOnMachine
     child.folderHolders = this.folderHolders
     return child
+  }
+
+  /**
+   * The program writing the pipe this frame's stage reads, while `stdin` is
+   * still that pipe; null once a redirect, a here-document or a closed
+   * descriptor replaced it.
+   *
+   * @param stdin the input a command reads.
+   */
+  pipeWriterOf(stdin: ByteSource | null): PipeWriter | null {
+    const given = stdin instanceof SharedInput ? stdin.lines.input : stdin
+    return this.stdinWriter !== null && given === this.stdinWriter.pipe ? this.stdinWriter : null
   }
 }

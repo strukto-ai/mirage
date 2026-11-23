@@ -20,7 +20,7 @@ import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { ZERO_CHUNK_SIZE } from '../../core/dev/constants.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { drain, sliceStream } from '../../io/stream.ts'
+import { closeQuietly, drain, OutputStream, sliceStream } from '../../io/stream.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../../utils/abort.ts'
 
@@ -311,7 +311,11 @@ async function* deviceRanges(dispatch: DispatchFn, scope: PathSpec): AsyncIterab
   }
 }
 
-/** `createFile` that answers how many bytes it wrote. Mirrors Python's create_counted. */
+/**
+ * `createFile` that answers how many bytes it wrote. A store that refuses
+ * the bytes unread still closes what produces them. Mirrors Python's
+ * create_counted.
+ */
 async function createCounted(
   dispatch: DispatchFn,
   session: SessionState,
@@ -330,6 +334,12 @@ async function createCounted(
       yield part
     }
   }
-  await createFile(dispatch, session, scope, counted(), append)
+  await createFile(
+    dispatch,
+    session,
+    scope,
+    new OutputStream(counted(), () => closeQuietly(data)),
+    append,
+  )
   return size
 }

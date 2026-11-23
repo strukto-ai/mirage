@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import current_caller, note_decision
 from mirage.core.machine.constants import KERNEL_VIEWS
 from mirage.core.machine.stat import hidden_machines, stat_entry
 from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import folder_of, machine_path
-from mirage.errors.fs import enoent, enotdir
-from mirage.types import PathSpec
+from mirage.errors.fs import eacces, enoent, enotdir
+from mirage.types import PathSpec, PolicyDecision
 
 
 def running_machine(accessor: MachineAccessor) -> str | None:
@@ -36,6 +36,107 @@ def running_machine(accessor: MachineAccessor) -> str | None:
     if machine is None or machine.name not in accessor.names():
         return None
     return machine.name
+
+
+def copy_machine(accessor: MachineAccessor) -> str | None:
+    """The machine whose file the copy being made by a read and a write
+    read (``Caller.copied_from``), when it read one machine's file and
+    that machine is one of the mount's; None for any other write.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+    """
+    copied = current_caller().copied_from
+    if copied is None or len(copied) != 1:
+        return None
+    (machine,) = copied
+    return machine if machine in accessor.names() else None
+
+
+def note_copy_source(machine: str) -> None:
+    """Note a machine whose file the copy being made by a read and a
+    write reads (``Caller.copied_from``); nothing outside such a copy.
+
+    Args:
+        machine (str): the machine holding the file read.
+    """
+    copied = current_caller().copied_from
+    if copied is not None:
+        copied.add(machine)
+
+
+def crossing_reason(source: str, target: str) -> str:
+    """Why bytes from one machine do not go to another, for the decision
+    record of the refusal (stderr says ``Permission denied``).
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+    """
+    return (
+        f"machine {source}'s bytes do not go to machine {target}:"
+        " copy them through a store"
+    )
+
+
+def crossing_refused(
+    source: str, target: str, path: PathSpec
+) -> PermissionError:
+    """The refusal of bytes going from one machine to another: EACCES for
+    the file, the reason on the line's decision record.
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+        path (PathSpec): the file the refusal names.
+    """
+    note_decision(
+        PolicyDecision(kind="deny", reason=crossing_reason(source, target))
+    )
+    return eacces(path)
+
+
+def refuse_crossing(
+    accessor: MachineAccessor,
+    machine: str,
+    path: PathSpec,
+    reads: bool = False,
+) -> None:
+    """Refuse bytes going from one machine to another through a program
+    the line runs on a machine: a file of ``machine`` it reads
+    (``prog < /srv/b/in``), or its output landing there (``prog >
+    /srv/b/out``), when the program is on another of the workspace's
+    machines; and a copy made by a read and a write landing on another
+    machine than the one whose file it read (``Caller.copied_from``).
+    Bytes go between a machine and a store, never from one machine to
+    another. The refusal is ``Permission denied``, its reason on the
+    line's decision record.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the op reads from or lands on.
+        path (PathSpec): the file.
+        reads (bool): the program reads the file, whose bytes go from
+            ``machine`` to it; else its bytes land on ``machine``.
+
+    Raises:
+        PermissionError: the program runs on another machine.
+    """
+    caller = current_caller()
+    running = caller.machine
+    if (
+        running is not None
+        and running.name != machine
+        and accessor.is_machine(running.name)
+    ):
+        if reads:
+            raise crossing_refused(machine, running.name, path)
+        raise crossing_refused(running.name, machine, path)
+    if reads:
+        return
+    for source in sorted(caller.copied_from or ()):
+        if source != machine and accessor.is_machine(source):
+            raise crossing_refused(source, machine, path)
 
 
 def command_machine(accessor: MachineAccessor) -> str | None:
@@ -279,7 +380,11 @@ async def write_machine(
         FileNotFoundError: the machine's own links lead the name to one
             the session hides.
     """
-    running = running_machine(accessor) if replaces else None
+    running = (
+        running_machine(accessor) or copy_machine(accessor)
+        if replaces
+        else None
+    )
     if running is None:
         held = await holders(accessor, path)
         if held:

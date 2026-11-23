@@ -15,17 +15,25 @@
 import { MachineAccessor } from '../../accessor/machine.ts'
 import { capacity as machineCapacity } from '../../core/machine/capacity.ts'
 import { checksum as machineChecksum } from '../../core/machine/checksum.ts'
-import { copy as machineCopy, dirCopy as machineDirCopy } from '../../core/machine/copy.ts'
+import {
+  copy as machineCopy,
+  copyFrom as machineCopyFrom,
+  dirCopy as machineDirCopy,
+} from '../../core/machine/copy.ts'
 import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
 import {
   askedMachines,
   chosen,
   commandMachine,
+  copyMachine,
+  crossingRefused,
   existingHolders,
   holders,
   holdingMachine,
   machinesLackingFolder,
+  noteCopySource,
+  refuseCrossing,
   refuseHidden,
   writeMachine,
 } from '../../core/machine/place.ts'
@@ -35,6 +43,7 @@ import {
   lastLines as machineLastLines,
   lineCount as machineLineCount,
   read as machineRead,
+  readStream as machineReadStream,
 } from '../../core/machine/read.ts'
 import { readdir as machineReaddir, tree as machineTree } from '../../core/machine/readdir.ts'
 import { rename as machineRename } from '../../core/machine/rename.ts'
@@ -47,8 +56,10 @@ import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import { eisdir, enoent, enotdir, enotempty, enotsup } from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty, enotsup, exdev } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
+import { callerSignal } from '../../context/session_context.ts'
+import { closeQuietly } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   PathSpec,
@@ -64,6 +75,81 @@ import { LOCAL_WALK_LIMIT } from '../constants.ts'
 import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { MachineVFSConfig } from './config.ts'
+
+/**
+ * Refuse bytes landing on a machine they may not go to (`refuseCrossing`),
+ * closing what would have been written so its writer stops. Mirrors
+ * Python's `_refuse_landing`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the write lands on.
+ * @param path the file.
+ * @param data what would have been written.
+ * @throws FsError the bytes come from another machine.
+ */
+async function refuseLanding(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+  data: ByteSource,
+): Promise<void> {
+  try {
+    refuseCrossing(accessor, machine, path)
+  } catch (err) {
+    await closeQuietly(data)
+    throw err
+  }
+}
+
+/**
+ * Land a copy made by a read and a write on its source's machine as a
+ * direct copy lands (`MachineVFS.copyFrom`): its folder made there when
+ * only another machine holds it, and no other machine's copy of the name
+ * left to show again. Mirrors Python's `_land_copy`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the source's machine.
+ * @param path the copy.
+ * @param data its bytes.
+ * @param atomic show nothing until the bytes have ended whole.
+ */
+async function landCopy(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+  data: ByteSource,
+  atomic: boolean,
+): Promise<void> {
+  let lacking: string[]
+  try {
+    lacking = await machinesLackingFolder(accessor, [machine], path)
+  } catch (err) {
+    await closeQuietly(data)
+    throw err
+  }
+  await machineWrite(accessor, machine, path, data, false, atomic, lacking.length > 0)
+  await dropOtherCopies(accessor, machine, path)
+}
+
+/**
+ * Take a name off every other machine holding it as a file, once its new
+ * copy has landed on `machine`, so an older copy never shows again.
+ * Mirrors Python's `_drop_other_copies`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the name landed on.
+ * @param path the name.
+ */
+async function dropOtherCopies(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<void> {
+  if (!accessor.several) return
+  for (const one of await holders(accessor, path)) {
+    if (one.machine !== machine && !one.isFolder) await machineUnlink(accessor, one.machine, path)
+  }
+}
 
 /**
  * A machine's own files at a prefix, reached through the exec the workspace
@@ -144,13 +230,29 @@ export class MachineVFS extends BaseVFS {
     return holderStat(leaf(path), one)
   }
 
+  /**
+   * A file's bytes from the machine holding it; a whole file as a stream,
+   * never held whole, where the machine's output can be read as it comes. A
+   * program the line runs on another machine never reads it
+   * (`refuseCrossing`).
+   *
+   * @param path the file.
+   * @param _handed unused.
+   * @param offset the first byte.
+   * @param size how many bytes; null for the rest.
+   */
   override async read(
     path: PathSpec,
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
   ): Promise<ByteSource> {
-    return machineRead(this.accessor, await holdingMachine(this.accessor, path), path, offset, size)
+    const machine = await holdingMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path, true)
+    noteCopySource(machine)
+    if (offset === 0 && size === null && this.accessor.streams(machine))
+      return machineReadStream(this.accessor, machine, path, callerSignal())
+    return machineRead(this.accessor, machine, path, offset, size)
   }
 
   override async firstLines(path: PathSpec, n: number): Promise<Uint8Array | null> {
@@ -212,23 +314,35 @@ export class MachineVFS extends BaseVFS {
     atomic = false,
   ): Promise<void> {
     const machine = await writeMachine(this.accessor, path, { replaces: true })
+    await refuseLanding(this.accessor, machine, path, data)
+    if (copyMachine(this.accessor) === machine) {
+      await landCopy(this.accessor, machine, path, data, atomic)
+      return
+    }
     await machineWrite(this.accessor, machine, path, data, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    await machineWrite(this.accessor, await writeMachine(this.accessor, path), path, data, true)
+    const machine = await writeMachine(this.accessor, path)
+    await refuseLanding(this.accessor, machine, path, data)
+    await machineWrite(this.accessor, machine, path, data, true)
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    await machinePwrite(this.accessor, await writeMachine(this.accessor, path), path, data, offset)
+    const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
+    await machinePwrite(this.accessor, machine, path, data, offset)
   }
 
   override async create(path: PathSpec): Promise<void> {
-    await machineCreate(this.accessor, await writeMachine(this.accessor, path), path)
+    const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
+    await machineCreate(this.accessor, machine, path)
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
     const machine = await writeMachine(this.accessor, path)
+    refuseCrossing(this.accessor, machine, path)
     await machineTruncate(this.accessor, machine, path, length, noCreate)
   }
 
@@ -339,6 +453,34 @@ export class MachineVFS extends BaseVFS {
       if (one.machine !== machine && !one.isFolder)
         await machineUnlink(this.accessor, one.machine, dst)
     }
+  }
+
+  /**
+   * Copy a file another machine mount shows, on the machine holding it, when
+   * this mount shows that machine too: the copy lands where its source is
+   * and its bytes never leave the machine (`cp /srv/a/out /tmp/out`),
+   * replacing the name as `copy` does. A file of a machine this mount does
+   * not show is refused: bytes go between a machine and a store, never from
+   * one machine to another. A store's file is EXDEV, and its bytes come
+   * through Mirage.
+   *
+   * @param source the source mount's VFS.
+   * @param src the file, on `source`.
+   * @param dst the copy, on this mount.
+   * @throws FsError EXDEV for a source that is no machine's file; EACCES
+   *   for a source on a machine this mount does not show.
+   */
+  override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
+    if (!(source instanceof MachineVFS)) throw exdev(dst)
+    const machine = await holdingMachine(source.accessor, src)
+    if (!this.accessor.names().includes(machine)) {
+      const target = await writeMachine(this.accessor, dst, { replaces: true })
+      throw crossingRefused(machine, target, dst)
+    }
+    await refuseHidden(this.accessor, machine, dst)
+    const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
+    await machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0)
+    await dropOtherCopies(this.accessor, machine, dst)
   }
 
   /**

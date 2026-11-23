@@ -406,3 +406,36 @@ async def test_a_machine_that_is_down_does_not_hide_who_holds_a_path_under_a_hid
     await agent.shell("smi /tmp/only.txt")
     assert (a.ran, b.ran) == ([], ["smi /tmp/only.txt"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_reading_a_pipe_runs_on_its_writer_s_machine():
+    a = FakeFiles(programs=("both",))
+    b = FakeFiles(programs=("gen", "both"))
+    ws = two(a, b)
+    assert (await ws.shell("gen | both")).exit_code == 0
+    assert (await ws.shell("both")).exit_code == 0
+    assert (a.ran, b.ran) == (["both"], ["gen", "both"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_middle_stage_is_placed_where_its_own_writer_put_it():
+    a = FakeFiles(programs=("filter",))
+    b = FakeFiles(programs=("gen", "filter", "sink"))
+    ws = two(a, b)
+    assert (await ws.shell("gen | filter | sink")).exit_code == 0
+    assert (a.ran, b.ran) == ([], ["gen", "filter", "sink"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_middle_stage_s_reader_only_another_machine_has_is_refused():
+    a = FakeFiles(programs=("filter", "sink"))
+    b = FakeFiles(programs=("gen", "filter"))
+    ws = two(a, b)
+    done = await ws.shell("gen | filter | sink")
+    assert done.exit_code == 126
+    assert await done.stderr_str() == "sink: Permission denied\n"
+    assert a.ran == []
+    await ws.close()

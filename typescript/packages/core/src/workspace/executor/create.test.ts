@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest'
 
 import { chunks } from '../../io/cooperative.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
+import { closeQuietly, OutputStream } from '../../io/stream.ts'
 import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { FileDescription } from '../../shell/descriptors.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -190,5 +191,36 @@ describe('writeDescription', () => {
     ).rejects.toThrow('ENOSPC')
     expect(landed).toBeGreaterThan(0)
     expect(file.offset).toBe(landed)
+  })
+})
+
+async function* endless(): AsyncGenerator<Uint8Array> {
+  for (;;) {
+    await Promise.resolve()
+    yield new Uint8Array([0x61])
+  }
+}
+
+/** A store that refuses every write and append without reading it. */
+const refusingDispatch: DispatchFn = async (op, _path, args, kwargs) => {
+  if ((op === 'write' || op === 'append') && kwargs?.admit_only !== true) {
+    await closeQuietly((args as [ByteSource])[0])
+    throw Object.assign(new Error('EACCES'), { code: 'EACCES' })
+  }
+  return [null, new IOResult()]
+}
+
+describe('a write refused unread', () => {
+  it.each([false, true])('closes what feeds it (append: %s)', async (append) => {
+    let closed = 0
+    const input = new OutputStream(endless(), () => {
+      closed += 1
+      return Promise.resolve()
+    })
+    const file = new FileDescription(SCOPE, append)
+    await expect(
+      writeDescription(refusingDispatch, new SessionState({ sessionId: 's' }), file, input),
+    ).rejects.toThrow('EACCES')
+    expect(closed).toBe(1)
   })
 })
