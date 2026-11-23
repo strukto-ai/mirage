@@ -20,7 +20,12 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
-import { currentCaller, isProgramInvocation, voiceName } from '../../context/session_context.ts'
+import {
+  callerProcess,
+  currentCaller,
+  isProgramInvocation,
+  voiceName,
+} from '../../context/session_context.ts'
 import { IGNORED_SIGNALS } from '../../execution/job/constants.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
@@ -136,7 +141,7 @@ function dropJobIgnores(session: SessionState, signals: ReadonlySet<number>): vo
  * Mirrors Python's arm_signals.
  */
 export function armSignals(session: SessionState): void {
-  const process = currentCaller().process
+  const process = callerProcess(session.processId)
   if (process === null) return
   process.catcher =
     session.signalTraps.size > 0 ? (signal, pid) => session.catchSignal(signal, pid) : null
@@ -249,8 +254,9 @@ export function errTrapArmed(session: SessionState): boolean {
  * which this consumes, so a group returning the same node does not answer
  * the failure again). `$?` is
  * `status` while it runs and again after it, whatever the action returns,
- * and the action does not run while it is running, nor once `set -e` is
- * ending the shell. An `exit` or `return` in it leaves as the statement's
+ * and the action does not run while it is running, nor once `set -e` or a
+ * signal (`fatalSignal`) is ending the shell. An `exit` or `return` in it
+ * leaves as the statement's
  * would. Hidden in a function or a child shell unless `set -E`, as bash's
  * is. `armed` is `errTrapArmed` as the statement started. Returns what the
  * action wrote, for the caller to land; empty when none runs. Mirrors
@@ -281,6 +287,7 @@ export async function runErrTrap(
     action === '' ||
     session.errTrapHidden ||
     session.errTrapRunning ||
+    session.fatalSignal !== null ||
     session.errexitExiting ||
     session.errexitImmune ||
     session.errexitIgnored ||
@@ -332,8 +339,9 @@ export async function runReturnTrap(
 /**
  * Run the action of each trapped signal that arrived while the last command
  * ran, in signal order, as bash does once that command ends. `$?` is the
- * command's status while each runs and again after it; an `exit` in one ends
- * the shell, a `return` the function it runs in. One that arrives while an
+ * command's status while each runs and again after it, the one before it when
+ * a signal ending the shell cut it short; an `exit` in one ends the shell, a
+ * `return` the function it runs in. One that arrives while an
  * action runs waits for the next command boundary after it. A signal the
  * shell took to run its EXIT action before it dies of it (`takesFatalSignal`)
  * then ends it as an `exit` does, with 128 plus the signal, even inside an
@@ -350,6 +358,8 @@ export async function runSignalTraps(
 ): Promise<Written[]> {
   let written: Written[] = []
   if (executeFn !== null && session.pendingSignals.size > 0 && !session.signalTrapRunning) {
+    // The command the signal cut short has no status yet.
+    if (session.fatalSignal !== null) recordStatus(session, session.statusBeforeSignal)
     session.signalTrapRunning = true
     try {
       while (session.pendingSignals.size > 0) {
@@ -494,7 +504,7 @@ export async function runExitTrap(
     sink,
   )
   recordStatus(session, 128 + fatal)
-  const process = currentCaller().process
+  const process = callerProcess(session.processId)
   if (process !== null && process.record.id.pid === session.processId)
     process.programSignaled(fatal)
   if (ended !== null) ended.exitCode = 128 + fatal

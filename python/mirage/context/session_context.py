@@ -377,6 +377,19 @@ def current_process_id() -> ProcessId | None:
     return process.record.id if process is not None else None
 
 
+def caller_process(pid: int | None) -> ProcessHandle | None:
+    """The process ``pid`` the current call runs under: the current
+    call's, which a task's context always binds, so no sibling's is in
+    reach. Mirrors TypeScript's callerProcess, whose host may not tell
+    tasks apart.
+
+    Args:
+        pid (int | None): the process wanted, a shell's own; None for
+            the current call's.
+    """
+    return _caller_storage.get().process
+
+
 def set_traits(traits: ProcessTraits) -> CallerToken:
     """Run what follows as a wrapper's program: the process it runs as,
     and everything it starts, carries ``traits``.

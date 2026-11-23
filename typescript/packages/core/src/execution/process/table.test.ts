@@ -737,6 +737,43 @@ it('a group signal waits for the EXIT action of a shell below', async () => {
   expect(order).toEqual(['child ended', 'parent stopped'])
 })
 
+// KILL waits for no cleanup: it lands on the shell above at once, and stops
+// the shell below running its EXIT action with it.
+it('a KILL waits for no EXIT action below', async () => {
+  const processes = new ProcessTable()
+  const order: string[] = []
+  const above = stoppable()
+  const below = stoppable()
+  const parent = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      order.push('parent stopped')
+      above.cancel()
+    },
+    run: above.run,
+  })
+  const child = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    parent: parent.record.id.pid,
+    cancel: () => {
+      order.push('child stopped')
+      below.cancel()
+    },
+    run: below.run,
+  })
+  child.exitCatcher = () => true
+  expect(await processes.signalGroup(parent.record.group, 15)).toBe(true)
+  expect(order).toEqual([])
+  expect(await processes.signal(parent, 9)).toBe(true)
+  expect((await child.join()).exit).toBe(137)
+  expect((await parent.join()).exit).toBe(137)
+  expect(order).toEqual(['child stopped', 'parent stopped'])
+})
+
 // A native program a trapping shell started gets the group's signal as sent
 // and answers it itself, so the shell's wait for it goes on.
 it("a group signal leaves a trapping shell's native program", async () => {

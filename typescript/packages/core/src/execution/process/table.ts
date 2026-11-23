@@ -406,7 +406,7 @@ export class ProcessTable {
    * sent, since only KILL ends a stopped program; a kept signal leaves it as it is, and
    * any other stops it unless the shell running a statement in it traps or
    * ignores it (`catcher`), or takes it to run its EXIT action first
-   * (`exitCatcher`). One of a group leaves what it started to their own
+   * (`exitCatcher`), which a KILL to it or a shell above it cuts short. One of a group leaves what it started to their own
    * delivery and, if it ignores the signal, hands it to the program it runs
    * right now (`deliver`); one signalled alone stops what it started too, and
    * if it ignores the signal nothing happens. A signal sent to the whole group
@@ -455,6 +455,11 @@ export class ProcessTable {
       handle.interrupt(signal)
       return true
     }
+    // KILL waits for no cleanup: a shell under this one running its EXIT
+    // action stops with it.
+    if (signal === SIGKILL)
+      for (const child of this.under(handle.record.id.pid))
+        if (child.exiting) child.terminate(SIGKILL)
     let found = true
     if (group) this.deliverPastExits(handle, signal)
     else
@@ -465,13 +470,17 @@ export class ProcessTable {
 
   /**
    * Deliver a group's signal to one runner (`deliver`) once each shell under
-   * it that took the signal to run its EXIT action first (`exiting`) has
-   * ended, since the runner's stop would stop them with it: it lands as the
-   * last of them ends, before whoever waits for that one goes on. Python's
-   * reap leaves such a runner to its end the same way.
+   * it that took a signal to run its EXIT action first (`exiting`) has ended,
+   * since the runner's stop would stop them with it, one in a group of its own
+   * too: it lands as the last of them ends, before whoever waits for that one
+   * goes on. KILL waits for none. Python's reap leaves such a runner to its end
+   * the same way.
    */
   private deliverPastExits(handle: ProcessHandle, signal: number): void {
-    const below = this.under(handle.record.id.pid).find((child) => child.exiting)
+    const below =
+      signal === SIGKILL
+        ? undefined
+        : this.under(handle.record.id.pid).find((child) => child.exiting)
     if (below === undefined) {
       deliver(handle, signal)
       return

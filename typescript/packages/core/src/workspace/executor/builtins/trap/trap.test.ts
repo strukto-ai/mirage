@@ -150,6 +150,9 @@ describe('takesFatalSignal', () => {
     }
     session.exitTrapInherited = false
     expect(session.takesFatalSignal(15, 8)).toBe(false)
+    session.trapStatus = 143
+    expect(session.takesFatalSignal(15, 7)).toBe(false)
+    session.trapStatus = null
     expect(session.takesFatalSignal(15, 7)).toBe(true)
     session.lastExitCode = 143
     expect(session.takesFatalSignal(1, 7)).toBe(true)

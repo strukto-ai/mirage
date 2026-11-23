@@ -200,6 +200,7 @@ async def handle_kill(
     processes = job_table.processes
     errors: list[str] = []
     signalled = False
+    taken = session is not None and session.fatal_signal is not None
     await job_table.sync(sid)
     for operand in words:
         jobs = job_table.list_jobs(sid)
@@ -267,9 +268,10 @@ async def handle_kill(
         # lands here, before its next statement.
         raise asyncio.CancelledError
     code = 0 if signalled else 1
-    if session is not None and session.fatal_signal is not None:
+    if not taken and session is not None and session.fatal_signal is not None:
         # One it takes to run its EXIT action first lands as kill ends, so
-        # the action finds kill's status.
+        # the action finds kill's status; one taken before it ran keeps
+        # the status it found.
         session.status_before_signal = code
     err = encode_text("\n".join(errors) + "\n") if errors else b""
     node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err)

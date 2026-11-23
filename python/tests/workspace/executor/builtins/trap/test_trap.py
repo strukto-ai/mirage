@@ -127,6 +127,9 @@ def test_a_shell_takes_a_fatal_signal_for_its_own_exit_action_only():
         assert not session.takes_fatal_signal(15, 7)
     session.exit_trap_inherited = False
     assert not session.takes_fatal_signal(15, 8)
+    session._trap_status = 143
+    assert not session.takes_fatal_signal(15, 7)
+    session._trap_status = None
     assert session.takes_fatal_signal(15, 7)
     session.last_exit_code = 143
     assert session.takes_fatal_signal(1, 7)

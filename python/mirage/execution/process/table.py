@@ -511,7 +511,8 @@ class ProcessTable:
         program; a kept
         signal leaves it as it is, and any other stops it unless the shell
         running a statement in it traps or ignores it (``catcher``), or
-        takes it to run its EXIT action first (``exit_catcher``). One of
+        takes it to run its EXIT action first (``exit_catcher``), which
+        a KILL to it or a shell above it cuts short. One of
         a group
         leaves what it started to their own delivery and, if it ignores
         the signal, hands it to the program it runs right now
@@ -569,6 +570,12 @@ class ProcessTable:
             handle.exiting = True
             handle.interrupt(signal)
             return True
+        if signal == SIGKILL:
+            # KILL waits for no cleanup: a shell under this one running its
+            # EXIT action stops with it.
+            for child in self._under(handle.record.pid):
+                if child.exiting:
+                    child.terminate(SIGKILL)
         if group:
             _deliver(handle, signal)
             found = True

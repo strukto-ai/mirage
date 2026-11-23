@@ -851,9 +851,10 @@ and `ps -p` take either kind.
       `exit N` or fails under `set -e`.
     - It runs too when a signal the shell neither traps nor ignores ends it
       (`TERM`, `INT`, `HUP` and the rest that end a shell, not `KILL`): at
-      once, the running program cut short and `wait` too, with `$?` as the
-      signal found it. The shell still ends with 128 plus the signal,
-      whatever the cleanup does, and a second signal ends the cleanup. A
+      once, the running program cut short and `wait` and `read` too, with no
+      `ERR` action and `$?` as the signal found it. The shell still ends with
+      128 plus the signal, whatever the cleanup does, and a second signal or a
+      `KILL` to a shell above it ends the cleanup. A
       child shell with its own `EXIT` action runs it when the signal that
       ends it ends its parent too, as under `timeout`.
     - `trap 'commands' ERR` runs where `set -e` would end the shell, and

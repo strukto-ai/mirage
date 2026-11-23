@@ -192,4 +192,21 @@ describe('a job on the fallback storage', () => {
       await ws.close()
     }
   })
+
+  it('runs its EXIT action when a signal ends it', async () => {
+    // The line's frames are the newest while the job sets its action; armed on
+    // the line's process, the job would end of the signal without it.
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "{ trap 'echo ran > /data/l' EXIT; echo ready > /data/r; sleep 30; } & v=$!; " +
+          'while ! test -e /data/r; do sleep .01; done; kill $v; wait $v 2>/dev/null; ' +
+          'test -e /data/l; echo present:$?',
+      )
+      expect(io.exitCode).toBe(0)
+      expect(new TextDecoder().decode(io.stdout)).toBe('present:0\n')
+    } finally {
+      await ws.close()
+    }
+  })
 })

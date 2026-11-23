@@ -122,6 +122,23 @@ async def test_a_fatal_signal_ends_a_shell_with_no_exit_action():
     assert (raised.value.exit_code, run.seen) == (130, [])
 
 
+@pytest.mark.asyncio
+async def test_a_queued_action_runs_first_with_the_status_a_fatal_signal_found():
+    session = make_session("echo bye")
+    session.signal_traps = {10: "echo usr1"}
+    session.pending_signals = {10}
+    session.fatal_signal, session.status_before_signal = 15, 4
+    session.last_exit_code = 143
+    run = Watcher(session, IOResult())
+    with pytest.raises(ExitSignal) as raised:
+        await run_signal_traps(run, session)
+    assert raised.value.exit_code == 143
+    assert [(line, status) for line, status, _ in run.seen] == [
+        ("echo usr1", 4),
+        ("echo bye", 4),
+    ]
+
+
 @pytest.mark.parametrize(
     "traced, inside, body, after",
     [

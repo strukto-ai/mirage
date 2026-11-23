@@ -793,6 +793,7 @@ class SessionState:
         if (
             not self.exit_trap
             or self.exit_trap_inherited
+            or self._trap_status is not None
             or (self.process_id is not None and pid != self.process_id)
         ):
             return False

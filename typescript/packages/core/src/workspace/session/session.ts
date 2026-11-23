@@ -1186,6 +1186,7 @@ export class SessionState {
       this.exitTrap === null ||
       this.exitTrap === '' ||
       this.exitTrapInherited ||
+      this.trapStatus !== null ||
       (this.processId !== null && pid !== this.processId)
     )
       return false

@@ -15,7 +15,12 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import current_caller, is_program_invocation, voice_name
+from mirage.context import (
+    caller_process,
+    current_caller,
+    is_program_invocation,
+    voice_name,
+)
 from mirage.execution.job.constants import IGNORED_SIGNALS
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
@@ -160,7 +165,7 @@ def arm_signals(session: SessionState) -> None:
     Args:
         session (SessionState): the shell.
     """
-    process = current_caller().process
+    process = caller_process(session.process_id)
     if process is not None:
         process.catcher = (
             session.catch_signal if session.signal_traps else None
@@ -286,7 +291,8 @@ async def run_err_trap(
     it already, unless the statement failed to open a redirect and never
     ran. ``$?`` is ``status`` while it runs and again after it, whatever
     the action returns, and the action does not run while it is running,
-    nor once ``set -e`` is ending the shell. An ``exit`` or ``return`` in
+    nor once ``set -e`` or a signal (``fatal_signal``) is ending the
+    shell. An ``exit`` or ``return`` in
     it leaves as the statement's would. Hidden in a function or a child
     shell unless ``set -E``, as bash's is.
 
@@ -321,6 +327,7 @@ async def run_err_trap(
         or not action
         or session.err_trap_hidden
         or session.err_trap_running
+        or session.fatal_signal is not None
         or session.errexit_exiting
         or session.errexit_immune
         or session.errexit_ignored
@@ -393,8 +400,9 @@ async def run_signal_traps(
     """Run the action of each trapped signal that arrived while the last
     command ran, in signal order, as bash does once that command ends.
 
-    ``$?`` is the command's status while each runs and again after it;
-    an ``exit`` in one ends the shell, a ``return`` the function it runs
+    ``$?`` is the command's status while each runs and again after it,
+    the one before it when a signal ending the shell cut it short; an
+    ``exit`` in one ends the shell, a ``return`` the function it runs
     in. One that arrives while an action runs waits for the next command
     boundary after it. A signal the shell took to run its EXIT action
     before it dies of it (``takes_fatal_signal``) then ends it as an
@@ -420,6 +428,9 @@ async def run_signal_traps(
         and session.pending_signals
         and not session.signal_trap_running
     ):
+        if session.fatal_signal is not None:
+            # The command the signal cut short has no status yet.
+            record_status(session, session.status_before_signal)
         session.signal_trap_running = True
         try:
             while session.pending_signals:
@@ -593,7 +604,7 @@ async def run_exit_trap(
         sink,
     )
     record_status(session, 128 + fatal)
-    process = current_caller().process
+    process = caller_process(session.process_id)
     if process is not None and process.record.pid == session.process_id:
         process.program_signaled(fatal)
     if ended is not None:

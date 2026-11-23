@@ -15,7 +15,10 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
+import { SessionState } from '../../../session/session.ts'
+import { sessionView } from '../../../session/state.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
+import { handleRead } from './read.ts'
 
 // What bash printed for each line (debian:stable-slim): the commands a
 // group, loop, list, function or nested shell runs read one descriptor,
@@ -122,4 +125,29 @@ it('reads on across lines after exec', async () => {
   const io = await ws.shell('read b; echo "[$a][$b]"')
   expect(io.stdoutText).toBe('[a][b]\n')
   await ws.close()
+})
+
+async function* stalls(): AsyncGenerator<Uint8Array> {
+  yield new TextEncoder().encode('partial')
+  await new Promise<void>(() => undefined)
+}
+
+// bash's read stops at once for a signal the shell dies of, to run its EXIT
+// action; a signal it traps lets it read on.
+it('read stops for a signal the shell dies of', async () => {
+  const session = new SessionState({ sessionId: 's1', cwd: '/' })
+  session.exitTrap = 'echo bye'
+  session.signalTraps.set(10, 'echo usr1')
+  let done = false
+  const reading = handleRead(['v'], session, stalls(), sessionView(session)).finally(() => {
+    done = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(session.catchSignal(10, 1)).toBe(true)
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  expect(done).toBe(false)
+  expect(session.takesFatalSignal(15, 1)).toBe(true)
+  const [, io] = await reading
+  expect(io.exitCode).toBe(143)
+  expect(session.env.v).toBeUndefined()
 })

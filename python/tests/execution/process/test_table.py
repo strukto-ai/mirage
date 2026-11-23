@@ -781,6 +781,41 @@ async def test_a_shell_takes_a_fatal_signal_to_run_its_exit_action():
     assert child.exiting and child.signal is None
 
 
+# KILL waits for no cleanup: a shell stopped while it waits for a shell
+# running its EXIT action stops it with it at a KILL.
+@pytest.mark.asyncio
+async def test_a_kill_waits_for_no_exit_action_below():
+    processes = ProcessTable()
+    below: list[ProcessHandle] = []
+
+    async def owner_run() -> int:
+        return await below[0].reap()
+
+    owner = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=owner_run,
+    )
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent=owner.record.pid,
+    )
+    child.exiting = True
+    below.append(child)
+    await asyncio.sleep(0)
+    assert owner.terminate(15, children=False)
+    await asyncio.sleep(0)
+    assert owner.record.state == ProcessState.STOPPING
+    async with asyncio.timeout(5):
+        assert await processes.signal(owner, 9)
+        assert (await child.join()).exit == 137
+        await owner.join()
+
+
 # A native program a trapping shell started gets the group's signal as sent
 # and answers it itself, so the shell's wait for it goes on.
 @pytest.mark.asyncio

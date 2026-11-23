@@ -118,6 +118,22 @@ describe('runSignalTraps', () => {
     const raised = await runSignalTraps(run, session).catch((err: unknown) => err)
     expect([(raised as ExitSignal).exitCode, seen]).toEqual([130, []])
   })
+
+  it('runs a queued action first, with the status the fatal signal found', async () => {
+    const session = makeSession('echo bye')
+    session.signalTraps.set(10, 'echo usr1')
+    session.pendingSignals.add(10)
+    session.fatalSignal = 15
+    session.statusBeforeSignal = 4
+    session.lastExitCode = 143
+    const { run, seen } = watcher(session, new IOResult())
+    const raised = await runSignalTraps(run, session).catch((err: unknown) => err)
+    expect((raised as ExitSignal).exitCode).toBe(143)
+    expect(seen.map(([line, status]) => [line, status])).toEqual([
+      ['echo usr1', 4],
+      ['echo bye', 4],
+    ])
+  })
 })
 
 describe('liftFunctionTraps', () => {
