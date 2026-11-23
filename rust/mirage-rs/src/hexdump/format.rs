@@ -412,9 +412,10 @@ fn size(unit: &Unit, prints: &mut [Print]) -> Result<(), String> {
     Ok(())
 }
 
-/// Output held past a `drain`'s budget: bytes, or a run of one byte.
+/// Output held past a `drain`'s budget: bytes from an offset on, or a run
+/// of one byte.
 pub(super) enum Piece {
-    Bytes(Vec<u8>),
+    Bytes(Vec<u8>, usize),
     Run(u8, usize),
 }
 
@@ -454,13 +455,13 @@ impl<'a> Sink<'a> {
             return;
         }
         if !self.held.is_empty() {
-            self.held.push_back(Piece::Bytes(bytes.to_vec()));
+            self.held.push_back(Piece::Bytes(bytes.to_vec(), 0));
             return;
         }
         let now = bytes.len().min(self.limit.saturating_sub(self.out.len()));
         self.out.extend_from_slice(&bytes[..now]);
         if now < bytes.len() {
-            self.held.push_back(Piece::Bytes(bytes[now..].to_vec()));
+            self.held.push_back(Piece::Bytes(bytes[now..].to_vec(), 0));
         }
     }
 
@@ -483,11 +484,13 @@ impl<'a> Sink<'a> {
     pub(super) fn release(&mut self) {
         while let Some(piece) = self.held.pop_front() {
             match piece {
-                Piece::Bytes(bytes) => {
-                    let now = bytes.len().min(self.limit.saturating_sub(self.out.len()));
-                    self.out.extend_from_slice(&bytes[..now]);
-                    if now < bytes.len() {
-                        self.held.push_front(Piece::Bytes(bytes[now..].to_vec()));
+                // The rest stays where it is, its offset moved on.
+                Piece::Bytes(bytes, at) => {
+                    let left = bytes.len() - at;
+                    let now = left.min(self.limit.saturating_sub(self.out.len()));
+                    self.out.extend_from_slice(&bytes[at..at + now]);
+                    if now < left {
+                        self.held.push_front(Piece::Bytes(bytes, at + now));
                         return;
                     }
                 }
