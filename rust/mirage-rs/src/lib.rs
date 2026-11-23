@@ -32,6 +32,7 @@ mod generated;
 mod glob;
 mod grep;
 mod head;
+mod hexdump;
 #[cfg(test)]
 mod host;
 mod iconv;
@@ -130,6 +131,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "glob" => glob::open(config),
         "glob_tails" => glob::open_tails(config),
         "grep" => grep::open(config),
+        "hexdump" => hexdump::open(config),
         "iconv" => iconv::open(config),
         "join" => join::open(config),
         "jq_options" => jq::open_options(config),

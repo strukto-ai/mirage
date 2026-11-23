@@ -196,6 +196,27 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         )
     ),
+    # util-linux's hexdump: each display option and format string adds
+    # its formats where it stands, so they read in the order typed, and
+    # an abbreviated long name is ambiguous in the order listed here.
+    "hexdump": CommandSpec(
+        arguments=(
+            Argument("-b", "--one-byte-octal", action="store_true"),
+            Argument("-X", "--one-byte-hex", action="store_true"),
+            Argument("-c", "--one-byte-char", action="store_true"),
+            Argument("-C", "--canonical", action="store_true"),
+            Argument("-d", "--two-bytes-decimal", action="store_true"),
+            Argument("-o", "--two-bytes-octal", action="store_true"),
+            Argument("-x", "--two-bytes-hex", action="store_true"),
+            Argument("-L", "--color", nargs="?", attached_only=True),
+            Argument("-e", "--format", action="append"),
+            Argument("-f", "--format-file", type="path", action="append"),
+            Argument("-n", "--length"),
+            Argument("-s", "--skip"),
+            Argument("-v", "--no-squeezing", action="store_true"),
+            PATHS_OPERAND,
+        )
+    ),
     "colrm": CommandSpec(
         description="Remove columns from a file read on standard input.",
         arguments=(TEXTS_OPERAND,),

@@ -94,6 +94,10 @@ and gzip 1.13 in `debian:stable-slim`.
 
 The `ast-grep-sql` target compares both registries against ast-grep 0.51.3 goldens on SQLite with a 100 MiB workspace. The shared Python battery and TypeScript jobs run this target. The browser suite exercises parser exhaustion and recovery, and the Cloudflare SQL tests run search, scan, outline and rewrites on Durable Object storage.
 
+The Rust `hexdump` stream (`rust/mirage-rs/src/hexdump/`) and its host
+builders use the same whole-host filters; `unix/hexdump/` and
+`crossmount/hexdump/` pin it against util-linux 2.41.5 in `debian:stable-slim`.
+
 The shared Rust `file` signature and MIME catalog and its host adapters use
 the same whole-host filters. The existing file corpus and host prefix-read
 tests cover their output and source lifetime.

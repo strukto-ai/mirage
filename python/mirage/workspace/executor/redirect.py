@@ -138,6 +138,7 @@ STREAM_OUTPUT_BUILTINS = frozenset(
         "fold",
         "fmt",
         "od",
+        "hexdump",
         "strings",
         "rev",
         "tac",

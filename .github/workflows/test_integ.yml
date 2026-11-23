@@ -120,6 +120,8 @@ jobs:
             # Rust colrm/envsubst streams, document validation, utils/records and the
             # core Jaeger config use these whole-host filters. The shared
             # policy/documents and fixtures/normalized_records corpora do too.
+            # The Rust hexdump stream and its host builders, with the
+            # unix/hexdump and crossmount/hexdump corpora, use them as well.
             #
             # ts, battery, hosting and cloudflare each take only the trees
             # their jobs load. Rust counts by host: rust/python builds only
@@ -432,6 +434,7 @@ jobs:
               - 'integ/unix/gunzip/**'
               - 'integ/unix/gzip/**'
               - 'integ/unix/head/**'
+              - 'integ/unix/hexdump/**'
               - 'integ/unix/ln/**'
               - 'integ/unix/ls/**'
               - 'integ/unix/mkdir/**'

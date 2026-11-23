@@ -38,6 +38,7 @@ import * as grep from './grep.ts'
 import * as gunzip from './gunzip.ts'
 import * as gzip from './gzip.ts'
 import * as head from './head.ts'
+import * as hexdump from './hexdump.ts'
 import * as iconv from './iconv.ts'
 import * as join from './join.ts'
 import * as jq from './jq.ts'
@@ -108,6 +109,7 @@ export const BUILDERS: readonly GenericCommand[] = [
   gunzip.BUILDER,
   gzip.BUILDER,
   head.BUILDER,
+  hexdump.BUILDER,
   iconv.BUILDER,
   join.BUILDER,
   jq.BUILDER,
