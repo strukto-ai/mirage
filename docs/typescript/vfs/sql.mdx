@@ -96,6 +96,27 @@ const sql = new SqlVFS(new DurableObjectSqlDriver(ctx.storage), { root: '/worksp
 const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
 ```
 
+A Durable Object is billed for each row its SQLite writes, and a mount writes
+a row for each file chunk, name and record. `DurableObjectPagedSqlDriver`
+keeps the mount in a SQLite database inside the storage, and writes what
+changed as a few large rows: a command that changed thousands of rows writes
+one or two. Changes reach the storage at `flush()`, so call it before a
+request is answered. A Durable Object that stops before a flush loses what it
+had not flushed, and a flush lands whole or not at all.
+
+```ts
+import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-cloudflare'
+import { DurableObjectPagedSqlDriver } from '@struktoai/mirage-cloudflare/paged/driver'
+
+const driver = await DurableObjectPagedSqlDriver.open(ctx.storage)
+const ws = new Workspace({ '/sql': new SqlVFS(driver) }, { mode: MountMode.WRITE })
+await ws.shell('echo hi > /sql/f')
+driver.flush()
+```
+
+`driver.sql.exec` and `driver.transactionSync` run statements in the database
+inside, for tables kept beside the mount's.
+
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.

@@ -240,7 +240,7 @@ describe('mirage in workerd', () => {
       expect(df?.exit).toBe(0)
     },
   )
-  for (const on of ['d1', 'object'] as const) {
+  for (const on of ['d1', 'object', 'paged'] as const) {
     const sql = async (
       id: string,
       lines: readonly string[],
