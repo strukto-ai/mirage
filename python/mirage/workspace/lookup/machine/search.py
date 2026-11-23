@@ -29,6 +29,7 @@ from mirage.utils.abort import MirageAbortError
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.lookup.lookup import lookup, lookup_all
 from mirage.workspace.lookup.machine.mounts import (
+    folder_machines,
     mount_machines,
     path_on_mount,
 )
@@ -238,21 +239,36 @@ async def nearest_machine(
 
 
 async def folder_holders(
-    folder: str, registry: MountRegistry, asked: dict[str, list[str]]
+    folder: str,
+    session: SessionState,
+    registry: MountRegistry,
+    asked: dict[str, list[str]],
 ) -> list[str]:
     """The machines holding the folder a command stands in
     (``holding_machines``), asked once a line: ``asked`` keeps each
     folder's answer for every command the line runs
     (``ExecutionFrame.folder_holders``).
 
+    Where a coded file policy speaks for the session no machine is
+    asked, since the policy judges a path inside the command that
+    opens it: a folder whose mount shows one machine is that
+    machine's, and any other is no one machine's.
+
     Args:
         folder (str): the folder, an absolute virtual path.
+        session (SessionState): the session it runs in.
         registry (MountRegistry): the workspace's mounts and machines.
         asked (dict[str, list[str]]): the answers the line has had.
     """
     known = asked.get(folder)
-    if known is None:
-        known = asked[folder] = await holding_machines(folder, registry)
+    if known is not None:
+        return known
+    if await registry.policies.wants_for("pre_vfs", session.session_id):
+        shown = folder_machines(folder, registry)
+        known = shown if len(shown) == 1 else []
+    else:
+        known = await holding_machines(folder, registry)
+    asked[folder] = known
     return known
 
 

@@ -436,6 +436,22 @@ async def test_a_fact_from_a_shared_folder_is_asked_of_the_machine_holding_it():
     await ws.close()
 
 
+@pytest.mark.asyncio
+async def test_a_new_download_lands_in_the_shared_folder_its_machine_holds():
+    a = FakeFiles(programs=CLIENTS)
+    b = FakeFiles({"/tmp/only/k": b"k"}, programs=CLIENTS)
+    ws = two(a, b)
+    await ws.shell(f"cd /tmp/only && wget -q -T 2 {REQUEST}")
+    await ws.shell(f"cd /tmp/only && curl -s -o new.txt {REQUEST}")
+    await ws.shell(f"cd /tmp/only && curl -s -o /tmp/new.txt {REQUEST}")
+    assert a.ran == []
+    assert b.ran == [
+        f"wget -q -T 2 {REQUEST}",
+        f"curl -s -o new.txt {REQUEST}",
+    ]
+    await ws.close()
+
+
 def lost_on(path: str, files: FakeFiles):
     """An answer finding no program on ``path``, else ``files``'s.
 

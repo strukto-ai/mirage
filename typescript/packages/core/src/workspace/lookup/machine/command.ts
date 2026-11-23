@@ -27,7 +27,7 @@ import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
 import type { DispatchFn, RouteDecision } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unmarkGlobs } from '../../../utils/glob_walk.ts'
-import { norm } from '../../../utils/path.ts'
+import { norm, parent, resolvePath } from '../../../utils/path.ts'
 import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import type { NamespaceReader } from '../../dispatcher/reader.ts'
 import type { Argv } from '../../expand/argv.ts'
@@ -44,7 +44,7 @@ import {
   onlyMachine,
   pathOnMount,
 } from './mounts.ts'
-import { folderHolders, nearestMachine } from './search.ts'
+import { folderHolders, holdingMachines, nearestMachine } from './search.ts'
 
 /**
  * The paths a command's options name (`grep -f /data/patterns`), which the
@@ -220,8 +220,9 @@ export function asksAboutMachine(argv: Argv): boolean {
 /**
  * The files a client that reaches a server reads or writes through words its
  * spec keeps as text, as typed: curl's `@file` data and `-w @file` template,
- * the cookie file a `-b` without `=` names, and the file wget saves into its
- * folder when neither `-O` nor `--spider` says otherwise. Null where Mirage
+ * the cookie file a `-b` without `=` names, and, for wget with neither `-O`
+ * nor `--spider`, its folder itself (`.`), where it saves under a name it
+ * picks as it runs (`report.1` when `report` is there). Null where Mirage
  * cannot tell which files the program touches: an option its spec does not
  * know, a `-F` field read from a file, which Mirage's curl sends as given,
  * and a second wget operand, a URL to the machine's wget and a destination
@@ -240,8 +241,7 @@ function clientFiles(argv: Argv, cwd: string): string[] | null {
     const urls = parsed.rawOperands.map(([word]) => word)
     if (urls.length > 1) return null
     if ('-O' in flags || flags['--spider'] === true) return []
-    const saved = (urls[0] ?? '').split('/').at(-1) ?? ''
-    return [saved === '' ? 'index.html' : saved]
+    return ['.']
   }
   const form = flags['--form']
   if (typeof form === 'string') {
@@ -268,6 +268,30 @@ function clientFiles(argv: Argv, cwd: string): string[] | null {
 }
 
 /**
+ * The path a machine must hold for a command that writes `path` to run
+ * there: `path` where a machine holds it, else its folder, where the new
+ * file lands. Null where a write may not reach it on a machine
+ * (`machineMounts`): another mount, a read-only one, a mount the session's
+ * rules restrict, or a link of Mirage's own on the way, the name itself
+ * included. Mirrors Python's `_written_scope`.
+ *
+ * @param path an absolute virtual path the command writes.
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param links the session's link table.
+ */
+async function writtenScope(
+  path: string,
+  session: SessionState,
+  registry: MountRegistry,
+  links: NamespaceReader,
+): Promise<string | null> {
+  if (machineMounts([[path, true]], session, registry, links) === null) return null
+  if ((await holdingMachines(path, registry)).length > 0) return path
+  return parent(path)
+}
+
+/**
  * The machine a command that asks about its machine runs on whole
  * (`asksAboutMachine`): `uname -m` is the machine's own answer, where
  * Mirage's is no machine's, and `curl localhost:8000` reaches the server a
@@ -277,9 +301,12 @@ function clientFiles(argv: Argv, cwd: string): string[] | null {
  * Mirage keeps the command where no machine takes programs (`aboutMachine`),
  * or that machine refuses the session's runs or would not find the program
  * on the PATH the run gets; when a path it names or a file it reads or
- * writes is not that machine's own, or is typed relative to a folder the
- * machine does not hold; when input is piped into a machine that takes none;
- * and, for a command that reaches a server, when the workspace limits its
+ * writes is not that machine's own, a file it writes counting by its folder
+ * while no machine holds it (`writtenScope`), or is typed relative to a
+ * folder the machine does not hold; when a coded file policy speaks for the
+ * session and the command touches a path, which the policy judges inside
+ * Mirage; when input is piped into a machine that takes none; and, for a
+ * command that reaches a server, when the workspace limits its
  * network or a policy watches its connections, which only Mirage judges, or
  * when Mirage cannot tell which files it touches (`clientFiles`). Mirrors
  * Python's `fact_machine`.
@@ -313,16 +340,15 @@ export async function factMachine(
   const cwd = session.cwd
   const files = client ? clientFiles(argv, cwd) : []
   if (files === null) return null
-  const here = (await folderHolders(cwd, registry, asked)).includes(runtime.defaultMachine)
-  const typed = argv.operands.filter(
-    (w): w is PathSpec => w instanceof PathSpec && w.rawPath !== '-',
-  )
+  const typed = pathOperands(argv, cwd).filter((w) => w.rawPath !== '-')
   const options = optionPaths(argv, cwd)
-  const paths = [
-    ...typed.map((w) => unmarkGlobs(w.virtual)),
-    ...options,
-    ...files.map((name) => norm(name.startsWith('/') ? name : `${cwd}/${name}`)),
-  ]
+  if (
+    (typed.length > 0 || options.length > 0 || files.length > 0) &&
+    (await registry.policies.wantsFor('preVfs', session.sessionId))
+  )
+    return null
+  const holding = await folderHolders(cwd, session, registry, asked)
+  const here = holding.includes(runtime.defaultMachine)
   const rooted = optionPaths(argv, '/')
   const leans =
     options.length !== rooted.length ||
@@ -330,6 +356,17 @@ export async function factMachine(
     typed.some((w) => !w.rawPath.startsWith('/')) ||
     files.some((name) => !name.startsWith('/'))
   if (leans && !here) return null
+  const written: string[] = []
+  for (const path of options) {
+    const scope = await writtenScope(path, session, registry, links)
+    if (scope === null) return null
+    written.push(scope)
+  }
+  const paths = [
+    ...typed.map((w) => unmarkGlobs(w.virtual)),
+    ...written,
+    ...files.map((name) => resolvePath(name, cwd)),
+  ]
   if (paths.length > 0) {
     const held = await machineHoldingAll(
       paths.map((path) => [path, true] as const),

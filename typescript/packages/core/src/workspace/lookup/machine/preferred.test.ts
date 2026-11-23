@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
 import { FakeFiles, two, run, texts } from '../../../../tests/fixtures/machine_files.ts'
-import type { Action } from '../../../policy/types.ts'
+import type { Action, CommandContext } from '../../../policy/types.ts'
 import { MountMode } from '../../../types.ts'
 import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import { Workspace } from '../../workspace/workspace.ts'
@@ -55,6 +55,29 @@ describe('preferredMachine', () => {
       [],
       ['/tmp/from-only', '/tmp/only/k'],
     ])
+    await ws.close()
+  })
+
+  it.each([
+    [
+      'refused',
+      {
+        preCommand: (ctx: CommandContext): Action | null =>
+          ctx.command === 'echo' ? { kind: 'deny', reason: 'no echo' } : null,
+      },
+    ],
+    ['judged by a file policy', { preVfs: (): Action | null => null }],
+  ])('asks no machine about its folder for a %s line', async (_, policy) => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/only/k': 'k' })
+    const first = new ScriptedMachine('a', a.answer)
+    const second = new ScriptedMachine('b', b.answer)
+    const ws = new Workspace({}, { mode: MountMode.WRITE, machines: { a: first, b: second } })
+    ws.policies.add(policy)
+    await ws.shell('cd /tmp/only')
+    const before = [first.lines.length, second.lines.length]
+    await ws.shell('echo 1')
+    expect([first.lines.length, second.lines.length]).toEqual(before)
     await ws.close()
   })
 

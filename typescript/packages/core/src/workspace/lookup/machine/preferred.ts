@@ -64,9 +64,38 @@ export async function preferredMachine(
     fedBy.placed = true
   }
   if (fedBy !== null && fedBy.machine !== null) return fedBy.machine
-  const held = await folderHolders(session.cwd, registry, asked)
+  const held = await folderHolders(session.cwd, session, registry, asked)
   const [only] = held
   return held.length === 1 && only !== undefined ? only : null
+}
+
+/**
+ * Whether `preferredMachine` may ask a machine for its answer: to place a
+ * pipe's writer not placed yet, or to find who holds a folder a mount
+ * several machines show that the line has not asked about. The command is
+ * then admitted first, so a refused one never reaches a machine. Mirrors
+ * Python's `asks_machines`.
+ *
+ * @param session the session it runs in.
+ * @param registry the workspace's mounts and machines.
+ * @param routing the line's placement.
+ * @param fedBy the program writing the pipe the command reads.
+ * @param asked the machines the line found holding its folders
+ *   (`ExecutionFrame.folderHolders`).
+ */
+export function asksMachines(
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+  fedBy: PipeWriter | null,
+  asked: Map<string, string[]>,
+): boolean {
+  if (routing === undefined || routing.machine !== undefined) return false
+  if (!severalMachines(registry)) return false
+  if (fedBy !== null && !fedBy.placed) return true
+  if (fedBy !== null && fedBy.machine !== null) return false
+  const folder = session.cwd
+  return !asked.has(folder) && folderMachines(folder, registry).length > 1
 }
 
 /**

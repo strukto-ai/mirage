@@ -27,7 +27,7 @@ import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { lookup, lookupAll } from '../lookup.ts'
 import { Consumer } from '../types.ts'
-import { mountMachines, pathOnMount } from './mounts.ts'
+import { folderMachines, mountMachines, pathOnMount } from './mounts.ts'
 
 /**
  * The machines a program no name captures is searched for on, in the order
@@ -214,21 +214,33 @@ export async function nearestMachine(
 /**
  * The machines holding the folder a command stands in (`holdingMachines`),
  * asked once a line: `asked` keeps each folder's answer for every command
- * the line runs (`ExecutionFrame.folderHolders`). Mirrors Python's
- * `folder_holders`.
+ * the line runs (`ExecutionFrame.folderHolders`).
+ *
+ * Where a coded file policy speaks for the session no machine is asked,
+ * since the policy judges a path inside the command that opens it: a
+ * folder whose mount shows one machine is that machine's, and any other
+ * is no one machine's. Mirrors Python's `folder_holders`.
  *
  * @param folder the folder, an absolute virtual path.
+ * @param session the session it runs in.
  * @param registry the workspace's mounts and machines.
  * @param asked the answers the line has had.
  */
 export async function folderHolders(
   folder: string,
+  session: SessionState,
   registry: MountRegistry,
   asked: Map<string, string[]>,
 ): Promise<string[]> {
   const known = asked.get(folder)
   if (known !== undefined) return known
-  const held = await holdingMachines(folder, registry)
+  let held: string[]
+  if (await registry.policies.wantsFor('preVfs', session.sessionId)) {
+    const shown = folderMachines(folder, registry)
+    held = shown.length === 1 ? shown : []
+  } else {
+    held = await holdingMachines(folder, registry)
+  }
   asked.set(folder, held)
   return held
 }

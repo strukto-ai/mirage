@@ -184,7 +184,10 @@ from mirage.workspace.lookup.machine.command import (
 )
 from mirage.workspace.lookup.machine.links import link_machine
 from mirage.workspace.lookup.machine.mounts import several_machines
-from mirage.workspace.lookup.machine.preferred import preferred_machine
+from mirage.workspace.lookup.machine.preferred import (
+    asks_machines,
+    preferred_machine,
+)
 from mirage.workspace.lookup.machine.search import (
     bound_to,
     is_searched,
@@ -1229,6 +1232,16 @@ async def _run_argv(
                 if held is None or held.runtime is None
                 else held.runtime.machine
             )
+        if asks_machines(
+            session,
+            registry,
+            context.frame.routing,
+            context.frame.stdin_writer,
+            context.frame.folder_holders,
+        ):
+            denied = await guard((), stdin)
+            if denied is not None:
+                return denied
         preferred = await preferred_machine(
             session,
             registry,

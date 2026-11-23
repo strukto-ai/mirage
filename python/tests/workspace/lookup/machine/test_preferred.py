@@ -15,6 +15,7 @@
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy import Deny
 from mirage.policy.base import Policy
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
@@ -81,6 +82,32 @@ async def test_a_line_asks_who_holds_its_folder_once():
     await ws.shell("echo 1; echo 2; echo 3; echo 4")
     assert one_echo > 0
     assert len(first.lines) - start == one_echo
+    await ws.close()
+
+
+class NoEcho(Policy):
+    async def pre_command(self, ctx):
+        return Deny(reason="no echo") if ctx.command == "echo" else None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [NoEcho(), Seen()])
+async def test_no_machine_is_asked_about_a_folder_for_a_refused_or_judged_line(
+    policy,
+):
+    a, b = FakeFiles(), FakeFiles({"/tmp/only/k": b"k"})
+    first = ScriptedMachine("a", a.answer)
+    second = ScriptedMachine("b", b.answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": first, "b": second},
+        policies=[policy],
+    )
+    await ws.shell("cd /tmp/only")
+    before = (len(first.lines), len(second.lines))
+    await ws.shell("echo 1")
+    assert (len(first.lines), len(second.lines)) == before
     await ws.close()
 
 

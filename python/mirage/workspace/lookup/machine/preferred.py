@@ -77,8 +77,42 @@ async def preferred_machine(
         fed_by.placed = True
     if fed_by is not None and fed_by.machine is not None:
         return fed_by.machine
-    held = await folder_holders(session.cwd, registry, asked)
+    held = await folder_holders(session.cwd, session, registry, asked)
     return held[0] if len(held) == 1 else None
+
+
+def asks_machines(
+    session: SessionState,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+    fed_by: PipeWriter | None,
+    asked: dict[str, list[str]],
+) -> bool:
+    """Whether ``preferred_machine`` may ask a machine for its answer:
+    to place a pipe's writer not placed yet, or to find who holds a
+    folder a mount several machines show that the line has not asked
+    about. The command is then admitted first, so a refused one never
+    reaches a machine.
+
+    Args:
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        routing (RouteDecision | None): the line's placement.
+        fed_by (PipeWriter | None): the program writing the pipe the
+            command reads.
+        asked (dict[str, list[str]]): the machines the line found
+            holding its folders (``ExecutionFrame.folder_holders``).
+    """
+    if routing is None or routing.machine is not None:
+        return False
+    if not several_machines(registry):
+        return False
+    if fed_by is not None and not fed_by.placed:
+        return True
+    if fed_by is not None and fed_by.machine is not None:
+        return False
+    folder = session.cwd
+    return folder not in asked and len(folder_machines(folder, registry)) > 1
 
 
 def _writer_paths(fed_by: PipeWriter, registry: MountRegistry) -> list[str]:

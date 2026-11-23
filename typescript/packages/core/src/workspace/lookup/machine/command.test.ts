@@ -362,6 +362,18 @@ describe('operand routing', () => {
     await ws.close()
   })
 
+  it('lands a new download in the shared folder its machine holds', async () => {
+    const a = new FakeFiles({}, CLIENTS)
+    const b = new FakeFiles({ '/tmp/only/k': 'k' }, CLIENTS)
+    const ws = two(a, b)
+    await ws.shell(`cd /tmp/only && wget -q -T 2 ${REQUEST}`)
+    await ws.shell(`cd /tmp/only && curl -s -o new.txt ${REQUEST}`)
+    await ws.shell(`cd /tmp/only && curl -s -o /tmp/new.txt ${REQUEST}`)
+    expect(a.ran).toEqual([])
+    expect(b.ran).toEqual([`wget -q -T 2 ${REQUEST}`, `curl -s -o new.txt ${REQUEST}`])
+    await ws.close()
+  })
+
   it("leaves a fact to Mirage where the run's PATH finds nothing", async () => {
     const a = new FakeFiles({}, ['uname'])
     const b = new FakeFiles({}, ['uname'])

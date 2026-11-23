@@ -30,7 +30,7 @@ from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
-from mirage.utils.path import norm
+from mirage.utils.path import norm, parent, resolve_path
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
@@ -50,6 +50,7 @@ from mirage.workspace.lookup.machine.mounts import (
 )
 from mirage.workspace.lookup.machine.search import (
     folder_holders,
+    holding_machines,
     nearest_machine,
 )
 from mirage.workspace.lookup.types import ExternalTarget
@@ -254,11 +255,12 @@ def _client_files(argv: Argv, cwd: str) -> list[str] | None:
     """The files a client that reaches a server reads or writes through
     words its spec keeps as text, as typed: curl's ``@file`` data and
     ``-w @file`` template, the cookie file a ``-b`` without ``=`` names,
-    and the file wget saves into its folder when neither ``-O`` nor
-    ``--spider`` says otherwise. None where Mirage cannot tell which
-    files the program touches: an option its spec does not know, a
-    ``-F`` field read from a file, which Mirage's curl sends as given,
-    and a second wget operand, a URL to the machine's wget and a
+    and, for wget with neither ``-O`` nor ``--spider``, its folder
+    itself (``.``), where it saves under a name it picks as it runs
+    (``report.1`` when ``report`` is there). None where Mirage cannot
+    tell which files the program touches: an option its spec does not
+    know, a ``-F`` field read from a file, which Mirage's curl sends as
+    given, and a second wget operand, a URL to the machine's wget and a
     destination to Mirage's.
 
     Args:
@@ -275,7 +277,7 @@ def _client_files(argv: Argv, cwd: str) -> list[str] | None:
             return None
         if "-O" in flags or flags.get("--spider"):
             return []
-        return [(urls[0] if urls else "").rsplit("/", 1)[-1] or "index.html"]
+        return ["."]
     form = flags.get("--form")
     if isinstance(form, str) and form.partition("=")[2][:1] in ("@", "<"):
         return None
@@ -302,6 +304,32 @@ def _client_files(argv: Argv, cwd: str) -> list[str] | None:
     return [name for name in named if name not in ("", "-")]
 
 
+async def _written_scope(
+    path: str,
+    session: SessionState,
+    registry: MountRegistry,
+    links: NamespaceReader,
+) -> str | None:
+    """The path a machine must hold for a command that writes ``path``
+    to run there: ``path`` where a machine holds it, else its folder,
+    where the new file lands. None where a write may not reach it on
+    a machine (``machine_mounts``): another mount, a read-only one, a
+    mount the session's rules restrict, or a link of Mirage's own on
+    the way, the name itself included.
+
+    Args:
+        path (str): an absolute virtual path the command writes.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the workspace's mounts and machines.
+        links (NamespaceReader): the session's link table.
+    """
+    if machine_mounts([(path, True)], session, registry, links) is None:
+        return None
+    if await holding_machines(path, registry):
+        return path
+    return parent(path)
+
+
 async def fact_machine(
     argv: Argv,
     session: SessionState,
@@ -320,12 +348,15 @@ async def fact_machine(
     Mirage keeps the command where no machine takes programs
     (``about_machine``), or that machine refuses the session's runs or
     would not find the program on the PATH the run gets; when a path it
-    names or a file it reads or writes is not that machine's own, or is
-    typed relative to a folder the machine does not hold; when input is
-    piped into a machine that takes none; and, for a command that reaches
-    a server, when the workspace limits its network or a policy watches
-    its connections, which only Mirage judges, or when Mirage cannot tell
-    which files it touches (``_client_files``).
+    names or a file it reads or writes is not that machine's own, a
+    file it writes counting by its folder while no machine holds it
+    (``_written_scope``), or is typed relative to a folder the machine
+    does not hold; when a coded file policy speaks for the session and
+    the command touches a path, which the policy judges inside Mirage;
+    when input is piped into a machine that takes none; and, for a
+    command that reaches a server, when the workspace limits its network
+    or a policy watches its connections, which only Mirage judges, or
+    when Mirage cannot tell which files it touches (``_client_files``).
 
     Args:
         argv (Argv): the command.
@@ -353,20 +384,15 @@ async def fact_machine(
     files = _client_files(argv, cwd) if client else []
     if files is None:
         return None
-    here = runtime.default_machine in await folder_holders(
-        cwd, registry, asked
-    )
-    typed = [
-        w
-        for w in argv.operands
-        if isinstance(w, PathSpec) and w.raw_path != "-"
-    ]
+    typed = [w for w in _path_operands(argv, cwd) if w.raw_path != "-"]
     options = _option_paths(argv, cwd)
-    paths = [
-        *(unmark_globs(w.virtual) for w in typed),
-        *options,
-        *(norm(posixpath.join(cwd, name)) for name in files),
-    ]
+    if (typed or options or files) and (
+        await registry.policies.wants_for("pre_vfs", session.session_id)
+    ):
+        return None
+    here = runtime.default_machine in await folder_holders(
+        cwd, session, registry, asked
+    )
     leans = (
         options != _option_paths(argv, "/")
         or any(not w.raw_path.startswith("/") for w in typed)
@@ -374,6 +400,17 @@ async def fact_machine(
     )
     if leans and not here:
         return None
+    written: list[str] = []
+    for path in options:
+        scope = await _written_scope(path, session, registry, links)
+        if scope is None:
+            return None
+        written.append(scope)
+    paths = [
+        *(unmark_globs(w.virtual) for w in typed),
+        *written,
+        *(resolve_path(name, cwd) for name in files),
+    ]
     if paths:
         held = await machine_holding_all(
             [(p, True) for p in paths], session, registry, links, None

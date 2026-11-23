@@ -137,7 +137,7 @@ import { binProgram } from '../lookup/machine/answers.ts'
 import { factMachine, operandMachine, programMachine } from '../lookup/machine/command.ts'
 import { linkMachine } from '../lookup/machine/links.ts'
 import { severalMachines } from '../lookup/machine/mounts.ts'
-import { preferredMachine } from '../lookup/machine/preferred.ts'
+import { asksMachines, preferredMachine } from '../lookup/machine/preferred.ts'
 import { boundTo, isSearched, searchedMachine } from '../lookup/machine/search.ts'
 import type { NamespaceReader } from '../dispatcher/reader.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -1204,6 +1204,18 @@ async function runArgv(
       if (denied !== null) return denied
       const [held] = await heldMachine(argv, deps, context, stdin)
       if (held?.runtime) machine = held.runtime.machine
+    }
+    if (
+      asksMachines(
+        session,
+        registry,
+        context.frame.routing,
+        context.frame.stdinWriter,
+        context.frame.folderHolders,
+      )
+    ) {
+      const denied = await guard([], stdin)
+      if (denied !== null) return denied
     }
     const preferred = await preferredMachine(
       session,
