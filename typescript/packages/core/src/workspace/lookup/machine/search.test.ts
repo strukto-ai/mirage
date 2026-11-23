@@ -408,7 +408,7 @@ describe('a middle stage', () => {
   })
 
   it('refuses a reader only another machine has', async () => {
-    const a = new FakeFiles({}, ['sink'])
+    const a = new FakeFiles({}, ['filter', 'sink'])
     const b = new FakeFiles({}, ['gen', 'filter'])
     const ws = two(a, b)
     const done = await ws.shell('gen | filter | sink')
