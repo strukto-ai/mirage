@@ -560,9 +560,7 @@ export class SessionState {
   // once it ends; a child shell starts with none.
   pendingSignals = new Set<number>()
   signalTrapRunning = false
-  // The signal this shell ends of once its EXIT action has run, as bash runs
-  // it before it dies of a signal it neither traps nor ignores, and `$?` as it
-  // came; null while none has. A child shell starts with none.
+  // The signal the shell ends of once its EXIT action runs, and `$?` then.
   fatalSignal: number | null = null
   statusBeforeSignal = 0
   // Resolved when a trapped signal arrives while `wait` waits.

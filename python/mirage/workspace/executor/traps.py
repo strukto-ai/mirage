@@ -15,13 +15,9 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import (
-    caller_process,
-    current_caller,
-    is_program_invocation,
-    voice_name,
-)
+from mirage.context import current_caller, is_program_invocation, voice_name
 from mirage.execution.job.constants import IGNORED_SIGNALS
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
@@ -153,6 +149,17 @@ def _drop_job_ignores(session: SessionState, signals: frozenset[int]) -> None:
     session.job_ignored = session.job_ignored - signals
 
 
+def _shell_process() -> ProcessHandle | None:
+    """The process the shell runs as: the current call's, which a task's
+    context always binds. Mirrors TypeScript's shellProcess, whose host
+    may not tell tasks apart and so takes the frame's shell instead.
+
+    Returns:
+        ProcessHandle | None: its process; None outside any.
+    """
+    return current_caller().process
+
+
 def arm_signals(session: SessionState) -> None:
     """Make the shell the one that answers a signal its process gets, as
     it runs a statement there: one it traps or ignores, it takes
@@ -165,7 +172,7 @@ def arm_signals(session: SessionState) -> None:
     Args:
         session (SessionState): the shell.
     """
-    process = caller_process(session.process_id)
+    process = _shell_process()
     if process is not None:
         process.catcher = (
             session.catch_signal if session.signal_traps else None
@@ -604,7 +611,7 @@ async def run_exit_trap(
         sink,
     )
     record_status(session, 128 + fatal)
-    process = caller_process(session.process_id)
+    process = _shell_process()
     if process is not None and process.record.pid == session.process_id:
         process.program_signaled(fatal)
     if ended is not None:

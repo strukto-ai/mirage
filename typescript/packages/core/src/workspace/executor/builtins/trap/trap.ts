@@ -15,6 +15,7 @@
 import { boundedDecimal } from '../../../../commands/builtin/utils/strtol.ts'
 import { currentCaller, type RedirectResult } from '../../../../context/session_context.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import type { ProcessHandle } from '../../../../execution/process/handle.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { builtinError, builtinUsage, result } from '../shared.ts'
 import { SHELL_IGNORED_SIGNALS, SIGNALS } from '../../../../shell/constants.ts'
@@ -93,9 +94,14 @@ function ownTraps(session: SessionState): void {
  * action runs once the command running as it arrives (`kill`) has ended,
  * and an empty one ignores the signal; one ignored as the shell started
  * stays ignored, and KILL and STOP are listed and never caught, as bash's
- * are. DEBUG is refused rather than accepted and never run.
+ * are. DEBUG is refused rather than accepted and never run. `shell` is the
+ * process the shell runs as, its frame's (`armSignals`).
  */
-export function handleTrap(args: readonly string[], session: SessionState): RedirectResult {
+export function handleTrap(
+  args: readonly string[],
+  session: SessionState,
+  shell: ProcessHandle | null = null,
+): RedirectResult {
   const words = [...args]
   let printing = false
   for (let word = words[0]; word?.startsWith('-') === true && word !== '-'; word = words[0]) {
@@ -161,7 +167,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Redi
       session[scoped] = false
     }
   }
-  armSignals(session)
+  armSignals(session, shell)
   return result('trap', { exitCode: errors.length > 0 ? 1 : 0, stderr: errors.join('') })
 }
 
@@ -185,5 +191,5 @@ function ownSignal(session: SessionState, signal: number): void {
 
 /** The `trap` arm. */
 export function trapBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return Promise.resolve(handleTrap(call.argv.args, call.context.session))
+  return Promise.resolve(handleTrap(call.argv.args, call.context.session, call.context.frame.shell))
 }

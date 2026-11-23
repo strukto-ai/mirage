@@ -545,9 +545,7 @@ class SessionState:
     # run once it ends; a child shell starts with none.
     pending_signals: set[int] = field(default_factory=set, repr=False)
     signal_trap_running: bool = False
-    # The signal this shell ends of once its EXIT action has run, as bash
-    # runs it before it dies of a signal it neither traps nor ignores, and
-    # `$?` as it came; None while none has. A child shell starts with none.
+    # The signal the shell ends of once its EXIT action runs, and `$?` then.
     fatal_signal: int | None = field(default=None, repr=False)
     status_before_signal: int = field(default=0, repr=False)
     signal_arrived: asyncio.Event | None = field(default=None, repr=False)

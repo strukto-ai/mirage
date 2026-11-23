@@ -20,13 +20,10 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
-import {
-  callerProcess,
-  currentCaller,
-  isProgramInvocation,
-  voiceName,
-} from '../../context/session_context.ts'
+import { currentCaller, isProgramInvocation, voiceName } from '../../context/session_context.ts'
 import { IGNORED_SIGNALS } from '../../execution/job/constants.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
+import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
@@ -132,6 +129,17 @@ function dropJobIgnores(session: SessionState, signals: ReadonlySet<number>): vo
 }
 
 /**
+ * The process the shell runs as: the current call's on a host that isolates
+ * tasks. Without isolation the slot can hold another task's process, even
+ * another workspace's under the same pid, and a pid names no workspace, so it
+ * is the frame's shell (`shell`), and none where the frame names none.
+ * Mirrors Python's _shell_process.
+ */
+function shellProcess(shell: ProcessHandle | null = null): ProcessHandle | null {
+  return asyncContextIsolatesTasks ? currentCaller().process : shell
+}
+
+/**
  * Make the shell the one that answers a signal its process gets, as it runs
  * a statement there: one it traps or ignores, it takes
  * (`SessionState.catchSignal`), one it would die of it takes to run its EXIT
@@ -140,8 +148,8 @@ function dropJobIgnores(session: SessionState, signals: ReadonlySet<number>): vo
  * script, a job's own subshell), so the innermost shell running answers.
  * Mirrors Python's arm_signals.
  */
-export function armSignals(session: SessionState): void {
-  const process = callerProcess(session.processId)
+export function armSignals(session: SessionState, shell: ProcessHandle | null = null): void {
+  const process = shellProcess(shell)
   if (process === null) return
   process.catcher =
     session.signalTraps.size > 0 ? (signal, pid) => session.catchSignal(signal, pid) : null
@@ -504,7 +512,7 @@ export async function runExitTrap(
     sink,
   )
   recordStatus(session, 128 + fatal)
-  const process = callerProcess(session.processId)
+  const process = shellProcess()
   if (process !== null && process.record.id.pid === session.processId)
     process.programSignaled(fatal)
   if (ended !== null) ended.exitCode = 128 + fatal

@@ -369,7 +369,7 @@ export async function runProgram(
   sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
   currentCaller().process?.programSignaled(null)
-  armSignals(context.session)
+  armSignals(context.session, context.frame.shell)
   const shell = context.frame.shell
   if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal

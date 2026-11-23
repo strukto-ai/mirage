@@ -15,7 +15,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { runWithLineAbort } from './abort.ts'
+import { ProcessTable } from '../execution/process/table.ts'
 import { recordStatus } from './executor/statement.ts'
+import { armSignals } from './executor/traps.ts'
 import { SessionState } from './session/session.ts'
 import {
   callerSignal,
@@ -25,7 +27,7 @@ import {
   setCurrentEvaluation,
 } from '../context/session_context.ts'
 import { EvaluationContext } from './evaluation.ts'
-import { MountMode } from '../types.ts'
+import { MountMode, PathSpec } from '../types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -190,6 +192,67 @@ describe('a job on the fallback storage', () => {
       expect(new TextDecoder().decode(io.stdout)).toBe('present:1\n')
     } finally {
       await ws.close()
+    }
+  })
+
+  it('arms only the process its frame names', async () => {
+    // A pid names no workspace: without the frame's shell a shell arms nothing,
+    // whatever process sits in the slot or shares its pid.
+    const init = {
+      sessionId: 'a',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run: () => new Promise<number>(() => undefined),
+    }
+    const own = new ProcessTable().start(init)
+    const foreign = new ProcessTable().start(init)
+    expect(foreign.record.id.pid).toBe(own.record.id.pid)
+    const session = new SessionState({ sessionId: 'a', cwd: '/' })
+    session.exitTrap = 'echo bye'
+    await bindCaller({ ...currentCaller(), process: foreign }, () => {
+      armSignals(session)
+      session.processId = own.record.id.pid
+      armSignals(session)
+      armSignals(session, own)
+      return Promise.resolve()
+    })
+    expect(foreign.exitCatcher).toBeNull()
+    expect(own.exitCatcher).not.toBeNull()
+  })
+
+  it('arms a nested shell its own traps', async () => {
+    // Pinned on bash 5.2: each nested shell answers the signal it sends itself.
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        `bash -c 'trap "echo caught" TERM; kill $$; echo after'; echo rc=$?; ` +
+          `( trap 'echo c' TERM; kill $BASHPID; echo after ); echo rc=$?; ` +
+          `timeout 5 bash -c 'trap "echo t" TERM; kill $$; echo after'; echo rc=$?; ` +
+          `bash -c 'trap "echo bye" EXIT; kill $$; echo after' 2>/dev/null; echo rc=$?; ` +
+          `( trap 'echo sub' EXIT; kill $BASHPID; echo after ) 2>/dev/null; echo rc=$?`,
+      )
+      expect(new TextDecoder().decode(io.stdout)).toBe(
+        'caught\nafter\nrc=0\nc\nafter\nrc=0\nt\nafter\nrc=0\nbye\nrc=143\nsub\nrc=143\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('answers its own signals while another workspace runs beside it', async () => {
+    // Both lines run under the same pid, each in its own table; the shell that
+    // ignores TERM must arm its own process, not the other workspace's.
+    const a = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    const b = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const running = a.shell('sleep 0.3; echo a')
+      const io = await b.shell("trap '' TERM; kill $$; echo survived")
+      expect(new TextDecoder().decode(io.stdout)).toBe('survived\n')
+      expect(new TextDecoder().decode((await running).stdout)).toBe('a\n')
+    } finally {
+      await a.close()
+      await b.close()
     }
   })
 
