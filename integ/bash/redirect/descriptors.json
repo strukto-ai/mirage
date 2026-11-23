@@ -1904,6 +1904,41 @@
         "stdout": "a\n141 0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "a_redirected_group_s_exec_and_refusals_keep_its_streams",
+      "seq": 1380040,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(d={mount}/redirected_group_rebinds; mkdir -p $d; { echo A; exec >$d/g; echo B; } > $d/f; cat $d/f $d/g; { echo C; exec 2>$d/e; echo D >&2; } 2>&1; cat $d/e; { echo E >&2; exec 2>&1; echo F >&2; } 2>$d/h; cat $d/h; { sleep 0.1 && echo J & exec >$d/j; echo K; wait; } > $d/i; cat $d/i $d/j; set -C; echo x > $d/n; { echo L; } 2>/dev/null > $d/n; echo noclobber=$?; set +C; exec 3>&1; { echo M >&3; } 3>&-; echo closed=$?; rm -r $d)",
+      "expect": {
+        "exit": 0,
+        "stdout": "A\nB\nC\nD\nF\nE\nJ\nK\nnoclobber=1\nclosed=1\n",
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
+      }
     }
   ]
 }
