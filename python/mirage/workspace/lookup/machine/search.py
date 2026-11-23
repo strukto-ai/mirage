@@ -17,12 +17,14 @@ import dataclasses
 import logging
 from collections.abc import Sequence
 
-from mirage.core.machine.place import asked_machines
-from mirage.core.machine.stat import stat_entry
+from mirage.accessor.machine import MachineAccessor
+from mirage.core.machine.place import kernel_view_machine
+from mirage.core.machine.stat import is_hidden_on, stat_entry
 from mirage.errors.types import CommandTimeoutError
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.machine import RemoteRuntime
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
+from mirage.types import PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.workspace.lookup.lookup import lookup, lookup_all
@@ -130,24 +132,41 @@ async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
         return shown
     accessor = entry.vfs.accessor
     spec = path_on_mount(entry, path)
-    try:
-        names = await asked_machines(accessor, spec)
-    except Exception as exc:
-        _unasked(exc, path)
-        return []
+    own = kernel_view_machine(accessor, spec)
+    names = [n for n in accessor.names() if own in (None, n)]
     found = await asyncio.gather(
-        *(stat_entry(accessor, name, spec) for name in names),
+        *(_holds(accessor, name, spec) for name in names),
         return_exceptions=True,
     )
     held: list[str] = []
     for name, result in zip(names, found, strict=True):
-        if isinstance(result, (FileNotFoundError, NotADirectoryError)):
-            continue
         if isinstance(result, BaseException):
             _unasked(result, f"{name} for {path}")
-            continue
-        held.append(name)
+        elif result:
+            held.append(name)
     return held
+
+
+async def _holds(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> bool:
+    """Whether one machine holds a path the session may see: not one its
+    own links lead to a hidden name (``is_hidden_on``), and one it has.
+    Each machine is asked on its own, so one that cannot be asked fails
+    alone.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine asked.
+        path (PathSpec): the path, as its mount addresses it.
+    """
+    if await is_hidden_on(accessor, machine, path):
+        return False
+    try:
+        await stat_entry(accessor, machine, path)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    return True
 
 
 async def _machines_with(

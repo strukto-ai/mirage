@@ -386,3 +386,23 @@ async def test_a_usr_bin_path_is_searched_for_past_a_function_of_its_name():
     await ws.shell("tool() { :; }; /usr/bin/tool -x")
     assert (a.ran, b.ran) == ([], ["tool -x"])
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_machine_that_is_down_does_not_hide_who_holds_a_path_under_a_hide():
+    a = FakeFiles(programs=("smi",))
+    b = FakeFiles({"/tmp/only.txt": b"o"}, programs=("smi",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": Serving("a", a.answer),
+            "b": Serving("b", b.answer),
+            "c": Down("c", FakeFiles().answer),
+        },
+        profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
+    )
+    agent = await ws.session("agent", profile="agent")
+    await agent.shell("smi /tmp/only.txt")
+    assert (a.ran, b.ran) == ([], ["smi /tmp/only.txt"])
+    await ws.close()

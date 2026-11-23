@@ -144,21 +144,38 @@ async def hidden_machines(
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the path an op names.
     """
+    if not hidden_under(current_caller().visibility, mount_prefix(path)):
+        return []
+    return [
+        machine
+        for machine in accessor.names()
+        if await is_hidden_on(accessor, machine, path)
+    ]
+
+
+async def is_hidden_on(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> bool:
+    """Whether ``path`` resolves on one machine, through that machine's
+    own links, to a name the running session hides (``hidden_machines``);
+    no for a session that hides nothing in the mount, which asks nothing.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine asked.
+        path (PathSpec): the path an op names.
+    """
     vis = current_caller().visibility
     if not hidden_under(vis, mount_prefix(path)):
-        return []
+        return False
     q = single_quote(machine_path(accessor, path))
-    hidden: list[str] = []
-    for machine in accessor.names():
-        status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
-        if status != 0:
-            continue
-        real = out.decode(errors="surrogateescape").rstrip("\n")
-        seen = virtual_path(accessor, path, real)
-        if (
-            seen is not None
-            and seen != norm(path.virtual)
-            and not path_visible(vis, seen)
-        ):
-            hidden.append(machine)
-    return hidden
+    status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
+    if status != 0:
+        return False
+    real = out.decode(errors="surrogateescape").rstrip("\n")
+    seen = virtual_path(accessor, path, real)
+    return (
+        seen is not None
+        and seen != norm(path.virtual)
+        and not path_visible(vis, seen)
+    )

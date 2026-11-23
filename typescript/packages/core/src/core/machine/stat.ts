@@ -148,17 +148,34 @@ export function hasHides(path: PathSpec): boolean {
  * @param path the path an op names.
  */
 export async function hiddenMachines(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
-  const vis = currentCaller().session?.visibility ?? null
-  if (!hiddenUnder(vis, mountPrefix(path))) return []
-  const q = singleQuote(machinePath(accessor, path))
+  if (!hiddenUnder(currentCaller().session?.visibility ?? null, mountPrefix(path))) return []
   const hidden: string[] = []
-  for (const machine of accessor.names()) {
-    const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
-    if (status !== 0) continue
-    const real = new TextDecoder().decode(out).replace(/\n$/, '')
-    const seen = virtualPath(accessor, path, real)
-    if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen))
-      hidden.push(machine)
-  }
+  for (const machine of accessor.names())
+    if (await isHiddenOn(accessor, machine, path)) hidden.push(machine)
   return hidden
+}
+
+/**
+ * Whether `path` resolves on one machine, through that machine's own links,
+ * to a name the running session hides (`hiddenMachines`); no for a session
+ * that hides nothing in the mount, which asks nothing. Mirrors Python's
+ * `is_hidden_on`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine asked.
+ * @param path the path an op names.
+ */
+export async function isHiddenOn(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<boolean> {
+  const vis = currentCaller().session?.visibility ?? null
+  if (!hiddenUnder(vis, mountPrefix(path))) return false
+  const q = singleQuote(machinePath(accessor, path))
+  const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
+  if (status !== 0) return false
+  const real = new TextDecoder().decode(out).replace(/\n$/, '')
+  const seen = virtualPath(accessor, path, real)
+  return seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen)
 }

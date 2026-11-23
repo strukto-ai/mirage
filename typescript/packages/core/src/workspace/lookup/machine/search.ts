@@ -12,13 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { askedMachines } from '../../../core/machine/place.ts'
-import { statEntry } from '../../../core/machine/stat.ts'
+import type { MachineAccessor } from '../../../accessor/machine.ts'
+import { kernelViewMachine } from '../../../core/machine/place.ts'
+import { isHiddenOn, statEntry } from '../../../core/machine/stat.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../../runtime/constants.ts'
 import { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
+import type { PathSpec } from '../../../types.ts'
 import { MachineVFS } from '../../../vfs/machine/machine.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
@@ -108,26 +110,39 @@ async function pathMachines(path: string, registry: MountRegistry): Promise<stri
   if (shown.length < 2) return shown
   const accessor = entry.vfs.accessor
   const spec = pathOnMount(entry, path)
-  let names: string[]
-  try {
-    names = await askedMachines(accessor, spec)
-  } catch (err) {
-    unasked(err, path)
-    return []
-  }
-  const found = await Promise.allSettled(names.map((name) => statEntry(accessor, name, spec)))
+  const own = kernelViewMachine(accessor, spec)
+  const names = accessor.names().filter((name) => own === null || own === name)
+  const found = await Promise.allSettled(names.map((name) => holds(accessor, name, spec)))
   const held: string[] = []
   for (const [at, name] of names.entries()) {
     const result = found[at]
     if (result === undefined) continue
-    if (result.status === 'fulfilled') {
-      held.push(name)
-      continue
-    }
-    const code = (result.reason as { code?: unknown } | null)?.code
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') unasked(result.reason, `${name} for ${path}`)
+    if (result.status === 'rejected') unasked(result.reason, `${name} for ${path}`)
+    else if (result.value) held.push(name)
   }
   return held
+}
+
+/**
+ * Whether one machine holds a path the session may see: not one its own
+ * links lead to a hidden name (`isHiddenOn`), and one it has. Each machine is
+ * asked on its own, so one that cannot be asked fails alone. Mirrors
+ * Python's `_holds`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine asked.
+ * @param path the path, as its mount addresses it.
+ */
+async function holds(accessor: MachineAccessor, machine: string, path: PathSpec): Promise<boolean> {
+  if (await isHiddenOn(accessor, machine, path)) return false
+  try {
+    await statEntry(accessor, machine, path)
+    return true
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false
+    throw err
+  }
 }
 
 /**

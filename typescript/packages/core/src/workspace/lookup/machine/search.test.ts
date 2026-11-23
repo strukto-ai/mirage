@@ -362,4 +362,25 @@ describe('searchedMachine', () => {
     expect([a.ran, b.ran]).toEqual([[], ['tool -x']])
     await ws.close()
   })
+
+  it('does not hide who holds a path under a hide when a machine is down', async () => {
+    const a = new FakeFiles({}, ['smi'])
+    const b = new FakeFiles({ '/tmp/only.txt': 'o' }, ['smi'])
+    const ws = new Workspace(
+      {},
+      {
+        mode: MountMode.WRITE,
+        machines: {
+          a: new Serving('a', a.answer),
+          b: new Serving('b', b.answer),
+          c: new Down('c', new FakeFiles().answer),
+        },
+        profiles: { agent: { paths: { hide: ['/tmp/secret'] } } },
+      },
+    )
+    const agent = await ws.session('agent', { profile: 'agent' })
+    await agent.shell('smi /tmp/only.txt')
+    expect([a.ran, b.ran]).toEqual([[], ['smi /tmp/only.txt']])
+    await ws.close()
+  })
 })
