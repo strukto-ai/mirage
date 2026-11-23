@@ -682,7 +682,16 @@ async def _deadline(
         said.append(killed(signal))
         return await _ended(console, held, said, 128 + signal)
     if not task.cancelled():
-        code = task.result() if preserve else TIMEOUT_STATUS
+        # A native program the command is may still have died of a signal
+        # (``program_signaled``), whose KILL stands as one Mirage sent.
+        ended = process.ended_by
+        code = (
+            task.result()
+            if preserve
+            else TIMEOUT_STATUS
+            if ended is None
+            else _signalled_status(ended, preserve)
+        )
         return await _ended(console, held, said, code, finished=True)
     return await _ended(
         console, held, said, _signalled_status(process.signal, preserve)

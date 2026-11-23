@@ -3113,6 +3113,24 @@ describe('handleTimeout', () => {
     expect(decode(stdout)).toBe('ran:sh\n')
   })
 
+  // A program that outlives the deadline's signal and then dies of another
+  // ends timeout with KILL's status, as GNU's does, and with the signal under
+  // --preserve-status; any other signal is the deadline's 124.
+  it.each<[string[], number, number]>([
+    [['-s', 'CONT'], 9, 137],
+    [['-p', '-s', 'CONT'], 9, 137],
+    [['-s', 'CONT'], 10, 124],
+    [['-p', '-s', 'CONT'], 10, 138],
+  ])('a program signalled after the deadline (%j, %d)', async (args, killed, code) => {
+    const late = async (_cmd: string, opts: { context?: EvaluationContext }): Promise<IOResult> => {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      opts.context?.frame.shell?.programSignaled(killed)
+      return new IOResult({ exitCode: 128 + killed })
+    }
+    const [, io] = await timed(late, [...args, '0.05', 'sleep'], context)
+    expect(io.exitCode).toBe(code)
+  })
+
   it('a stopped timeout never returns', async () => {
     const shell = slowShell({ sh: 50 })
     const run = timed(shell.fn, ['-s', 'STOP', '0.01', 'sh'], context)

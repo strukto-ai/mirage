@@ -627,6 +627,14 @@ async function supervise(
     }
     return await ended(sink, held, said, exitCode)
   }
+  // The status of a run that ended after the deadline: its own under
+  // --preserve-status; otherwise a native program the command is may still
+  // have died of a signal, whose KILL stands as one Mirage sent.
+  const finished = (late: IOResult): number => {
+    if (how.preserve) return late.exitCode
+    const killed = how.killedBy()
+    return killed === null ? TIMEOUT_STATUS : signalledStatus(killed, false)
+  }
   try {
     let result: IOResult | typeof TIMED_OUT
     try {
@@ -686,7 +694,7 @@ async function supervise(
         said.push(how.killed(SIGKILL))
         return await stop(said, 137)
       }
-      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
+      return await ended(sink, held, said, finished(late), true)
     }
     // A program on a machine got the signal as sent and may outlive it, as
     // a shell that traps or ignores it does: only -k's KILL then ends the
@@ -710,9 +718,7 @@ async function supervise(
       said.push(how.killed(signal))
       return await stop(said, 128 + signal)
     }
-    if (onMachine && late !== null) {
-      return await ended(sink, held, said, how.preserve ? late.exitCode : TIMEOUT_STATUS, true)
-    }
+    if (onMachine && late !== null) return await ended(sink, held, said, finished(late), true)
     return await stop(said, signalledStatus(how.killedBy() ?? signal, how.preserve))
   } finally {
     settled = true
