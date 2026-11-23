@@ -18,6 +18,22 @@
       "supports_pty"
     ]
   },
+  "python/mirage/agents/openenv/env.py": {
+    "reason": "OpenEnv's MCPEnvironment hooks and class flags, which its server and base class call and read.",
+    "names": [
+      "SUPPORTS_CONCURRENT_SESSIONS",
+      "_step_impl",
+      "supports_code_mode"
+    ]
+  },
+  "python/mirage/agents/openenv/mcp.py": {
+    "reason": "OpenEnv's MCPEnvironment hooks and class flags, and FastMCP's ClientTransport.connect_session, which the framework calls.",
+    "names": [
+      "SUPPORTS_CONCURRENT_SESSIONS",
+      "_step_impl",
+      "connect_session"
+    ]
+  },
   "python/mirage/cli/login.py": {
     "reason": "http.server's BaseHTTPRequestHandler hooks: the server calls do_GET and log_message.",
     "names": [

@@ -369,7 +369,7 @@ jobs:
               - '!**/*.md'
               - '!python/tests/**'
               - '!typescript/**/*.test.ts'
-              - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,pydantic_ai}/**'
+              - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,openenv,pydantic_ai}/**'
               - '!typescript/packages/{browser,cloudflare,claude-agent-sdk,claude-managed-agents,dsh,langchain,mastra,openai-agents,opencode,pi,pi-durable,vercel}/**'
               - '!typescript/scripts/**'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcs}{.py,/**}'
