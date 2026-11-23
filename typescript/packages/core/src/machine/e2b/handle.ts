@@ -406,11 +406,15 @@ export class E2BMachine extends MachineHandle<E2BConfig> implements PipeTranspor
 
   /**
    * Kill the sandbox Mirage started for this workspace, as the workspace is
-   * deleted, and forget it; one the config names stays. Reaches the one the
-   * workspace remembers when this build never connected.
+   * deleted, and forget it; one the config names stays, with the mounts the
+   * workspace left there released. Reaches the one the workspace remembers
+   * when this build never connected.
    */
   override async destroy(): Promise<void> {
-    if (this.brought !== null) return
+    if (this.brought !== null) {
+      await this.releaseMounts()
+      return
+    }
     this.stopRefresher()
     const id = this.sandboxId ?? (await this.memory?.recall(this.name)) ?? null
     if (id === null) return

@@ -49,6 +49,8 @@ export type PauseAction = 'pause'
  * `MachineMemory`.
  */
 export interface MachineMemory {
+  /** The workspace's id, which names the mounts it serves into a machine (`sourceName`). */
+  readonly workspaceId: string
   /** The machine Mirage started for `name`; null when it started none. */
   recall(name: string): Promise<string | null>
   /** Keep `instance` as the machine Mirage started for `name`. */

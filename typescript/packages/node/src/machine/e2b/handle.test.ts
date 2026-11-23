@@ -33,6 +33,7 @@ import {
 } from '@struktoai/mirage-core/machine/e2b/constants'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { killLine } from '@struktoai/mirage-core/machine/mounts'
 import type { MachineMemory, MachinePipe } from '@struktoai/mirage-core/machine/types'
 import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -331,7 +332,10 @@ beforeEach(() => {
 
 /** A workspace's memory of the machines Mirage started, in a map. */
 class MapMemory implements MachineMemory {
-  constructor(readonly kept = new Map<string, string>()) {}
+  constructor(
+    readonly kept = new Map<string, string>(),
+    readonly workspaceId = 'w1',
+  ) {}
   recall(name: string): Promise<string | null> {
     return Promise.resolve(this.kept.get(name) ?? null)
   }
@@ -441,6 +445,19 @@ describe('E2BMachine started by Mirage', () => {
       [],
       false,
     ])
+  })
+  it('releases the mounts of a sandbox the config names as the workspace is deleted', async () => {
+    const machine = new MountingE2BMachine('box', {
+      sandboxId: 'sb-live',
+      apiKey: 'k',
+      mountType: 'ssh',
+    })
+    machine.table.set('/data', ['mirage-w1.box-0123abcd-1:/data', 'fuse.sshfs'])
+    machine.bindMemory(new MapMemory())
+    await machine.destroy()
+    expect(machine.lines).toContain(killLine('mirage-w1.box-0123abcd-1:/data'))
+    expect(machine.lines).toContain("fusermount3 -uz '/data' || fusermount -uz '/data'")
+    expect(FakeMachine.killed).toEqual([])
   })
   it('pauses the sandbox it started', async () => {
     const machine = startable(new MapMemory())

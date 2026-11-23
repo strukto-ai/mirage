@@ -58,6 +58,7 @@ from mirage.machine.handle import MachineHandle
 from mirage.machine.mixin import PipeTransportMixin
 from mirage.machine.mounts import (
     darwin_admin_hint,
+    darwin_left,
     darwin_mount_table,
     darwin_table_line,
     kill_line,
@@ -1059,6 +1060,145 @@ async def test_a_mount_a_restarted_instance_left_that_will_not_unmount_fails():
         "before a restart: fusermount: busy\n",
     )
     assert sandbox.pipes == []
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_workspace_releases_the_mounts_it_left():
+    first = FakeMachine("ssh")
+    one = await workspace(first, workspace_id="w1").session(
+        "agent", profile="agent"
+    )
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    left = [source for source, _ in first.table.values()]
+    others = {
+        "/theirs": "mirage-w2.box-0123abcd-1:/theirs",
+        "/box2": "mirage-w1.box2-0123abcd-1:/box2",
+    }
+    for prefix, source in others.items():
+        first.table[prefix] = (source, "fuse.sshfs")
+        first.running.add(source)
+    # The host restarted, and the workspace is deleted before it runs a line.
+    second = sharing(first, "ssh")
+    workspace(second, workspace_id="w1")
+    await second.destroy()
+    assert [kill_line(s) in second.commands for s in left] == [True, True]
+    assert {p: s for p, (s, _) in second.table.items()} == others
+    assert second.running == set(others.values())
+
+
+class Counted(FakeMachine):
+    """A machine that counts its connects and closes."""
+
+    def __init__(self, mount_type):
+        super().__init__(mount_type)
+        self.connects = 0
+        self.closes = 0
+
+    async def connect(self) -> None:
+        self.connects += 1
+
+    async def close(self) -> None:
+        self.closes += 1
+        await super().close()
+
+
+@pytest.mark.asyncio
+async def test_a_delete_closes_the_connection_its_release_opened():
+    sandbox = Counted("ssh")
+    ws = workspace(sandbox, workspace_id="w1")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.delete()
+    assert (sandbox.connects, sandbox.closes) == (2, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_delete_releases_a_mount_its_close_could_not_unmount():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox, workspace_id="w1")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.refuse_unmount = True
+    await ws.close()
+    assert len(sandbox.table) == 2
+    sandbox.refuse_unmount = False
+    await sandbox.destroy()
+    assert sandbox.table == {}
+
+
+@pytest.mark.asyncio
+async def test_a_delete_lets_an_unanswered_kill_go_at_its_deadline(
+    monkeypatch,
+):
+    monkeypatch.setattr(mounts, "UNMOUNT_WAIT_SECONDS", 0.05)
+    sandbox = FakeMachine("ssh")
+    sandbox.table["/data"] = ("mirage-w1.box-0123abcd-1:/data", "fuse.sshfs")
+    sandbox.hang_kill = True
+    workspace(sandbox, workspace_id="w1")
+    await asyncio.wait_for(sandbox.destroy(), 5)
+    assert sandbox.kills_stopped == 1
+
+
+@pytest.mark.asyncio
+async def test_a_live_workspace_keeps_its_own_mounts_through_destroy():
+    sandbox = FakeMachine("ssh")
+    ws = workspace(sandbox, workspace_id="w1")
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    serving = dict(sandbox.table)
+    await sandbox.destroy()
+    assert sandbox.table == serving
+    await ws.close()
+    assert sandbox.table == {}
+
+
+def test_a_macs_left_mounts_are_the_workspaces_own():
+    text = (
+        "mirage-w1.box-0123abcd-1:/data on /home/u/.mirage/mnt/data "
+        "(macfuse, nodev)\n"
+        "mirage-w2.box-0123abcd-1:/other on /home/u/.mirage/mnt/other "
+        "(macfuse)\n"
+        "mirage-w1.box-0123abcd-2:/my notes on /home/u/.mirage/mnt/my notes "
+        "(macfuse)\n"
+        "mirage-w1.box-0123abcd-3:/tmp/a on /b on /home/u/.mirage/mnt/x "
+        "(macfuse)\n"
+        "/dev/disk1s1 on / (apfs, local)\n"
+    )
+    assert darwin_left(text, "mirage-w1.box") == {
+        "/data",
+        "/my notes",
+        "/tmp/a",
+        "/tmp/a on /b",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_workspace_tries_every_mount_it_left():
+    sandbox = FakeMachine("ssh")
+    sandbox.table["/data"] = ("mirage-w1.box-0123abcd-1:/data", "fuse.sshfs")
+    sandbox.table["/more"] = ("mirage-w1.box-0123abcd-2:/more", "fuse.sshfs")
+    sandbox.refuse_unmount = True
+    workspace(sandbox, workspace_id="w1")
+    await sandbox.destroy()
+    tried = [c for c in sandbox.commands if c.startswith("fusermount3 -uz ")]
+    assert [shlex.split(c)[2] for c in tried] == ["/data", "/more"]
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_workspace_releases_the_mounts_it_left_on_a_mac():
+    first = FakeMac("mirage", linked={"/data", "/my notes"})
+    one = await workspace(first, workspace_id="w1").session(
+        "agent", profile="agent"
+    )
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    assert len(first.table) == 2
+    # The host restarted, and the workspace is deleted before it runs a line.
+    second = FakeMac("mirage", linked={"/data", "/my notes"})
+    second.table = first.table
+    second.running = first.running
+    workspace(second, workspace_id="w1")
+    await second.destroy()
+    assert (first.table, first.running) == ({}, set())
 
 
 @pytest.mark.asyncio

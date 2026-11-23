@@ -442,8 +442,41 @@ class MachineHandle:
 
     async def destroy(self) -> None:
         """Remove the machine Mirage started for this handle, as its
-        workspace is deleted, and forget it; one the user brought stays. A
-        provider that starts machines overrides this."""
+        workspace is deleted, and forget it; one the user brought stays,
+        with the mounts the workspace left there released
+        (``_release_mounts``). A provider that starts machines overrides
+        this."""
+        await self._release_mounts()
+
+    async def _release_mounts(self) -> None:
+        """Kill and unmount what the deleted workspace's earlier instances
+        left serving in the machine (``MachineMounts.release``), which
+        nothing else would take back. A connection opened for it is closed
+        again. A failure to connect or release is logged: the workspace is
+        deleted either way."""
+        if self._mounts is None or self._memory is None:
+            return
+        opened = not self._connected
+        try:
+            try:
+                if await self._reach_to_release():
+                    await self._mounts.release(self._memory.workspace_id)
+            finally:
+                if opened and self._connected:
+                    await self.close()
+        except Exception:
+            logger.warning(
+                "%s: releasing the deleted workspace's mounts failed",
+                self.machine,
+                exc_info=True,
+            )
+
+    async def _reach_to_release(self) -> bool:
+        """Reach the machine for ``_release_mounts``, as a line does; False
+        when it holds nothing to release. A provider whose connect starts a
+        stopped machine overrides this."""
+        await self.ensure_connected()
+        return True
 
     def file_effects_dispatched(
         self, binding: WorkspaceBinding | None
