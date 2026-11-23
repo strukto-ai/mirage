@@ -1212,6 +1212,7 @@ async function runArgv(
       context.frame.stdinWriter,
       deps.namespace,
       deps.dispatch,
+      context.frame.folderHolders,
     )
     const outer = currentCaller()
     if (
@@ -1370,7 +1371,10 @@ async function heldMachine(
   const links = namespace.sessionLinks(session)
   let machine = await operandMachine(argv, session, registry, links, stdin)
   if (machine === null)
-    return [await factMachine(argv, session, registry, links, placed, stdin), argv]
+    return [
+      await factMachine(argv, session, registry, links, placed, stdin, context.frame.folderHolders),
+      argv,
+    ]
   const words = await matched(argv, session, registry, namespace)
   if (words !== argv) machine = await operandMachine(words, session, registry, links, stdin)
   return [machine, words]

@@ -18,7 +18,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy import Deny
 from mirage.policy.base import Policy
 from mirage.workspace.lookup.constants import LOCALHOST_WORD
-from tests.fixtures.machine import ScriptedMachine
+from tests.fixtures.machine import ScriptedMachine, failed
 from tests.fixtures.machine_files import TOOLS, FakeFiles, one, out, two
 
 
@@ -339,6 +339,134 @@ async def test_under_a_network_policy_mirage_keeps_a_request_to_localhost():
     done = await ws.shell("curl -s --max-time 2 http://127.0.0.1:1/x")
     assert done.exit_code != 0
     assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+class Logged(Policy):
+    async def post_network(self, ctx):
+        return None
+
+
+class Reads(Policy):
+    async def pre_vfs(self, ctx):
+        return None
+
+
+REQUEST = "http://127.0.0.1:1/x"
+CLIENTS = ("curl", "wget")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        f"curl -s --max-time 2 {REQUEST}",
+        f"cd /srv && curl -s --max-time 2 {REQUEST}",
+        "cd /srv && curl -s --max-time 2 http://0.0.0.0:1/x",
+        f"cd /srv && wget -q -T 2 -O - {REQUEST}",
+    ],
+)
+@pytest.mark.parametrize(
+    "limits", [{"network": False}, {"policies": [Logged()]}]
+)
+async def test_a_watched_network_keeps_every_request_in_mirage(line, limits):
+    a = FakeFiles(programs=CLIENTS)
+    b = FakeFiles({"/srv/k": b"k"}, programs=CLIENTS)
+    ws = two(a, b, mounts={"/srv": "@b"}, **limits)
+    await ws.shell(line)
+    assert (a.ran, b.ran) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_request_runs_where_the_files_it_reads_are_the_machine_s():
+    a = FakeFiles(programs=CLIENTS)
+    b = FakeFiles({"/srv/k": b"k"}, programs=CLIENTS)
+    ws = two(a, b, mounts={"/srv": "@b", "/data": RAMVFS()})
+    await ws.shell("echo d > /data/body")
+    await ws.shell(f"cd /srv && curl -s -d @k -b jar -w @k {REQUEST}")
+    await ws.shell(f"cd /srv && curl -s --data-binary @/data/body {REQUEST}")
+    await ws.shell(
+        f"cd /srv && curl -s --data-urlencode n@/data/body {REQUEST}"
+    )
+    await ws.shell(f"cd /srv && curl -s -F f=@k {REQUEST}")
+    await ws.shell(f"cd /srv && curl -s -T k {REQUEST}")
+    await ws.shell(f"cd /data && curl -s -d @body {REQUEST}")
+    assert a.ran == []
+    assert b.ran == [f"curl -s -d @k -b jar -w @k {REQUEST}"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_under_a_file_policy_a_request_reading_a_file_stays_in_mirage():
+    a = FakeFiles(programs=CLIENTS)
+    b = FakeFiles({"/srv/k": b"k"}, programs=CLIENTS)
+    ws = two(a, b, mounts={"/srv": "@b"}, policies=[Reads()])
+    await ws.shell(f"cd /srv && curl -s --data-binary @/srv/k {REQUEST}")
+    await ws.shell(f"cd /srv && curl -s {REQUEST}")
+    assert (a.ran, b.ran) == ([], [f"curl -s {REQUEST}"])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_download_lands_in_the_folder_only_its_machine_holds():
+    a = FakeFiles(programs=CLIENTS)
+    b = FakeFiles({"/srv/k": b"k"}, programs=CLIENTS)
+    ws = two(a, b, mounts={"/srv": "@b", "/data": RAMVFS()})
+    await ws.shell(f"cd /data && wget -q -T 2 {REQUEST}")
+    await ws.shell(f"cd /data && wget -q -T 2 {REQUEST} /srv/out")
+    await ws.shell(f"cd /data && wget -q -T 2 -O - {REQUEST}")
+    await ws.shell(f"cd /data && wget -q -T 2 --spider {REQUEST}")
+    await ws.shell(f"cd /srv && wget -q -T 2 {REQUEST}")
+    assert a.ran == [
+        f"wget -q -T 2 -O - {REQUEST}",
+        f"wget -q -T 2 --spider {REQUEST}",
+    ]
+    assert b.ran == [f"wget -q -T 2 {REQUEST}"]
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_fact_from_a_shared_folder_is_asked_of_the_machine_holding_it():
+    a = FakeFiles(programs=("uname",))
+    b = FakeFiles({"/tmp/only/k": b"k"}, programs=("uname",))
+    ws = two(a, b)
+    await ws.shell("cd /tmp/only && echo x | uname -s")
+    assert (a.ran, b.ran) == ([], ["uname -s"])
+    await ws.close()
+
+
+def lost_on(path: str, files: FakeFiles):
+    """An answer finding no program on ``path``, else ``files``'s.
+
+    Args:
+        path (str): the PATH a probe finds nothing on.
+        files (FakeFiles): the machine's files.
+    """
+
+    def answer(line, data):
+        if "command -v" in line and f"PATH={path} " in line:
+            return failed(b"")
+        return files.answer(line, data)
+
+    return answer
+
+
+@pytest.mark.asyncio
+async def test_a_fact_is_left_to_mirage_where_the_run_s_path_finds_nothing():
+    a = FakeFiles(programs=("uname",))
+    b = FakeFiles(programs=("uname",))
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={
+            "a": ScriptedMachine("a", lost_on("/empty", a)),
+            "b": ScriptedMachine("b", b.answer),
+        },
+    )
+    assert await out(ws, "PATH=/empty uname -s") == "Linux\n"
+    await ws.shell("uname -s")
+    assert (a.ran, b.ran) == (["uname -s"], [])
     await ws.close()
 
 

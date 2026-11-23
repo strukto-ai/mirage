@@ -14,9 +14,11 @@
 
 import { SPECS, parseCommand } from '../../../commands/spec/index.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
+import { currentCaller } from '../../../context/session_context.ts'
 import { holders } from '../../../core/machine/place.ts'
 import { findLayout } from '../../../rs/find.ts'
 import { isFsError } from '../../../errors/fs.ts'
+import { liveEgress } from '../../../io/gateway.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CommandWord } from '../../../policy/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
@@ -31,10 +33,10 @@ import type { NamespaceReader } from '../../dispatcher/reader.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
-import { FOLDER_FREE, LOCALHOST_CLIENTS, LOCALHOST_WORD, MACHINE_FACTS } from '../constants.ts'
+import { envSnapshot } from '../../session/state.ts'
+import { FOLDER_FREE, LOCALHOST_WORD, MACHINE_FACTS, NETWORK_CLIENTS } from '../constants.ts'
 import { Consumer, type ExternalTarget } from '../types.ts'
 import {
-  folderMachines,
   isPiped,
   machineHoldingAll,
   machineMounts,
@@ -42,7 +44,7 @@ import {
   onlyMachine,
   pathOnMount,
 } from './mounts.ts'
-import { nearestMachine } from './search.ts'
+import { folderHolders, nearestMachine } from './search.ts'
 
 /**
  * The paths a command's options name (`grep -f /data/patterns`), which the
@@ -133,15 +135,18 @@ function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
  *
  * Mirage keeps the command when anything is piped into it, since its own
  * command leaves input it does not read for the next one (`... | while read
- * f; do grep x "$f"; done`) where a machine would drain it; when a path is
- * anywhere else (another mount, a machine mount at another root, a mount
- * nested under it); when no one machine holds every path (a new name, or a
- * name on several machines, which Mirage places by its own rules); when the
- * session's rules restrict its mount, a coded file policy speaks for the
- * session, or the mount is read-only; when a path, an option's or a `find
- * -exec` command's included, walks through a link of Mirage's own; or when
- * the machine lacks the program. `statedMachine` is the same rule as far as a
- * command's words tell it. Mirrors Python's `operand_machine`.
+ * f; do grep x "$f"; done`) where a machine would drain it; when it reaches
+ * a server (`NETWORK_CLIENTS`), whose connections the workspace's network
+ * rule and policies judge inside Mirage, one to `localhost` being
+ * `factMachine`'s; when a path is anywhere else (another mount, a machine
+ * mount at another root, a mount nested under it); when no one machine
+ * holds every path (a new name, or a name on several machines, which Mirage
+ * places by its own rules); when the session's rules restrict its mount, a
+ * coded file policy speaks for the session, or the mount is read-only; when
+ * a path, an option's or a `find -exec` command's included, walks through a
+ * link of Mirage's own; or when the machine lacks the program.
+ * `statedMachine` is the same rule as far as a command's words tell it.
+ * Mirrors Python's `operand_machine`.
  *
  * @param argv the command.
  * @param session the session it runs in.
@@ -156,7 +161,7 @@ export async function operandMachine(
   links: NamespaceReader,
   stdin: ByteSource | null,
 ): Promise<ExternalTarget | null> {
-  if (isPiped(stdin)) return null
+  if (isPiped(stdin) || NETWORK_CLIENTS.has(argv.name)) return null
   const [paths, relative] = namedPaths(argv, session.cwd)
   const scopes: [string, boolean][] = paths.map((path) => [path, true])
   const cwd = norm(session.cwd)
@@ -179,23 +184,22 @@ export async function operandMachine(
 
 /**
  * The machine a command that asks about its machine is about: the one its
- * line names, else the one the session's folder is on, else the first that
- * takes programs no name captures, where the session's programs run. Null
- * where no machine takes them. Mirrors Python's `about_machine`.
+ * line names, else the one a command Mirage runs itself prefers
+ * (`Caller.preferredMachine`: the machine whose program writes its pipe, or
+ * the one machine holding its folder), else the first that takes programs
+ * no name captures, where the session's programs run. Null where no machine
+ * takes them. Mirrors Python's `about_machine`.
  *
- * @param session the session it runs in.
  * @param registry the workspace's mounts and machines.
  * @param routing the line's placement.
  */
 export function aboutMachine(
-  session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime> | undefined,
 ): RemoteRuntime | null {
   if (routing === undefined) return null
-  if (routing.machine !== undefined) return onlyMachine([routing.machine], registry)
-  const shown = folderMachines(session.cwd, registry)
-  if (shown.length === 1) return onlyMachine(shown, registry)
+  const told = routing.machine ?? currentCaller().preferredMachine ?? null
+  if (told !== null) return onlyMachine([told], registry)
   const first = routing.bindings[EXTERNAL_COMMANDS]
   return first instanceof RemoteRuntime ? first : null
 }
@@ -203,14 +207,64 @@ export function aboutMachine(
 /**
  * Whether a command of Mirage's own asks about the machine it runs on: one
  * that reports a machine's facts (`MACHINE_FACTS`), or one that reaches a
- * server at `localhost` (`LOCALHOST_CLIENTS`). Mirrors Python's
+ * server at `localhost` (`NETWORK_CLIENTS`). Mirrors Python's
  * `asks_about_machine`.
  *
  * @param argv the command.
  */
 export function asksAboutMachine(argv: Argv): boolean {
   if (MACHINE_FACTS.has(argv.name)) return true
-  return LOCALHOST_CLIENTS.has(argv.name) && argv.args.some((word) => LOCALHOST_WORD.test(word))
+  return NETWORK_CLIENTS.has(argv.name) && argv.args.some((word) => LOCALHOST_WORD.test(word))
+}
+
+/**
+ * The files a client that reaches a server reads or writes through words its
+ * spec keeps as text, as typed: curl's `@file` data and `-w @file` template,
+ * the cookie file a `-b` without `=` names, and the file wget saves into its
+ * folder when neither `-O` nor `--spider` says otherwise. Null where Mirage
+ * cannot tell which files the program touches: an option its spec does not
+ * know, a `-F` field read from a file, which Mirage's curl sends as given,
+ * and a second wget operand, a URL to the machine's wget and a destination
+ * to Mirage's. Mirrors Python's `_client_files`.
+ *
+ * @param argv the command, one of `NETWORK_CLIENTS`.
+ * @param cwd the directory a relative path resolves against.
+ */
+function clientFiles(argv: Argv, cwd: string): string[] | null {
+  const spec = SPECS[argv.name]
+  if (spec === undefined) return null
+  const parsed = parseCommand(spec, [...argv.args], cwd, argv.name)
+  if (parsed.optionErrorKinds.length > 0) return null
+  const flags = parsed.flags
+  if (argv.name === 'wget') {
+    const urls = parsed.rawOperands.map(([word]) => word)
+    if (urls.length > 1) return null
+    if ('-O' in flags || flags['--spider'] === true) return []
+    const saved = (urls[0] ?? '').split('/').at(-1) ?? ''
+    return [saved === '' ? 'index.html' : saved]
+  }
+  const form = flags['--form']
+  if (typeof form === 'string') {
+    const at = form.indexOf('=')
+    const lead = at < 0 ? '' : form.charAt(at + 1)
+    if (lead === '@' || lead === '<') return null
+  }
+  const given = (key: string): string[] => {
+    const value = flags[key]
+    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+  }
+  const named: string[] = []
+  for (const key of ['--data', '--data-binary', '--json'])
+    for (const value of given(key)) if (value.startsWith('@')) named.push(value.slice(1))
+  for (const value of given('--data-urlencode')) {
+    let sep = value.indexOf('=')
+    if (sep < 0) sep = value.indexOf('@')
+    if (sep >= 0 && value[sep] === '@') named.push(value.slice(sep + 1))
+  }
+  for (const value of given('--cookie')) if (!value.includes('=')) named.push(value)
+  const template = flags['--write-out']
+  if (typeof template === 'string' && template.startsWith('@')) named.push(template.slice(1))
+  return named.filter((name) => name !== '' && name !== '-')
 }
 
 /**
@@ -218,15 +272,17 @@ export function asksAboutMachine(argv: Argv): boolean {
  * (`asksAboutMachine`): `uname -m` is the machine's own answer, where
  * Mirage's is no machine's, and `curl localhost:8000` reaches the server a
  * program of the session started there. It runs from the session's folder
- * when that is the machine's own, else from `/`.
+ * when the machine holds it, else from `/`.
  *
- * Mirage keeps the command where no machine takes programs (`aboutMachine`)
- * or that machine refuses the session's runs or lacks the program; when a
- * path it names is not that machine's own, or is typed relative to a folder
- * that is not; when input is piped into a machine that takes none; and, for
- * a command that reaches a server, when a network policy speaks for the
- * session, which judges the request inside Mirage. Mirrors Python's
- * `fact_machine`.
+ * Mirage keeps the command where no machine takes programs (`aboutMachine`),
+ * or that machine refuses the session's runs or would not find the program
+ * on the PATH the run gets; when a path it names or a file it reads or
+ * writes is not that machine's own, or is typed relative to a folder the
+ * machine does not hold; when input is piped into a machine that takes none;
+ * and, for a command that reaches a server, when the workspace limits its
+ * network or a policy watches its connections, which only Mirage judges, or
+ * when Mirage cannot tell which files it touches (`clientFiles`). Mirrors
+ * Python's `fact_machine`.
  *
  * @param argv the command.
  * @param session the session it runs in.
@@ -234,6 +290,8 @@ export function asksAboutMachine(argv: Argv): boolean {
  * @param links the session's link table.
  * @param routing the line's placement.
  * @param stdin what is piped into it.
+ * @param asked the machines the line found holding its folders
+ *   (`ExecutionFrame.folderHolders`).
  */
 export async function factMachine(
   argv: Argv,
@@ -242,26 +300,35 @@ export async function factMachine(
   links: NamespaceReader,
   routing: RouteDecision<Runtime> | undefined,
   stdin: ByteSource | null,
+  asked: Map<string, string[]>,
 ): Promise<ExternalTarget | null> {
   if (!asksAboutMachine(argv)) return null
-  const runtime = aboutMachine(session, registry, routing)
+  const runtime = aboutMachine(registry, routing)
   if (runtime === null || runtime.refusesSession()) return null
   if (isPiped(stdin) && !runtime.handle().takesInput) return null
-  if (
-    LOCALHOST_CLIENTS.has(argv.name) &&
-    (await registry.policies.wantsFor('preNetwork', session.sessionId))
+  const client = NETWORK_CLIENTS.has(argv.name)
+  if (client)
+    for (const egress of liveEgress())
+      if (egress.rule !== null || (await egress.hooked)) return null
+  const cwd = session.cwd
+  const files = client ? clientFiles(argv, cwd) : []
+  if (files === null) return null
+  const here = (await folderHolders(cwd, registry, asked)).includes(runtime.defaultMachine)
+  const typed = argv.operands.filter(
+    (w): w is PathSpec => w instanceof PathSpec && w.rawPath !== '-',
   )
-    return null
-  const shown = folderMachines(session.cwd, registry)
-  const here = shown.length === 1 && shown[0] === runtime.defaultMachine
-  const typed = argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
-  const options = optionPaths(argv, session.cwd)
-  const paths = [...typed.map((w) => unmarkGlobs(w.virtual)), ...options]
+  const options = optionPaths(argv, cwd)
+  const paths = [
+    ...typed.map((w) => unmarkGlobs(w.virtual)),
+    ...options,
+    ...files.map((name) => norm(name.startsWith('/') ? name : `${cwd}/${name}`)),
+  ]
   const rooted = optionPaths(argv, '/')
   const leans =
     options.length !== rooted.length ||
     options.some((path, at) => path !== rooted[at]) ||
-    typed.some((w) => !w.rawPath.startsWith('/'))
+    typed.some((w) => !w.rawPath.startsWith('/')) ||
+    files.some((name) => !name.startsWith('/'))
   if (leans && !here) return null
   if (paths.length > 0) {
     const held = await machineHoldingAll(
@@ -273,7 +340,10 @@ export async function factMachine(
     )
     if (held !== runtime) return null
   }
-  if (!(await runtime.handle().hasProgram(argv.name))) return null
+  const found = await runtime
+    .handle()
+    .findsProgram(argv.name, envSnapshot(session).PATH ?? null, here ? cwd : '/')
+  if (!found) return null
   return { kind: Consumer.EXTERNAL, runtime, ...(here ? {} : { cwd: '/' }) }
 }
 
@@ -308,6 +378,7 @@ export function statedMachine(
       : [],
   )
   const name = words.find((w) => w.kind === WordKind.NAME)?.text ?? ''
+  if (NETWORK_CLIENTS.has(name)) return null
   const args = words
     .filter((w) => w.kind !== WordKind.NAME && w.kind !== WordKind.REDIRECT)
     .map((w) => w.text)

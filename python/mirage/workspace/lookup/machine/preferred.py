@@ -25,7 +25,10 @@ from mirage.workspace.lookup.machine.mounts import (
     folder_machines,
     several_machines,
 )
-from mirage.workspace.lookup.machine.search import searched_machine
+from mirage.workspace.lookup.machine.search import (
+    folder_holders,
+    searched_machine,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
@@ -38,12 +41,14 @@ async def preferred_machine(
     fed_by: PipeWriter | None,
     namespace: Namespace,
     dispatch: DispatchFn,
+    asked: dict[str, list[str]],
 ) -> str | None:
     """The machine a command Mirage runs itself is about
     (``Caller.preferred_machine``): the one the line names, else the one
-    whose program writes the pipe it reads, else the one its folder is
-    on; None when nothing says, and in a workspace that runs programs on
-    one machine, where nothing is to choose.
+    whose program writes the pipe it reads, else the one machine holding
+    its folder, which a mount several machines show asks them
+    (``folder_holders``); None when nothing says, and in a workspace
+    that runs programs on one machine, where nothing is to choose.
 
     A pipe's writer is placed once for the pipe, so a reader that moves
     (``gen | (cd /srv; tee log)``) or runs many commands asks no more.
@@ -58,6 +63,8 @@ async def preferred_machine(
             through.
         dispatch (DispatchFn): op dispatcher, which a writer's path is
             asked of.
+        asked (dict[str, list[str]]): the machines the line found
+            holding its folders (``ExecutionFrame.folder_holders``).
     """
     if routing is None or not several_machines(registry):
         return None
@@ -70,8 +77,8 @@ async def preferred_machine(
         fed_by.placed = True
     if fed_by is not None and fed_by.machine is not None:
         return fed_by.machine
-    shown = folder_machines(session.cwd, registry)
-    return shown[0] if len(shown) == 1 else None
+    held = await folder_holders(session.cwd, registry, asked)
+    return held[0] if len(held) == 1 else None
 
 
 def _writer_paths(fed_by: PipeWriter, registry: MountRegistry) -> list[str]:

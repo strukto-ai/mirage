@@ -14,9 +14,11 @@
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.policy.base import Policy
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
+from tests.fixtures.machine import ScriptedMachine
 from tests.fixtures.machine_files import FakeFiles, run, two
 
 
@@ -47,6 +49,38 @@ async def test_a_folder_one_machine_shows_takes_the_new_names_made_from_it():
         {"/tmp/from-tmp": b""},
         ["/srv/kept", "/tmp/from-b"],
     )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_shared_folder_one_machine_holds_takes_the_new_names_from_it():
+    a, b = FakeFiles(), FakeFiles({"/tmp/only/k": b"k"})
+    ws = two(a, b)
+    assert (await run(ws, "cd /tmp/only && touch /tmp/from-only"))[0] == 0
+    assert (sorted(a.files), sorted(b.files)) == (
+        [],
+        ["/tmp/from-only", "/tmp/only/k"],
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_asks_who_holds_its_folder_once():
+    a, b = FakeFiles(), FakeFiles({"/tmp/only/k": b"k"})
+    first = ScriptedMachine("a", a.answer)
+    ws = Workspace(
+        {},
+        mode=MountMode.WRITE,
+        machines={"a": first, "b": ScriptedMachine("b", b.answer)},
+    )
+    await ws.shell("cd /tmp/only")
+    start = len(first.lines)
+    await ws.shell("echo 1")
+    one_echo = len(first.lines) - start
+    start = len(first.lines)
+    await ws.shell("echo 1; echo 2; echo 3; echo 4")
+    assert one_echo > 0
+    assert len(first.lines) - start == one_echo
     await ws.close()
 
 

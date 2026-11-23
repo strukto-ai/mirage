@@ -52,7 +52,7 @@ export const MACHINE_FACTS: ReadonlySet<string> = new Set(['arch', 'uname'])
 // The commands of Mirage's own that reach a server by its address. One asked
 // for `localhost` means the machine the command is about, where the
 // session's programs listen, so it runs there.
-export const LOCALHOST_CLIENTS: ReadonlySet<string> = new Set(['curl', 'wget'])
+export const NETWORK_CLIENTS: ReadonlySet<string> = new Set(['curl', 'wget'])
 
 // A word that addresses the machine it is typed on: `localhost`, a `127.`
 // address or `[::1]`, with or without a scheme, a user and a port.

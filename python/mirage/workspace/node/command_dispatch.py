@@ -1236,6 +1236,7 @@ async def _run_argv(
             context.frame.stdin_writer,
             deps.namespace,
             deps.dispatch,
+            context.frame.folder_holders,
         )
         caller = current_caller()
         staged = (
@@ -1449,7 +1450,13 @@ async def _held_machine(
     machine = await operand_machine(argv, session, registry, links, stdin)
     if machine is None:
         asked = await fact_machine(
-            argv, session, registry, links, placed, stdin
+            argv,
+            session,
+            registry,
+            links,
+            placed,
+            stdin,
+            context.frame.folder_holders,
         )
         return asked, argv
     matched = await _matched(argv, session, registry, namespace)

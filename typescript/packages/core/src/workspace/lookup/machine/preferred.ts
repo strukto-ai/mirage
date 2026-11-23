@@ -26,12 +26,13 @@ import type { SessionState } from '../../session/session.ts'
 import { programHead, programRuntime } from '../lookup.ts'
 import { programMachine } from './command.ts'
 import { folderMachines, severalMachines } from './mounts.ts'
-import { searchedMachine } from './search.ts'
+import { folderHolders, searchedMachine } from './search.ts'
 
 /**
  * The machine a command Mirage runs itself is about
  * (`Caller.preferredMachine`): the one the line names, else the one whose
- * program writes the pipe it reads, else the one its folder is on; null when
+ * program writes the pipe it reads, else the one machine holding its folder,
+ * which a mount several machines show asks them (`folderHolders`); null when
  * nothing says, and in a workspace that runs programs on one machine, where
  * nothing is to choose. Mirrors Python's `preferred_machine`.
  *
@@ -44,6 +45,8 @@ import { searchedMachine } from './search.ts'
  * @param fedBy the program writing the pipe the command reads.
  * @param namespace the link table a writer's path is read through.
  * @param dispatch op dispatcher, which a writer's path is asked of.
+ * @param asked the machines the line found holding its folders
+ *   (`ExecutionFrame.folderHolders`).
  */
 export async function preferredMachine(
   session: SessionState,
@@ -52,6 +55,7 @@ export async function preferredMachine(
   fedBy: PipeWriter | null,
   namespace: Namespace,
   dispatch: DispatchFn,
+  asked: Map<string, string[]>,
 ): Promise<string | null> {
   if (routing === undefined || !severalMachines(registry)) return null
   if (routing.machine !== undefined) return routing.machine
@@ -60,9 +64,9 @@ export async function preferredMachine(
     fedBy.placed = true
   }
   if (fedBy !== null && fedBy.machine !== null) return fedBy.machine
-  const shown = folderMachines(session.cwd, registry)
-  const [only] = shown
-  return shown.length === 1 && only !== undefined ? only : null
+  const held = await folderHolders(session.cwd, registry, asked)
+  const [only] = held
+  return held.length === 1 && only !== undefined ? only : null
 }
 
 /**

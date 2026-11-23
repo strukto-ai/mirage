@@ -429,12 +429,15 @@ one that names a machine (`execute(machine=)`, a route), or one run from a
 folder only one machine has. Nothing else changes the rows.
 
 `uname` and `arch` have no row per machine. They answer for the machine the
-command is about: the one the line names, else the one the session's folder
-is on, else the first that takes programs. `curl` and `wget` asked for
-`localhost` run on that same machine, so they reach a server a program
-started there. Mirage answers itself where no machine takes programs, where
-that machine lacks the command, and for a request to `localhost` under a
-network policy.
+command is about: the one the line names, else the one whose program writes
+its pipe, else the one machine holding the session's folder, else the first
+that takes programs. `curl` and `wget` asked for `localhost` run on that same
+machine, so they reach a server a program started there; no other request
+runs on a machine. Mirage answers itself where no machine takes programs,
+where that machine would not find the command on the run's `PATH`, where a
+file the request reads or writes is not that machine's own (`wget` with no
+`-O` saves into the session's folder), and under a `network` limit or a
+network policy, which only Mirage enforces.
 
 ```bash
 $ nproc

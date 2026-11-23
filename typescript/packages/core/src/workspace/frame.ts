@@ -72,12 +72,17 @@ export class ExecutionFrame {
   // never puts back: it ends with the command, so bash keeps no copy of what
   // they replace.
   ending: number | null = null
+  // The machines holding each folder a command of the line stood in, by
+  // folder, asked once for the whole line and shared by every frame it forks
+  // (`folderHolders`).
+  folderHolders = new Map<string, string[]>()
 
   /**
    * A child evaluation's frame. `stdin` is the input a child shell reads in
    * its parent's place (a subshell, a pipeline's first stage), whose writer
    * the child keeps when it is the pipe this frame's stage reads; null for
-   * one that reads none of it (a substitution, a job).
+   * one that reads none of it (a substitution, a job). It shares the machines
+   * the line found holding its folders.
    */
   fork(stdin: ByteSource | null = null): ExecutionFrame {
     const child = new ExecutionFrame()
@@ -90,6 +95,7 @@ export class ExecutionFrame {
     child.substitution = this.substitution
     if (this.routing !== undefined) child.routing = this.routing
     if (this.runsOnMachine !== undefined) child.runsOnMachine = this.runsOnMachine
+    child.folderHolders = this.folderHolders
     return child
   }
 }

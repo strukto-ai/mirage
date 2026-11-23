@@ -284,10 +284,12 @@ export function two(
   a: FakeFiles,
   b: FakeFiles,
   mounts: Record<string, MountSpec | string> = {},
+  options: WorkspaceOptions = {},
 ): Workspace {
   return new Workspace(mounts, {
     mode: MountMode.WRITE,
     machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+    ...options,
   })
 }
 

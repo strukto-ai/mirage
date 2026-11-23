@@ -18,8 +18,10 @@ from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.types import WordKind
+from mirage.context import current_caller
 from mirage.core.machine.place import holders
 from mirage.errors.constants import FS_ERRORS
+from mirage.io.gateway import live_egress
 from mirage.io.types import ByteSource
 from mirage.policy.types import CommandWord
 from mirage.rs.find import find_layout
@@ -34,12 +36,11 @@ from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.lookup.constants import (
     FOLDER_FREE,
-    LOCALHOST_CLIENTS,
     LOCALHOST_WORD,
     MACHINE_FACTS,
+    NETWORK_CLIENTS,
 )
 from mirage.workspace.lookup.machine.mounts import (
-    folder_machines,
     is_piped,
     machine_holding_all,
     machine_mounts,
@@ -47,10 +48,13 @@ from mirage.workspace.lookup.machine.mounts import (
     only_machine,
     path_on_mount,
 )
-from mirage.workspace.lookup.machine.search import nearest_machine
+from mirage.workspace.lookup.machine.search import (
+    folder_holders,
+    nearest_machine,
+)
 from mirage.workspace.lookup.types import ExternalTarget
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import SessionState
+from mirage.workspace.session import SessionState, env_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -159,10 +163,13 @@ async def operand_machine(
     Mirage keeps the command when anything is piped into it, since its
     own command leaves input it does not read for the next one (``... |
     while read f; do grep x "$f"; done``) where a machine would drain it;
-    when a path is anywhere else (another mount, a machine mount at
-    another root, a mount nested under it); when no one machine holds
-    every path (a new name, or a name on several machines, which Mirage
-    places by its own rules); when the session's rules restrict its
+    when it reaches a server (``NETWORK_CLIENTS``), whose connections
+    the workspace's network rule and policies judge inside Mirage, one
+    to ``localhost`` being ``fact_machine``'s; when a path is anywhere
+    else (another mount, a machine mount at another root, a mount nested
+    under it); when no one machine holds every path (a new name, or a
+    name on several machines, which Mirage places by its own rules);
+    when the session's rules restrict its
     mount, a coded file policy speaks for the session, or the mount is
     read-only; when a path, an option's or a ``find -exec`` command's
     included, walks through a link of Mirage's own; or when the machine
@@ -176,7 +183,7 @@ async def operand_machine(
         links (NamespaceReader): the session's link table.
         stdin (ByteSource | None): what is piped into it.
     """
-    if is_piped(stdin):
+    if is_piped(stdin) or argv.name in NETWORK_CLIENTS:
         return None
     paths, relative = _named_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
@@ -201,27 +208,29 @@ async def operand_machine(
 
 
 def about_machine(
-    session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> RemoteRuntime | None:
     """The machine a command that asks about its machine is about: the
-    one its line names, else the one the session's folder is on, else
-    the first that takes programs no name captures, where the session's
-    programs run. None where no machine takes them.
+    one its line names, else the one a command Mirage runs itself prefers
+    (``Caller.preferred_machine``: the machine whose program writes its
+    pipe, or the one machine holding its folder), else the first that
+    takes programs no name captures, where the session's programs run.
+    None where no machine takes them.
 
     Args:
-        session (SessionState): the session it runs in.
         registry (MountRegistry): the workspace's mounts and machines.
         routing (RouteDecision | None): the line's placement.
     """
     if routing is None:
         return None
-    if routing.machine is not None:
-        return only_machine([routing.machine], registry)
-    shown = folder_machines(session.cwd, registry)
-    if len(shown) == 1:
-        return only_machine(shown, registry)
+    told = (
+        routing.machine
+        if routing.machine is not None
+        else current_caller().preferred_machine
+    )
+    if told is not None:
+        return only_machine([told], registry)
     first = routing.bindings.get(EXTERNAL_COMMANDS)
     return first if isinstance(first, RemoteRuntime) else None
 
@@ -229,16 +238,68 @@ def about_machine(
 def asks_about_machine(argv: Argv) -> bool:
     """Whether a command of Mirage's own asks about the machine it runs
     on: one that reports a machine's facts (``MACHINE_FACTS``), or one
-    that reaches a server at ``localhost`` (``LOCALHOST_CLIENTS``).
+    that reaches a server at ``localhost`` (``NETWORK_CLIENTS``).
 
     Args:
         argv (Argv): the command.
     """
     if argv.name in MACHINE_FACTS:
         return True
-    return argv.name in LOCALHOST_CLIENTS and any(
+    return argv.name in NETWORK_CLIENTS and any(
         LOCALHOST_WORD.fullmatch(word) for word in argv.args
     )
+
+
+def _client_files(argv: Argv, cwd: str) -> list[str] | None:
+    """The files a client that reaches a server reads or writes through
+    words its spec keeps as text, as typed: curl's ``@file`` data and
+    ``-w @file`` template, the cookie file a ``-b`` without ``=`` names,
+    and the file wget saves into its folder when neither ``-O`` nor
+    ``--spider`` says otherwise. None where Mirage cannot tell which
+    files the program touches: an option its spec does not know, a
+    ``-F`` field read from a file, which Mirage's curl sends as given,
+    and a second wget operand, a URL to the machine's wget and a
+    destination to Mirage's.
+
+    Args:
+        argv (Argv): the command, one of ``NETWORK_CLIENTS``.
+        cwd (str): the directory a relative path resolves against.
+    """
+    parsed = parse_command(SPECS[argv.name], list(argv.args), cwd, argv.name)
+    if parsed.option_error_kinds:
+        return None
+    flags = parsed.flags
+    if argv.name == "wget":
+        urls = [word for word, _ in parsed.raw_operands]
+        if len(urls) > 1:
+            return None
+        if "-O" in flags or flags.get("--spider"):
+            return []
+        return [(urls[0] if urls else "").rsplit("/", 1)[-1] or "index.html"]
+    form = flags.get("--form")
+    if isinstance(form, str) and form.partition("=")[2][:1] in ("@", "<"):
+        return None
+    named: list[str] = []
+    for key in ("--data", "--data-binary", "--json"):
+        given = flags.get(key)
+        for value in given if isinstance(given, list) else []:
+            if value.startswith("@"):
+                named.append(value[1:])
+    encoded = flags.get("--data-urlencode")
+    for value in encoded if isinstance(encoded, list) else []:
+        sep = value.find("=")
+        if sep < 0:
+            sep = value.find("@")
+        if sep >= 0 and value[sep] == "@":
+            named.append(value[sep + 1 :])
+    cookies = flags.get("--cookie")
+    for value in cookies if isinstance(cookies, list) else []:
+        if "=" not in value:
+            named.append(value)
+    template = flags.get("--write-out")
+    if isinstance(template, str) and template.startswith("@"):
+        named.append(template[1:])
+    return [name for name in named if name not in ("", "-")]
 
 
 async def fact_machine(
@@ -248,20 +309,23 @@ async def fact_machine(
     links: NamespaceReader,
     routing: RouteDecision[RuntimeIdentity] | None,
     stdin: ByteSource | None,
+    asked: dict[str, list[str]],
 ) -> ExternalTarget | None:
     """The machine a command that asks about its machine runs on whole
     (``asks_about_machine``): ``uname -m`` is the machine's own answer,
     where Mirage's is no machine's, and ``curl localhost:8000`` reaches
     the server a program of the session started there. It runs from the
-    session's folder when that is the machine's own, else from ``/``.
+    session's folder when the machine holds it, else from ``/``.
 
     Mirage keeps the command where no machine takes programs
-    (``about_machine``) or that machine refuses the session's runs or
-    lacks the program; when a path it names is not that machine's own, or
-    is typed relative to a folder that is not; when input is piped into
-    a machine that takes none; and, for a command that reaches a server,
-    when a network policy speaks for the session, which judges the
-    request inside Mirage.
+    (``about_machine``), or that machine refuses the session's runs or
+    would not find the program on the PATH the run gets; when a path it
+    names or a file it reads or writes is not that machine's own, or is
+    typed relative to a folder the machine does not hold; when input is
+    piped into a machine that takes none; and, for a command that reaches
+    a server, when the workspace limits its network or a policy watches
+    its connections, which only Mirage judges, or when Mirage cannot tell
+    which files it touches (``_client_files``).
 
     Args:
         argv (Argv): the command.
@@ -270,25 +334,43 @@ async def fact_machine(
         links (NamespaceReader): the session's link table.
         routing (RouteDecision | None): the line's placement.
         stdin (ByteSource | None): what is piped into it.
+        asked (dict[str, list[str]]): the machines the line found
+            holding its folders (``ExecutionFrame.folder_holders``).
     """
     if not asks_about_machine(argv):
         return None
-    runtime = about_machine(session, registry, routing)
+    runtime = about_machine(registry, routing)
     if runtime is None or runtime.refuses_session():
         return None
     if is_piped(stdin) and not runtime.handle().takes_input:
         return None
-    sid = session.session_id
-    if argv.name in LOCALHOST_CLIENTS and (
-        await registry.policies.wants_for("pre_network", sid)
+    client = argv.name in NETWORK_CLIENTS
+    if client and any(
+        egress.rule is not None or egress.hooked for egress in live_egress()
     ):
         return None
-    here = folder_machines(session.cwd, registry) == [runtime.default_machine]
-    typed = [w for w in argv.operands if isinstance(w, PathSpec)]
-    options = _option_paths(argv, session.cwd)
-    paths = [*(unmark_globs(w.virtual) for w in typed), *options]
-    leans = options != _option_paths(argv, "/") or any(
-        not w.raw_path.startswith("/") for w in typed
+    cwd = session.cwd
+    files = _client_files(argv, cwd) if client else []
+    if files is None:
+        return None
+    here = runtime.default_machine in await folder_holders(
+        cwd, registry, asked
+    )
+    typed = [
+        w
+        for w in argv.operands
+        if isinstance(w, PathSpec) and w.raw_path != "-"
+    ]
+    options = _option_paths(argv, cwd)
+    paths = [
+        *(unmark_globs(w.virtual) for w in typed),
+        *options,
+        *(norm(posixpath.join(cwd, name)) for name in files),
+    ]
+    leans = (
+        options != _option_paths(argv, "/")
+        or any(not w.raw_path.startswith("/") for w in typed)
+        or any(not name.startswith("/") for name in files)
     )
     if leans and not here:
         return None
@@ -298,7 +380,9 @@ async def fact_machine(
         )
         if held is not runtime:
             return None
-    if not await runtime.handle().has_program(argv.name):
+    if not await runtime.handle().finds_program(
+        argv.name, env_snapshot(session).get("PATH"), cwd if here else "/"
+    ):
         return None
     return ExternalTarget(runtime, None if here else "/")
 
@@ -334,6 +418,8 @@ def stated_machine(
         and w.kind in (WordKind.OPERAND, WordKind.VALUE, WordKind.OPTION)
     ]
     name = next((w.text for w in words if w.kind is WordKind.NAME), "")
+    if name in NETWORK_CLIENTS:
+        return None
     args = [
         w.text
         for w in words

@@ -50,10 +50,12 @@ MACHINE_ANSWERED = frozenset({"readlink"})
 # run on the one the command is about (``fact_machine``).
 MACHINE_FACTS = frozenset({"arch", "uname"})
 
-# The commands of Mirage's own that reach a server by its address. One
-# asked for ``localhost`` means the machine the command is about, where
-# the session's programs listen, so it runs there.
-LOCALHOST_CLIENTS = frozenset({"curl", "wget"})
+# The commands of Mirage's own that reach a server by its address, under
+# the workspace's network rule and policies. One asked for ``localhost``
+# means the machine the command is about, where the session's programs
+# listen, so it runs there (``fact_machine``); no other one runs on a
+# machine, where nothing judges its connections.
+NETWORK_CLIENTS = frozenset({"curl", "wget"})
 
 # A word that addresses the machine it is typed on: ``localhost``, a
 # ``127.`` address or ``[::1]``, with or without a scheme, a user and a

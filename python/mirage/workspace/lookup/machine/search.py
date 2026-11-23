@@ -113,7 +113,7 @@ def _unasked(failure: BaseException, what: str) -> None:
     )
 
 
-async def _path_machines(path: str, registry: MountRegistry) -> list[str]:
+async def holding_machines(path: str, registry: MountRegistry) -> list[str]:
     """The machines holding a path as their own file or folder, by the
     machine mount showing it; none for a path in a store and for a name
     no machine holds yet. A machine that cannot be asked counts as not
@@ -232,9 +232,28 @@ async def nearest_machine(
     for path in (cwd, *paths):
         if len(left) < 2:
             break
-        holding = await _path_machines(path, registry)
+        holding = await holding_machines(path, registry)
         left = [m for m in left if m in holding] or left
     return left[0]
+
+
+async def folder_holders(
+    folder: str, registry: MountRegistry, asked: dict[str, list[str]]
+) -> list[str]:
+    """The machines holding the folder a command stands in
+    (``holding_machines``), asked once a line: ``asked`` keeps each
+    folder's answer for every command the line runs
+    (``ExecutionFrame.folder_holders``).
+
+    Args:
+        folder (str): the folder, an absolute virtual path.
+        registry (MountRegistry): the workspace's mounts and machines.
+        asked (dict[str, list[str]]): the answers the line has had.
+    """
+    known = asked.get(folder)
+    if known is None:
+        known = asked[folder] = await holding_machines(folder, registry)
+    return known
 
 
 async def searched_machine(

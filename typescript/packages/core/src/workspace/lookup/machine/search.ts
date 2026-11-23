@@ -103,7 +103,7 @@ function unasked(failure: unknown, what: string): void {
  * @param path an absolute virtual path.
  * @param registry the workspace's mounts and machines.
  */
-async function pathMachines(path: string, registry: MountRegistry): Promise<string[]> {
+export async function holdingMachines(path: string, registry: MountRegistry): Promise<string[]> {
   const entry = registry.tryMountFor(path)
   if (entry === null || !(entry.vfs instanceof MachineVFS)) return []
   const shown = mountMachines(entry, registry)
@@ -204,11 +204,33 @@ export async function nearestMachine(
   if (await registry.policies.wantsFor('preVfs', session.sessionId)) return left[0] ?? null
   for (const path of [cwd, ...paths]) {
     if (left.length < 2) break
-    const holding = await pathMachines(path, registry)
+    const holding = await holdingMachines(path, registry)
     const kept = left.filter((machine) => holding.includes(machine))
     if (kept.length > 0) left = kept
   }
   return left[0] ?? null
+}
+
+/**
+ * The machines holding the folder a command stands in (`holdingMachines`),
+ * asked once a line: `asked` keeps each folder's answer for every command
+ * the line runs (`ExecutionFrame.folderHolders`). Mirrors Python's
+ * `folder_holders`.
+ *
+ * @param folder the folder, an absolute virtual path.
+ * @param registry the workspace's mounts and machines.
+ * @param asked the answers the line has had.
+ */
+export async function folderHolders(
+  folder: string,
+  registry: MountRegistry,
+  asked: Map<string, string[]>,
+): Promise<string[]> {
+  const known = asked.get(folder)
+  if (known !== undefined) return known
+  const held = await holdingMachines(folder, registry)
+  asked.set(folder, held)
+  return held
 }
 
 /**

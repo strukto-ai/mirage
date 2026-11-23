@@ -727,7 +727,7 @@
     },
     {
       "id": "programs_on_two_machines",
-      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. uname answers for the machine the command is about, and nproc prints a row each until the line names one machine. A session that hides a name is still refused its programs, not told the program is missing.",
+      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. uname answers for the machine the command is about, and nproc prints a row each until the line names one machine; from a folder in the shared /tmp only the second machine holds, a piped uname and nproc answer for that machine alone. A session that hides a name is still refused its programs, not told the program is missing.",
       "runtimes": [
         "docker"
       ],
@@ -902,6 +902,40 @@
           "expect": {
             "exit": 0,
             "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"$1\" && cat /etc/hostname > \"$1/host\"' dash $d-only",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(cd $d-only && [ \"$(echo x | uname -n)\" = \"$(cat host)\" ] && echo second)",
+          "expect": {
+            "exit": 0,
+            "stdout": "second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(cd $d-only && nproc | wc -l)",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf \"$1\"; test -e \"$1\" || echo gone' dash $d-only",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
             "stderr": ""
           }
         },
