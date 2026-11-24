@@ -141,7 +141,7 @@ def check_npm(name: str, version: str, tag: str) -> tuple[list[str], str]:
     problems = []
     if tags.get(tag) != version:
         problems.append(f"dist-tag {tag} is {tags.get(tag)}, not {version}")
-    if tag != "latest" and "-" in latest and latest != version:
+    if tag != "latest" and "-" in latest:
         releases = [
             v for v in packument["versions"] if re.fullmatch(RELEASE, v)
         ]
@@ -151,7 +151,7 @@ def check_npm(name: str, version: str, tag: str) -> tuple[list[str], str]:
                 f"dist-tag latest is the pre-release {latest} though "
                 f"{newest} is out: npm dist-tag add {name}@{newest} latest"
             )
-        else:
+        elif latest != version:
             problems.append(
                 f"dist-tag latest is the older pre-release {latest}, and the "
                 f"package has no release for it to fall back to: "
