@@ -2178,8 +2178,8 @@ function withCalls(
     const name = getFunctionName(node)
     if (!defined.has(name)) defined.set(name, (node.endIndex ?? 0) - base)
   }
-  const nodes = [...walkTree(tree)]
   if (defined.size === 0) return [...judged]
+  const nodes = [...walkTree(tree)]
   if (
     judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) ||
     nodes.some(

@@ -2974,9 +2974,9 @@ def _with_calls(
             node
         ):
             defined.setdefault(get_function_name(node), node.end_byte - base)
-    nodes = list(walk_tree(tree))
     if not defined:
         return list(judged)
+    nodes = list(walk_tree(tree))
     if any(one.judgment.command in FUNCTION_DROPPERS for one in judged) or any(
         node.type == NodeType.UNSET_COMMAND
         or (
