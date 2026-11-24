@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -94,6 +95,16 @@ async def _refuse_landing(
         raise
 
 
+def _removal_slot(path: PathSpec, machine: str) -> str:
+    """The key a removal of a name on a machine is under while it runs.
+
+    Args:
+        path (PathSpec): the name.
+        machine (str): the machine.
+    """
+    return f"{machine}\0{path.virtual}"
+
+
 async def _unlink_older(
     accessor: MachineAccessor, machine: str, path: PathSpec
 ) -> None:
@@ -146,13 +157,16 @@ class MachineVFS(BaseVFS):
         self._landings = 0
         self._settling: dict[str, int] = {}
         self._unsettled: set[str] = set()
+        self._removing: dict[str, asyncio.Event] = {}
 
     @asynccontextmanager
     async def _live_write(
         self, machine: str, path: PathSpec, *, replaces: bool
     ) -> AsyncIterator[None]:
         """Count a write of a name on a machine as live while it lands,
-        and end it (``_end_write``).
+        and end it (``_end_write``). A removal of the name there that is
+        under way ends first (``_remove_copy``), so it never takes the
+        new copy.
 
         Args:
             machine (str): the machine written.
@@ -160,6 +174,9 @@ class MachineVFS(BaseVFS):
             replaces (bool): the write replaces the name, so once it lands
                 no other machine's copy of it stays.
         """
+        slot = _removal_slot(path, machine)
+        while (gone := self._removing.get(slot)) is not None:
+            await gone.wait()
         self._live_writes.setdefault(path.virtual, []).append(machine)
         try:
             yield
@@ -232,7 +249,7 @@ class MachineVFS(BaseVFS):
                     if one.machine in self._live_writes.get(key, ()):
                         self._unsettled.add(key)
                         continue
-                    await _unlink_older(self.accessor, one.machine, path)
+                    await self._remove_copy(one.machine, path)
                 if self._latest.get(key) == seen:
                     return
         finally:
@@ -240,6 +257,25 @@ class MachineVFS(BaseVFS):
             if not self._settling[key]:
                 del self._settling[key]
             self._forget(key)
+
+    async def _remove_copy(self, machine: str, path: PathSpec) -> None:
+        """Take an older copy of a name off a machine, a write of the name
+        there waiting until it is gone (``_live_write``); nothing when a
+        removal of it is already under way.
+
+        Args:
+            machine (str): the machine holding the copy.
+            path (PathSpec): the name.
+        """
+        slot = _removal_slot(path, machine)
+        if slot in self._removing:
+            return
+        gone = self._removing[slot] = asyncio.Event()
+        try:
+            await _unlink_older(self.accessor, machine, path)
+        finally:
+            del self._removing[slot]
+            gone.set()
 
     def _forget(self, key: str) -> None:
         """Let go of a name's latest landing once nothing writes or settles

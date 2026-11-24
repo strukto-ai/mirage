@@ -110,6 +110,16 @@ async function refuseLanding(
 }
 
 /**
+ * The key a removal of a name on a machine is under while it runs.
+ *
+ * @param path the name.
+ * @param machine the machine.
+ */
+function removalSlot(path: PathSpec, machine: string): string {
+  return `${machine}\0${path.virtual}`
+}
+
+/**
  * Take an older copy of a name off a machine; one already gone, which
  * another settling took first, is no error. Mirrors Python's
  * `_unlink_older`.
@@ -162,6 +172,7 @@ export class MachineVFS extends BaseVFS {
   private landings = 0
   private readonly settling = new Map<string, number>()
   private readonly unsettled = new Set<string>()
+  private readonly removing = new Map<string, Promise<void>>()
 
   constructor(config: MachineVFSConfig) {
     super()
@@ -318,7 +329,9 @@ export class MachineVFS extends BaseVFS {
 
   /**
    * Count a write of a name on a machine as live while it lands, and end it
-   * (`endWrite`). Mirrors Python's `MachineVFS._live_write`.
+   * (`endWrite`). A removal of the name there that is under way ends first
+   * (`removeCopy`), so it never takes the new copy. Mirrors Python's
+   * `MachineVFS._live_write`.
    *
    * @param machine the machine written.
    * @param path the name.
@@ -332,6 +345,9 @@ export class MachineVFS extends BaseVFS {
     replaces: boolean,
     write: () => Promise<T>,
   ): Promise<T> {
+    const slot = removalSlot(path, machine)
+    for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
+      await gone
     let live = this.liveWrites.get(path.virtual)
     if (live === undefined) {
       live = []
@@ -418,7 +434,7 @@ export class MachineVFS extends BaseVFS {
             this.unsettled.add(key)
             continue
           }
-          await unlinkOlder(this.accessor, one.machine, path)
+          await this.removeCopy(one.machine, path)
         }
         if (this.latest.get(key) === seen) return
       }
@@ -427,6 +443,32 @@ export class MachineVFS extends BaseVFS {
       if (left > 0) this.settling.set(key, left)
       else this.settling.delete(key)
       this.forget(key)
+    }
+  }
+
+  /**
+   * Take an older copy of a name off a machine, a write of the name there
+   * waiting until it is gone (`liveWrite`); nothing when a removal of it is
+   * already under way. Mirrors Python's `MachineVFS._remove_copy`.
+   *
+   * @param machine the machine holding the copy.
+   * @param path the name.
+   */
+  private async removeCopy(machine: string, path: PathSpec): Promise<void> {
+    const slot = removalSlot(path, machine)
+    if (this.removing.has(slot)) return
+    let gone = (): void => undefined
+    this.removing.set(
+      slot,
+      new Promise<void>((resolve) => {
+        gone = resolve
+      }),
+    )
+    try {
+      await unlinkOlder(this.accessor, machine, path)
+    } finally {
+      this.removing.delete(slot)
+      gone()
     }
   }
 

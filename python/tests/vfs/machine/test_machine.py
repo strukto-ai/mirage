@@ -902,12 +902,12 @@ async def test_writes_ending_together_on_two_machines_leave_one_copy():
 
 
 class Gated(ScriptedMachine):
-    """A machine whose next look at a name, once ``armed`` with it, waits
+    """A machine whose next line holding every part ``armed`` names waits
     for ``go``, setting ``held`` as it starts to wait."""
 
     def __init__(self, name: str, answer) -> None:
         super().__init__(name, answer)
-        self.armed: str | None = None
+        self.armed: tuple[str, ...] = ()
         self.held = asyncio.Event()
         self.go = asyncio.Event()
 
@@ -921,8 +921,8 @@ class Gated(ScriptedMachine):
         errors: OutputFn,
     ) -> RunResult:
         line = " ".join(argv)
-        if self.armed and self.armed in line and "-maxdepth 0" in line:
-            self.armed = None
+        if self.armed and all(part in line for part in self.armed):
+            self.armed = ()
             self.held.set()
             await self.go.wait()
         return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
@@ -934,7 +934,7 @@ async def test_a_settling_keeps_a_copy_landed_while_it_looks():
     a = Gated("a", a_files.answer)
     vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
     vfs.bind_machines(table_of(a, ScriptedMachine("b", b_files.answer)), "a")
-    a.armed = "/tmp/k"
+    a.armed = ("/tmp/k", "-maxdepth 0")
     first = asyncio.create_task(write_on("b", vfs, spec("/k"), b"from b\n"))
     await a.held.wait()
     await write_on("a", vfs, spec("/k"), b"from a\n")
@@ -943,4 +943,23 @@ async def test_a_settling_keeps_a_copy_landed_while_it_looks():
     assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
         b"from a\n",
         False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_removal_never_takes_a_copy_written_after_it_began():
+    a_files, b_files = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "a")
+    b.armed = ("rm --", "/tmp/k")
+    first = asyncio.create_task(write_on("a", vfs, spec("/k"), b"from a\n"))
+    await b.held.wait()
+    second = asyncio.create_task(write_on("b", vfs, spec("/k"), b"from b\n"))
+    await asyncio.wait({second}, timeout=0.2)
+    b.go.set()
+    await asyncio.gather(first, second)
+    assert ("/tmp/k" in a_files.files, b_files.files.get("/tmp/k")) == (
+        False,
+        b"from b\n",
     )

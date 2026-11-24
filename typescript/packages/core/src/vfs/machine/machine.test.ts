@@ -844,9 +844,9 @@ describe('a landed write', () => {
   })
 })
 
-/** A machine whose next look at a name, once `armed` with it, waits for `go`. */
+/** A machine whose next line holding every part `armed` names waits for `go`. */
 class Gated extends ScriptedMachine {
-  armed: string | null = null
+  armed: readonly string[] = []
   private markHeld: () => void = () => undefined
   readonly held = new Promise<void>((resolve) => {
     this.markHeld = resolve
@@ -869,8 +869,8 @@ class Gated extends ScriptedMachine {
     errors: OutputFn,
   ): Promise<RunResult> {
     const line = argv.join(' ')
-    if (this.armed !== null && line.includes(this.armed) && line.includes('-maxdepth 0')) {
-      this.armed = null
+    if (this.armed.length > 0 && this.armed.every((part) => line.includes(part))) {
+      this.armed = []
       this.markHeld()
       await this.opened
     }
@@ -885,12 +885,28 @@ describe('a settling', () => {
     const a = new Gated('a', aFiles.answer)
     const vfs = new MachineVFS({ root: '/tmp' })
     vfs.bindMachines(tableOf(a, new ScriptedMachine('b', bFiles.answer)), 'a')
-    a.armed = '/tmp/k'
+    a.armed = ['/tmp/k', '-maxdepth 0']
     const first = writeOn('b', vfs, '/k', ENC.encode('from b\n'))
     await a.held
     await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
     a.go()
     await first
     expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
+
+  it('never takes with a removal a copy written after it began', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles({ '/tmp/k': 'old\n' })
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'a')
+    b.armed = ['rm --', '/tmp/k']
+    const first = writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    await b.held
+    const second = writeOn('b', vfs, '/k', ENC.encode('from b\n'))
+    await Promise.race([second, new Promise((resolve) => setTimeout(resolve, 200))])
+    b.go()
+    await Promise.all([first, second])
+    expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, 'from b\n'])
   })
 })
