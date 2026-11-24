@@ -856,7 +856,14 @@
     {"op": "exec", "session": "kept", "command": "printf x > /marker; f() { cat; }; f < /data/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "command": "test -e /marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "command": "cat /data/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "kept", "command": "f() { echo hi; }; f > /out.txt; cat /out.txt", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}}
+    {"op": "exec", "session": "kept", "command": "f() { echo hi; }; f > /out.txt; cat /out.txt", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "ln -s /data/f.txt /l", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "session", "id": "linked", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "exec", "session": "linked", "command": "printf x > /marker; f() { echo hi; }; f > /l", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "test -e /marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "linked", "command": "printf x > /marker; g() { cat /l; }; g", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "test -e /marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /data/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}}
    ]
   },
   {
