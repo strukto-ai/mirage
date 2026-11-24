@@ -41,6 +41,9 @@ OAUTH_VFS = frozenset(
 )
 OAUTH_CLIS = frozenset({"gws"})
 REFRESH_FIELDS = ("refresh_token", "client_secret")
+OUTSIDE = (
+    "code outside Mirage's own list, whose keys the plugin cannot vouch for"
+)
 LOCAL_SCHEMES = frozenset({"", "file", "db"})
 MONGO_VFS = frozenset({"mongodb", "gridfs"})
 AWS_MECHANISM = "MONGODB-AWS"

@@ -29,10 +29,13 @@ from mirage.agents.hermes.constants import (
     MONGO_VFS,
     OAUTH_CLIS,
     OAUTH_VFS,
+    OUTSIDE,
     REFRESH_FIELDS,
     ROUTED_SOURCES,
     SOURCE,
 )
+from mirage.commands.cli.mcp.constants import NAME as MCP_CLI
+from mirage.commands.cli.specs import BUILTIN_CLI_SPECS
 from mirage.config import S3StoreBlock, WorkspaceConfig
 from mirage.secrets.config import EnvVar
 from mirage.secrets.errors import SecretsError
@@ -41,6 +44,8 @@ from mirage.secrets.types import ResolvedSecret
 from mirage.vfs.registry import REGISTRY, resolve_class, resolve_entry
 
 logger = logging.getLogger(__name__)
+
+BUILTIN_CLIS = frozenset({*BUILTIN_CLI_SPECS, MCP_CLI})
 
 SCOPE: ContextVar[Mapping[str, str] | None] = ContextVar(
     "mirage_hermes_secrets", default=None
@@ -96,7 +101,7 @@ class HermesSecrets(dict[str, str]):
         self._get_secret = get_secret
         self.missing: set[str] = set()
 
-    def __contains__(self, name: object) -> bool:
+    def __contains__(self, name: Any) -> bool:
         if not isinstance(name, str):
             return False
         if dict.__contains__(self, name):
@@ -325,10 +330,7 @@ def _s3_refusal(label: str, config: Mapping[str, Any]) -> str | None:
 def _mount_refusal(prefix: str, vfs: str, config: Mapping[str, Any]) -> str:
     label = f"mounts.{prefix} ({vfs})"
     if vfs not in REGISTRY:
-        return (
-            f"{label}: a backend outside Mirage's own list, whose "
-            "credentials the plugin cannot vouch for"
-        )
+        return f"{label}: {OUTSIDE}"
     if vfs in AMBIENT_VFS:
         return f"{label}: {AMBIENT_VFS[vfs]}"
     if config.get("aws_profile"):
@@ -367,6 +369,8 @@ def _machine_refusal(name: str, machine: Mapping[str, Any]) -> str:
     label = f"machines.{name} ({provider})"
     if provider in AMBIENT_MACHINES:
         return f"{label}: {AMBIENT_MACHINES[provider]}"
+    if ":" in str(machine.get("runtime", "")):
+        return f"{label}: {OUTSIDE}"
     if provider in KEYED_MACHINES and not machine.get("api_key"):
         return (
             f"{label}: no api_key, so its SDK reads one from the environment"
@@ -390,7 +394,10 @@ def ambient_refusals(config: WorkspaceConfig) -> list[str]:
         for name, machine in (config.machines or {}).items()
     ]
     for name, cli in (config.clis or {}).items():
-        if cli.cli in OAUTH_CLIS and any(
+        named = cli.cli is not None and cli.cli not in BUILTIN_CLIS
+        if named or ":" in str(cli.runtime or ""):
+            found.append(f"clis.{name} ({cli.cli or cli.runtime}): {OUTSIDE}")
+        elif cli.cli in OAUTH_CLIS and any(
             cli.config.get(f) for f in REFRESH_FIELDS
         ):
             found.append(

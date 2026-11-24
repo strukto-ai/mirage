@@ -133,6 +133,16 @@ REFUSED = {
         "  /h: {vfs: 'mirage.vfs.ssh:SSHVFS', config: {host: h}}\n",
         "outside Mirage's own list",
     ),
+    "a CLI named by its class": (
+        "clis:\n  g:\n    cli: 'mirage.commands.cli.builtin.gws:GWS'\n"
+        "    machine: in_process\n"
+        "    config: {client_id: c, refresh_token: '${TOKEN}'}\n",
+        "clis.g",
+    ),
+    "a runtime named by its class": (
+        "machines:\n  p: {provider: in_process, runtime: 'pkg.mod:Runtime'}\n",
+        "machines.p",
+    ),
     "a mongodb aws login": (
         "  /m: {vfs: mongodb, config: "
         "{uri: 'mongodb://h/?authMechanism=MONGODB-AWS'}}\n",
@@ -187,6 +197,8 @@ ALLOWED = {
     "{dsn: {from: env, key: DSN}}}\n",
     "an e2b machine with a key": "machines:\n  e: {provider: e2b, "
     "api_key: '${KEY}'}\n",
+    "a built-in CLI": "clis:\n  gh: {cli: gh, machine: in_process, "
+    "config: {token: '${TOKEN}'}}\n",
     "a docker machine": "machines:\n  d: {provider: docker, container: c}\n",
 }
 

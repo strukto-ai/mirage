@@ -72,7 +72,7 @@ mounts:
 | --- | --- |
 | A `secrets:` block, or `from: dotenv`, `1password` or `aws-sm` in any `env:` block, including a session profile's | a key store other than Hermes |
 | A key pointer in a policy program's `env` (write `${NAME}` there instead) | the process environment |
-| A backend outside Mirage's own list, such as a `module:Class` reference | whatever that backend reads |
+| A backend, CLI or runtime named by a `module:Class` reference, or one outside Mirage's own list | whatever that code reads |
 | An S3 or S3-compatible mount or `store:` group without a key pair, or with `aws_profile` | `~/.aws` |
 | An `ssh` mount or machine | `~/.ssh/config` and the ssh-agent |
 | A `kubernetes` machine | `~/.kube/config` |

@@ -190,6 +190,23 @@ def test_a_yaml_reaching_around_hermes_builds_nothing(tmp_path):
         provider.close()
 
 
+def test_a_fuse_folder_serves_one_set_of_keys(tmp_path):
+    config = tmp_path / "workspace.yaml"
+    config.write_text(
+        WORKSPACE_YAML
+        + "  /f: {vfs: ram, backend: fuse, mountpoint: /tmp/mirage-hermes}\n"
+    )
+    provider = MirageTerminalProvider(lambda: str(config))
+    provider._workspaces[(config.resolve(), (("OLD", "key"),))] = None
+    try:
+        with pytest.raises(ValueError, match="FUSE folder"):
+            provider.create_environment(cwd="/", timeout=30, task_id="f")
+        assert provider._loop is None
+    finally:
+        provider._workspaces.clear()
+        provider.close()
+
+
 def loop_threads() -> set[threading.Thread]:
     return {t for t in threading.enumerate() if t.name == "mirage-hermes"}
 

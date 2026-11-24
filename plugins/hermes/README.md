@@ -48,7 +48,7 @@ The plugin refuses a workspace YAML that would reach a key any other way, and th
 
 - a `secrets:` block, or a key from `dotenv`, `1password` or `aws-sm`, in any `env:` block, including a session profile's;
 - a key pointer in a policy program's `env` (write `${NAME}` there instead);
-- a backend outside Mirage's own list, such as a `module:Class` reference or a third-party backend;
+- a backend, CLI or runtime named by a `module:Class` reference, or one outside Mirage's own list;
 - an S3 or S3-compatible mount, or an S3 `store:` group, without an access key pair, or with `aws_profile`, which would read `~/.aws`;
 - an `ssh` mount or machine, which reads `~/.ssh/config` and the ssh-agent;
 - a `kubernetes` machine, which reads `~/.kube/config`;
@@ -68,7 +68,7 @@ Mirage refreshes OAuth tokens itself, and a Hermes plugin may not, so a mount wi
 - **Keys:** read from the active Hermes profile when a Hermes task starts, and held in memory for the workspace's life. The plugin writes no key anywhere.
 - **Local files:** a `disk` mount reads and writes the folder its `root` names.
 - **Commands:** commands run inside the workspace. A program Mirage does not run itself runs on a machine the YAML adds. A `docker`, `apple_container`, `smolvm` or `microsandbox` machine runs that tool's CLI on your computer, with your environment and that tool's own configuration (for Docker, `DOCKER_HOST` and its contexts). A `host` machine runs programs directly on your computer, where they reach whatever your user account can, unless a `sandbox` block confines them (Linux only).
-- **Background work:** each Hermes task gets its own sessions in one workspace per profile, and a background job lives until its task ends. The workspaces close when Hermes exits.
+- **Background work:** each Hermes task gets its own sessions in one workspace per profile, and a background job lives until its task ends. The workspaces close when Hermes exits. A YAML with a FUSE mount serves one set of keys: a second profile needs its own YAML.
 - **Approvals:** Hermes' `approvals.mode` still decides which commands ask first, and the workspace's command rules apply as well.
 
 Full guide: [docs.mirage.strukto.ai/home/agents/hermes](https://docs.mirage.strukto.ai/home/agents/hermes)

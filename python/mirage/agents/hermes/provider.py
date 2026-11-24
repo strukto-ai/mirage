@@ -147,6 +147,13 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             if self._closed:
                 raise RuntimeError("the mirage backend has shut down")
             workspace = self._workspaces.get(key)
+            if workspace is None and config.kernel_mounts():
+                if any(built == path for built, _ in self._workspaces):
+                    raise ValueError(
+                        f"{path} mounts a FUSE folder another Hermes profile, "
+                        "or this one before a key changed, already serves; "
+                        "give each profile its own workspace YAML"
+                    )
             if workspace is None:
                 workspace = asyncio.run_coroutine_threadsafe(
                     build_owned_workspace(config, values), self._owner()
