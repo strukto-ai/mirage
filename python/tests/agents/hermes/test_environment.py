@@ -43,7 +43,9 @@ def ws():
 
 @pytest.fixture
 def env(ws):
-    environment = MirageEnvironment(ws, cwd="/", timeout=30, task_id="t")
+    environment = MirageEnvironment(
+        ws, cwd="/", timeout=30, task_id="t", secrets={}
+    )
     yield environment
     environment.cleanup()
 
@@ -113,7 +115,9 @@ def test_a_workspace_without_cross_session_processes_is_refused():
     workspace = build_workspace("session")
     try:
         with pytest.raises(ValueError, match="processes: workspace"):
-            MirageEnvironment(workspace, cwd="/", timeout=30, task_id="t")
+            MirageEnvironment(
+                workspace, cwd="/", timeout=30, task_id="t", secrets={}
+            )
         assert not [
             s.session_id
             for s in workspace.list_sessions()
@@ -146,7 +150,7 @@ def test_cleanup_closes_the_session(ws, env):
 
 
 def test_two_environments_of_one_task_keep_their_own_sessions(ws, env):
-    other = MirageEnvironment(ws, cwd="/", timeout=30, task_id="t")
+    other = MirageEnvironment(ws, cwd="/", timeout=30, task_id="t", secrets={})
     other.cleanup()
     assert env.execute("echo still")["output"].strip() == "still"
 
@@ -154,7 +158,7 @@ def test_two_environments_of_one_task_keep_their_own_sessions(ws, env):
 def test_cleanup_after_the_workspace_closed_does_not_raise():
     workspace = build_workspace("workspace")
     environment = MirageEnvironment(
-        workspace, cwd="/", timeout=30, task_id="t"
+        workspace, cwd="/", timeout=30, task_id="t", secrets={}
     )
     asyncio.run(workspace.close())
     environment.cleanup()

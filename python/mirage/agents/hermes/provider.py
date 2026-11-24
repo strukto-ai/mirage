@@ -15,17 +15,28 @@
 import asyncio
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from agent.secret_scope import get_secret
 from agent.terminal_env_provider import TerminalEnvironmentProvider
 from hermes_cli.plugins_context import PluginContext
 
-from mirage.agents.hermes.constants import BACKEND, SETTING
+from mirage.agents.hermes.constants import BACKEND, SETTING, SOURCE
+from mirage.agents.hermes.credentials import (
+    SCOPE,
+    HermesSecrets,
+    HermesSourceConfig,
+    fetch_hermes,
+    missing_error,
+    through_hermes,
+)
 from mirage.agents.hermes.environment import MirageEnvironment
+from mirage.config import WorkspaceConfig, load_config
+from mirage.secrets.registry import register_secrets
 from mirage.server.workspace_config import build_workspace_from_config
 from mirage.workspace.workspace import Workspace
 
@@ -36,7 +47,10 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
     """hermes' ``mirage`` terminal backend.
 
     Builds the workspace from the YAML the plugin setting names, once
-    per path, and gives each hermes task its own session in it.
+    per path and set of keys, and gives each hermes task its own session
+    in it. Every key comes from hermes' active profile: ``${NAME}`` and
+    ``{from: env, key: NAME}`` read ``get_secret(NAME)`` on hermes'
+    thread, and a YAML that would reach a key any other way is refused.
 
     Args:
         config_path (Callable[[], str | None]): Returns the workspace
@@ -49,9 +63,12 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
     default_cwd = "/"
 
     def __init__(self, config_path: Callable[[], str | None]) -> None:
+        register_secrets(SOURCE, HermesSourceConfig, fetch_hermes)
         self._config_path = config_path
         self._lock = threading.Lock()
-        self._workspaces: dict[Path, Workspace] = {}
+        self._workspaces: dict[
+            tuple[Path, tuple[tuple[str, str], ...]], Workspace
+        ] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._closed = False
@@ -85,8 +102,13 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         task_id: str = "default",
         **kwargs: Any,
     ) -> MirageEnvironment:
+        workspace, values = self._workspace()
         return MirageEnvironment(
-            self._workspace(), cwd=cwd, timeout=timeout, task_id=task_id
+            workspace,
+            cwd=cwd,
+            timeout=timeout,
+            task_id=task_id,
+            secrets=values,
         )
 
     def _owner(self) -> asyncio.AbstractEventLoop:
@@ -103,23 +125,34 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             self._thread.start()
         return self._loop
 
-    def _workspace(self) -> Workspace:
+    def _workspace(self) -> tuple[Workspace, dict[str, str]]:
         path = self._path()
         if path is None:
             raise ValueError(
                 "set plugins.entries.mirage.settings."
                 f"{SETTING} to a Mirage workspace YAML"
             )
+        secrets = HermesSecrets(get_secret)
+        try:
+            loaded = load_config(path, env=secrets)
+        except ValueError as exc:
+            if secrets.missing:
+                raise missing_error(secrets.missing) from exc
+            raise
+        config = through_hermes(loaded, secrets)
+        values = dict(secrets)
+        # Keyed by the values too, so two hermes profiles never share one.
+        key = (path, tuple(sorted(values.items())))
         with self._lock:
             if self._closed:
                 raise RuntimeError("the mirage backend has shut down")
-            workspace = self._workspaces.get(path)
+            workspace = self._workspaces.get(key)
             if workspace is None:
                 workspace = asyncio.run_coroutine_threadsafe(
-                    build_owned_workspace(path), self._owner()
+                    build_owned_workspace(config, values), self._owner()
                 ).result()
-                self._workspaces[path] = workspace
-        return workspace
+                self._workspaces[key] = workspace
+        return workspace, values
 
     def close(self) -> None:
         """Close every workspace this provider built, then its loop. hermes
@@ -148,14 +181,19 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             self._loop = self._thread = None
 
 
-async def build_owned_workspace(path: Path) -> Workspace:
-    """Build the workspace a YAML describes and make the running loop its
-    owner, so hermes' threads run its lines there.
+async def build_owned_workspace(
+    config: WorkspaceConfig, secrets: Mapping[str, str]
+) -> Workspace:
+    """Build the workspace a config describes and make the running loop
+    its owner, so hermes' threads run its lines there.
 
     Args:
-        path (Path): The workspace YAML.
+        config (WorkspaceConfig): The workspace YAML, read through hermes.
+        secrets (Mapping[str, str]): The values hermes gave for it, which
+            its ``hermes`` pointers read.
     """
-    workspace = await build_workspace_from_config(path)
+    SCOPE.set(secrets)
+    workspace = await build_workspace_from_config(config)
     workspace._sync_bridge.observe()
     return workspace
 

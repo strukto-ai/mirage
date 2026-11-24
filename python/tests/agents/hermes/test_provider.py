@@ -20,6 +20,8 @@ import pytest
 
 pytest.importorskip("agent.terminal_env_provider")
 
+from agent.secret_scope import reset_secret_scope, set_secret_scope
+
 from mirage.agents.hermes import MirageTerminalProvider, register
 
 WORKSPACE_YAML = """
@@ -103,6 +105,88 @@ def test_secret_pointers_in_the_yaml_resolve(tmp_path, monkeypatch):
         assert result["output"].strip() == "hi", result
     finally:
         environment.cleanup()
+        provider.close()
+
+
+@pytest.fixture
+def profile():
+    tokens = []
+
+    def bind(values: dict[str, str]) -> None:
+        tokens.append(set_secret_scope(values))
+
+    yield bind
+    for token in reversed(tokens):
+        reset_secret_scope(token)
+
+
+def test_keys_come_from_the_hermes_profile_not_the_process_env(
+    tmp_path, monkeypatch, profile
+):
+    roots = {}
+    for name in ("right-a", "right-b", "wrong"):
+        roots[name] = tmp_path / name
+        roots[name].mkdir()
+        (roots[name] / "who.txt").write_text(f"{name}\n")
+    for name in ("MIRAGE_HERMES_ROOT", "MIRAGE_HERMES_OTHER"):
+        monkeypatch.setenv(name, str(roots["wrong"]))
+    monkeypatch.setenv("TOKEN", "wrong")
+    profile(
+        {
+            "MIRAGE_HERMES_ROOT": str(roots["right-a"]),
+            "MIRAGE_HERMES_OTHER": str(roots["right-b"]),
+            "TOKEN": "right",
+        }
+    )
+    config = tmp_path / "workspace.yaml"
+    config.write_text(
+        WORKSPACE_YAML
+        + "  /a: {vfs: disk, config: {root: '${MIRAGE_HERMES_ROOT}'}}\n"
+        + "  /b:\n    vfs: disk\n"
+        + "    config: {root: {from: env, key: MIRAGE_HERMES_OTHER}}\n"
+        + "env:\n  TOKEN: {from: env}\n"
+    )
+    provider = MirageTerminalProvider(lambda: str(config))
+    environment = provider.create_environment(cwd="/", timeout=30, task_id="p")
+    try:
+        result = environment.execute("cat /a/who.txt /b/who.txt; echo $TOKEN")
+        assert result["output"].split() == ["right-a", "right-b", "right"], (
+            result
+        )
+    finally:
+        environment.cleanup()
+        provider.close()
+
+
+def test_two_profiles_never_share_a_workspace(tmp_path, profile):
+    config = tmp_path / "workspace.yaml"
+    config.write_text(WORKSPACE_YAML + "env:\n  TOKEN: {from: env}\n")
+    provider = MirageTerminalProvider(lambda: str(config))
+    profile({"TOKEN": "a"})
+    first = provider.create_environment(cwd="/", timeout=30, task_id="a")
+    again = provider.create_environment(cwd="/", timeout=30, task_id="b")
+    profile({"TOKEN": "b"})
+    other = provider.create_environment(cwd="/", timeout=30, task_id="c")
+    try:
+        assert first._ws is again._ws
+        assert first._ws is not other._ws
+        assert first.execute("echo $TOKEN")["output"].strip() == "a"
+        assert other.execute("echo $TOKEN")["output"].strip() == "b"
+    finally:
+        for environment in (first, again, other):
+            environment.cleanup()
+        provider.close()
+
+
+def test_a_yaml_reaching_around_hermes_builds_nothing(tmp_path):
+    config = tmp_path / "workspace.yaml"
+    config.write_text(WORKSPACE_YAML + "  /h: {vfs: ssh, config: {host: h}}\n")
+    provider = MirageTerminalProvider(lambda: str(config))
+    try:
+        with pytest.raises(ValueError, match="ssh-agent"):
+            provider.create_environment(cwd="/", timeout=30, task_id="r")
+        assert provider._loop is None
+    finally:
         provider.close()
 
 
