@@ -597,6 +597,8 @@ describe('explain', () => {
     ['printf x > /data/marker; f() { ls; } | ls; f', 'f'],
     ['printf x > /data/marker; f() { ls; } & f', 'f'],
     ['printf x > /data/marker; cat() { :; }; command cat a', 'cat'],
+    ['printf x > /data/marker; cat() { ls; }; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /data/marker; cat() { ls; }; sh -c "cat f.txt"', 'cat'],
     ['printf x > /data/marker; trap : ERR; f() { ls; }; f', 'f'],
     ['printf x > /data/marker; f() { cat a; }; f', 'cat'],
   ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
@@ -604,6 +606,7 @@ describe('explain', () => {
     open.push(w)
     await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
     const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'trap']
+    allowed.push('timeout', 'sh')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },

@@ -473,6 +473,8 @@ async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
         ("printf x > /data/marker; f() { ls; } | ls; f", "f"),
         ("printf x > /data/marker; f() { ls; } & f", "f"),
         ("printf x > /data/marker; cat() { :; }; command cat a", "cat"),
+        ("printf x > /data/marker; cat() { ls; }; timeout 1 cat f.txt", "cat"),
+        ('printf x > /data/marker; cat() { ls; }; sh -c "cat f.txt"', "cat"),
         ("printf x > /data/marker; trap : ERR; f() { ls; }; f", "f"),
         ("printf x > /data/marker; f() { cat a; }; f", "cat"),
     ],
@@ -483,7 +485,7 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
     allowed = ["cd", "ls", "printf", "false", "true", ":", "command"]
-    allowed += ["unset", "trap"]
+    allowed += ["unset", "trap", "timeout", "sh"]
     ws.create_session(
         "s",
         profile={
