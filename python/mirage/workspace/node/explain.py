@@ -1744,7 +1744,10 @@ async def prejudge_line(
     - A word a closed tree names nothing for is refused where it stands,
       not with the line: the stage fails with ``Permission denied`` and
       the rest of the line does what bash does, so a typo cannot cost
-      an agent the work the line already did.
+      an agent the work the line already did. A folder entry's root is
+      the exception: it speaks about its folder, so it holds the line
+      wherever the command surely works inside that folder, unless the
+      word calls a function the line surely defines (:func:`_is_verdict`).
     - A word only the runtime can expand is judged where it is
       expanded, by the per-command gate, which sees the real path.
 
@@ -2604,7 +2607,9 @@ async def line_held(
     does not ask again; one still waiting holds the line, and a question
     the gate will ask about other words (``Judged.stated`` False) is
     left to it. A word a closed tree names nothing for fails where it stands
-    while the rest of its line runs, so it does not hold the line.
+    while the rest of its line runs, so it does not hold the line, except
+    where a folder entry's root refuses it inside that folder
+    (:func:`_is_verdict`).
 
     Args:
         judged (list[tuple[Walked, list[Judged]]]): the line's read-only

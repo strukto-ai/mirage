@@ -1451,6 +1451,9 @@ export async function lineJudgments(
  * rule: only a refusal that names a rule is a verdict about the intent.
  * A word a closed tree names nothing for is refused where it stands, not
  * with the line, so a typo cannot cost an agent the work the line already did; a
+ * folder entry's root is the exception, since it speaks about its folder:
+ * it holds the line wherever the command surely works inside that folder,
+ * unless the word calls a function the line surely defines (`isVerdict`). A
  * word only the runtime can expand is judged where it is expanded, by
  * the per-command gate, which sees the real path.
  *
@@ -1881,7 +1884,8 @@ export async function unrefusedNodes(
  * still waiting holds the line, and a question the gate will ask about
  * other words (`Judged.stated` false) is left to it. A word the allow
  * list leaves out fails where it stands while the rest of its line runs,
- * so it does not hold the line. Mirrors the Python `line_held`.
+ * so it does not hold the line, except where a folder entry's root refuses
+ * it inside that folder (`isVerdict`). Mirrors the Python `line_held`.
  */
 export async function lineHeld(
   judged: readonly [Walked, Judged[]][],
