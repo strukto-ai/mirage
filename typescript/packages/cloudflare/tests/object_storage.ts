@@ -37,6 +37,13 @@ export class ObjectStorage implements DurableObjectStorageLike {
 
   constructor(private readonly db = new DatabaseSync(':memory:')) {}
 
+  /** The bytes of the pages the stored rows hold. */
+  bytes(): number {
+    const count = (pragma: string): number =>
+      Number(Object.values(this.db.prepare(`PRAGMA ${pragma}`).get() ?? {})[0])
+    return (count('page_count') - count('freelist_count')) * count('page_size')
+  }
+
   /** The same stored rows as an object started anew holds them. */
   restarted(): ObjectStorage {
     return new ObjectStorage(this.db)

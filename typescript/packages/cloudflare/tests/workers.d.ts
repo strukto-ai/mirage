@@ -17,6 +17,7 @@ declare module 'cloudflare:workers' {
   interface Storage {
     readonly sql: {
       exec(query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] }
+      readonly databaseSize: number
     }
     transactionSync<T>(fn: () => T): T
   }

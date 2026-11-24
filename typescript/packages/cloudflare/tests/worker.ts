@@ -211,18 +211,22 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
 /**
  * A SQLite-backed Durable Object whose workspace lives in its own storage:
  * in the storage's own tables, or on `paged` in a database inside it, opened
- * for each request and closed, which flushes it, before the answer.
+ * for each request and closed, which flushes it, before the answer. That
+ * answer's `x-stored-bytes` is what the storage takes once it is flushed.
  */
 export class SqlObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const run = (await request.json()) as SqlRun
     if (run.on !== 'paged') return sqlLines(new DurableObjectSqlDriver(this.ctx.storage), run)
     const driver = await DurableObjectPagedSqlDriver.open(this.ctx.storage)
+    let answer: Response
     try {
-      return await sqlLines(driver, run)
+      answer = await sqlLines(driver, run)
     } finally {
       await driver.close()
     }
+    answer.headers.set('x-stored-bytes', String(this.ctx.storage.sql.databaseSize))
+    return answer
   }
 }
 
