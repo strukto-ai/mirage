@@ -473,7 +473,6 @@ async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
         ("printf x > /data/marker; f() { ls; } | ls; f", "f"),
         ("printf x > /data/marker; f() { ls; } & f", "f"),
         ("printf x > /data/marker; cat() { :; }; command cat a", "cat"),
-        ("printf x > /data/marker; eval 'f() { ls; }'; f", "f"),
         ("printf x > /data/marker; trap : ERR; f() { ls; }; f", "f"),
         ("printf x > /data/marker; f() { cat a; }; f", "cat"),
     ],
@@ -484,7 +483,7 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
     allowed = ["cd", "ls", "printf", "false", "true", ":", "command"]
-    allowed += ["unset", "eval", "trap"]
+    allowed += ["unset", "trap"]
     ws.create_session(
         "s",
         profile={
@@ -511,6 +510,51 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
     assert (said.exit_code, said.stderr) == (126, stderr)
     marker = await ws.shell("test -e /data/marker")
     assert marker.exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cwd", "line", "stdout", "stderr"),
+    [
+        ("/", "cd /data/keep; cd -; echo hi", b"/\nhi\n", b""),
+        ("/", "cd /data/keep; D=/data; cd $D; echo hi", b"hi\n", b""),
+        (
+            "/",
+            "cd /data/keep/nope; echo hi",
+            b"hi\n",
+            b"bash: line 1: cd: /data/keep/nope: No such file or directory\n",
+        ),
+        ("/data/keep", "eval 'f() { ls; }'; f", b"f.txt\n", b""),
+    ],
+)
+async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate(
+    cwd, line, stdout, stderr
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    allowed = ["cd", "ls", "eval"]
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data/keep": {
+                    "commands": {
+                        "*": "deny",
+                        **dict.fromkeys(allowed, "allow"),
+                    }
+                }
+            },
+        },
+    )
+    await ws.shell(f"cd {cwd}", session_id="s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr or b"") == (
+        0,
+        stdout,
+        stderr,
+    )
     await ws.close()
 
 

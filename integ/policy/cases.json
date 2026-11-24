@@ -844,6 +844,19 @@
    ]
   },
   {
+   "id": "a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "ls": "allow"}}}}},
+    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "cd /data/keep; cd -; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "/\nhi\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "cd /data/keep; D=/data; cd $D; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "cd /; cd /data/keep/nope; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "bash: line 1: cd: /data/keep/nope: No such file or directory\n", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "cd /data/keep", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "ls; echo hi", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "decision": "kept"}}}
+   ]
+  },
+  {
    "id": "explain_sums_a_line_up_at_its_strictest_part_and_the_runs_exit",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

@@ -84,6 +84,7 @@ from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, PolicyDecision
 from mirage.utils.hidden import is_glob
+from mirage.utils.key_prefix import under_path
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.env.env import env_child, env_vars
@@ -432,6 +433,10 @@ class Judged:
             defines before it runs (:func:`_with_calls`), so the gate,
             which sees the call, says whether a tree root's own decision
             speaks for it (``is_tool``).
+        placed (bool): the walk knows where the command stands: no
+            ``cd`` it could not follow, nor one that may have been
+            skipped or failed, ran before it (``Walked.lost``,
+            ``Walked.elsewhere``), so ``ctx.cwd`` is the shell's.
     """
 
     judgment: Judgment
@@ -442,6 +447,7 @@ class Judged:
     ctx: CommandContext | None = None
     session: SessionState | None = None
     defined: bool = False
+    placed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -639,6 +645,7 @@ async def _judge_words(
     session = item.session
     intrinsic = item.intrinsic
     lost = item.lost
+    placed = not lost and not item.elsewhere
     open_ = item.open_
     head = words[0]
     rules = session.commands
@@ -655,13 +662,17 @@ async def _judge_words(
             ),
             occurrence,
             False,
+            placed=placed,
         )
         return
     if head.text is None and not whole_line:
         return
     if whole_line and (head.text is None or head.glob) and has_rules(rules):
         yield Judged(
-            _denied(head.raw, unreadable(head.raw)), occurrence, False
+            _denied(head.raw, unreadable(head.raw)),
+            occurrence,
+            False,
+            placed=placed,
         )
         return
     stated = item.stated and all(
@@ -741,6 +752,7 @@ async def _judge_words(
             stated,
             intrinsic,
             unread,
+            placed=placed,
         )
         return
     yield Judged(
@@ -754,6 +766,7 @@ async def _judge_words(
         unread,
         ctx,
         session,
+        placed=placed,
     )
     # env's command runs in the environment env builds for it, and a
     # nested shell's line in a new shell started from this one.
@@ -795,7 +808,7 @@ async def _judge_words(
                 open_=inner.open,
                 pipeline=pipeline,
             ):
-                yield one
+                yield one if placed else dataclasses.replace(one, placed=False)
         else:
             argv = list(inner.argv)
             within = whole_occurrence(
@@ -822,7 +835,7 @@ async def _judge_words(
                 namespace,
                 mode,
             ):
-                yield one
+                yield one if placed else dataclasses.replace(one, placed=False)
 
 
 def _is_verdict(one: Judged) -> bool:
@@ -838,17 +851,18 @@ def _is_verdict(one: Judged) -> bool:
     command no tree names, or words only the runtime can expand fail
     where they occur rather than against the whole line. A mount
     entry's root speaks about its folder, as a root leaf with paths
-    speaks about those paths, so it holds the line (``_in_folder``),
-    except for a word the line defines as a function
-    (``Judged.defined``): the call runs the function, whose body's
-    commands are each judged, and the gate sees whether it does.
+    speaks about those paths, so it holds the line where the command
+    surely works inside that folder (``_in_folder``), except for a word
+    the line defines as a function (``Judged.defined``): the call runs
+    the function, whose body's commands are each judged, and the gate
+    sees whether it does.
 
     Args:
         one (Judged): one command's explanation and its place.
     """
     expl = one.judgment
     if expl.exit_code == 0 or (
-        _by_default(expl) and (one.defined or not _in_folder(expl))
+        _by_default(expl) and (one.defined or not _in_folder(one))
     ):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
@@ -878,14 +892,35 @@ def _by_default(expl: Judgment) -> bool:
     )
 
 
-def _in_folder(expl: Judgment) -> bool:
+def _in_folder(one: Judged) -> bool:
     """Whether the leaf that decided the command belongs to a mount
-    entry's tree, which judges only lines working inside its folder.
+    entry's tree, and the command surely works inside that folder: a
+    word of its own names an absolute path there, or the walk knows
+    where it stands (``Judged.placed``) and its cwd or a path it reaches
+    is there. Where the walk only guesses the cwd (after ``cd -``,
+    ``cd "$d"``, a ``cd`` that may fail), the per-command gate judges
+    the command in the cwd the shell really has.
 
     Args:
-        expl (Judgment): one command's explanation.
+        one (Judged): one command's explanation and its place.
     """
-    return expl.rule is not None and bool(expl.rule.mount)
+    rule = one.judgment.rule
+    if rule is None or not rule.mount:
+        return False
+    ctx = one.ctx
+    if ctx is None:
+        return True
+    if one.placed and any(
+        under_path(path, rule.mount)
+        for path in (ctx.cwd, *(p.virtual for p in ctx.paths))
+    ):
+        return True
+    return any(
+        word.path is not None
+        and word.text.startswith("/")
+        and under_path(word.path.virtual, rule.mount)
+        for word in ctx.words
+    )
 
 
 def _uncovered(expl: Judgment) -> bool:
@@ -2898,7 +2933,7 @@ def _with_calls(
     if not any(
         one.judgment.exit_code
         and _by_default(one.judgment)
-        and _in_folder(one.judgment)
+        and _in_folder(one)
         for one in judged
     ):
         return list(judged)

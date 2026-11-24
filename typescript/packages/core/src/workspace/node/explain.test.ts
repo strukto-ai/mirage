@@ -597,14 +597,13 @@ describe('explain', () => {
     ['printf x > /data/marker; f() { ls; } | ls; f', 'f'],
     ['printf x > /data/marker; f() { ls; } & f', 'f'],
     ['printf x > /data/marker; cat() { :; }; command cat a', 'cat'],
-    ["printf x > /data/marker; eval 'f() { ls; }'; f", 'f'],
     ['printf x > /data/marker; trap : ERR; f() { ls; }; f', 'f'],
     ['printf x > /data/marker; f() { cat a; }; f', 'cat'],
   ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
     const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
     await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
-    const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'eval', 'trap']
+    const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'trap']
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
@@ -630,6 +629,36 @@ describe('explain', () => {
     expect([said.exitCode, said.stderr]).toEqual([126, stderr])
     expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
   })
+
+  it.each([
+    ['/', 'cd /data/keep; cd -; echo hi', '/\nhi\n', ''],
+    ['/', 'cd /data/keep; D=/data; cd $D; echo hi', 'hi\n', ''],
+    [
+      '/',
+      'cd /data/keep/nope; echo hi',
+      'hi\n',
+      'bash: line 1: cd: /data/keep/nope: No such file or directory\n',
+    ],
+    ['/data/keep', "eval 'f() { ls; }'; f", 'f.txt\n', ''],
+  ])(
+    "leaves a command the walk cannot place to the gate under a folder's *: %s %s",
+    async (cwd, line, out, err) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: {
+            '/data/keep': { commands: { '*': 'deny', cd: 'allow', ls: 'allow', eval: 'allow' } },
+          },
+        }),
+      })
+      await w.shell(`cd ${cwd}`, { sessionId: 's' })
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([0, out, err])
+    },
+  )
 
   it.each([
     'printf x > /data/marker; cat f.txt; (cat() { :; })',

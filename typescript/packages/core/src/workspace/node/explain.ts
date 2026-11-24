@@ -64,6 +64,7 @@ import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
+import { underPath } from '../../utils/key_prefix.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { scanOptions } from '../executor/builtins/getopt.ts'
@@ -318,6 +319,13 @@ export interface Judged {
    * root's own decision speaks for it (`isTool`).
    */
   readonly defined?: boolean
+  /**
+   * The walk knows where the command stands: no `cd` it could not follow,
+   * nor one that may have been skipped or failed, ran before it
+   * (`Walked.lost`, `Walked.elsewhere`), so `ctx.cwd` is the shell's.
+   * Absent means known.
+   */
+  readonly placed?: boolean
 }
 
 /**
@@ -552,6 +560,7 @@ async function* judgeWords(
     stdin = null,
     open = false,
   } = item
+  const placed = !lost && (item.elsewhere ?? []).length === 0
   const wholeLine = takesWholeLine(mode)
   const words = wholeLine ? item.words.map(machineWord) : item.words
   const redirectWords = wholeLine ? item.redirects.map(machineWord) : item.redirects
@@ -562,12 +571,12 @@ async function* judgeWords(
   // for a postCommand policy to judge.
   if (wholeLine && (await registry.policies.wantsFor('postCommand', session.sessionId))) {
     const reason = 'a post_command policy cannot judge a line a runtime runs whole'
-    yield { judgment: denied(head.raw, reason), occurrence, stated: false }
+    yield { judgment: denied(head.raw, reason), occurrence, stated: false, placed }
     return
   }
   if (head.text === null && !wholeLine) return
   if (wholeLine && (head.text === null || head.glob === true) && hasRules(rules)) {
-    yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
+    yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false, placed }
     return
   }
   const literal = stated && [...words, ...redirectWords].every((w) => w.text !== null)
@@ -635,6 +644,7 @@ async function* judgeWords(
       stated: literal,
       intrinsic,
       unread,
+      placed,
     }
     return
   }
@@ -646,6 +656,7 @@ async function* judgeWords(
     unread,
     ctx,
     session,
+    placed,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -672,7 +683,7 @@ async function* judgeWords(
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {
-      yield* judgeLine(
+      for await (const one of judgeLine(
         reparse(inner.line),
         innerSession,
         registry,
@@ -681,7 +692,9 @@ async function* judgeWords(
         lineFrame(inner.line, occurrence),
         mode,
         { stated: literal && !inner.open, lost, open: inner.open, pipeline },
-      )
+      )) {
+        yield placed ? one : { ...one, placed: false }
+      }
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
       // `env -C` runs its command where `cd` would have gone.
@@ -689,7 +702,7 @@ async function* judgeWords(
         inner.chdir === undefined || inner.chdir === null
           ? [innerSession, lost]
           : afterCd([{ raw: 'cd', text: 'cd' }, inner.chdir], innerSession, lost, [])
-      yield* judgeWords(
+      for await (const one of judgeWords(
         {
           words: inner.argv,
           redirects: [],
@@ -704,7 +717,9 @@ async function* judgeWords(
         registry,
         namespace,
         reparse,
-      )
+      )) {
+        yield placed ? one : { ...one, placed: false }
+      }
     }
   }
 }
@@ -1243,11 +1258,28 @@ function byDefault(expl: Judgment): boolean {
 
 /**
  * Whether the leaf that decided the command belongs to a mount entry's
- * tree, which judges only lines working inside its folder. Mirrors the
- * Python `_in_folder`.
+ * tree, and the command surely works inside that folder: a word of its own
+ * names an absolute path there, or the walk knows where it stands
+ * (`Judged.placed`) and its cwd or a path it reaches is there. Where the
+ * walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
+ * fail), the per-command gate judges the command in the cwd the shell
+ * really has. Mirrors the Python `_in_folder`.
  */
-function inFolder(expl: Judgment): boolean {
-  return expl.rule !== null && (expl.rule.mount ?? '') !== ''
+function inFolder(one: Judged): boolean {
+  const mount = one.judgment.rule?.mount ?? ''
+  if (mount === '') return false
+  const ctx = one.ctx
+  if (ctx === undefined) return true
+  if (
+    one.placed !== false &&
+    [ctx.cwd, ...ctx.paths.map((path) => path.virtual)].some((path) => underPath(path, mount))
+  ) {
+    return true
+  }
+  return (ctx.words ?? []).some(
+    (word) =>
+      word.path !== null && word.text.startsWith('/') && underPath(word.path.virtual, mount),
+  )
 }
 
 /**
@@ -1297,14 +1329,14 @@ function asksFor(one: Judged): boolean {
  * word, a command no tree names, or words only the runtime can expand
  * fail where they occur rather than against the whole line. A mount
  * entry's root speaks about its folder, as a root leaf with paths speaks
- * about those paths, so it holds the line (`inFolder`), except for a word
- * the line defines as a function (`Judged.defined`): the call runs the
- * function, whose body's commands are each judged, and the gate sees
- * whether it does.
+ * about those paths, so it holds the line where the command surely works
+ * inside that folder (`inFolder`), except for a word the line defines as a
+ * function (`Judged.defined`): the call runs the function, whose body's
+ * commands are each judged, and the gate sees whether it does.
  */
 function isVerdict(one: Judged): boolean {
   const expl = one.judgment
-  if (expl.exitCode === 0 || (byDefault(expl) && (one.defined === true || !inFolder(expl)))) {
+  if (expl.exitCode === 0 || (byDefault(expl) && (one.defined === true || !inFolder(one)))) {
     return false
   }
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
@@ -2112,7 +2144,7 @@ function withCalls(
   origin: Occurrence | null,
 ): Judged[] {
   const folder = judged.some(
-    (one) => one.judgment.exitCode !== 0 && byDefault(one.judgment) && inFolder(one.judgment),
+    (one) => one.judgment.exitCode !== 0 && byDefault(one.judgment) && inFolder(one),
   )
   if (!folder) return [...judged]
   const base = tree.startIndex ?? 0
