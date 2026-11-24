@@ -1302,21 +1302,23 @@ function inFolder(one: Judged): boolean {
 }
 
 /**
- * Whether a redirect target of the command lies in the folder of the mount
- * entry whose leaf decided it: an absolute one always, a relative one where
+ * Whether a redirect target of the command is one the session's trees refuse
+ * or ask about as they judge a redirect no command owns (`redirectAsked`): the
+ * target inside any mount entry whose root speaks, not only the one that
+ * decided the command. An absolute target counts always, a relative one where
  * the walk knows where the command stands (`Judged.placed`), as `inFolder`
- * reads a path. Mirrors the Python `_opens_in_folder`.
+ * reads a path. Mirrors the Python `_opens_held`.
  */
-function opensInFolder(one: Judged): boolean {
-  const mount = one.judgment.rule?.mount ?? ''
+function opensHeld(one: Judged): boolean {
   const ctx = one.ctx
-  if (mount === '' || ctx === undefined) return false
+  const session = one.session
+  if (ctx === undefined || session === undefined) return false
   return (ctx.words ?? []).some(
     (word) =>
       word.kind === WordKind.REDIRECT &&
       word.path !== null &&
       (one.placed !== false || word.text.startsWith('/')) &&
-      underPath(word.path.virtual, mount),
+      redirectAsked([word.path], session, null) !== null,
   )
 }
 
@@ -1372,14 +1374,13 @@ function asksFor(one: Judged): boolean {
  * function (`Judged.defined`): the call runs the function, whose body's
  * commands are each judged, and the gate sees whether it does. The call's
  * redirect targets are not the body's: the shell opens them whatever the
- * body does, so one inside the folder (`opensInFolder`) holds the line
- * still.
+ * body does, so one a tree refuses (`opensHeld`) holds the line still.
  */
 function isVerdict(one: Judged): boolean {
   const expl = one.judgment
   if (
     expl.exitCode === 0 ||
-    (byDefault(expl) && ((one.defined === true && !opensInFolder(one)) || !inFolder(one)))
+    (byDefault(expl) && ((one.defined === true && !opensHeld(one)) || !inFolder(one)))
   ) {
     return false
   }

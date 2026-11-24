@@ -859,8 +859,8 @@ def _is_verdict(one: Judged) -> bool:
     the line defines as a function (``Judged.defined``): the call runs
     the function, whose body's commands are each judged, and the gate
     sees whether it does. The call's redirect targets are not the
-    body's: the shell opens them whatever the body does, so one inside
-    the folder (``_opens_in_folder``) holds the line still.
+    body's: the shell opens them whatever the body does, so one a tree
+    refuses (``_opens_held``) holds the line still.
 
     Args:
         one (Judged): one command's explanation and its place.
@@ -868,9 +868,7 @@ def _is_verdict(one: Judged) -> bool:
     expl = one.judgment
     if expl.exit_code == 0 or (
         _by_default(expl)
-        and (
-            (one.defined and not _opens_in_folder(one)) or not _in_folder(one)
-        )
+        and ((one.defined and not _opens_held(one)) or not _in_folder(one))
     ):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
@@ -931,24 +929,27 @@ def _in_folder(one: Judged) -> bool:
     )
 
 
-def _opens_in_folder(one: Judged) -> bool:
-    """Whether a redirect target of the command lies in the folder of
-    the mount entry whose leaf decided it: an absolute one always, a
-    relative one where the walk knows where the command stands
-    (``Judged.placed``), as :func:`_in_folder` reads a path.
+def _opens_held(one: Judged) -> bool:
+    """Whether a redirect target of the command is one the session's
+    trees refuse or ask about as they judge a redirect no command owns
+    (``redirect_asked``): the target inside any mount entry whose root
+    speaks, not only the one that decided the command. An absolute
+    target counts always, a relative one where the walk knows where the
+    command stands (``Judged.placed``), as :func:`_in_folder` reads a
+    path.
 
     Args:
         one (Judged): one command's explanation and its place.
     """
-    rule = one.judgment.rule
     ctx = one.ctx
-    if rule is None or not rule.mount or ctx is None:
+    session = one.session
+    if ctx is None or session is None:
         return False
     return any(
         word.kind is WordKind.REDIRECT
         and word.path is not None
         and (one.placed or word.text.startswith("/"))
-        and under_path(word.path.virtual, rule.mount)
+        and redirect_asked([word.path], session, None) is not None
         for word in ctx.words
     )
 

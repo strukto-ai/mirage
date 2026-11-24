@@ -670,6 +670,31 @@ describe('explain', () => {
     },
   )
 
+  it('holds a function the line defines on a redirect into another entry', async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/vault/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /vault/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data': { commands: { '*': 'deny', cd: 'allow' } },
+          '/vault': { commands: { '*': 'deny' } },
+        },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const line = 'f() { echo hi; }; f > /vault/f.txt'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([126, 'f: Permission denied\n'])
+    expect(said.exitCode).toBe(126)
+    expect(DEC.decode((await w.shell('cat /vault/f.txt')).stdout)).toBe('kept\n')
+  })
+
   it.each([
     ['/', 'cd /data; cd -; echo hi', 0, '/\nhi\n', ''],
     ['/', 'cd /data; D=/; cd $D; echo hi', 0, 'hi\n', ''],

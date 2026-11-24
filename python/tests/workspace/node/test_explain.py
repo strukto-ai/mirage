@@ -557,6 +557,33 @@ async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
 
 
 @pytest.mark.asyncio
+async def test_a_redirect_into_another_entry_holds_a_function_the_line_defines():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/vault/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /vault/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {"commands": {"*": "deny", "cd": "allow"}},
+                "/vault": {"commands": {"*": "deny"}},
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    line = "f() { echo hi; }; f > /vault/f.txt"
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stderr) == (126, b"f: Permission denied\n")
+    assert said.exit_code == 126
+    kept = await ws.shell("cat /vault/f.txt")
+    assert kept.stdout == b"kept\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("cwd", "line", "exit_code", "stdout", "stderr"),
     [
