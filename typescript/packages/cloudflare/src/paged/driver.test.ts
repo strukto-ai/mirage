@@ -85,6 +85,53 @@ describe('the paged sql driver of a Durable Object', () => {
     )
   })
 
+  it('gives the storage back the pages a delete freed', async () => {
+    const storage = new ObjectStorage()
+    const driver = await open(storage)
+    await lines(driver, [
+      'printf kept > /s/a',
+      'mkdir /s/d && for i in $(seq 1 30); do head -c 2000000 /dev/zero > /s/d/f$i; done',
+    ])
+    driver.flush()
+    const full = storage.bytes()
+    expect(full).toBeGreaterThan(60_000_000)
+    await lines(driver, ['rm -r /s/d'])
+    // The flush that commits the delete gives them back. What stays is the
+    // few emptied rows the log keeps to write into next.
+    driver.flush()
+    expect(storage.bytes()).toBeLessThan(full / 4)
+    await driver.close()
+    const again = await open(storage.restarted())
+    expect(await lines(again, ['ls /s', 'cat /s/a'])).toBe('a\nkept')
+    const [check] = await again.query('PRAGMA integrity_check')
+    expect(check?.integrity_check).toBe('ok')
+  })
+
+  it('gives them back to a storage with no room to move a page in, and writes into them again', async () => {
+    const storage = new ObjectStorage()
+    const driver = await open(storage)
+    await lines(driver, [
+      'mkdir /s/d /s/k',
+      'for i in $(seq 1 15); do head -c 2000000 /dev/zero > /s/d/f$i; done',
+      'for i in $(seq 1 15); do seq 1 300000 > /s/k/f$i; done',
+    ])
+    driver.flush()
+    const full = storage.bytes()
+    const kept = await lines(driver, ['cat /s/k/* | md5sum'])
+    // The files kept were written after the ones deleted, and the storage
+    // takes 2 MB more: a delete that moved them to give pages back would fail.
+    storage.room(2 << 20)
+    await lines(driver, ['rm -r /s/d'])
+    driver.flush()
+    expect(storage.bytes()).toBeLessThan(full - 16_000_000)
+    await lines(driver, ['seq 1 500000 > /s/n'])
+    await driver.close()
+    const again = await open(storage.restarted())
+    expect(await lines(again, ['cat /s/k/* | md5sum', 'wc -l < /s/n'])).toBe(kept + '500000\n')
+    const [check] = await again.query('PRAGMA integrity_check')
+    expect(check?.integrity_check).toBe('ok')
+  })
+
   it('keeps the last flush when the storage fails in the middle of the next', async () => {
     const storage = new ObjectStorage()
     const driver = await open(storage)

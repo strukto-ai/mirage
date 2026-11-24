@@ -360,4 +360,26 @@ describe('mirage in workerd', () => {
       ])
     })
   }
+
+  it('gives a Durable Object back the storage a delete freed on paged', async () => {
+    const id = `t-freed-${crypto.randomUUID()}`
+    const stored = async (lines: readonly string[]): Promise<number> => {
+      const response = await worker.fetch('http://cloudflare.test/sql', {
+        method: 'POST',
+        body: JSON.stringify({ lines, on: 'paged', id }),
+      })
+      expect(response.status).toBe(200)
+      const results = (await response.json()) as Result[]
+      expect(results.map((r) => r.exit)).toEqual(lines.map(() => 0))
+      return Number(response.headers.get('x-stored-bytes'))
+    }
+    const full = await stored([
+      'mkdir /s/d && for i in $(seq 1 30); do head -c 2000000 /dev/zero > /s/d/f$i; done',
+      'printf kept > /s/a',
+    ])
+    expect(full).toBeGreaterThan(60_000_000)
+    // A request's close is a flush, which gives back a step of what was freed.
+    await stored(['rm -r /s/d'])
+    expect(await stored(['cat /s/a'])).toBeLessThan(full / 2)
+  }, 180_000)
 })

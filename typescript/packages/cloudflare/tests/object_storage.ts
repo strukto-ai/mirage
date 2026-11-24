@@ -37,6 +37,19 @@ export class ObjectStorage implements DurableObjectStorageLike {
 
   constructor(private readonly db = new DatabaseSync(':memory:')) {}
 
+  /** The bytes of the pages the stored rows hold. */
+  bytes(): number {
+    const count = (pragma: string): number =>
+      Number(Object.values(this.db.prepare(`PRAGMA ${pragma}`).get() ?? {})[0])
+    return (count('page_count') - count('freelist_count')) * count('page_size')
+  }
+
+  /** Let the stored pages take `bytes` more and refuse the rest, as a storage near its limit does. */
+  room(bytes: number): void {
+    const pages = Number(Object.values(this.db.prepare('PRAGMA page_count').get() ?? {})[0])
+    this.db.exec(`PRAGMA max_page_count = ${String(pages + Math.floor(bytes / 4096))}`)
+  }
+
   /** The same stored rows as an object started anew holds them. */
   restarted(): ObjectStorage {
     return new ObjectStorage(this.db)
@@ -67,7 +80,8 @@ export class ObjectStorage implements DurableObjectStorageLike {
       this.db.exec('COMMIT')
       return out
     } catch (e) {
-      this.db.exec('ROLLBACK')
+      // SQLite ends the transaction itself when the database is full.
+      if (this.db.isTransaction) this.db.exec('ROLLBACK')
       throw e
     }
   }
