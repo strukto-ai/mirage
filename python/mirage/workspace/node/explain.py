@@ -53,6 +53,7 @@ from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.decisions import is_pending
 from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
+from mirage.policy.match.rule import operand_paths
 from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
@@ -865,7 +866,8 @@ def _is_verdict(one: Judged) -> bool:
     the function, whose body's commands are each judged, and the gate
     sees whether it does. The call's redirect targets are not the
     body's: the shell opens them whatever the body does, so one a tree
-    refuses (``_opens_held``) holds the line still.
+    refuses, or asks about by the call's own rule (``_opens_held``),
+    holds the line still.
 
     Args:
         one (Judged): one command's explanation and its place.
@@ -911,7 +913,8 @@ def _in_folder(one: Judged) -> bool:
     is there, or, every path word being absolute, a path it reaches
     through a link is there, or it walks or moves a whole tree from an
     absolute path the folder lies under (``grep -r x /a`` for a folder
-    ``/a/b``), as the matcher's ``touches`` reads it. Where the walk only guesses the
+    ``/a/b``, but not ``mv``'s destination, ``_destination``), as the
+    matcher's ``touches`` reads it. Where the walk only guesses the
     cwd (after ``cd -``, ``cd "$d"``, a ``cd`` that may fail), the
     per-command gate judges the command in the cwd the shell really has.
 
@@ -934,25 +937,46 @@ def _in_folder(one: Judged) -> bool:
     ) and any(under_path(p.virtual, rule.mount) for p in ctx.paths):
         return True
     walks = ctx.walks or ctx.subtree
+    into = None if ctx.walks else _destination(ctx)
     return any(
         word.path is not None
         and word.text.startswith("/")
         and (
             under_path(word.path.virtual, rule.mount)
-            or (walks and under_path(rule.mount, word.path.virtual))
+            or (
+                walks
+                and word.path.virtual != into
+                and under_path(rule.mount, word.path.virtual)
+            )
         )
         for word in ctx.words
     )
 
 
+def _destination(ctx: CommandContext) -> str | None:
+    """The directory a move puts its sources into, which it does not
+    move as a tree: ``mv -t``'s target, or else the last of two or more
+    operands, as the matcher's ``touches`` leaves it out.
+
+    Args:
+        ctx (CommandContext): the classified command.
+    """
+    if ctx.command != "mv" or ctx.move_target is not None:
+        return ctx.move_target
+    operands = operand_paths(ctx)
+    return operands[-1].virtual if len(operands) >= 2 else None
+
+
 def _opens_held(one: Judged) -> bool:
     """Whether a redirect target of the command is one the session's
-    trees refuse or ask about as they judge a redirect no command owns
-    (``redirect_asked``): the target inside any mount entry whose root
-    speaks, not only the one that decided the command. An absolute
-    target counts always, a relative one where the walk knows where the
-    command stands (``Judged.placed``), as :func:`_in_folder` reads a
-    path.
+    trees refuse as they judge a redirect no command owns
+    (``redirect_asked``), inside any mount entry whose root speaks, or
+    ask about by the rule that decided the command, so the line's one
+    question is the redirect's. An ask from another entry is the
+    redirect's own question, which the gate asks as it opens. An
+    absolute target counts always, a relative one where the walk knows
+    where the command stands (``Judged.placed``), as :func:`_in_folder`
+    reads a path.
 
     Args:
         one (Judged): one command's explanation and its place.
@@ -965,7 +989,12 @@ def _opens_held(one: Judged) -> bool:
         word.kind is WordKind.REDIRECT
         and word.path is not None
         and (one.placed or word.text.startswith("/"))
-        and redirect_asked([word.path], session, one.namespace) is not None
+        and (asked := redirect_asked([word.path], session, one.namespace))
+        is not None
+        and (
+            isinstance(asked.answer, Deny)
+            or asked.answer.rule == one.judgment.rule
+        )
         for word in ctx.words
     )
 

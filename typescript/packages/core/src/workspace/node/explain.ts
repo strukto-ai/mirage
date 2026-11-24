@@ -18,6 +18,7 @@ import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
+import { operandPaths } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import {
@@ -1288,7 +1289,8 @@ function byDefault(expl: Judgment): boolean {
  * (`Judged.placed`) and its cwd or a path it reaches is there, or, every
  * path word being absolute, a path it reaches through a link is there, or it walks
  * or moves a whole tree from an absolute path the folder lies under
- * (`grep -r x /a` for a folder `/a/b`), as the matcher's `touches` reads it.
+ * (`grep -r x /a` for a folder `/a/b`, but not `mv`'s destination,
+ * `destination`), as the matcher's `touches` reads it.
  * Where the walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
  * fail), the per-command gate judges the command in the cwd the shell
  * really has. Mirrors the Python `_in_folder`.
@@ -1312,33 +1314,47 @@ function inFolder(one: Judged): boolean {
     return true
   }
   const walks = ctx.walks === true || ctx.subtree === true
+  const into = ctx.walks === true ? null : destination(ctx)
   return words.some(
     (word) =>
       word.path !== null &&
       word.text.startsWith('/') &&
-      (underPath(word.path.virtual, mount) || (walks && underPath(mount, word.path.virtual))),
+      (underPath(word.path.virtual, mount) ||
+        (walks && word.path.virtual !== into && underPath(mount, word.path.virtual))),
   )
 }
 
 /**
+ * The directory a move puts its sources into, which it does not move as a
+ * tree: `mv -t`'s target, or else the last of two or more operands, as the
+ * matcher's `touches` leaves it out. Mirrors the Python `_destination`.
+ */
+function destination(ctx: CommandContext): string | null {
+  if (ctx.command !== 'mv' || (ctx.moveTarget ?? null) !== null) return ctx.moveTarget ?? null
+  const operands = operandPaths(ctx)
+  return operands.length >= 2 ? (operands.at(-1)?.virtual ?? null) : null
+}
+
+/**
  * Whether a redirect target of the command is one the session's trees refuse
- * or ask about as they judge a redirect no command owns (`redirectAsked`): the
- * target inside any mount entry whose root speaks, not only the one that
- * decided the command. An absolute target counts always, a relative one where
- * the walk knows where the command stands (`Judged.placed`), as `inFolder`
- * reads a path. Mirrors the Python `_opens_held`.
+ * as they judge a redirect no command owns (`redirectAsked`), inside any mount
+ * entry whose root speaks, or ask about by the rule that decided the command,
+ * so the line's one question is the redirect's. An ask from another entry is
+ * the redirect's own question, which the gate asks as it opens. An absolute
+ * target counts always, a relative one where the walk knows where the command
+ * stands (`Judged.placed`), as `inFolder` reads a path. Mirrors the Python
+ * `_opens_held`.
  */
 function opensHeld(one: Judged): boolean {
   const ctx = one.ctx
   const session = one.session
   if (ctx === undefined || session === undefined) return false
-  return (ctx.words ?? []).some(
-    (word) =>
-      word.kind === WordKind.REDIRECT &&
-      word.path !== null &&
-      (one.placed !== false || word.text.startsWith('/')) &&
-      redirectAsked([word.path], session, one.namespace ?? null) !== null,
-  )
+  return (ctx.words ?? []).some((word) => {
+    if (word.kind !== WordKind.REDIRECT || word.path === null) return false
+    if (one.placed === false && !word.text.startsWith('/')) return false
+    const answer = redirectAsked([word.path], session, one.namespace ?? null)?.answer
+    return answer?.kind === 'deny' || answer?.rule === one.judgment.rule
+  })
 }
 
 /**
@@ -1393,7 +1409,8 @@ function asksFor(one: Judged): boolean {
  * function (`Judged.defined`): the call runs the function, whose body's
  * commands are each judged, and the gate sees whether it does. The call's
  * redirect targets are not the body's: the shell opens them whatever the
- * body does, so one a tree refuses (`opensHeld`) holds the line still.
+ * body does, so one a tree refuses, or asks about by the call's own rule
+ * (`opensHeld`), holds the line still.
  */
 function isVerdict(one: Judged): boolean {
   const expl = one.judgment

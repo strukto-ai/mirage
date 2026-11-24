@@ -975,16 +975,17 @@ async def _run_argv(
         )
         if admitted is not None and asked == key:
             return None
-        if paths and runs_function(name, session, registry):
+        if opening is not None and runs_function(name, session, registry):
             # A function is no tool, so no tree root judges its call;
-            # its redirects open whatever its body does, and are judged
-            # as a redirect no command owns.
+            # its redirects open whatever its body does, and each is
+            # judged as it opens, as a redirect no command owns: the
+            # opener passes every target so far, and only the last is new.
             opened = await admit_redirect(
-                paths,
+                paths[-1:],
                 session,
                 registry,
                 namespace,
-                None if opening is None else opening.target_node,
+                opening.target_node,
             )
             if opened is not None:
                 return _refused(" ".join([name, *argv.args]), opened)

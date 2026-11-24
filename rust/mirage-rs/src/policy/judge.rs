@@ -167,6 +167,18 @@ impl AdmissionMatcher {
         })
     }
 
+    /// How narrowly a refusal speaks, to break a tie between two equally
+    /// strict ones: 2 for a leaf naming the command or with paths, 1 for
+    /// a mount tree's root decision, 0 for the top-level root's. A root's
+    /// own decision is a leaf at `/*` with no paths.
+    fn standing(&self, leaf: Option<usize>, mounted: bool) -> u8 {
+        let root = leaf.is_none_or(|id| {
+            let rule = &self.rules[id];
+            rule.paths.is_empty() && rule.at.split(|&unit| unit == 47).nth(1) == Some(&[42][..])
+        });
+        if root { u8::from(mounted) } else { 2 }
+    }
+
     fn covers(&self, id: usize, path: &[u32]) -> bool {
         self.scopes[id]
             .as_ref()
@@ -174,16 +186,17 @@ impl AdmissionMatcher {
     }
 
     /// Judge a line: every tree that applies to it, once for each path it
-    /// names (once when it names none), the strictest result winning, and
-    /// between two equally strict refusals a mount's tree over the
-    /// top-level one, as the narrower scope that spoke.
+    /// names (once when it names none), the strictest result winning.
+    /// Between two equally strict refusals the narrower one speaks
+    /// (`standing`): a leaf naming the command or its paths over a tree
+    /// root's own decision, and a mount's root over the top-level root.
     /// Every ask behind an ask result is reported, since the host needs
     /// each one answered.
     pub fn decide(&self, facts: &CommandFacts) -> Ruling {
         let read = Read::new(&facts.tokens, facts.line.as_ref());
         let line = read.line(facts.tool);
         let subjects = subjects(facts);
-        let mut best: Option<(Verdict, &Subject, bool)> = None;
+        let mut best: Option<(Verdict, &Subject, u8)> = None;
         let mut asks: Vec<usize> = Vec::new();
         for scoped in &self.trees {
             if scoped
@@ -202,12 +215,15 @@ impl AdmissionMatcher {
                         asks.push(id);
                     }
                 }
-                if best.as_ref().is_none_or(|(held, _, held_mounted)| {
+                let standing = self.standing(verdict.leaf, mounted);
+                if best.as_ref().is_none_or(|(held, _, held_standing)| {
                     let (now, then) = (rank(verdict.outcome), rank(held.outcome));
                     now > then
-                        || (now == then && now > rank(Outcome::Allow) && mounted && !held_mounted)
+                        || (now == then
+                            && now > rank(Outcome::Allow)
+                            && standing > *held_standing)
                 }) {
-                    best = Some((verdict, subject, mounted));
+                    best = Some((verdict, subject, standing));
                 }
             }
         }
@@ -866,6 +882,24 @@ mod tests {
         let outside = tied.decide(&facts("/", &["cat", "/e/f.txt"], &["/e/f.txt"]));
         assert_eq!(outside.outcome, Deny);
         assert_eq!(tied.rules()[outside.rule.unwrap()].mount, None);
+    }
+
+    #[test]
+    fn a_leaf_naming_the_command_answers_a_refusal_a_mount_root_ties() {
+        let named = matcher(
+            json!({"cat": "deny"}),
+            &[("/d", json!({"*": "deny", "printf": "allow"}))],
+        );
+        let ruling = named.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
+        assert_eq!(ruling.outcome, Deny);
+        let rule = &named.rules()[ruling.rule.unwrap()];
+        assert_eq!((rule.mount.clone(), rule.at.clone()), (None, text("/cat/*")));
+        let inner = matcher(
+            json!({"*": "deny"}),
+            &[("/d", json!({"cat": "deny"}))],
+        );
+        let ruling = inner.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
+        assert_eq!(inner.rules()[ruling.rule.unwrap()].at, text("/cat/*"));
     }
 
     #[test]

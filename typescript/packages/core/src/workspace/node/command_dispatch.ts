@@ -934,16 +934,17 @@ async function runArgv(
   ): Promise<RedirectResult | null> => {
     const key = [String(given === null), ...paths.map((p) => p.virtual)].join('\0')
     if (admitted !== null && asked === key) return null
-    if (paths.length > 0 && runsFunction(name, context.session, registry)) {
+    if (opening !== null && runsFunction(name, context.session, registry)) {
       // A function is no tool, so no tree root judges its call; its
-      // redirects open whatever its body does, and are judged as a
-      // redirect no command owns.
+      // redirects open whatever its body does, and each is judged as it
+      // opens, as a redirect no command owns: the opener passes every
+      // target so far, and only the last is new.
       const opened = await admitRedirect(
-        paths,
+        paths.slice(-1),
         context.session,
         registry,
         namespace,
-        (opening?.targetNode ?? null) as TSNodeLike | null,
+        opening.targetNode as TSNodeLike | null,
       )
       if (opened !== null) return refused([name, ...argv.args].join(' '), opened)
     }

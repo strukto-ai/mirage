@@ -885,6 +885,32 @@
    ]
   },
   {
+   "id": "a_folders_star_spares_a_move_out_and_another_entrys_question",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/vault": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "named", "profile": {"commands": {"*": "allow", "cat": {"decision": "deny", "reason": "no cat"}}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "printf": "allow", "cd": "allow"}}}}},
+    {"op": "session", "id": "moves", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow"}}}}},
+    {"op": "session", "id": "vault", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "ls": "allow", "cd": "allow"}}, "/vault": {"commands": {"*": {"decision": "ask", "reason": "vault needs a nod"}}}}}},
+    {"op": "session", "id": "stored", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "ask", "reason": "data needs a nod"}}}}}},
+    {"op": "exec", "command": "echo top > /data/f.txt && mkdir /t && echo x > /t/m.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "named", "command": "cd /data", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "named", "command": "printf x > /marker; f() { cat f.txt; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "no cat"}}},
+    {"op": "exec", "command": "test -e /marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "moves", "command": "cd /data", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "moves", "command": "f() { mv /t/m.txt /; }; cd /; f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /m.txt", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "vault", "command": "cd /data", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "vault", "command": "f() { ls; }; f > /vault/out", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /vault/out: Permission denied\n", "decision": "vault needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "vault", "command": "f() { ls; }; f > /vault/out", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /vault/out", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "stored", "command": "g() { :; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "stored", "command": "g > /data/a > /out", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/a: Permission denied\n", "decision": "data needs a nod"}}},
+    {"op": "answer", "outcome": "allow", "scope": "once"},
+    {"op": "exec", "session": "stored", "command": "g > /data/a > /out", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "a_folders_star_holds_a_walk_from_above_its_mount",
    "settings": {"mode": "write", "mounts": {"/srv/vault": {"vfs": "ram", "config": {}}}},
    "steps": [
