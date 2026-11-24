@@ -157,9 +157,9 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { admit, Admitted, classifiedWords, type Refused } from './admission.ts'
+import { admit, Admitted, admitRedirect, classifiedWords, type Refused } from './admission.ts'
 import { UNREADABLE_LINES } from './explain.ts'
-import { programLines, type Word, wordValue } from './inner_lines.ts'
+import { programLines, runsFunction, type Word, wordValue } from './inner_lines.ts'
 import { argvFrame, claimantFor, evaluatedFrom, wholeOccurrence } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
 
@@ -933,6 +933,13 @@ async function runArgv(
   ): Promise<RedirectResult | null> => {
     const key = [String(given === null), ...paths.map((p) => p.virtual)].join('\0')
     if (admitted !== null && asked === key) return null
+    if (paths.length > 0 && runsFunction(name, context.session, registry)) {
+      // A function is no tool, so no tree root judges its call; its
+      // redirects open whatever its body does, and are judged as a
+      // redirect no command owns.
+      const opened = await admitRedirect(paths, context.session, registry, namespace)
+      if (opened !== null) return refused([name, ...argv.args].join(' '), opened)
+    }
     if (name !== '') {
       asked = key
       const verdict = await admit(
