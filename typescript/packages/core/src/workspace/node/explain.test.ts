@@ -518,23 +518,20 @@ describe('explain', () => {
   })
 
   it.each([
-    ['deny', 'echo before; cat /data/keep/f.txt'],
-    ['deny', 'cat /data/keep/f.txt; echo after'],
-    ['deny', 'f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f'],
-    ['ask', 'echo before; cat /data/keep/f.txt'],
-    ['ask', 'cat /data/keep/f.txt; echo after'],
-    ['ask', 'f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f'],
+    ['deny', 'echo before; cat /data/f.txt'],
+    ['deny', 'cat /data/f.txt; echo after'],
+    ['deny', 'f(){ cat /data/f.txt; }; f; f(){ cat /data/f.txt; }; f'],
+    ['ask', 'echo before; cat /data/f.txt'],
+    ['ask', 'cat /data/f.txt; echo after'],
+    ['ask', 'f(){ cat /data/f.txt; }; f; f(){ cat /data/f.txt; }; f'],
   ])("holds the whole line on a folder entry's * %s: %s", async (decision, line) => {
-    const w = new Workspace(
-      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
-    await w.shell('echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/f.txt')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
-        mounts: { '/data/keep': { commands: { '*': decision } } },
+        mounts: { '/data': { commands: { '*': decision } } },
       }),
     })
     const said = await w.explain(line, 's')
@@ -549,7 +546,7 @@ describe('explain', () => {
       (
         [
           ['f() { ls; }; f', 0, 'f.txt\n', ''],
-          ['f() { cat /data/keep/f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+          ['f() { cat /data/f.txt; }; f', 126, '', 'cat: Permission denied\n'],
           ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
           ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
           ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
@@ -562,27 +559,24 @@ describe('explain', () => {
           ['  f() { ls; }; f', 0, 'f.txt\n', ''],
           ['timeout() { ls; }; timeout 1 rm f.txt', 0, 'f.txt\n', ''],
           ['f() { ls; }; MODE=test f', 0, 'f.txt\n', ''],
-          ['f() { ls; }; f /data/keep/f.txt', 0, 'f.txt\n', ''],
-          ['f() { ls; }; f > /data/out.txt', 0, '', ''],
+          ['f() { ls; }; f /data/f.txt', 0, 'f.txt\n', ''],
+          ['f() { ls; }; f > /out.txt', 0, '', ''],
         ] as const
       ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
     ),
   )(
     "a function the line defines is not held by a folder's * %s: %s",
     async (decision, line, code, out, err) => {
-      const w = new Workspace(
-        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-        { mode: MountMode.WRITE },
-      )
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
       open.push(w)
-      await w.shell('echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
-          mounts: { '/data/keep': { commands: { '*': decision, cd: 'allow', ls: 'allow' } } },
+          mounts: { '/data': { commands: { '*': decision, cd: 'allow', ls: 'allow' } } },
         }),
       })
-      await w.shell('cd /data/keep', { sessionId: 's' })
+      await w.shell('cd /data', { sessionId: 's' })
       const said = await w.explain(line, 's')
       const ran = await w.shell(line, { sessionId: 's' })
       expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
@@ -595,37 +589,34 @@ describe('explain', () => {
   )
 
   it.each([
-    ['printf x > /data/marker; false && f() { ls; }; f', 'f'],
-    ['printf x > /data/marker; true && f() { ls; }; f', 'f'],
-    ['f() { ls; }; unset -f f; printf x > /data/marker; f', 'f'],
-    ['printf x > /data/marker; f() { ls; }; unset f; f', 'f'],
-    ['printf x > /data/marker; f() { ls; }; unset -v x; f', 'f'],
-    ["printf x > /data/marker; f() { ls; }; un''set -f f; f", 'f'],
-    ['printf x > /data/marker; f() { ls; }; command unset -f f; f', 'f'],
-    ['printf x > /data/marker; (f() { ls; }); f', 'f'],
-    ['printf x > /data/marker; f() { ls; } | ls; f', 'f'],
-    ['printf x > /data/marker; f() { ls; } & f', 'f'],
-    ['printf x > /data/marker; cat() { :; }; command cat a', 'cat'],
-    ['printf x > /data/marker; cat() { ls; }; timeout 1 cat f.txt', 'cat'],
-    ['printf x > /data/marker; cat() { ls; }; sh -c "cat f.txt"', 'cat'],
-    ['printf x > /data/marker; trap : ERR; f() { ls; }; f', 'f'],
-    ['printf x > /data/marker; f() { cat /data/keep/a; }; f', 'cat'],
-    ['printf x > /data/marker; timeout 1 cat f.txt', 'cat'],
-    ['printf x > /data/marker; sh -c "cat f.txt"', 'cat'],
+    ['printf x > /marker; false && f() { ls; }; f', 'f'],
+    ['printf x > /marker; true && f() { ls; }; f', 'f'],
+    ['f() { ls; }; unset -f f; printf x > /marker; f', 'f'],
+    ['printf x > /marker; f() { ls; }; unset f; f', 'f'],
+    ['printf x > /marker; f() { ls; }; unset -v x; f', 'f'],
+    ["printf x > /marker; f() { ls; }; un''set -f f; f", 'f'],
+    ['printf x > /marker; f() { ls; }; command unset -f f; f', 'f'],
+    ['printf x > /marker; (f() { ls; }); f', 'f'],
+    ['printf x > /marker; f() { ls; } | ls; f', 'f'],
+    ['printf x > /marker; f() { ls; } & f', 'f'],
+    ['printf x > /marker; cat() { :; }; command cat a', 'cat'],
+    ['printf x > /marker; cat() { ls; }; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /marker; cat() { ls; }; sh -c "cat f.txt"', 'cat'],
+    ['printf x > /marker; trap : ERR; f() { ls; }; f', 'f'],
+    ['printf x > /marker; f() { cat /data/a; }; f', 'cat'],
+    ['printf x > /marker; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /marker; sh -c "cat f.txt"', 'cat'],
   ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
-    const w = new Workspace(
-      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
-    await w.shell('echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/f.txt')
     const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'trap']
     allowed.push('timeout', 'sh')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
         mounts: {
-          '/data/keep': {
+          '/data': {
             commands: {
               '*': 'deny',
               ...Object.fromEntries(allowed.map((name) => [name, 'allow'])),
@@ -634,7 +625,7 @@ describe('explain', () => {
         },
       }),
     })
-    await w.shell('cd /data/keep', { sessionId: 's' })
+    await w.shell('cd /data', { sessionId: 's' })
     const said = await w.explain(line, 's')
     const ran = await w.shell(line, { sessionId: 's' })
     const stderr = `${heldOn}: Permission denied\n`
@@ -644,29 +635,26 @@ describe('explain', () => {
       stderr,
     ])
     expect([said.exitCode, said.stderr]).toEqual([126, stderr])
-    expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
+    expect((await w.shell('test -e /marker')).exitCode).toBe(1)
   })
 
   it.each(
     (['deny', 'ask'] as const).flatMap((decision) =>
       [
-        'printf x > /data/marker; f() { echo hi; }; f > /data/keep/f.txt',
-        'printf x > /data/marker; f() { cat; }; f < /data/keep/f.txt',
+        'printf x > /marker; f() { echo hi; }; f > /data/f.txt',
+        'printf x > /marker; f() { cat; }; f < /data/f.txt',
       ].map((line) => [decision, line] as const),
     ),
   )(
     'holds a function the line defines on a redirect into the folder %s: %s',
     async (decision, line) => {
-      const w = new Workspace(
-        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-        { mode: MountMode.WRITE },
-      )
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
       open.push(w)
-      await w.shell('echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
-          mounts: { '/data/keep': { commands: { '*': decision } } },
+          mounts: { '/data': { commands: { '*': decision } } },
         }),
       })
       const said = await w.explain(line, 's')
@@ -677,38 +665,35 @@ describe('explain', () => {
         'f: Permission denied\n',
       ])
       expect([said.exitCode, said.stderr]).toEqual([126, 'f: Permission denied\n'])
-      expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
-      expect(DEC.decode((await w.shell('cat /data/keep/f.txt')).stdout)).toBe('kept\n')
+      expect((await w.shell('test -e /marker')).exitCode).toBe(1)
+      expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
     },
   )
 
   it.each([
-    ['/', 'cd /data/keep; cd -; echo hi', 0, '/\nhi\n', ''],
-    ['/', 'cd /data/keep; D=/data; cd $D; echo hi', 0, 'hi\n', ''],
+    ['/', 'cd /data; cd -; echo hi', 0, '/\nhi\n', ''],
+    ['/', 'cd /data; D=/; cd $D; echo hi', 0, 'hi\n', ''],
     [
       '/',
-      'cd /data/keep/nope; echo hi',
+      'cd /data/nope; echo hi',
       0,
       'hi\n',
-      'bash: line 1: cd: /data/keep/nope: No such file or directory\n',
+      'bash: line 1: cd: /data/nope: No such file or directory\n',
     ],
-    ['/data/keep', "eval 'f() { ls; }'; f", 0, 'f.txt\n', ''],
-    ['/data/keep', 'report() { echo hi; }; cd /data; report', 0, 'hi\n', ''],
-    ['/data/keep', 'f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+    ['/data', "eval 'f() { ls; }'; f", 0, 'f.txt\n', ''],
+    ['/data', 'report() { echo hi; }; cd /; report', 0, 'hi\n', ''],
+    ['/data', 'f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
   ])(
     "leaves a command the walk cannot place to the gate under a folder's *: %s %s",
     async (cwd, line, code, out, err) => {
-      const w = new Workspace(
-        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-        { mode: MountMode.WRITE },
-      )
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
       open.push(w)
-      await w.shell('echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
           mounts: {
-            '/data/keep': { commands: { '*': 'deny', cd: 'allow', ls: 'allow', eval: 'allow' } },
+            '/data': { commands: { '*': 'deny', cd: 'allow', ls: 'allow', eval: 'allow' } },
           },
         }),
       })
@@ -723,28 +708,25 @@ describe('explain', () => {
   )
 
   it.each([
-    'printf x > /data/marker; cat f.txt; (cat() { :; })',
-    'printf x > /data/marker; cat f.txt; cat() { :; }',
-    'printf x > /data/marker; cat f.txt; v=$(cat() { :; })',
-    'printf x > /data/marker; cat f.txt; cat() { :; } | :',
-    'printf x > /data/marker; cat f.txt; { cat() { :; }; }',
-    'f() { printf x > /data/marker; cat /data/keep/f.txt; }; f; (cat() { :; })',
+    'printf x > /marker; cat f.txt; (cat() { :; })',
+    'printf x > /marker; cat f.txt; cat() { :; }',
+    'printf x > /marker; cat f.txt; v=$(cat() { :; })',
+    'printf x > /marker; cat f.txt; cat() { :; } | :',
+    'printf x > /marker; cat f.txt; { cat() { :; }; }',
+    'f() { printf x > /marker; cat /data/f.txt; }; f; (cat() { :; })',
   ])('holds a line whose word cannot see a definition of its name: %s', async (line) => {
-    const w = new Workspace(
-      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
-      { mode: MountMode.WRITE },
-    )
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
-    await w.shell('echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/f.txt')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
         mounts: {
-          '/data/keep': { commands: { '*': 'deny', cd: 'allow', printf: 'allow', ':': 'allow' } },
+          '/data': { commands: { '*': 'deny', cd: 'allow', printf: 'allow', ':': 'allow' } },
         },
       }),
     })
-    await w.shell('cd /data/keep', { sessionId: 's' })
+    await w.shell('cd /data', { sessionId: 's' })
     const said = await w.explain(line, 's')
     const ran = await w.shell(line, { sessionId: 's' })
     expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
@@ -753,7 +735,7 @@ describe('explain', () => {
       'cat: Permission denied\n',
     ])
     expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
-    expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
+    expect((await w.shell('test -e /marker')).exitCode).toBe(1)
   })
 
   it.each([
