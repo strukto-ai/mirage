@@ -17,6 +17,7 @@ import contextlib
 import inspect
 import io
 import itertools
+import re
 import subprocess
 import sys
 import uuid
@@ -35,6 +36,7 @@ from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.machine import MachineHandle
+from mirage.policy.errors import PolicyError
 from mirage.types import (
     FileChangeKind,
     FileEvent,
@@ -1127,3 +1129,134 @@ async def test_a_line_runs_under_a_max_memory_past_4_gib(max_memory):
         )
     finally:
         await ws.close()
+
+
+KEEP = "mounts key /data/keep is not a mount"
+FOLDER = {"mounts": {"/data/keep": {"commands": {"rm": "deny"}}}}
+
+
+@pytest.mark.asyncio
+async def test_a_profile_mounts_key_inside_a_mount_is_refused_at_every_entry():
+    with pytest.raises(PolicyError, match=re.escape(f"profile agent: {KEEP}")):
+        Workspace({"/data": RAMVFS()}, profiles={"agent": FOLDER})
+    with pytest.raises(
+        PolicyError, match=re.escape("mounts key /data/*/sub is not a mount")
+    ):
+        Workspace(
+            {"/data": RAMVFS()},
+            profiles={"agent": {"mounts": {"/data/*/sub": {"mode": "read"}}}},
+        )
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        with pytest.raises(
+            PolicyError, match=re.escape(f"profile agent: {KEEP}")
+        ):
+            ws.set_profile("agent", FOLDER)
+        with pytest.raises(PolicyError, match=re.escape(f"session a: {KEEP}")):
+            ws.create_session("a", profile=FOLDER)
+        with pytest.raises(PolicyError, match=re.escape(f"session b: {KEEP}")):
+            ws.create_session("b", permissions=FOLDER)
+        with pytest.raises(PolicyError, match=re.escape(f"session c: {KEEP}")):
+            ws.create_session("c", mounts={"/data/keep": "read"})
+        with pytest.raises(PolicyError, match=re.escape(KEEP)):
+            await ws.set_session_profile(ws.default_session_id, FOLDER)
+        assert "agent" not in ws.profiles
+        assert {"a", "b", "c"}.isdisjoint(
+            s.session_id for s in ws.list_sessions()
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_mounts_key_that_is_a_mount_or_under_none_loads():
+    ws = Workspace(
+        {"/data": RAMVFS(), "/data/keep": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "agent": {
+                "mounts": {
+                    "/data/": {"mode": "read"},
+                    "/data/keep": {"commands": {"rm": "deny"}},
+                    "/later/x": {"mode": "read"},
+                    "/later/*": {"commands": {"rm": "deny"}},
+                }
+            }
+        },
+    )
+    try:
+        ws.create_session("a", profile="agent")
+        io = await ws.shell("echo x > /data/keep/f; rm /data/keep/f", "a")
+        assert (io.exit_code, io.stderr) == (126, b"rm: Permission denied\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_named_profile_is_refused_when_taken_inside_a_later_mount():
+    ws = Workspace({"/tmp": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.set_profile("agent", FOLDER)
+        ws.create_session("a", profile="agent")
+        ws.add_mount("/data", RAMVFS(), MountMode.WRITE)
+        with pytest.raises(
+            PolicyError, match=re.escape(f"profile agent: {KEEP}")
+        ):
+            ws.create_session("b", profile="agent")
+        with pytest.raises(
+            PolicyError, match=re.escape(f"profile agent: {KEEP}")
+        ):
+            await ws.set_session_profile("a", "agent")
+        assert "b" not in [s.session_id for s in ws.list_sessions()]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_default_profile_keying_a_folder_is_refused_at_load():
+    with pytest.raises(PolicyError, match=re.escape(f"profile agent: {KEEP}")):
+        Workspace(
+            {"/data": RAMVFS()}, profiles={"agent": FOLDER}, profile="agent"
+        )
+    with pytest.raises(
+        PolicyError,
+        match=re.escape("profile agent: mounts key /usr/bin/x is not a mount"),
+    ):
+        Workspace(
+            {"/data": RAMVFS()},
+            profiles={"agent": {"mounts": {"/usr/bin/x": {"mode": "read"}}}},
+            profile="agent",
+        )
+    ws = Workspace(
+        {"/usr": RAMVFS()},
+        profiles={"agent": {"mounts": {"/usr/bin": {"mode": "read"}}}},
+        profile="agent",
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_keeps_a_profile_whose_nested_mount_was_unmounted():
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    ws.add_mount("/data/keep", RAMVFS(), MountMode.WRITE)
+    ws.set_profile("agent", FOLDER)
+    await ws.unmount("/data/keep")
+    buf = io.BytesIO()
+    await ws.snapshot(buf)
+    await ws.close()
+    buf.seek(0)
+    loaded = await Workspace.load(buf)
+    try:
+        assert "/data/keep" in (loaded.profiles["agent"].mounts or {})
+        with pytest.raises(
+            PolicyError, match=re.escape(f"profile agent: {KEEP}")
+        ):
+            loaded.create_session("a", profile="agent")
+    finally:
+        await loaded.close()
+    buf.seek(0)
+    with pytest.raises(PolicyError, match=re.escape(f"profile agent: {KEEP}")):
+        await Workspace.load(buf, profiles={"agent": FOLDER})
+    buf.seek(0)
+    with pytest.raises(PolicyError, match=re.escape(f"profile agent: {KEEP}")):
+        await Workspace.load(buf, profile="agent")

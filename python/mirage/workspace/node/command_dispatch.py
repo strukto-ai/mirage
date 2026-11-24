@@ -210,10 +210,15 @@ from mirage.workspace.node.admission import (
     Admitted,
     Refused,
     admit,
+    admit_redirect,
     classified_words,
 )
 from mirage.workspace.node.explain import UNREADABLE_LINES
-from mirage.workspace.node.inner_lines import Word, program_lines
+from mirage.workspace.node.inner_lines import (
+    Word,
+    program_lines,
+    runs_function,
+)
 from mirage.workspace.node.occurrence import (
     argv_frame,
     claimant_for,
@@ -970,6 +975,20 @@ async def _run_argv(
         )
         if admitted is not None and asked == key:
             return None
+        if opening is not None and runs_function(name, session, registry):
+            # A function is no tool, so no tree root judges its call;
+            # its redirects open whatever its body does, and each is
+            # judged as it opens, as a redirect no command owns: the
+            # opener passes every target so far, and only the last is new.
+            opened = await admit_redirect(
+                paths[-1:],
+                session,
+                registry,
+                namespace,
+                opening.target_node,
+            )
+            if opened is not None:
+                return _refused(" ".join([name, *argv.args]), opened)
         if name:
             asked = key
             verdict = await admit(

@@ -14,6 +14,7 @@
 
 import asyncio
 import dataclasses
+import io
 import json
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -371,6 +372,23 @@ def test_an_unknown_source_fails_at_construction():
         _ws({"T": {"from": "nope", "ref": "r"}})
     with pytest.raises(SecretsError, match="unknown secrets source"):
         _ws(None, profiles={"p": {"env": {"T": {"from": "nope", "ref": "r"}}}})
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_profile_naming_an_unknown_source_fails_to_load(
+    monkeypatch,
+):
+    register_secrets("fake", FakeConfig, dead_source())
+    ws = _ws(
+        None, profiles={"p": {"env": {"T": {"from": "fake", "ref": "r"}}}}
+    )
+    buf = io.BytesIO()
+    await ws.snapshot(buf)
+    await ws.close()
+    monkeypatch.setattr(registry, "_REGISTERED", {})
+    buf.seek(0)
+    with pytest.raises(SecretsError, match="unknown secrets source 'fake'"):
+        await Workspace.load(buf)
 
 
 # A profile's env speaks the workspace env grammar, so a credential a

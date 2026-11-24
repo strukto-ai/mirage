@@ -167,6 +167,18 @@ impl AdmissionMatcher {
         })
     }
 
+    /// How narrowly a refusal speaks, to break a tie between two equally
+    /// strict ones: 2 for a leaf naming the command or with paths, 1 for
+    /// a mount tree's root decision, 0 for the top-level root's. A root's
+    /// own decision is a leaf at `/*` with no paths.
+    fn standing(&self, leaf: Option<usize>, mounted: bool) -> u8 {
+        let root = leaf.is_none_or(|id| {
+            let rule = &self.rules[id];
+            rule.paths.is_empty() && rule.at.split(|&unit| unit == 47).nth(1) == Some(&[42][..])
+        });
+        if root { u8::from(mounted) } else { 2 }
+    }
+
     fn covers(&self, id: usize, path: &[u32]) -> bool {
         self.scopes[id]
             .as_ref()
@@ -175,13 +187,16 @@ impl AdmissionMatcher {
 
     /// Judge a line: every tree that applies to it, once for each path it
     /// names (once when it names none), the strictest result winning.
+    /// Between two equally strict refusals the narrower one speaks
+    /// (`standing`): a leaf naming the command or its paths over a tree
+    /// root's own decision, and a mount's root over the top-level root.
     /// Every ask behind an ask result is reported, since the host needs
     /// each one answered.
     pub fn decide(&self, facts: &CommandFacts) -> Ruling {
         let read = Read::new(&facts.tokens, facts.line.as_ref());
         let line = read.line(facts.tool);
         let subjects = subjects(facts);
-        let mut best: Option<(Verdict, &Subject)> = None;
+        let mut best: Option<(Verdict, &Subject, u8)> = None;
         let mut asks: Vec<usize> = Vec::new();
         for scoped in &self.trees {
             if scoped
@@ -191,6 +206,7 @@ impl AdmissionMatcher {
             {
                 continue;
             }
+            let mounted = scoped.mount.is_some();
             let branches = scoped.tree.walk(&line);
             for subject in &subjects {
                 let verdict = resolve(&branches, &self.table, &|id| self.reaches(id, subject));
@@ -199,15 +215,17 @@ impl AdmissionMatcher {
                         asks.push(id);
                     }
                 }
-                if best
-                    .as_ref()
-                    .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
-                {
-                    best = Some((verdict, subject));
+                let standing = self.standing(verdict.leaf, mounted);
+                if best.as_ref().is_none_or(|(held, _, held_standing)| {
+                    let (now, then) = (rank(verdict.outcome), rank(held.outcome));
+                    now > then
+                        || (now == then && now > rank(Outcome::Allow) && standing > *held_standing)
+                }) {
+                    best = Some((verdict, subject, standing));
                 }
             }
         }
-        let Some((verdict, subject)) = best else {
+        let Some((verdict, subject, _)) = best else {
             return Ruling::default();
         };
         Ruling {
@@ -230,9 +248,11 @@ impl AdmissionMatcher {
     /// Judge the files a redirect opens that no command owns: a compound
     /// statement's (`{ cat; } < f`, a loop, a subshell) or a bare one
     /// (`> f`). There is no command to walk, so only a root leaf scoped
-    /// to a path the redirect opens speaks; a root leaf with no paths
-    /// is about commands and says nothing here. Each tree that applies
-    /// is judged on its own and the strictest wins, as in `decide`.
+    /// to a path the redirect opens speaks: one with paths, or one of a
+    /// mount tree, whose scope is its mount. A top-level root leaf with
+    /// no paths is about commands and says nothing here. Each tree that
+    /// applies is judged on its own and the strictest wins, as in
+    /// `decide`.
     pub fn redirect(&self, paths: &[Text]) -> Ruling {
         let read = Read::new(&[], None);
         let line = read.line(true);
@@ -249,7 +269,8 @@ impl AdmissionMatcher {
                     continue;
                 }
                 let verdict = resolve(&branches, &self.table, &|id| {
-                    !self.rules[id].paths.is_empty() && self.covers(id, path)
+                    (scoped.mount.is_some() || !self.rules[id].paths.is_empty())
+                        && self.covers(id, path)
                 });
                 for &id in &verdict.asks {
                     if !asks.contains(&id) {
@@ -845,5 +866,59 @@ mod tests {
         let ruling = asks.redirect(&[text("/d/secret.txt")]);
         assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 2));
         assert_eq!(asks.redirect(&[text("/e/x")]).outcome, Allow);
+    }
+
+    #[test]
+    fn a_mount_tree_answers_a_refusal_the_top_level_root_ties() {
+        let tied = matcher(
+            json!({"*": "deny", "echo": "allow"}),
+            &[("/d", json!({"*": "deny"}))],
+        );
+        let ruling = tied.decide(&facts("/", &["cat", "/d/f.txt"], &["/d/f.txt"]));
+        assert_eq!(ruling.outcome, Deny);
+        assert_eq!(tied.rules()[ruling.rule.unwrap()].mount, Some(text("/d")));
+        let outside = tied.decide(&facts("/", &["cat", "/e/f.txt"], &["/e/f.txt"]));
+        assert_eq!(outside.outcome, Deny);
+        assert_eq!(tied.rules()[outside.rule.unwrap()].mount, None);
+    }
+
+    #[test]
+    fn a_leaf_naming_the_command_answers_a_refusal_a_mount_root_ties() {
+        let named = matcher(
+            json!({"cat": "deny"}),
+            &[("/d", json!({"*": "deny", "printf": "allow"}))],
+        );
+        let ruling = named.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
+        assert_eq!(ruling.outcome, Deny);
+        let rule = &named.rules()[ruling.rule.unwrap()];
+        assert_eq!(
+            (rule.mount.clone(), rule.at.clone()),
+            (None, text("/cat/*"))
+        );
+        let inner = matcher(json!({"*": "deny"}), &[("/d", json!({"cat": "deny"}))]);
+        let ruling = inner.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
+        assert_eq!(inner.rules()[ruling.rule.unwrap()].at, text("/cat/*"));
+    }
+
+    #[test]
+    fn a_redirect_inside_a_folder_meets_the_folders_root_leaf() {
+        let sealed = matcher(json!({"*": "allow"}), &[("/d/keep", json!({"*": "deny"}))]);
+        let ruling = sealed.redirect(&[text("/d/out"), text("/d/keep/f.txt")]);
+        assert_eq!(ruling.outcome, Deny);
+        assert_eq!(ruling.matched_path, Some(text("/d/keep/f.txt")));
+        assert_eq!(
+            sealed.rules()[ruling.rule.unwrap()].mount,
+            Some(text("/d/keep"))
+        );
+        assert_eq!(sealed.redirect(&[text("/d/out")]).outcome, Allow);
+        assert_eq!(sealed.redirect(&[text("/d/keeper")]).outcome, Allow);
+        let asks = matcher(json!({}), &[("/d/keep", json!({"*": "ask"}))]);
+        let ruling = asks.redirect(&[text("/d/keep/f.txt")]);
+        assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 1));
+        let named = matcher(
+            json!({}),
+            &[("/d/keep", json!({"cat": "deny", "echo": "deny"}))],
+        );
+        assert_eq!(named.redirect(&[text("/d/keep/f.txt")]).outcome, Allow);
     }
 }

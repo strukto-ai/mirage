@@ -54,6 +54,7 @@ from mirage.policy.profile import (
     ProfilePolicy,
     SessionProfile,
     compile_program,
+    folder_mount_key,
     parse_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
@@ -69,6 +70,7 @@ from mirage.secrets.sources import (
     resolve_sources_for,
 )
 from mirage.secrets.summary import mask_values
+from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
     KERNEL_BACKENDS,
     Limit,
@@ -89,6 +91,7 @@ from mirage.utils.loader import (
 from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
+from mirage.vfs.history.history import HISTORY_PREFIX
 from mirage.vfs.machine.constants import MACHINE_MARK
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
@@ -97,6 +100,7 @@ from mirage.workspace.mount.read_policy import (
     coerce_read_ttl,
     resolve_read_spec,
 )
+from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
 from mirage.workspace.store import (
@@ -872,6 +876,18 @@ class WorkspaceConfig(BaseModel):
             self.profiles or {}
         ):
             raise ValueError(f"unknown profile {self.profile!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _v_profile_mounts(self) -> "WorkspaceConfig":
+        for name, doc in (self.profiles or {}).items():
+            key = folder_mount_key(
+                doc, [*self.mounts, BIN_PREFIX, DEV_PREFIX, HISTORY_PREFIX]
+            )
+            if key is not None:
+                raise ValueError(
+                    f"profile {name}: mounts key {key} is not a mount"
+                )
         return self
 
     @model_validator(mode="after")

@@ -12,11 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WordKind } from '../../commands/spec/types.ts'
 import { currentCaller, voiceName } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
+import { operandPaths } from '../../policy/match/rule.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
 import { commandRoute, settled } from '../../policy/policies.ts'
 import {
@@ -59,14 +61,17 @@ import {
 } from '../../shell/node_kind.ts'
 import { parseOptionWord } from '../../shell/options.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
+import { walkTree } from '../../shell/parse/names.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
+import { underPath } from '../../utils/key_prefix.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { scanOptions } from '../executor/builtins/getopt.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
+import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -137,6 +142,23 @@ const ASSIGNED_TILDE = /^[A-Za-z_][A-Za-z0-9_]*=(?:[^~'"\\]*[:=])?~/
  * run in this shell, and the directory stack.
  */
 const CWD_MOVERS: ReadonlySet<string> = new Set(['eval', '.', 'source', 'pushd', 'popd'])
+
+/**
+ * Words after which a function the line defined may no longer be one, or
+ * that run text in this shell the walk does not read as the line's:
+ * `unset`, a line run in this shell, a trap's action.
+ */
+const FUNCTION_DROPPERS: ReadonlySet<string> = new Set(['unset', 'eval', '.', 'source', 'trap'])
+
+/** The nodes a word is spelled with, quoted or not. */
+const WORD_TYPES: ReadonlySet<string> = new Set([
+  NodeType.WORD,
+  NodeType.CONCATENATION,
+  NodeType.STRING,
+  NodeType.RAW_STRING,
+  NodeType.ANSI_C_STRING,
+  NodeType.TRANSLATED_STRING,
+])
 
 /**
  * How many other places a line may stand in before the walk calls its cwd
@@ -244,7 +266,9 @@ export interface Judgment {
  * session's cwd is not where it stands. `stated` (true when absent) says
  * whether the gate admits the command on these words once each is literal
  * (`TestRead.stated`). `elsewhere` holds the other places the command may
- * stand, where a `cd` before it was skipped or failed.
+ * stand, where a `cd` before it was skipped or failed. `deferred` says the
+ * command stands in a function body, which runs where the function is
+ * called, not where the walk reads the definition.
  */
 export interface Walked {
   readonly words: readonly Word[]
@@ -258,6 +282,7 @@ export interface Walked {
   readonly elsewhere?: readonly SessionState[]
   readonly open?: boolean
   readonly pipeline?: PipelineWalk | undefined
+  readonly deferred?: boolean
 }
 
 /**
@@ -294,6 +319,26 @@ export interface Judged {
    * before it in that line is where it stands.
    */
   readonly session?: SessionState
+  /**
+   * The link table the command was judged against, so a redirect target is
+   * followed through its links as the run follows it.
+   */
+  readonly namespace?: Namespace | null
+  /**
+   * The word calls a function the line surely defines before it runs
+   * (`withCalls`), so the gate, which sees the call, says whether a tree
+   * root's own decision speaks for it (`isTool`).
+   */
+  readonly defined?: boolean
+  /**
+   * The walk knows where the command stands: it is not in a function body,
+   * which runs where it is called, and no `cd` the walk could not follow,
+   * nor one that may have been skipped or failed, ran before it
+   * (`Walked.lost`, `Walked.elsewhere`, `Walked.deferred`), so `ctx.cwd` is
+   * the shell's.
+   * Absent means known.
+   */
+  readonly placed?: boolean
 }
 
 /**
@@ -528,6 +573,7 @@ async function* judgeWords(
     stdin = null,
     open = false,
   } = item
+  const placed = !lost && (item.elsewhere ?? []).length === 0 && item.deferred !== true
   const wholeLine = takesWholeLine(mode)
   const words = wholeLine ? item.words.map(machineWord) : item.words
   const redirectWords = wholeLine ? item.redirects.map(machineWord) : item.redirects
@@ -538,12 +584,12 @@ async function* judgeWords(
   // for a postCommand policy to judge.
   if (wholeLine && (await registry.policies.wantsFor('postCommand', session.sessionId))) {
     const reason = 'a post_command policy cannot judge a line a runtime runs whole'
-    yield { judgment: denied(head.raw, reason), occurrence, stated: false }
+    yield { judgment: denied(head.raw, reason), occurrence, stated: false, placed }
     return
   }
   if (head.text === null && !wholeLine) return
   if (wholeLine && (head.text === null || head.glob === true) && hasRules(rules)) {
-    yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false }
+    yield { judgment: denied(head.raw, unreadable(head.raw)), occurrence, stated: false, placed }
     return
   }
   const literal = stated && [...words, ...redirectWords].every((w) => w.text !== null)
@@ -611,6 +657,7 @@ async function* judgeWords(
       stated: literal,
       intrinsic,
       unread,
+      placed,
     }
     return
   }
@@ -622,6 +669,8 @@ async function* judgeWords(
     unread,
     ctx,
     session,
+    placed,
+    namespace,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -648,7 +697,7 @@ async function* judgeWords(
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {
-      yield* judgeLine(
+      for await (const one of judgeLine(
         reparse(inner.line),
         innerSession,
         registry,
@@ -657,7 +706,9 @@ async function* judgeWords(
         lineFrame(inner.line, occurrence),
         mode,
         { stated: literal && !inner.open, lost, open: inner.open, pipeline },
-      )
+      )) {
+        yield placed ? one : { ...one, placed: false }
+      }
     } else {
       const within = wholeOccurrence(argvFrame(inner.argv.map(wordValue), occurrence))
       // `env -C` runs its command where `cd` would have gone.
@@ -665,7 +716,7 @@ async function* judgeWords(
         inner.chdir === undefined || inner.chdir === null
           ? [innerSession, lost]
           : afterCd([{ raw: 'cd', text: 'cd' }, inner.chdir], innerSession, lost, [])
-      yield* judgeWords(
+      for await (const one of judgeWords(
         {
           words: inner.argv,
           redirects: [],
@@ -680,7 +731,9 @@ async function* judgeWords(
         registry,
         namespace,
         reparse,
-      )
+      )) {
+        yield placed ? one : { ...one, placed: false }
+      }
     }
   }
 }
@@ -1027,7 +1080,20 @@ function* walkNode(
   ) {
     lost = true
   }
-  return yield* walkChildren(node, session, homes, frame, reparse, pipeline, lost, elsewhere)
+  const walk = walkChildren(node, session, homes, frame, reparse, pipeline, lost, elsewhere)
+  return yield* scope === ScopeKind.DEFERRED ? deferred(walk) : walk
+}
+
+/**
+ * A function body's walk, each command marked as standing in it
+ * (`Walked.deferred`). Mirrors the Python `_deferred`.
+ */
+function* deferred(walk: Walk): Walk {
+  for (;;) {
+    const next = walk.next()
+    if (next.done === true) return next.value
+    yield { ...next.value, deferred: true }
+  }
 }
 
 /**
@@ -1202,8 +1268,8 @@ function* walkedLine(
  * one. What stays out is the rule-less DENY, which `isVerdict` explains
  * is answered where it happens.
  */
-function isJudged(expl: Judgment): boolean {
-  return expl.exitCode === 0 || isVerdict(expl)
+function isJudged(one: Judged): boolean {
+  return one.judgment.exitCode === 0 || isVerdict(one)
 }
 
 /**
@@ -1215,6 +1281,81 @@ function isJudged(expl: Judgment): boolean {
 function byDefault(expl: Judgment): boolean {
   const rule = expl.rule
   return rule !== null && (rule.paths ?? []).length === 0 && (rule.at ?? '').split('/')[1] === '*'
+}
+
+/**
+ * Whether the leaf that decided the command belongs to a mount entry's
+ * tree, and the command surely works inside that folder: a word of its own
+ * names an absolute path there, or the walk knows where it stands
+ * (`Judged.placed`) and its cwd or a path it reaches is there, or, every
+ * path word being absolute, a path it reaches through a link is there, or it walks
+ * or moves a whole tree from an absolute path the folder lies under
+ * (`grep -r x /a` for a folder `/a/b`, but not `mv`'s destination,
+ * `destination`), as the matcher's `touches` reads it.
+ * Where the walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
+ * fail), the per-command gate judges the command in the cwd the shell
+ * really has. Mirrors the Python `_in_folder`.
+ */
+function inFolder(one: Judged): boolean {
+  const mount = one.judgment.rule?.mount ?? ''
+  if (mount === '') return false
+  const ctx = one.ctx
+  if (ctx === undefined) return true
+  if (
+    one.placed !== false &&
+    [ctx.cwd, ...ctx.paths.map((path) => path.virtual)].some((path) => underPath(path, mount))
+  ) {
+    return true
+  }
+  const words = ctx.words ?? []
+  if (
+    words.every((word) => word.path === null || word.text.startsWith('/')) &&
+    ctx.paths.some((path) => underPath(path.virtual, mount))
+  ) {
+    return true
+  }
+  const walks = ctx.walks === true || ctx.subtree === true
+  const into = ctx.walks === true ? null : destination(ctx)
+  return words.some(
+    (word) =>
+      word.path !== null &&
+      word.text.startsWith('/') &&
+      (underPath(word.path.virtual, mount) ||
+        (walks && word.path.virtual !== into && underPath(mount, word.path.virtual))),
+  )
+}
+
+/**
+ * The directory a move puts its sources into, which it does not move as a
+ * tree: `mv -t`'s target, or else the last of two or more operands, as the
+ * matcher's `touches` leaves it out. Mirrors the Python `_destination`.
+ */
+function destination(ctx: CommandContext): string | null {
+  if (ctx.command !== 'mv' || (ctx.moveTarget ?? null) !== null) return ctx.moveTarget ?? null
+  const operands = operandPaths(ctx)
+  return operands.length >= 2 ? (operands.at(-1)?.virtual ?? null) : null
+}
+
+/**
+ * Whether a redirect target of the command is one the session's trees refuse
+ * as they judge a redirect no command owns (`redirectAsked`), inside any mount
+ * entry whose root speaks, or ask about by the rule that decided the command,
+ * so the line's one question is the redirect's. An ask from another entry is
+ * the redirect's own question, which the gate asks as it opens. An absolute
+ * target counts always, a relative one where the walk knows where the command
+ * stands (`Judged.placed`), as `inFolder` reads a path. Mirrors the Python
+ * `_opens_held`.
+ */
+function opensHeld(one: Judged): boolean {
+  const ctx = one.ctx
+  const session = one.session
+  if (ctx === undefined || session === undefined) return false
+  return (ctx.words ?? []).some((word) => {
+    if (word.kind !== WordKind.REDIRECT || word.path === null) return false
+    if (one.placed === false && !word.text.startsWith('/')) return false
+    const answer = redirectAsked([word.path], session, one.namespace ?? null)?.answer
+    return answer?.kind === 'deny' || answer?.rule === one.judgment.rule
+  })
 }
 
 /**
@@ -1259,14 +1400,27 @@ function asksFor(one: Judged): boolean {
  * A deny a tree states for a command it names, and command-scoped policy
  * refusals, hold the line. Operand-scoped filesystem refusals wait for
  * the per-command gate, where earlier commands have established the live
- * cwd and namespace. Rule-less DENY results also wait, and so does a tree
- * root's own decision (`byDefault`): an unavailable head word, a command
- * no tree names (a function the line defines first, say), or words only
- * the runtime can expand fail where they occur rather than against the
- * whole line.
+ * cwd and namespace. Rule-less DENY results also wait, and so does a
+ * top-level tree root's own decision (`byDefault`): an unavailable head
+ * word, a command no tree names, or words only the runtime can expand
+ * fail where they occur rather than against the whole line. A mount
+ * entry's root speaks about its folder, as a root leaf with paths speaks
+ * about those paths, so it holds the line where the command surely works
+ * inside that folder (`inFolder`), except for a word the line defines as a
+ * function (`Judged.defined`): the call runs the function, whose body's
+ * commands are each judged, and the gate sees whether it does. The call's
+ * redirect targets are not the body's: the shell opens them whatever the
+ * body does, so one a tree refuses, or asks about by the call's own rule
+ * (`opensHeld`), holds the line still.
  */
-function isVerdict(expl: Judgment): boolean {
-  if (expl.exitCode === 0 || byDefault(expl)) return false
+function isVerdict(one: Judged): boolean {
+  const expl = one.judgment
+  if (
+    expl.exitCode === 0 ||
+    (byDefault(expl) && ((one.defined === true && !opensHeld(one)) || !inFolder(one)))
+  ) {
+    return false
+  }
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true
   // Filesystem refusals use the live cwd and fail only their command.
   const denied = expl.answers.find((a): a is Deny => a.kind === 'deny')
@@ -1351,7 +1505,17 @@ export async function lineJudgments(
     }
     judged.push([item, explained])
   }
-  return judged
+  const marked = withCalls(
+    root,
+    judged.flatMap(([, explained]) => explained),
+    handed.origin,
+  )
+  let at = 0
+  return judged.map(([item, explained]) => {
+    const own = marked.slice(at, at + explained.length)
+    at += explained.length
+    return [item, own]
+  })
 }
 
 /**
@@ -1369,6 +1533,9 @@ export async function lineJudgments(
  * rule: only a refusal that names a rule is a verdict about the intent.
  * A word a closed tree names nothing for is refused where it stands, not
  * with the line, so a typo cannot cost an agent the work the line already did; a
+ * folder entry's root is the exception, since it speaks about its folder:
+ * it holds the line wherever the command surely works inside that folder,
+ * unless the word calls a function the line surely defines (`isVerdict`). A
  * word only the runtime can expand is judged where it is expanded, by
  * the per-command gate, which sees the real path.
  *
@@ -1445,7 +1612,7 @@ export async function prejudgeLine(
   if (judged.reduce((n, [, explained]) => n + explained.length, 0) < 2) return null
   for (const [, explained] of judged) {
     for (const one of explained) {
-      if (!isJudged(one.judgment) || !asksFor(one)) continue
+      if (!isJudged(one) || !asksFor(one)) continue
       // This pass judges on the gate's behalf and runs nothing itself, so a
       // grant the host gives here is claimed for the per-command gate that
       // runs the line, and spent when the line ends: one question per run,
@@ -1719,7 +1886,7 @@ async function commandRefused(
     // A question about a spelling the runtime completes is the gate's
     // (`asksFor`); the node is kept, and over-keeping only ever
     // over-fetches.
-    if (!isVerdict(judged.judgment) || !asksFor(judged)) continue
+    if (!isVerdict(judged) || !asksFor(judged)) continue
     if (await verdictRefuses(judged, registry, handed, signal)) return true
   }
   return false
@@ -1799,7 +1966,8 @@ export async function unrefusedNodes(
  * still waiting holds the line, and a question the gate will ask about
  * other words (`Judged.stated` false) is left to it. A word the allow
  * list leaves out fails where it stands while the rest of its line runs,
- * so it does not hold the line. Mirrors the Python `line_held`.
+ * so it does not hold the line, except where a folder entry's root refuses
+ * it inside that folder (`isVerdict`). Mirrors the Python `line_held`.
  */
 export async function lineHeld(
   judged: readonly [Walked, Judged[]][],
@@ -1812,7 +1980,7 @@ export async function lineHeld(
   for (const [, explained] of judged) {
     for (const one of explained) {
       const expl = one.judgment
-      if (!isVerdict(expl) || expl.exitCode === 0) continue
+      if (!isVerdict(one) || expl.exitCode === 0) continue
       if (refuses(expl)) return true
       const asked = refusal(expl.answers)
       if (one.ctx === undefined || asked?.kind !== 'ask' || !one.stated) continue
@@ -1828,8 +1996,8 @@ export async function lineHeld(
  * on the host (`isVerdict`), the line-level answer placement waits on.
  * Mirrors the Python `holds`.
  */
-export function holds(judgments: readonly Judgment[]): boolean {
-  return judgments.some((one) => isVerdict(one) && one.exitCode !== 0)
+export function holds(judged: readonly Judged[]): boolean {
+  return judged.some((one) => isVerdict(one) && one.judgment.exitCode !== 0)
 }
 
 /**
@@ -1867,7 +2035,7 @@ export async function explainLine(
   )) {
     judged.push(one)
   }
-  return judged
+  return withCalls(root, judged, null)
 }
 
 /**
@@ -1924,8 +2092,7 @@ export function explainedLine(
   // (`find -exec`, `xargs`) is the gate's, asked where it runs, so it holds
   // nothing here either.
   const held = verdicts.find(
-    (one) =>
-      one.judgment.exitCode !== 0 && (wholeLine || (isVerdict(one.judgment) && asksFor(one))),
+    (one) => one.judgment.exitCode !== 0 && (wholeLine || (isVerdict(one) && asksFor(one))),
   )
   if (held !== undefined) {
     const judgment = held.judgment
@@ -2041,6 +2208,110 @@ interface Traced {
   readonly reached: ReadonlySet<string>
   readonly at: ReadonlyMap<number, ReadonlySet<string>>
   readonly bodies: ReadonlyMap<number, ReadonlySet<string>>
+}
+
+/**
+ * The line's judgments with `Judged.defined` set on a word the line has
+ * surely made a function call by the time it runs. The rule is kept narrow
+ * so it never has to follow the shell: the word heads a simple command of
+ * the line itself or of a function body the line defines; the line defines
+ * a function of that name before it as one of its top-level statements,
+ * not sent to the background, so under no `&&`, `||`, `!`, pipeline,
+ * compound command or substitution, where it may not run or may not last;
+ * and no word of the line, nor any command it is judged to run, can take a
+ * function away or run text in this shell (`FUNCTION_DROPPERS`). Anything
+ * else stays a folder's refusal, held with the line. The words of such a
+ * call that a wrapper's grammar reads as a command (`timeout 1 rm f`) never
+ * run, so they are let through with it. It is worked out only
+ * when a folder entry's root refuses some command, the one verdict
+ * `defined` changes. Mirrors the Python `_with_calls`.
+ */
+function withCalls(
+  tree: TSNodeLike,
+  judged: readonly Judged[],
+  origin: Occurrence | null,
+): Judged[] {
+  const folder = judged.some(
+    (one) => one.judgment.exitCode !== 0 && byDefault(one.judgment) && inFolder(one),
+  )
+  if (!folder) return [...judged]
+  const base = tree.startIndex ?? 0
+  const defined = new Map<string, number>()
+  for (const node of tree.namedChildren) {
+    if (isBackgrounded(node)) continue
+    const definition =
+      node.type === NodeType.REDIRECTED_STATEMENT ? (node.namedChildren[0] ?? node) : node
+    if (definition.type !== NodeType.FUNCTION_DEFINITION) continue
+    const name = getFunctionName(definition)
+    if (!defined.has(name)) defined.set(name, (node.endIndex ?? 0) - base)
+  }
+  if (defined.size === 0) return [...judged]
+  const nodes = [...walkTree(tree)]
+  if (judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) || dropsFunctions(nodes)) {
+    return [...judged]
+  }
+  const heads = new Map<string, string | null>()
+  const bodies = new Set<number>()
+  for (const node of nodes) {
+    const start = (node.startIndex ?? 0) - base
+    if (node.type === NodeType.FUNCTION_DEFINITION) bodies.add(start)
+    if (node.type !== NodeType.COMMAND) continue
+    const head = node.namedChildren.find((child) => child.type === NodeType.COMMAND_NAME)
+    if (head === undefined) continue
+    heads.set(`${String(start)}:${String((node.endIndex ?? 0) - base)}`, literalWord(head))
+  }
+  const calls = judged.map((one) => callsDefined(one, origin, defined, heads, bodies))
+  const callers = judged.filter((_, i) => calls[i] === true).map((one) => one.occurrence)
+  return judged.map((one, i) => ({
+    ...one,
+    defined: calls[i] === true || runsUnder(one.occurrence, callers),
+  }))
+}
+
+/**
+ * Whether a command is spelled by the words of a call to a function
+ * (`timeout() { ls; }; timeout 1 rm f`), which runs the function and never
+ * the command. Mirrors the Python `_runs_under`.
+ */
+function runsUnder(at: Occurrence, callers: readonly Occurrence[]): boolean {
+  for (let parent = at.parent; parent !== null; parent = parent.parent) {
+    if (callers.some((caller) => sameAt(parent, caller))) return true
+  }
+  return false
+}
+
+/**
+ * Whether a judgment is about the head word of a simple command that
+ * stands, on the line or in a function body the line defines, after the
+ * line's top-level definition of a function of that name: `defined` holds
+ * where each such definition first ends, `heads` each simple command's head
+ * word by its span, `bodies` where each definition starts. Mirrors the
+ * Python `_calls_defined`.
+ */
+function callsDefined(
+  one: Judged,
+  origin: Occurrence | null,
+  defined: ReadonlyMap<string, number>,
+  heads: ReadonlyMap<string, string | null>,
+  bodies: ReadonlySet<number>,
+): boolean {
+  const at = one.occurrence
+  let offset = 0
+  if (!sameAt(at.parent, origin)) {
+    const parent = at.parent
+    if (parent === null || !sameAt(parent.parent, origin) || !bodies.has(parent.start)) {
+      return false
+    }
+    offset = parent.start
+  }
+  const name = one.judgment.command
+  const end = defined.get(name)
+  const start = offset + at.start
+  return (
+    end !== undefined &&
+    end <= start &&
+    heads.get(`${String(start)}:${String(offset + at.end)}`) === name
+  )
 }
 
 /**
@@ -2351,14 +2622,48 @@ function caseArm(node: TSNodeLike): number | null {
 }
 
 /**
+ * Whether a line has a word that can take a function away or run text in
+ * this shell (`FUNCTION_DROPPERS`), so which names are functions where a
+ * command stands is the run's to know. Mirrors the Python `_drops_functions`.
+ */
+function dropsFunctions(nodes: Iterable<TSNodeLike>): boolean {
+  for (const node of nodes) {
+    if (
+      node.type === NodeType.UNSET_COMMAND ||
+      (WORD_TYPES.has(node.type) && FUNCTION_DROPPERS.has(literalWord(node) ?? ''))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Whether a walked command calls a function: one the session holds
+ * (`runsFunction`), or one the line defines before it, which shadows the name
+ * as a held one does unless the shell keeps the name (`SHELL_ONLY_BUILTINS`).
+ * Mirrors the Python `_runs_a_function`.
+ */
+function runsAFunction(item: Walked, registry: MountRegistry): boolean {
+  const head = item.words[0]?.text ?? null
+  return (
+    head !== null &&
+    (runsFunction(head, item.session, registry) ||
+      (item.pipeline?.functions.has(head) === true && !SHELL_ONLY_BUILTINS.has(head)))
+  )
+}
+
+/**
  * Every redirect of a line no command owns that the session's trees refuse
  * or ask about, judged where its statement stands, a `cd` before it on the
  * line included, as `admitRedirect` judges it when the shell opens it,
  * without asking anyone: an ask reads the session's standing grants and
- * stops there (`Decisions.held`), as a command's does. A target only the
- * runtime can expand (`> $f`), or a relative one after a `cd` the walk
- * could not follow, is left to the run. Mirrors the Python
- * `explain_redirects`.
+ * stops there (`Decisions.held`), as a command's does. A function call's
+ * redirects count as no command's too (`runsAFunction`), as the gate judges
+ * them, unless the line can drop a function (`dropsFunctions`). A target only
+ * the runtime can expand (`> $f`), or a relative one after a `cd` the walk
+ * could not follow or of a call in a function body, whose cwd is its
+ * caller's, is left to the run. Mirrors the Python `explain_redirects`.
  */
 export async function explainRedirects(
   root: TSNodeLike,
@@ -2368,13 +2673,15 @@ export async function explainRedirects(
   reparse: (line: string) => TSNodeLike,
 ): Promise<Opened[]> {
   const out: Opened[] = []
+  const calls = !dropsFunctions(walkTree(root))
   for (const item of walkedLine(root, session, reparse, null, false, true)) {
-    if (item.words.length > 0) continue
+    if (item.words.length > 0 && !(calls && runsAFunction(item, registry))) continue
     const at = item.occurrence
     const row = at.source.slice(0, at.start).split('\n').length
     const voice = `${voiceName(item.session)}: line ${String(row)}: `
+    const unsure = item.lost === true || (item.words.length > 0 && item.deferred === true)
     for (const word of item.redirects) {
-      if (item.lost === true && !wordValue(word).startsWith('/')) continue
+      if (unsure && !wordValue(word).startsWith('/')) continue
       const targets = redirectPaths([word], registry, item.session.cwd)
       const asked = redirectAsked(targets, item.session, namespace)
       if (asked === null) continue

@@ -14,6 +14,7 @@
 
 import importlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -2104,3 +2105,69 @@ async def test_an_mcp_entry_is_listed_only_where_its_network_lets_it():
         with pytest.raises(MCPToolsError):
             await build_mcp_clis(cfg)
     assert fake.requests == []
+
+
+@pytest.mark.parametrize("key", ["/data/keep", "/data/*/sub"])
+def test_a_profile_mounts_key_inside_a_mount_is_refused_at_the_loader(key):
+    with pytest.raises(
+        ValueError,
+        match=re.escape(f"profile agent: mounts key {key} is not a mount"),
+    ):
+        load_config(
+            {
+                "mounts": {"/data": {"vfs": "ram"}},
+                "profiles": {
+                    "agent": {"mounts": {key: {"commands": {"rm": "deny"}}}}
+                },
+            }
+        )
+
+
+def test_a_profile_mounts_key_on_the_program_view_counts_as_a_mount():
+    doc = {
+        "mounts": {"/usr": {"vfs": "ram"}},
+        "profiles": {"agent": {"mounts": {"/usr/bin": {"mode": "read"}}}},
+    }
+    load_config(doc)
+    doc["profiles"] = {
+        "agent": {"mounts": {"/usr/bin/private": {"mode": "read"}}}
+    }
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "profile agent: mounts key /usr/bin/private is not a mount"
+        ),
+    ):
+        load_config(doc)
+
+
+@pytest.mark.parametrize(
+    "key", ["/usr/bin/private", "/dev/x", "/.bash_history/private"]
+)
+def test_a_profile_mounts_key_inside_a_view_mount_is_refused(key):
+    with pytest.raises(
+        ValueError,
+        match=re.escape(f"profile agent: mounts key {key} is not a mount"),
+    ):
+        load_config(
+            {
+                "mounts": {"/data": {"vfs": "ram"}},
+                "profiles": {"agent": {"mounts": {key: {"mode": "read"}}}},
+            }
+        )
+
+
+def test_a_profile_mounts_key_that_is_a_mount_or_under_none_loads():
+    load_config(
+        {
+            "mounts": {"/data": {"vfs": "ram"}, "/data/keep": {"vfs": "ram"}},
+            "profiles": {
+                "agent": {
+                    "mounts": {
+                        "/data/keep": {"mode": "read"},
+                        "/later/x": {"mode": "read"},
+                    }
+                }
+            },
+        }
+    )

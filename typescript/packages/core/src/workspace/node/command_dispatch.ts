@@ -64,7 +64,7 @@ import { ALIAS_WORD_TYPES, WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { NodeType as NT, RedirectKind } from '../../shell/types.ts'
+import { NodeType as NT, type Redirect, RedirectKind } from '../../shell/types.ts'
 import { makeVar, type ShellVar, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
@@ -157,9 +157,9 @@ import {
   visibleEnv,
 } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
-import { admit, Admitted, classifiedWords, type Refused } from './admission.ts'
+import { admit, Admitted, admitRedirect, classifiedWords, type Refused } from './admission.ts'
 import { UNREADABLE_LINES } from './explain.ts'
-import { programLines, type Word, wordValue } from './inner_lines.ts'
+import { programLines, runsFunction, type Word, wordValue } from './inner_lines.ts'
 import { argvFrame, claimantFor, evaluatedFrom, wholeOccurrence } from './occurrence.ts'
 import type { ExpandedWords } from './types.ts'
 
@@ -930,9 +930,24 @@ async function runArgv(
   const guard = async (
     paths: readonly PathSpec[],
     given: ByteSource | null,
+    opening: Redirect | null = null,
   ): Promise<RedirectResult | null> => {
     const key = [String(given === null), ...paths.map((p) => p.virtual)].join('\0')
     if (admitted !== null && asked === key) return null
+    if (opening !== null && runsFunction(name, context.session, registry)) {
+      // A function is no tool, so no tree root judges its call; its
+      // redirects open whatever its body does, and each is judged as it
+      // opens, as a redirect no command owns: the opener passes every
+      // target so far, and only the last is new.
+      const opened = await admitRedirect(
+        paths.slice(-1),
+        context.session,
+        registry,
+        namespace,
+        opening.targetNode as TSNodeLike | null,
+      )
+      if (opened !== null) return refused([name, ...argv.args].join(' '), opened)
+    }
     if (name !== '') {
       asked = key
       const verdict = await admit(

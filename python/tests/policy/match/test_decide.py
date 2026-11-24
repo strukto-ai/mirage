@@ -12,9 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.decide import decide, source_of
+from mirage.policy.match.decide import decide, redirect_ruling, source_of
 from mirage.policy.types import AdmissionRules, Outcome, Ruling
-from tests.fixtures.command_trees import line, trees
+from tests.fixtures.command_trees import line, path, trees
 
 
 def test_no_tree_allows_every_line():
@@ -119,3 +119,22 @@ def test_source_of_names_the_section():
     inside = decide(line("cp", "/a/x"), rules).rule
     assert top is not None and source_of(top) == "top"
     assert inside is not None and source_of(inside) == "mounts./a"
+
+
+def test_a_redirect_inside_a_folder_meets_the_folders_star():
+    rules = trees({"*": "allow"}, mounts={"/d/keep": {"*": "deny"}})
+    ruling = redirect_ruling([path("/d/out"), path("/d/keep/f.txt")], rules)
+    assert ruling.outcome is Outcome.DENY
+    assert ruling.matched_path == "/d/keep/f.txt"
+    assert ruling.source == "mounts./d/keep"
+    assert redirect_ruling([path("/d/out")], rules).outcome is Outcome.ALLOW
+    asks = trees(mounts={"/d/keep": {"*": "ask"}})
+    asked = redirect_ruling([path("/d/keep/f.txt")], asks)
+    assert asked.outcome is Outcome.ASK
+    assert len(asked.asks) == 1
+
+
+def test_a_redirect_meets_no_named_command_of_a_folder():
+    rules = trees(mounts={"/d/keep": {"cat": "deny", "echo": "deny"}})
+    ruling = redirect_ruling([path("/d/keep/f.txt")], rules)
+    assert ruling.outcome is Outcome.ALLOW

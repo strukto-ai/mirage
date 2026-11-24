@@ -19,6 +19,7 @@ from collections.abc import (
     AsyncIterator,
     Callable,
     Generator,
+    Iterable,
     Iterator,
     Mapping,
     Sequence,
@@ -27,6 +28,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from mirage.commands.spec.types import WordKind
 from mirage.context.session_context import current_caller, voice_name
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
@@ -52,6 +54,7 @@ from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.decisions import is_pending
 from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
+from mirage.policy.match.rule import operand_paths
 from mirage.policy.policies import command_route, settled
 from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
@@ -79,16 +82,19 @@ from mirage.shell.node_kind import (
 )
 from mirage.shell.options import parse_option_word
 from mirage.shell.parse import opaque_reads, parse, referenced_names
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, PolicyDecision
 from mirage.utils.hidden import is_glob
+from mirage.utils.key_prefix import under_path
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.env.env import env_child, env_vars
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_facts
+from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -190,6 +196,23 @@ REDIRECT_TYPES = frozenset(
 # Commands that move the shell's cwd where the walk cannot follow: a line
 # run in this shell, and the directory stack.
 CWD_MOVERS = frozenset({"eval", ".", "source", "pushd", "popd"})
+
+# Words after which a function the line defined may no longer be one, or
+# that run text in this shell the walk does not read as the line's:
+# ``unset``, a line run in this shell, a trap's action.
+FUNCTION_DROPPERS = frozenset({"unset", "eval", ".", "source", "trap"})
+
+# The nodes a word is spelled with, quoted or not.
+WORD_TYPES = frozenset(
+    {
+        NodeType.WORD,
+        NodeType.CONCATENATION,
+        NodeType.STRING,
+        NodeType.RAW_STRING,
+        NodeType.ANSI_C_STRING,
+        NodeType.TRANSLATED_STRING,
+    }
+)
 
 # How many other places a line may stand in before the walk calls its cwd
 # lost: each relative ``cd`` doubles them.
@@ -410,6 +433,19 @@ class Judged:
             judged in, set beside ``ctx``: for a command a line runs in
             turn (``eval``), the one its own walk reached, so a ``cd``
             before it in that line is where it stands.
+        defined (bool): the word calls a function the line surely
+            defines before it runs (:func:`_with_calls`), so the gate,
+            which sees the call, says whether a tree root's own decision
+            speaks for it (``is_tool``).
+        placed (bool): the walk knows where the command stands: it is
+            not in a function body, which runs where it is called, and
+            no ``cd`` the walk could not follow, nor one that may have
+            been skipped or failed, ran before it (``Walked.lost``,
+            ``Walked.elsewhere``, ``Walked.deferred``), so ``ctx.cwd``
+            is the shell's.
+        namespace (Namespace | None): the link table the command was
+            judged against, so a redirect target is followed through its
+            links as the run follows it.
     """
 
     judgment: Judgment
@@ -419,6 +455,9 @@ class Judged:
     unread: frozenset[str] = frozenset()
     ctx: CommandContext | None = None
     session: SessionState | None = None
+    defined: bool = False
+    placed: bool = True
+    namespace: Namespace | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -616,6 +655,7 @@ async def _judge_words(
     session = item.session
     intrinsic = item.intrinsic
     lost = item.lost
+    placed = not lost and not item.elsewhere and not item.deferred
     open_ = item.open_
     head = words[0]
     rules = session.commands
@@ -632,13 +672,17 @@ async def _judge_words(
             ),
             occurrence,
             False,
+            placed=placed,
         )
         return
     if head.text is None and not whole_line:
         return
     if whole_line and (head.text is None or head.glob) and has_rules(rules):
         yield Judged(
-            _denied(head.raw, unreadable(head.raw)), occurrence, False
+            _denied(head.raw, unreadable(head.raw)),
+            occurrence,
+            False,
+            placed=placed,
         )
         return
     stated = item.stated and all(
@@ -718,6 +762,7 @@ async def _judge_words(
             stated,
             intrinsic,
             unread,
+            placed=placed,
         )
         return
     yield Judged(
@@ -731,6 +776,8 @@ async def _judge_words(
         unread,
         ctx,
         session,
+        placed=placed,
+        namespace=namespace,
     )
     # env's command runs in the environment env builds for it, and a
     # nested shell's line in a new shell started from this one.
@@ -772,7 +819,7 @@ async def _judge_words(
                 open_=inner.open,
                 pipeline=pipeline,
             ):
-                yield one
+                yield one if placed else dataclasses.replace(one, placed=False)
         else:
             argv = list(inner.argv)
             within = whole_occurrence(
@@ -799,10 +846,10 @@ async def _judge_words(
                 namespace,
                 mode,
             ):
-                yield one
+                yield one if placed else dataclasses.replace(one, placed=False)
 
 
-def _is_verdict(expl: Judgment) -> bool:
+def _is_verdict(one: Judged) -> bool:
     """Whether an explanation refuses the line's intent, rather than
     just failing one command.
 
@@ -810,16 +857,28 @@ def _is_verdict(expl: Judgment) -> bool:
     policy refusals, hold the line. Filesystem refusals, about a path or
     carrying an error, wait for the per-command gate, where earlier
     commands have established the live cwd and namespace.
-    Rule-less DENY results also wait, and so does a tree root's own
-    decision (``_by_default``): an unavailable head word, a command no
-    tree names (a function the line defines first, say), or words only
-    the runtime can expand fail where they occur rather than against
-    the whole line.
+    Rule-less DENY results also wait, and so does a top-level tree
+    root's own decision (``_by_default``): an unavailable head word, a
+    command no tree names, or words only the runtime can expand fail
+    where they occur rather than against the whole line. A mount
+    entry's root speaks about its folder, as a root leaf with paths
+    speaks about those paths, so it holds the line where the command
+    surely works inside that folder (``_in_folder``), except for a word
+    the line defines as a function (``Judged.defined``): the call runs
+    the function, whose body's commands are each judged, and the gate
+    sees whether it does. The call's redirect targets are not the
+    body's: the shell opens them whatever the body does, so one a tree
+    refuses, or asks about by the call's own rule (``_opens_held``),
+    holds the line still.
 
     Args:
-        expl (Judgment): one command's explanation.
+        one (Judged): one command's explanation and its place.
     """
-    if expl.exit_code == 0 or _by_default(expl):
+    expl = one.judgment
+    if expl.exit_code == 0 or (
+        _by_default(expl)
+        and ((one.defined and not _opens_held(one)) or not _in_folder(one))
+    ):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
         return True
@@ -845,6 +904,100 @@ def _by_default(expl: Judgment) -> bool:
         rule is not None
         and not rule.paths
         and rule.at.split("/")[1:2] == ["*"]
+    )
+
+
+def _in_folder(one: Judged) -> bool:
+    """Whether the leaf that decided the command belongs to a mount
+    entry's tree, and the command surely works inside that folder: a
+    word of its own names an absolute path there, or the walk knows
+    where it stands (``Judged.placed``) and its cwd or a path it reaches
+    is there, or, every path word being absolute, a path it reaches
+    through a link is there, or it walks or moves a whole tree from an
+    absolute path the folder lies under (``grep -r x /a`` for a folder
+    ``/a/b``, but not ``mv``'s destination, ``_destination``), as the
+    matcher's ``touches`` reads it. Where the walk only guesses the
+    cwd (after ``cd -``, ``cd "$d"``, a ``cd`` that may fail), the
+    per-command gate judges the command in the cwd the shell really has.
+
+    Args:
+        one (Judged): one command's explanation and its place.
+    """
+    rule = one.judgment.rule
+    if rule is None or not rule.mount:
+        return False
+    ctx = one.ctx
+    if ctx is None:
+        return True
+    if one.placed and any(
+        under_path(path, rule.mount)
+        for path in (ctx.cwd, *(p.virtual for p in ctx.paths))
+    ):
+        return True
+    if all(
+        word.path is None or word.text.startswith("/") for word in ctx.words
+    ) and any(under_path(p.virtual, rule.mount) for p in ctx.paths):
+        return True
+    walks = ctx.walks or ctx.subtree
+    into = None if ctx.walks else _destination(ctx)
+    return any(
+        word.path is not None
+        and word.text.startswith("/")
+        and (
+            under_path(word.path.virtual, rule.mount)
+            or (
+                walks
+                and word.path.virtual != into
+                and under_path(rule.mount, word.path.virtual)
+            )
+        )
+        for word in ctx.words
+    )
+
+
+def _destination(ctx: CommandContext) -> str | None:
+    """The directory a move puts its sources into, which it does not
+    move as a tree: ``mv -t``'s target, or else the last of two or more
+    operands, as the matcher's ``touches`` leaves it out.
+
+    Args:
+        ctx (CommandContext): the classified command.
+    """
+    if ctx.command != "mv" or ctx.move_target is not None:
+        return ctx.move_target
+    operands = operand_paths(ctx)
+    return operands[-1].virtual if len(operands) >= 2 else None
+
+
+def _opens_held(one: Judged) -> bool:
+    """Whether a redirect target of the command is one the session's
+    trees refuse as they judge a redirect no command owns
+    (``redirect_asked``), inside any mount entry whose root speaks, or
+    ask about by the rule that decided the command, so the line's one
+    question is the redirect's. An ask from another entry is the
+    redirect's own question, which the gate asks as it opens. An
+    absolute target counts always, a relative one where the walk knows
+    where the command stands (``Judged.placed``), as :func:`_in_folder`
+    reads a path.
+
+    Args:
+        one (Judged): one command's explanation and its place.
+    """
+    ctx = one.ctx
+    session = one.session
+    if ctx is None or session is None:
+        return False
+    return any(
+        word.kind is WordKind.REDIRECT
+        and word.path is not None
+        and (one.placed or word.text.startswith("/"))
+        and (asked := redirect_asked([word.path], session, one.namespace))
+        is not None
+        and (
+            isinstance(asked.answer, Deny)
+            or asked.answer.rule == one.judgment.rule
+        )
+        for word in ctx.words
     )
 
 
@@ -889,7 +1042,7 @@ def _asks_for(one: Judged) -> bool:
     return one.stated or _refuses(one.judgment)
 
 
-def _is_judged(expl: Judgment) -> bool:
+def _is_judged(one: Judged) -> bool:
     """Whether the compound-line pass puts a command through the gate.
 
     A verdict is, so the line is refused whole. So is a command that
@@ -901,9 +1054,9 @@ def _is_judged(expl: Judgment) -> bool:
     :func:`_is_verdict` explains is answered where it happens.
 
     Args:
-        expl (Judgment): one command's explanation.
+        one (Judged): one command's explanation and its place.
     """
-    return expl.exit_code == 0 or _is_verdict(expl)
+    return one.judgment.exit_code == 0 or _is_verdict(one)
 
 
 @dataclass(slots=True)
@@ -1022,6 +1175,9 @@ class Walked:
             failed.
         open_ (bool): the runtime appends operands the gate cannot read
             (``xargs``, ``find -exec``, ``mapfile -C``).
+        deferred (bool): the command stands in a function body, which
+            runs where the function is called, not where the walk reads
+            the definition.
     """
 
     words: list[Word]
@@ -1035,6 +1191,7 @@ class Walked:
     elsewhere: tuple[SessionState, ...] = ()
     open_: bool = False
     pipeline: _PipelineWalk | None = None
+    deferred: bool = False
 
 
 # Where a scope leaves the shell: the session, whether a `cd` the walk
@@ -1343,11 +1500,30 @@ def _walk_node(
         node, session, homes, pipeline
     ):
         lost = True
-    return (
-        yield from _walk_children(
-            node, session, homes, frame, pipeline, lost, elsewhere
-        )
+    walk = _walk_children(
+        node, session, homes, frame, pipeline, lost, elsewhere
     )
+    return (
+        yield from _deferred(walk) if scope == ScopeKind.DEFERRED else walk
+    )
+
+
+def _deferred(walk: Walk) -> Walk:
+    """A function body's walk, each command marked as standing in it
+    (``Walked.deferred``).
+
+    Args:
+        walk (Walk): the body's walk.
+    """
+    while True:
+        try:
+            item = next(walk)
+        except StopIteration as done:
+            ended: tuple[SessionState, bool, tuple[SessionState, ...]] = (
+                done.value
+            )
+            return ended
+        yield dataclasses.replace(item, deferred=True)
 
 
 def _moves(
@@ -1631,7 +1807,16 @@ async def line_judgments(
                 ],
             )
         )
-    return judged
+    marked = iter(
+        _with_calls(
+            ast,
+            [one for _, explained in judged for one in explained],
+            handed.origin,
+        )
+    )
+    return [
+        (item, [next(marked) for _ in explained]) for item, explained in judged
+    ]
 
 
 async def prejudge_line(
@@ -1660,7 +1845,10 @@ async def prejudge_line(
     - A word a closed tree names nothing for is refused where it stands,
       not with the line: the stage fails with ``Permission denied`` and
       the rest of the line does what bash does, so a typo cannot cost
-      an agent the work the line already did.
+      an agent the work the line already did. A folder entry's root is
+      the exception: it speaks about its folder, so it holds the line
+      wherever the command surely works inside that folder, unless the
+      word calls a function the line surely defines (:func:`_is_verdict`).
     - A word only the runtime can expand is judged where it is
       expanded, by the per-command gate, which sees the real path.
 
@@ -1760,7 +1948,7 @@ async def prejudge_line(
         return None
     for _, explained in judged:
         for one in explained:
-            if not _is_judged(one.judgment) or not _asks_for(one):
+            if not _is_judged(one) or not _asks_for(one):
                 continue
             # This pass judges on the gate's behalf and runs nothing
             # itself, so a grant the host gives here is claimed for the
@@ -2083,7 +2271,7 @@ async def _command_refused(
         # A question about a spelling the runtime completes is the
         # gate's (``_asks_for``); the node is kept, and over-keeping
         # only ever over-fetches.
-        if not _is_verdict(judged.judgment) or not _asks_for(judged):
+        if not _is_verdict(judged) or not _asks_for(judged):
             continue
         if await _verdict_refuses(judged, registry, handed, cancel):
             return True
@@ -2520,7 +2708,9 @@ async def line_held(
     does not ask again; one still waiting holds the line, and a question
     the gate will ask about other words (``Judged.stated`` False) is
     left to it. A word a closed tree names nothing for fails where it stands
-    while the rest of its line runs, so it does not hold the line.
+    while the rest of its line runs, so it does not hold the line, except
+    where a folder entry's root refuses it inside that folder
+    (:func:`_is_verdict`).
 
     Args:
         judged (list[tuple[Walked, list[Judged]]]): the line's read-only
@@ -2533,7 +2723,7 @@ async def line_held(
     for _, explained in judged:
         for one in explained:
             expl = one.judgment
-            if not _is_verdict(expl) or expl.exit_code == 0:
+            if not _is_verdict(one) or expl.exit_code == 0:
                 continue
             if _refuses(expl):
                 return True
@@ -2552,15 +2742,17 @@ async def line_held(
     return False
 
 
-def holds(judgments: Sequence[Judgment]) -> bool:
+def holds(judged: Sequence[Judged]) -> bool:
     """Whether some command's judgment is a verdict that refuses it or
     waits on the host (:func:`_is_verdict`), the line-level answer
     placement waits on.
 
     Args:
-        judgments (Sequence[Judgment]): a line's judgments.
+        judged (Sequence[Judged]): a line's judgments and their places.
     """
-    return any(_is_verdict(e) and e.exit_code != 0 for e in judgments)
+    return any(
+        _is_verdict(one) and one.judgment.exit_code != 0 for one in judged
+    )
 
 
 async def explain_line(
@@ -2592,7 +2784,7 @@ async def explain_line(
         namespace (Namespace | None): the link table.
         mode (JudgmentMode): how this judgment reads the commands and policies.
     """
-    return [
+    judged = [
         one
         async for one in _judge_line(
             ast,
@@ -2603,6 +2795,7 @@ async def explain_line(
             mode,
         )
     ]
+    return _with_calls(ast, judged, None)
 
 
 def explain_redirects(
@@ -2616,9 +2809,12 @@ def explain_redirects(
     before it on the line included, as ``admit_redirect`` judges it when
     the shell opens it, without asking anyone: an ask reads the session's
     standing grants and stops there (``Decisions.held``), as a command's
-    does in :func:`_explained`. A target only the runtime can expand
-    (``> $f``), or a relative one after a ``cd`` the walk could not
-    follow, is left to the run.
+    does in :func:`_explained`. A function call's redirects count as no
+    command's too (:func:`_runs_a_function`), as the gate judges them,
+    unless the line can drop a function (:func:`_drops_functions`). A
+    target only the runtime can expand (``> $f``), or a relative one
+    after a ``cd`` the walk could not follow or of a call in a function
+    body, whose cwd is its caller's, is left to the run.
 
     Args:
         ast (Any): the parsed root node.
@@ -2627,14 +2823,16 @@ def explain_redirects(
         namespace (Namespace | None): the link table.
     """
     out: list[Opened] = []
+    calls = not _drops_functions(walk_tree(ast))
     for item in _walked_line(ast, session, opens=True):
-        if item.words:
+        if item.words and not (calls and _runs_a_function(item, registry)):
             continue
         at = item.occurrence
         row = encode_text(at.source)[: at.start].count(b"\n") + 1
         voice = f"{voice_name(item.session)}: line {row}: "
+        unsure = item.lost or (bool(item.words) and item.deferred)
         for word in item.redirects:
-            if item.lost and not word.value.startswith("/"):
+            if unsure and not word.value.startswith("/"):
                 continue
             targets = redirect_paths([word], registry, item.session.cwd)
             asked = redirect_asked(targets, item.session, namespace)
@@ -2670,6 +2868,44 @@ def explain_redirects(
                 )
             out.append(Opened(judgment, at))
     return out
+
+
+def _drops_functions(nodes: Iterable[Any]) -> bool:
+    """Whether a line has a word that can take a function away or run
+    text in this shell (``FUNCTION_DROPPERS``), so which names are
+    functions where a command stands is the run's to know.
+
+    Args:
+        nodes (Iterable[Any]): the line's nodes.
+    """
+    return any(
+        node.type == NodeType.UNSET_COMMAND
+        or (
+            node.type in WORD_TYPES and literal_word(node) in FUNCTION_DROPPERS
+        )
+        for node in nodes
+    )
+
+
+def _runs_a_function(item: Walked, registry: MountRegistry) -> bool:
+    """Whether a walked command calls a function: one the session holds
+    (``runs_function``), or one the line defines before it, which
+    shadows the name as a held one does unless the shell keeps the name
+    (``SHELL_ONLY_BUILTINS``).
+
+    Args:
+        item (Walked): the command, where it stands.
+        registry (MountRegistry): registry holding the command layers.
+    """
+    head = item.words[0].text
+    return head is not None and (
+        runs_function(head, item.session, registry)
+        or (
+            item.pipeline is not None
+            and head in item.pipeline.functions
+            and head not in SHELL_ONLY_BUILTINS
+        )
+    )
 
 
 def explained_line(
@@ -2741,7 +2977,7 @@ def explained_line(
             one
             for one in verdicts
             if one.judgment.exit_code
-            and (whole_line or (_is_verdict(one.judgment) and _asks_for(one)))
+            and (whole_line or (_is_verdict(one) and _asks_for(one)))
         ),
         None,
     )
@@ -2818,6 +3054,141 @@ def explained_line(
         exit_code=traced.exit_code,
         stderr="".join(part.stderr for part in traced.ran),
     )
+
+
+def _with_calls(
+    tree: Any, judged: Sequence[Judged], origin: Occurrence | None
+) -> list[Judged]:
+    """The line's judgments with ``Judged.defined`` set on a word the
+    line has surely made a function call by the time it runs. The rule
+    is kept narrow so it never has to follow the shell: the word heads
+    a simple command of the line itself or of a function body the line
+    defines; the line defines a function of that name before it as one
+    of its top-level statements, not sent to the background, so under
+    no ``&&``, ``||``, ``!``, pipeline, compound command or
+    substitution, where it may not run or may not last; and no word of
+    the line, nor any command it is judged to run, can take a function
+    away or run text in this shell (``FUNCTION_DROPPERS``). Anything
+    else stays a folder's refusal, held with the line. The words of such
+    a call that a wrapper's grammar reads as a command
+    (``timeout 1 rm f``) never run, so they are let through with it. It
+    is worked out
+    only when a folder entry's root refuses some command, the one
+    verdict ``defined`` changes.
+
+    Args:
+        tree (Any): the line, parsed.
+        judged (Sequence[Judged]): the line's command judgments.
+        origin (Occurrence | None): the node the line was evaluated
+            from, None for a typed line.
+    """
+    if not any(
+        one.judgment.exit_code
+        and _by_default(one.judgment)
+        and _in_folder(one)
+        for one in judged
+    ):
+        return list(judged)
+    base = tree.start_byte
+    defined: dict[str, int] = {}
+    for node in tree.named_children:
+        if is_backgrounded(node):
+            continue
+        definition = node
+        if node.type == NodeType.REDIRECTED_STATEMENT and node.named_children:
+            definition = node.named_children[0]
+        if definition.type == NodeType.FUNCTION_DEFINITION:
+            defined.setdefault(
+                get_function_name(definition), node.end_byte - base
+            )
+    if not defined:
+        return list(judged)
+    nodes = list(walk_tree(tree))
+    if any(
+        one.judgment.command in FUNCTION_DROPPERS for one in judged
+    ) or _drops_functions(nodes):
+        return list(judged)
+    heads = {
+        (node.start_byte - base, node.end_byte - base): literal_word(head)
+        for node in nodes
+        if node.type == NodeType.COMMAND
+        for head in node.named_children
+        if head.type == NodeType.COMMAND_NAME
+    }
+    bodies = frozenset(
+        node.start_byte - base
+        for node in nodes
+        if node.type == NodeType.FUNCTION_DEFINITION
+    )
+    calls = [
+        _calls_defined(one, origin, defined, heads, bodies) for one in judged
+    ]
+    callers = [
+        one.occurrence for one, call in zip(judged, calls, strict=True) if call
+    ]
+    return [
+        dataclasses.replace(
+            one, defined=call or _runs_under(one.occurrence, callers)
+        )
+        for one, call in zip(judged, calls, strict=True)
+    ]
+
+
+def _runs_under(at: Occurrence, callers: Sequence[Occurrence]) -> bool:
+    """Whether a command is spelled by the words of a call to a function
+    (``timeout() { ls; }; timeout 1 rm f``), which runs the function and
+    never the command.
+
+    Args:
+        at (Occurrence): the command's occurrence.
+        callers (Sequence[Occurrence]): the occurrences of words that
+            surely call a function.
+    """
+    parent = at.parent
+    while parent is not None:
+        if parent in callers:
+            return True
+        parent = parent.parent
+    return False
+
+
+def _calls_defined(
+    one: Judged,
+    origin: Occurrence | None,
+    defined: Mapping[str, int],
+    heads: Mapping[tuple[int, int], str | None],
+    bodies: frozenset[int],
+) -> bool:
+    """Whether a judgment is about the head word of a simple command
+    that stands, on the line or in a function body the line defines,
+    after the line's top-level definition of a function of that name.
+
+    Args:
+        one (Judged): one command's judgment and place.
+        origin (Occurrence | None): the node the line was evaluated
+            from, None for a typed line.
+        defined (Mapping[str, int]): where each function the line
+            defines at its top level first ends.
+        heads (Mapping[tuple[int, int], str | None]): each simple
+            command's head word, by its span.
+        bodies (frozenset[int]): where each function definition on the
+            line starts.
+    """
+    at = one.occurrence
+    offset = 0
+    if at.parent != origin:
+        parent = at.parent
+        if (
+            parent is None
+            or parent.parent != origin
+            or parent.start not in bodies
+        ):
+            return False
+        offset = parent.start
+    name = one.judgment.command
+    end = defined.get(name)
+    span = (offset + at.start, offset + at.end)
+    return end is not None and end <= span[0] and heads.get(span) == name
 
 
 def _calls_function(

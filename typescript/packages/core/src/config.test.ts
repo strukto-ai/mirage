@@ -79,3 +79,48 @@ describe('@<machine>', () => {
     expect([vfs.name, vfs.config.root, vfs.config.machines]).toEqual(['machine', '/tmp', ['gpu']])
   })
 })
+
+describe('profile mounts keys', () => {
+  it.each(['/data/keep', '/data/*/sub'])('refuses %s inside a mount at the loader', (key) => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/data': { vfs: 'ram' } },
+        profiles: { agent: { mounts: { [key]: { commands: { rm: 'deny' } } } } },
+      }),
+    ).toThrow(`profile agent: mounts key ${key} is not a mount`)
+  })
+
+  it('counts the program view as a mount', () => {
+    loadWorkspaceConfig({
+      mounts: { '/usr': { vfs: 'ram' } },
+      profiles: { agent: { mounts: { '/usr/bin': { mode: 'read' } } } },
+    })
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/usr': { vfs: 'ram' } },
+        profiles: { agent: { mounts: { '/usr/bin/private': { mode: 'read' } } } },
+      }),
+    ).toThrow('profile agent: mounts key /usr/bin/private is not a mount')
+  })
+
+  it.each(['/usr/bin/private', '/dev/x', '/.bash_history/private'])(
+    'refuses %s inside a built-in mount',
+    (key) => {
+      expect(() =>
+        loadWorkspaceConfig({
+          mounts: { '/data': { vfs: 'ram' } },
+          profiles: { agent: { mounts: { [key]: { mode: 'read' } } } },
+        }),
+      ).toThrow(`profile agent: mounts key ${key} is not a mount`)
+    },
+  )
+
+  it('loads a key that is a mount or under none', () => {
+    loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' }, '/data/keep': { vfs: 'ram' } },
+      profiles: {
+        agent: { mounts: { '/data/keep': { mode: 'read' }, '/later/x': { mode: 'read' } } },
+      },
+    })
+  })
+})

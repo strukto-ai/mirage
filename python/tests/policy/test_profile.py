@@ -42,6 +42,7 @@ from mirage.policy.profile import (
     VarsBlock,
     command_tree,
     compile_program,
+    folder_mount_key,
     profile_from_dict,
     profile_to_dict,
     tree_doc,
@@ -3301,3 +3302,24 @@ def test_tree_doc_writes_the_block_it_reads_from():
 def test_command_tree_refuses_a_misshapen_block(block, message):
     with pytest.raises(ValueError, match=message):
         command_tree(block)
+
+
+@pytest.mark.parametrize(
+    ("key", "found"),
+    [
+        ("/data/keep", "/data/keep"),
+        ("/data/keep/", "/data/keep"),
+        ("/data/*/sub", "/data/*/sub"),
+        ("/data", None),
+        ("/data/", None),
+        ("/data/sub", None),
+        ("/later", None),
+        ("/later/x", None),
+        ("/", None),
+    ],
+)
+def test_folder_mount_key_finds_a_key_inside_a_mount(key, found):
+    profile = SessionProfile.model_validate(
+        {"mounts": {key: {"commands": {"rm": "deny"}}}}
+    )
+    assert folder_mount_key(profile, ["/", "/data/", "/data/sub/"]) == found

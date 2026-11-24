@@ -373,6 +373,615 @@ async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "echo before; cat /data/f.txt",
+        "cat /data/f.txt; echo after",
+        "f(){ cat /data/f.txt; }; f; f(){ cat /data/f.txt; }; f",
+    ],
+)
+async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": decision}}},
+        },
+    )
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout) == (126, b"")
+    assert ran.stderr == b"cat: Permission denied\n"
+    assert (said.exit_code, said.stderr) == (126, "cat: Permission denied\n")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+@pytest.mark.parametrize(
+    ("line", "exit_code", "stdout", "stderr"),
+    [
+        ("f() { ls; }; f", 0, b"f.txt\n", b""),
+        (
+            "f() { cat /data/f.txt; }; f",
+            126,
+            b"",
+            b"cat: Permission denied\n",
+        ),
+        ("f() { ls; }; f; cat f.txt", 126, b"", b"cat: Permission denied\n"),
+        (
+            "echo before; f() { ls; }; f",
+            126,
+            b"",
+            b"echo: Permission denied\n",
+        ),
+        ("f; f() { ls; }", 126, b"", b"f: Permission denied\n"),
+        ("f() { ls; }; g() { f; }; g", 0, b"f.txt\n", b""),
+        ("g() { f; }; f() { ls; }; g", 0, b"f.txt\n", b""),
+        ("(f() { ls; }); f", 126, b"", b"f: Permission denied\n"),
+        ("{ f() { ls; }; }; f", 126, b"", b"f: Permission denied\n"),
+        ("(f() { ls; }; f)", 126, b"", b"f: Permission denied\n"),
+        ("f() { ls; }; (f)", 0, b"f.txt\n", b""),
+        ("  f() { ls; }; f", 0, b"f.txt\n", b""),
+        ("timeout() { ls; }; timeout 1 rm f.txt", 0, b"f.txt\n", b""),
+        ("f() { ls; }; MODE=test f", 0, b"f.txt\n", b""),
+        ("f() { ls; }; f /data/f.txt", 0, b"f.txt\n", b""),
+        ("f() { ls; }; f > /out.txt", 0, b"", b""),
+    ],
+)
+async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
+    decision, line, exit_code, stdout, stderr
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {"*": decision, "cd": "allow", "ls": "allow"}
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr or b"") == (
+        exit_code,
+        stdout,
+        stderr,
+    )
+    assert (said.exit_code, said.stderr) == (exit_code, stderr.decode())
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "held_on"),
+    [
+        ("printf x > /marker; false && f() { ls; }; f", "f"),
+        ("printf x > /marker; true && f() { ls; }; f", "f"),
+        ("f() { ls; }; unset -f f; printf x > /marker; f", "f"),
+        ("printf x > /marker; f() { ls; }; unset f; f", "f"),
+        ("printf x > /marker; f() { ls; }; unset -v x; f", "f"),
+        ("printf x > /marker; f() { ls; }; un''set -f f; f", "f"),
+        ("printf x > /marker; f() { ls; }; command unset -f f; f", "f"),
+        ("printf x > /marker; (f() { ls; }); f", "f"),
+        ("printf x > /marker; f() { ls; } | ls; f", "f"),
+        ("printf x > /marker; f() { ls; } & f", "f"),
+        ("printf x > /marker; cat() { :; }; command cat a", "cat"),
+        ("printf x > /marker; cat() { ls; }; timeout 1 cat f.txt", "cat"),
+        ('printf x > /marker; cat() { ls; }; sh -c "cat f.txt"', "cat"),
+        ("printf x > /marker; trap : ERR; f() { ls; }; f", "f"),
+        ("printf x > /marker; f() { cat /data/a; }; f", "cat"),
+        ("printf x > /marker; timeout 1 cat f.txt", "cat"),
+        ('printf x > /marker; sh -c "cat f.txt"', "cat"),
+    ],
+)
+async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
+    line, held_on
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    allowed = ["cd", "ls", "printf", "false", "true", ":", "command"]
+    allowed += ["unset", "trap", "timeout", "sh"]
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {
+                        "*": "deny",
+                        **dict.fromkeys(allowed, "allow"),
+                    }
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    stderr = f"{held_on}: Permission denied\n"
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        126,
+        b"",
+        stderr.encode(),
+    )
+    assert (said.exit_code, said.stderr) == (126, stderr)
+    marker = await ws.shell("test -e /marker")
+    assert marker.exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "printf x > /marker; f() { echo hi; }; f > /data/f.txt",
+        "printf x > /marker; f() { cat; }; f < /data/f.txt",
+    ],
+)
+async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
+    decision, line
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": decision}}},
+        },
+    )
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        126,
+        b"",
+        b"f: Permission denied\n",
+    )
+    assert (said.exit_code, said.stderr) == (126, "f: Permission denied\n")
+    marker = await ws.shell("test -e /marker")
+    assert marker.exit_code == 1
+    kept = await ws.shell("cat /data/f.txt")
+    assert kept.stdout == b"kept\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("define", "call", "stdout"),
+    [
+        ("f() { cat; }", "f < /data/f.txt", b""),
+        ("f() { echo hi; }", "f > /data/f.txt", b""),
+    ],
+)
+async def test_a_stored_function_redirect_meets_the_folders_star(
+    define, call, stdout
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    await ws.shell(define, session_id="s")
+    ran = await ws.shell(call, session_id="s")
+    assert (ran.exit_code, ran.stdout or b"", ran.stderr) == (
+        1,
+        stdout,
+        b"bash: line 1: /data/f.txt: Permission denied\n",
+    )
+    kept = await ws.shell("cat /data/f.txt")
+    assert kept.stdout == b"kept\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_through_a_link_holds_a_function_the_line_defines():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/tmp/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    line = "printf x > /tmp/m; f() { echo hi; }; f > /tmp/l"
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stderr) == (126, b"f: Permission denied\n")
+    assert (await ws.shell("test -e /tmp/m")).exit_code == 1
+    assert (await ws.shell("cat /data/f.txt")).stdout == b"kept\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_function_body_reading_through_a_link_holds_a_folders_line():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/tmp/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    ran = await ws.shell(
+        "printf x > /tmp/m; f() { cat /tmp/l; }; f", session_id="s"
+    )
+    assert (ran.exit_code, ran.stdout or b"") == (126, b"")
+    assert (await ws.shell("test -e /tmp/m")).exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folders_star_holds_the_line_when_the_top_level_root_ties():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "deny", "echo": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    ran = await ws.shell("echo before; cat /data/f.txt", session_id="s")
+    assert (ran.exit_code, ran.stdout or b"") == (126, b"")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_folders_star_holds_a_walk_from_above_the_folder():
+    ws = Workspace({"/srv/vault/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo keep > /srv/vault/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/srv/vault": {"commands": {"*": "deny"}}},
+        },
+    )
+    ran = await ws.shell("echo before; grep -r keep /srv", session_id="s")
+    assert (ran.exit_code, ran.stdout or b"") == (126, b"")
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_function_defined_with_redirects_is_not_held_by_a_folders_star():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/out/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {"*": "deny", "ls": "allow", "cd": "allow"}
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    ran = await ws.shell("f(){ ls; } >/out/o 2>&1; f", session_id="s")
+    assert ran.exit_code == 0
+    listed = await ws.shell("cat /out/o")
+    assert listed.stdout == b"f.txt\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_into_another_entry_holds_a_function_the_line_defines():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/vault/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /vault/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {"commands": {"*": "deny", "cd": "allow"}},
+                "/vault": {"commands": {"*": "deny"}},
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    line = "f() { echo hi; }; f > /vault/f.txt"
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stderr) == (126, b"f: Permission denied\n")
+    assert said.exit_code == 126
+    kept = await ws.shell("cat /vault/f.txt")
+    assert kept.stdout == b"kept\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_command_the_top_level_names_holds_a_line_a_folders_star_ties():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow", "cat": "deny"},
+            "mounts": {
+                "/data": {
+                    "commands": {"*": "deny", "printf": "allow", "cd": "allow"}
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    line = "printf x > /marker; f() { cat f.txt; }; f"
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        126,
+        b"",
+        b"cat: Permission denied\n",
+    )
+    marker = await ws.shell("test -e /marker")
+    assert marker.exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_move_into_a_root_above_the_folder_is_not_held_by_its_star():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /t && echo x > /t/m.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny", "cd": "allow"}}},
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    ran = await ws.shell("f() { mv /t/m.txt /; }; cd /; f", session_id="s")
+    assert (ran.exit_code, ran.stderr or b"") == (0, b"")
+    moved = await ws.shell("cat /m.txt")
+    assert moved.stdout == b"x\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_another_entry_asks_about_is_its_own_question():
+    asked: list[str] = []
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/vault/": RAMVFS()},
+        mode=MountMode.WRITE,
+        on_ask=_answering(asked, Outcome.ALLOW),
+    )
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {"*": "deny", "ls": "allow", "cd": "allow"}
+                },
+                "/vault": {"commands": {"*": "ask"}},
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    said = await ws.explain("f() { ls; }; f > /vault/out", "s")
+    assert (said.outcome, said.exit_code, said.stderr) == (
+        Outcome.ASK,
+        1,
+        "bash: line 1: /vault/out: Permission denied\n",
+    )
+    ran = await ws.shell("f() { ls; }; f > /vault/out", session_id="s")
+    assert (ran.exit_code, ran.stderr or b"", len(asked)) == (0, b"", 1)
+    listed = await ws.shell("cat /vault/out")
+    assert listed.stdout == b"f.txt\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stored_functions_redirects_are_each_asked_once():
+    asked: list[str] = []
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        on_ask=_answering(asked, Outcome.ALLOW),
+    )
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "ask"}}},
+        },
+    )
+    await ws.shell("f() { :; }", session_id="s")
+    said = await ws.explain("f > /data/a > /out", "s")
+    assert (said.outcome, said.exit_code) == (Outcome.ASK, 1)
+    ran = await ws.shell("f > /data/a > /out", session_id="s")
+    assert (ran.exit_code, ran.stderr or b"", len(asked)) == (0, b"", 1)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rules", "cwd", "line"),
+    [
+        (
+            {"*": "deny", "ls": "allow"},
+            "/",
+            "ls() { :; }; unset -f ls; ls > /data/out",
+        ),
+        ({"*": "deny", "cd": "allow"}, "/data", "f() { g > out; }; cd /; f"),
+    ],
+)
+async def test_explain_leaves_an_unsure_function_redirect_to_the_run(
+    rules, cwd, line
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": rules}},
+        },
+    )
+    await ws.shell("g() { :; }", session_id="s")
+    await ws.shell(f"cd {cwd}", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (said.outcome, said.exit_code) == (Outcome.ALLOW, 0)
+    assert ran.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_reports_a_stored_functions_refused_redirect():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    await ws.shell("g() { echo hi; }", session_id="s")
+    said = await ws.explain("g > /data/f.txt", "s")
+    ran = await ws.shell("g > /data/f.txt", session_id="s")
+    refused = "bash: line 1: /data/f.txt: Permission denied\n"
+    assert (said.outcome, said.exit_code, said.stderr) == (
+        Outcome.DENY,
+        1,
+        refused,
+    )
+    assert (ran.exit_code, ran.stderr) == (1, refused.encode())
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cwd", "line", "exit_code", "stdout", "stderr"),
+    [
+        ("/", "cd /data; cd -; echo hi", 0, b"/\nhi\n", b""),
+        ("/", "cd /data; D=/; cd $D; echo hi", 0, b"hi\n", b""),
+        (
+            "/",
+            "cd /data/nope; echo hi",
+            0,
+            b"hi\n",
+            b"bash: line 1: cd: /data/nope: No such file or directory\n",
+        ),
+        ("/data", "eval 'f() { ls; }'; f", 0, b"f.txt\n", b""),
+        (
+            "/data",
+            "report() { echo hi; }; cd /; report",
+            0,
+            b"hi\n",
+            b"",
+        ),
+        (
+            "/data",
+            "f() { cat f.txt; }; f",
+            126,
+            b"",
+            b"cat: Permission denied\n",
+        ),
+    ],
+)
+async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate(
+    cwd, line, exit_code, stdout, stderr
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    allowed = ["cd", "ls", "eval"]
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {
+                        "*": "deny",
+                        **dict.fromkeys(allowed, "allow"),
+                    }
+                }
+            },
+        },
+    )
+    await ws.shell(f"cd {cwd}", session_id="s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr or b"") == (
+        exit_code,
+        stdout,
+        stderr,
+    )
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "printf x > /marker; cat f.txt; (cat() { :; })",
+        "printf x > /marker; cat f.txt; cat() { :; }",
+        "printf x > /marker; cat f.txt; v=$(cat() { :; })",
+        "printf x > /marker; cat f.txt; cat() { :; } | :",
+        "printf x > /marker; cat f.txt; { cat() { :; }; }",
+        "f() { printf x > /marker; cat /data/f.txt; }; f; (cat() { :; })",
+    ],
+)
+async def test_a_definition_where_the_word_cannot_see_it_leaves_the_line_held(
+    line,
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("echo kept > /data/f.txt")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data": {
+                    "commands": {
+                        "*": "deny",
+                        "cd": "allow",
+                        "printf": "allow",
+                        ":": "allow",
+                    }
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        126,
+        b"",
+        b"cat: Permission denied\n",
+    )
+    assert (said.exit_code, said.stderr) == (126, "cat: Permission denied\n")
+    marker = await ws.shell("test -e /marker")
+    assert marker.exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("test", "status"),
     [

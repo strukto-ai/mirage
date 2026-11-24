@@ -518,6 +518,481 @@ describe('explain', () => {
   })
 
   it.each([
+    ['deny', 'echo before; cat /data/f.txt'],
+    ['deny', 'cat /data/f.txt; echo after'],
+    ['deny', 'f(){ cat /data/f.txt; }; f; f(){ cat /data/f.txt; }; f'],
+    ['ask', 'echo before; cat /data/f.txt'],
+    ['ask', 'cat /data/f.txt; echo after'],
+    ['ask', 'f(){ cat /data/f.txt; }; f; f(){ cat /data/f.txt; }; f'],
+  ])("holds the whole line on a folder entry's * %s: %s", async (decision, line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': decision } } },
+      }),
+    })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+    expect(DEC.decode(ran.stderr)).toBe('cat: Permission denied\n')
+    expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
+  })
+
+  it.each(
+    (['deny', 'ask'] as const).flatMap((decision) =>
+      (
+        [
+          ['f() { ls; }; f', 0, 'f.txt\n', ''],
+          ['f() { cat /data/f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+          ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
+          ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
+          ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
+          ['f() { ls; }; g() { f; }; g', 0, 'f.txt\n', ''],
+          ['g() { f; }; f() { ls; }; g', 0, 'f.txt\n', ''],
+          ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
+          ['{ f() { ls; }; }; f', 126, '', 'f: Permission denied\n'],
+          ['(f() { ls; }; f)', 126, '', 'f: Permission denied\n'],
+          ['f() { ls; }; (f)', 0, 'f.txt\n', ''],
+          ['  f() { ls; }; f', 0, 'f.txt\n', ''],
+          ['timeout() { ls; }; timeout 1 rm f.txt', 0, 'f.txt\n', ''],
+          ['f() { ls; }; MODE=test f', 0, 'f.txt\n', ''],
+          ['f() { ls; }; f /data/f.txt', 0, 'f.txt\n', ''],
+          ['f() { ls; }; f > /out.txt', 0, '', ''],
+        ] as const
+      ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
+    ),
+  )(
+    "a function the line defines is not held by a folder's * %s: %s",
+    async (decision, line, code, out, err) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('echo kept > /data/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: { '/data': { commands: { '*': decision, cd: 'allow', ls: 'allow' } } },
+        }),
+      })
+      await w.shell('cd /data', { sessionId: 's' })
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        code,
+        out,
+        err,
+      ])
+      expect([said.exitCode, said.stderr]).toEqual([code, err])
+    },
+  )
+
+  it.each([
+    ['printf x > /marker; false && f() { ls; }; f', 'f'],
+    ['printf x > /marker; true && f() { ls; }; f', 'f'],
+    ['f() { ls; }; unset -f f; printf x > /marker; f', 'f'],
+    ['printf x > /marker; f() { ls; }; unset f; f', 'f'],
+    ['printf x > /marker; f() { ls; }; unset -v x; f', 'f'],
+    ["printf x > /marker; f() { ls; }; un''set -f f; f", 'f'],
+    ['printf x > /marker; f() { ls; }; command unset -f f; f', 'f'],
+    ['printf x > /marker; (f() { ls; }); f', 'f'],
+    ['printf x > /marker; f() { ls; } | ls; f', 'f'],
+    ['printf x > /marker; f() { ls; } & f', 'f'],
+    ['printf x > /marker; cat() { :; }; command cat a', 'cat'],
+    ['printf x > /marker; cat() { ls; }; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /marker; cat() { ls; }; sh -c "cat f.txt"', 'cat'],
+    ['printf x > /marker; trap : ERR; f() { ls; }; f', 'f'],
+    ['printf x > /marker; f() { cat /data/a; }; f', 'cat'],
+    ['printf x > /marker; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /marker; sh -c "cat f.txt"', 'cat'],
+  ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'trap']
+    allowed.push('timeout', 'sh')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data': {
+            commands: {
+              '*': 'deny',
+              ...Object.fromEntries(allowed.map((name) => [name, 'allow'])),
+            },
+          },
+        },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    const stderr = `${heldOn}: Permission denied\n`
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      126,
+      '',
+      stderr,
+    ])
+    expect([said.exitCode, said.stderr]).toEqual([126, stderr])
+    expect((await w.shell('test -e /marker')).exitCode).toBe(1)
+  })
+
+  it.each(
+    (['deny', 'ask'] as const).flatMap((decision) =>
+      [
+        'printf x > /marker; f() { echo hi; }; f > /data/f.txt',
+        'printf x > /marker; f() { cat; }; f < /data/f.txt',
+      ].map((line) => [decision, line] as const),
+    ),
+  )(
+    'holds a function the line defines on a redirect into the folder %s: %s',
+    async (decision, line) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('echo kept > /data/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: { '/data': { commands: { '*': decision } } },
+        }),
+      })
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        126,
+        '',
+        'f: Permission denied\n',
+      ])
+      expect([said.exitCode, said.stderr]).toEqual([126, 'f: Permission denied\n'])
+      expect((await w.shell('test -e /marker')).exitCode).toBe(1)
+      expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
+    },
+  )
+
+  it.each([
+    ['f() { cat; }', 'f < /data/f.txt'],
+    ['f() { echo hi; }', 'f > /data/f.txt'],
+  ])('judges a stored function %s on its redirect: %s', async (define, call) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    await w.shell(define, { sessionId: 's' })
+    const ran = await w.shell(call, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      1,
+      '',
+      'bash: line 1: /data/f.txt: Permission denied\n',
+    ])
+    expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
+  })
+
+  it('holds a function the line defines on a redirect through a link', async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/tmp/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const line = 'printf x > /tmp/m; f() { echo hi; }; f > /tmp/l'
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([126, 'f: Permission denied\n'])
+    expect((await w.shell('test -e /tmp/m')).exitCode).toBe(1)
+    expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
+  })
+
+  it("holds a folder's line on a function body reading through a link", async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/tmp/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('printf x > /tmp/m; f() { cat /tmp/l; }; f', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+    expect((await w.shell('test -e /tmp/m')).exitCode).toBe(1)
+  })
+
+  it("holds the line on a folder's star the top-level root ties", async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'deny', echo: 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('echo before; cat /data/f.txt', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+  })
+
+  it("holds a walk from above the folder on the folder's star", async () => {
+    const w = new Workspace({ '/srv/vault/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo keep > /srv/vault/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/srv/vault': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('echo before; grep -r keep /srv', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+  })
+
+  it("lets a function defined with redirects run past a folder's star", async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/out/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny', ls: 'allow', cd: 'allow' } } },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const ran = await w.shell('f(){ ls; } >/out/o 2>&1; f', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode((await w.shell('cat /out/o')).stdout)).toBe('f.txt\n')
+  })
+
+  it('holds a function the line defines on a redirect into another entry', async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/vault/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /vault/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data': { commands: { '*': 'deny', cd: 'allow' } },
+          '/vault': { commands: { '*': 'deny' } },
+        },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const line = 'f() { echo hi; }; f > /vault/f.txt'
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([126, 'f: Permission denied\n'])
+    expect(said.exitCode).toBe(126)
+    expect(DEC.decode((await w.shell('cat /vault/f.txt')).stdout)).toBe('kept\n')
+  })
+
+  it('holds a line on a command the top level names where a folder star ties', async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow', cat: 'deny' },
+        mounts: { '/data': { commands: { '*': 'deny', printf: 'allow', cd: 'allow' } } },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const ran = await w.shell('printf x > /marker; f() { cat f.txt; }; f', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      126,
+      '',
+      'cat: Permission denied\n',
+    ])
+    expect((await w.shell('test -e /marker')).exitCode).toBe(1)
+  })
+
+  it('does not hold a move into a root above the folder on its star', async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('mkdir /t && echo x > /t/m.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny', cd: 'allow' } } },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const ran = await w.shell('f() { mv /t/m.txt /; }; cd /; f', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([0, ''])
+    expect(DEC.decode((await w.shell('cat /m.txt')).stdout)).toBe('x\n')
+  })
+
+  it('asks a redirect another entry asks about as its own question', async () => {
+    const asked: string[] = []
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/vault/': new RAMVFS() },
+      { mode: MountMode.WRITE, onAsk: answering(asked, Outcome.ALLOW) },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data': { commands: { '*': 'deny', ls: 'allow', cd: 'allow' } },
+          '/vault': { commands: { '*': 'ask' } },
+        },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const said = await w.explain('f() { ls; }; f > /vault/out', 's')
+    expect([said.outcome, said.exitCode, said.stderr]).toEqual([
+      Outcome.ASK,
+      1,
+      'bash: line 1: /vault/out: Permission denied\n',
+    ])
+    const ran = await w.shell('f() { ls; }; f > /vault/out', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr), asked.length]).toEqual([0, '', 1])
+    expect(DEC.decode((await w.shell('cat /vault/out')).stdout)).toBe('f.txt\n')
+  })
+
+  it("asks each of a stored function's redirects once", async () => {
+    const asked: string[] = []
+    const w = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, onAsk: answering(asked, Outcome.ALLOW) },
+    )
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'ask' } } },
+      }),
+    })
+    await w.shell('f() { :; }', { sessionId: 's' })
+    const said = await w.explain('f > /data/a > /out', 's')
+    expect([said.outcome, said.exitCode]).toEqual([Outcome.ASK, 1])
+    const ran = await w.shell('f > /data/a > /out', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr), asked.length]).toEqual([0, '', 1])
+  })
+
+  it.each([
+    [{ '*': 'deny', ls: 'allow' }, '/', 'ls() { :; }; unset -f ls; ls > /data/out'],
+    [{ '*': 'deny', cd: 'allow' }, '/data', 'f() { g > out; }; cd /; f'],
+  ] as const)('leaves an unsure function redirect to the run: %#', async (rules, cwd, line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: rules } },
+      }),
+    })
+    await w.shell('g() { :; }', { sessionId: 's' })
+    await w.shell(`cd ${cwd}`, { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.outcome, said.exitCode, ran.exitCode]).toEqual([Outcome.ALLOW, 0, 0])
+  })
+
+  it("explains a stored function's refused redirect", async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    await w.shell('g() { echo hi; }', { sessionId: 's' })
+    const said = await w.explain('g > /data/f.txt', 's')
+    const ran = await w.shell('g > /data/f.txt', { sessionId: 's' })
+    const refused = 'bash: line 1: /data/f.txt: Permission denied\n'
+    expect([said.outcome, said.exitCode, said.stderr]).toEqual([Outcome.DENY, 1, refused])
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([1, refused])
+  })
+
+  it.each([
+    ['/', 'cd /data; cd -; echo hi', 0, '/\nhi\n', ''],
+    ['/', 'cd /data; D=/; cd $D; echo hi', 0, 'hi\n', ''],
+    [
+      '/',
+      'cd /data/nope; echo hi',
+      0,
+      'hi\n',
+      'bash: line 1: cd: /data/nope: No such file or directory\n',
+    ],
+    ['/data', "eval 'f() { ls; }'; f", 0, 'f.txt\n', ''],
+    ['/data', 'report() { echo hi; }; cd /; report', 0, 'hi\n', ''],
+    ['/data', 'f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+  ])(
+    "leaves a command the walk cannot place to the gate under a folder's *: %s %s",
+    async (cwd, line, code, out, err) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('echo kept > /data/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: {
+            '/data': { commands: { '*': 'deny', cd: 'allow', ls: 'allow', eval: 'allow' } },
+          },
+        }),
+      })
+      await w.shell(`cd ${cwd}`, { sessionId: 's' })
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        code,
+        out,
+        err,
+      ])
+    },
+  )
+
+  it.each([
+    'printf x > /marker; cat f.txt; (cat() { :; })',
+    'printf x > /marker; cat f.txt; cat() { :; }',
+    'printf x > /marker; cat f.txt; v=$(cat() { :; })',
+    'printf x > /marker; cat f.txt; cat() { :; } | :',
+    'printf x > /marker; cat f.txt; { cat() { :; }; }',
+    'f() { printf x > /marker; cat /data/f.txt; }; f; (cat() { :; })',
+  ])('holds a line whose word cannot see a definition of its name: %s', async (line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data': { commands: { '*': 'deny', cd: 'allow', printf: 'allow', ':': 'allow' } },
+        },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      126,
+      '',
+      'cat: Permission denied\n',
+    ])
+    expect([said.exitCode, said.stderr]).toEqual([126, 'cat: Permission denied\n'])
+    expect((await w.shell('test -e /marker')).exitCode).toBe(1)
+  })
+
+  it.each([
     ['[[ ! -e /data/secret.txt ]]', '1'],
     ['[[ -e /data/a.txt && -e /data/secret.txt ]]', '0'],
     ['[ ! -e /data/secret.txt ]', '1'],
