@@ -39,6 +39,14 @@ mirage workspace create workspace.yaml --id demo
 
 ## MCP
 
+OpenClaw changes and probes MCP servers only while its Gateway is stopped:
+
+```bash
+openclaw gateway stop
+```
+
+Stop a foreground `openclaw gateway run` with Ctrl-C instead. Then add Mirage:
+
 <CodeGroup>
 ```bash mirage mcp
 openclaw mcp set mirage '{"command":"mirage","args":["mcp","-w","demo"]}'
@@ -50,9 +58,10 @@ openclaw mcp set mirage '{"url":"https://mirage.example.com/v1/workspaces/demo/m
 
 ```bash
 openclaw mcp probe mirage
+openclaw gateway start
 ```
 
-This prints `mirage: 7 tools`. A session already open picks them up after `openclaw mcp reload`.
+The probe prints `mirage: 7 tools`. Sessions on the restarted Gateway get the tools.
 
 `mirage mcp` sends your saved [login](/home/access/cli#log-in) or the local token file. OpenClaw starts it with only `HOME`, `PATH`, `USER` and `LOGNAME`, so a `MIRAGE_TOKEN` in the Gateway's environment does not reach it. If the Gateway runs as a service, set `command` to the path `command -v mirage` prints.
 
