@@ -1607,3 +1607,30 @@ async def test_a_redirect_takes_the_windows_while_its_store_streams_elsewhere():
         await held
         await first.close()
         await second.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "stream"),
+    [
+        ("{ echo d; sleep 30\n} 2>&1", "stdout"),
+        ("( echo d; sleep 30 ) 2>/dev/null", "stdout"),
+        ("for i in 1; do echo d; sleep 30; done 2>&1", "stdout"),
+        ("while true; do echo d; sleep 30; done 2>&1", "stdout"),
+        ("if true; then echo d; sleep 30; fi 2>&1", "stdout"),
+        ("f() { echo d; sleep 30; }; f 2>&1", "stdout"),
+        ("{ echo d >&3; sleep 30; } 3>&1", "stdout"),
+        ("true && { echo d; sleep 30; } 2>&1", "stdout"),
+        ("echo x | { echo d; sleep 30; } 2>&1", "stdout"),
+        ("{ echo d >&2; sleep 30; } >/dev/null", "stderr"),
+        ("{ { echo d; sleep 30; } >&3; } 3>&1 2>&1", "stdout"),
+    ],
+)
+async def test_a_redirected_compound_streams_what_it_prints(line, stream):
+    ws = Workspace({})
+    try:
+        async with await ws.shell(line, stream=True) as execution:
+            event = await asyncio.wait_for(anext(execution.events), 5)
+            assert (event.stream, event.data) == (stream, b"d\n")
+    finally:
+        await ws.close()

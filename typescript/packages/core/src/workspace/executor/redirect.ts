@@ -155,11 +155,11 @@ const STREAM_OUTPUT_BUILTINS = new Set([
 ])
 
 /**
- * Send FIFO writes immediately; preserve ordinary redirect recording. While a
- * pipe is in play (`live`), terminal output goes out as it is written, through
- * a copied descriptor too, so it keeps the command's order. A write into a
- * pipe whose reader has gone throws `PipeClosed`. Mirrors Python's
- * PipeRecorder.
+ * Send FIFO writes immediately; preserve ordinary redirect recording. While
+ * `live`, terminal output goes out as it is written, through a copied
+ * descriptor too, so it keeps the command's order and a command cut short has
+ * shown what it wrote. A write into a pipe whose reader has gone throws
+ * `PipeClosed`. Mirrors Python's PipeRecorder.
  */
 export class PipeRecorder extends Recorder {
   // A channel `streamTo` binds goes into its file as it is written; two
@@ -316,7 +316,7 @@ export class PipeRecorder extends Recorder {
   constructor(
     private readonly dispatch: DispatchFn,
     private readonly streams: Map<Channel, PathSpec>,
-    private readonly forward: Map<Channel, Channel>,
+    private readonly forward: Map<Channel, Channel | Inherited>,
     private readonly sink: JobConsole | null,
     private readonly live: boolean,
   ) {
@@ -379,9 +379,10 @@ export class PipeRecorder extends Recorder {
     }
     const scope = this.streams.get(channel)
     if (scope === undefined) {
-      const channelTo = this.forward.get(channel)
-      if (this.sink !== null && channelTo !== undefined) await this.sink.emit(channelTo, data)
-      else await super.emit(channel, data)
+      const to = this.forward.get(channel)
+      if (this.sink === null || to === undefined) await super.emit(channel, data)
+      else if (to instanceof Inherited) await this.emitTo(to, data)
+      else await this.sink.emit(to, data)
     } else if (data.byteLength > 0) {
       await this.dispatch('append', scope, [data])
     }
@@ -664,14 +665,14 @@ function outputRecorder(
   dispatch: DispatchFn,
   outputs: Map<number, FdDest>,
   files: readonly FileDescription[],
-  piped: ReadonlySet<number>,
+  deferred: FileDescription | null,
   sink: JobConsole | undefined,
   command: TSNodeLike | null,
   follow: ((path: string) => string) | null,
   session: SessionState,
 ): PipeRecorder {
   const streams = new Map<Channel, PathSpec>()
-  const forward = new Map<Channel, Channel>()
+  const forward = new Map<Channel, Channel | Inherited>()
   for (const [fd, channel] of [
     [1, Channel.STDOUT],
     [2, Channel.STDERR],
@@ -679,13 +680,15 @@ function outputRecorder(
     const target = outputs.get(fd)
     if (target === TO_STDOUT) forward.set(channel, Channel.STDOUT)
     else if (target === TO_STDERR) forward.set(channel, Channel.STDERR)
+    else if (target instanceof Inherited) forward.set(channel, target)
     else if (target instanceof FileDescription && target.pipe) streams.set(channel, target.scope)
   }
-  const live = streams.size > 0 || piped.size > 0
+  // Held for a deferred open: bash never runs a command whose open fails.
+  const live = deferred === null
   const recorder = new PipeRecorder(
     dispatch,
     streams,
-    live ? forward : new Map<Channel, Channel>(),
+    live ? forward : new Map<Channel, Channel | Inherited>(),
     sink ?? null,
     live,
   )
@@ -1213,7 +1216,7 @@ async function runRedirects(
   if (badFd !== null) return shellFailure(badDescriptorLine(badFd))
   const [inputs, outputs, closed] = openDescriptors(context, stdin)
   const opened = new Opened(dispatch, session, sink, stdin, inputs, outputs, closed)
-  const { files, piped, targets } = opened
+  const { files, targets } = opened
   const expanded: Redirect[] = []
   const admissionStdin =
     guard === undefined ? stdin : await redirectStdin(dispatch, redirects, context, stdin)
@@ -1268,7 +1271,16 @@ async function runRedirects(
     if (failure !== null) return failure
   }
   redirects = expanded
-  const recorder = outputRecorder(dispatch, outputs, files, piped, sink, command, follow, session)
+  const recorder = outputRecorder(
+    dispatch,
+    outputs,
+    files,
+    opened.deferred,
+    sink,
+    command,
+    follow,
+    session,
+  )
   const streamed: Caller['streamed'] = [
     ...currentCaller().streamed,
     ...[...new Set(recorder.bound.values())].map(

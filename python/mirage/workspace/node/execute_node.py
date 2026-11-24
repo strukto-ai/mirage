@@ -223,9 +223,10 @@ async def _recurse_reassociated(
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): where this call's output goes as it
-            arrives, None to return it.
+            arrives, None for the list's own sink.
     """
-    deps = with_opts(deps, {"sink": sink})
+    if sink is not None:
+        deps = with_opts(deps, {"sink": sink})
     if node.id != right.id:
         return await recurse(node, context, stdin, call_stack, sink=deps.sink)
     return await _run_redirected(
@@ -342,7 +343,7 @@ async def _recurse_stage(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
         return await _run_redirected(
-            with_opts(deps, {"sink": None}),
+            deps,
             recurse,
             node,
             bound,
@@ -603,7 +604,7 @@ async def _run_redirected(
         )
     if command is not None and command.type == NT.PIPELINE:
         return await _run_pipeline(
-            with_opts(deps, {"sink": None}),
+            deps,
             recurse,
             get_pipeline_stages(command, redirects),
             context,
