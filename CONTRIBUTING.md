@@ -178,8 +178,9 @@ registries.
 
 1. Run `python3 scripts/check_release_published.py` from the release
    checkout. It checks every package on both registries: the version is
-   there with all its files, its dist-tag points at it, and its
-   `@struktoai/*` dependencies are pinned to it. A package with no release
+   there with all its files (each platform's wheel; in each npm tarball,
+   LICENSE and every file its entry points name), its dist-tag points at
+   it, and its `@struktoai/*` dependencies are pinned to it. A package with no release
    yet keeps `latest` at its first pre-release until moved, so the script
    prints the `npm dist-tag add` that moves it to the new one. A registry
    can take minutes to show a fresh publish; re-run before publishing

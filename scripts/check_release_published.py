@@ -14,10 +14,12 @@
 
 import argparse
 import concurrent.futures
+import io
 import json
 import pathlib
 import re
 import sys
+import tarfile
 import urllib.error
 import urllib.request
 from typing import Any
@@ -34,6 +36,22 @@ DEPENDENCY_FIELDS = (
     "peerDependencies",
     "optionalDependencies",
 )
+ENTRY_FIELDS = ("main", "module", "types", "bin", "exports", "imports")
+RELEASE = r"\d+\.\d+\.\d+"
+
+NPM_FILES = {
+    "@struktoai/mirage-fuse": tuple(
+        f"bin/mirage-fuse-{target}"
+        for target in (
+            "x86_64",
+            "aarch64",
+            "armv7l",
+            "armv6l",
+            "darwin-x86_64",
+            "darwin-arm64",
+        )
+    ),
+}
 
 PYPI_FILES = {
     "mirage-ai": {
@@ -124,16 +142,91 @@ def check_npm(name: str, version: str, tag: str) -> tuple[list[str], str]:
     if tags.get(tag) != version:
         problems.append(f"dist-tag {tag} is {tags.get(tag)}, not {version}")
     if tag != "latest" and "-" in latest and latest != version:
-        problems.append(
-            f"dist-tag latest is the older pre-release {latest}, and the "
-            f"package has no release for it to fall back to: "
-            f"npm dist-tag add {name}@{version} latest"
-        )
+        releases = [
+            v for v in packument["versions"] if re.fullmatch(RELEASE, v)
+        ]
+        if releases:
+            newest = max(releases, key=lambda v: tuple(map(int, v.split("."))))
+            problems.append(
+                f"dist-tag latest is the pre-release {latest} though "
+                f"{newest} is out: npm dist-tag add {name}@{newest} latest"
+            )
+        else:
+            problems.append(
+                f"dist-tag latest is the older pre-release {latest}, and the "
+                f"package has no release for it to fall back to: "
+                f"npm dist-tag add {name}@{version} latest"
+            )
     for field in DEPENDENCY_FIELDS:
         for dependency, spec in manifest.get(field, {}).items():
             if dependency.startswith(NPM_SCOPE) and spec != version:
                 problems.append(f"{field} {dependency} is {spec}")
+    problems += check_tarball(name, manifest["dist"]["tarball"])
     return problems, latest
+
+
+def entry_paths(field: str, value: Any) -> list[str]:
+    """The files a package.json entry field names, `./` stripped. Under
+    `exports` and `imports` only `./` targets are files; a bare name there
+    is another package. An `imports` entry's `types` serves the package's
+    own build from source, so the tarball needs only its runtime targets.
+
+    Args:
+        field (str): the package.json field the value sits under.
+        value (Any): the field's value, or one of its nested values.
+    """
+    if isinstance(value, dict):
+        return [
+            p
+            for key, v in value.items()
+            if not (field == "imports" and key == "types")
+            for p in entry_paths(field, v)
+        ]
+    if isinstance(value, list):
+        return [p for v in value for p in entry_paths(field, v)]
+    if not isinstance(value, str):
+        return []
+    if field in ("exports", "imports") and not value.startswith("./"):
+        return []
+    return [value.removeprefix("./")]
+
+
+def check_tarball(name: str, url: str) -> list[str]:
+    """The files a published npm tarball should hold and does not: LICENSE,
+    every file its package.json's entry points name, and the package's
+    own executables.
+
+    Args:
+        name (str): the npm package name.
+        url (str): the tarball's registry URL.
+    """
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "mirage-release-check"}
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        data = response.read()
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        files = {
+            m.name.removeprefix("package/")
+            for m in archive.getmembers()
+            if m.isfile() and m.name.startswith("package/")
+        }
+        if "package.json" not in files:
+            return ["tarball has no package/package.json"]
+        extracted = archive.extractfile("package/package.json")
+        package = json.load(extracted) if extracted else {}
+    wanted = {"LICENSE": "LICENSE", "package.json": "package.json"}
+    for field in ENTRY_FIELDS:
+        for path in entry_paths(field, package.get(field)):
+            wanted.setdefault(path, field)
+    for path in NPM_FILES.get(name, ()):
+        wanted.setdefault(path, "executable")
+    problems = []
+    for path, field in wanted.items():
+        pattern = re.escape(path).replace(r"\*", ".+")
+        if not any(re.fullmatch(pattern, file) for file in files):
+            problems.append(f"tarball has no {path} ({field})")
+    return problems
 
 
 def npm_names() -> list[str]:
