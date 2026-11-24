@@ -227,6 +227,22 @@ export class PageLog {
   }
 
   /**
+   * Store the pages named no more.
+   *
+   * They are pages the database reads nothing from before it writes them
+   * again, as the ones SQLite has freed. One read all the same answers
+   * zeros, or what a commit once held there.
+   */
+  abandon(pages: Iterable<number>): void {
+    if (this.broken !== null) throw this.broken
+    for (const page of pages) {
+      if (page >= this.size || this.spilled.has(page)) continue
+      this.release(page)
+      this.drop(page)
+    }
+  }
+
+  /**
    * Commit every change since the last commit, all of it or none.
    *
    * @returns the rows the commit wrote and deleted.
@@ -234,7 +250,8 @@ export class PageLog {
    *   write, as what it holds in memory no longer matches what is stored.
    */
   flush(): number {
-    if (this.dirty.size === 0 && this.spilled.size === 0 && this.size === this.published) return 0
+    const changed = this.dirty.size > 0 || this.spilled.size > 0 || this.size !== this.published
+    if (!changed && this.freed.length === 0) return 0
     if (this.broken !== null) throw this.broken
     const before = this.counts.rowsWritten + this.counts.rowsDeleted
     try {

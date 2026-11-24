@@ -21,9 +21,9 @@ import { PAGE_BYTES, PageLog, type PageLogOptions } from './log.ts'
 const VFS_NAME = 'mirage-paged'
 const MAIN = 'main.db'
 const STATEMENTS = 256
-// Freed pages are given back once they hold this many bytes, this many a flush.
-const RECLAIM_BYTES = 8 << 20
-const RECLAIM_STEP_BYTES = 32 << 20
+// The pages SQLite freed are looked for once this many bytes more of them
+// are free than when last looked for.
+const FREED_BYTES = 8 << 20
 const INTEGER = 1
 const FLOAT = 2
 const TEXT = 3
@@ -273,8 +273,8 @@ export class PagedDatabase {
   /** The bytes of BLOBs statements were given and answered, so far. */
   blobBytes = 0
   private closed = false
-  // Whether the database was made to give freed pages back.
-  private reclaims = false
+  // The free pages SQLite counted when the log was last told of them.
+  private told = 0
   private readonly statements = new Map<string, number>()
   private readonly free: number
   private readonly out: number
@@ -374,13 +374,6 @@ export class PagedDatabase {
     database.exec('PRAGMA synchronous = OFF')
     const cacheKb = Math.ceil((options.pageCacheBytes ?? 2 << 20) / 1024)
     database.exec(`PRAGMA cache_size = ${String(-cacheKb)}`)
-    // The pages a delete frees go back to the storage as the database is
-    // flushed (`reclaim`). SQLite gives them back only from a database made
-    // to: one made before keeps them, for what is written next.
-    if (Number(database.exec('PRAGMA page_count')[0]?.page_count) === 0) {
-      database.exec('PRAGMA auto_vacuum = INCREMENTAL')
-    }
-    database.reclaims = Number(database.exec('PRAGMA auto_vacuum')[0]?.auto_vacuum) === 2
     return database
   }
 
@@ -448,20 +441,39 @@ export class PagedDatabase {
   flush(): number {
     if (this.closed) return 0
     if (!this.idle) throw new Error('a paged database cannot flush inside a transaction')
-    this.reclaim()
+    this.abandon()
     return this.log.flush()
   }
 
-  // Give the storage back the pages deletes freed, once they are a quarter
-  // of the database and worth a pass: SQLite moves its last pages into them
-  // and cuts the file, which the log then stores no more. A flush takes a
-  // step of it, so none waits long on one large delete.
-  private reclaim(): void {
-    if (!this.reclaims) return
-    const free = Number(this.exec('PRAGMA freelist_count')[0]?.freelist_count)
-    if (free * PAGE_BYTES < RECLAIM_BYTES) return
-    if (free * 4 < Number(this.exec('PRAGMA page_count')[0]?.page_count)) return
-    this.exec(`PRAGMA incremental_vacuum(${String(RECLAIM_STEP_BYTES / PAGE_BYTES)})`)
+  // Tell the log which pages SQLite holds free, once deletes freed a pass
+  // worth of them. SQLite keeps a free page for what is written next and
+  // reads nothing from it before, so the log stores it no more and the
+  // storage has its room back, with no page moved or written for it. The
+  // list is SQLite's own: its first page and its length in the database's
+  // header, each page of it naming the next and the free pages it lists. A
+  // list that does not add up is left for SQLite to refuse.
+  private abandon(): void {
+    const head = this.log.read(0)
+    if (head === null) return
+    const header = new DataView(head.buffer, head.byteOffset, head.byteLength)
+    const count = header.getUint32(36)
+    if (count < this.told) this.told = count
+    if ((count - this.told) * PAGE_BYTES < FREED_BYTES) return
+    const most = (PAGE_BYTES - header.getUint8(20)) / 4 - 2
+    const free: number[] = []
+    let lists = 0
+    for (let next = header.getUint32(32); next !== 0; lists++) {
+      const page = lists < count ? this.log.read(next - 1) : null
+      if (page === null) return
+      const list = new DataView(page.buffer, page.byteOffset, page.byteLength)
+      const listed = list.getUint32(4)
+      if (listed > most) return
+      for (let i = 0; i < listed; i++) free.push(list.getUint32(8 + 4 * i) - 1)
+      next = list.getUint32(0)
+    }
+    if (free.length + lists !== count) return
+    this.log.abandon(free)
+    this.told = count
   }
 
   /** Flush, then free the database: it runs no statement after. */
