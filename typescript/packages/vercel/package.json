@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-vercel",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0",
   "description": "Mirage workspace tools for the Vercel AI SDK",
   "keywords": [
     "mirage",

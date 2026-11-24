@@ -2,8 +2,7 @@ cff-version: 1.2.0
 message: "Please cite Mirage if you use this code in your own work."
 title: "Mirage: A Virtual Terminal for AI Agents"
 authors:
-  - family-names: "Zhang"
-    given-names: "Zecheng"
+  - name: "Strukto.AI Team"
 license: Apache-2.0
 doi: "10.5281/zenodo.23504502"
 url: "https://github.com/strukto-ai/mirage"
