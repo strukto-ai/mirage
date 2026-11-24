@@ -1227,6 +1227,12 @@ async def test_a_default_profile_keying_a_folder_is_refused_at_load():
             profiles={"agent": {"mounts": {"/usr/bin/x": {"mode": "read"}}}},
             profile="agent",
         )
+    ws = Workspace(
+        {"/usr": RAMVFS()},
+        profiles={"agent": {"mounts": {"/usr/bin": {"mode": "read"}}}},
+        profile="agent",
+    )
+    await ws.close()
 
 
 @pytest.mark.asyncio

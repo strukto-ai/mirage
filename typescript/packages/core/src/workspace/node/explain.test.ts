@@ -670,6 +670,96 @@ describe('explain', () => {
     },
   )
 
+  it.each([
+    ['f() { cat; }', 'f < /data/f.txt'],
+    ['f() { echo hi; }', 'f > /data/f.txt'],
+  ])('judges a stored function %s on its redirect: %s', async (define, call) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    await w.shell(define, { sessionId: 's' })
+    const ran = await w.shell(call, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      1,
+      '',
+      'bash: line 1: /data/f.txt: Permission denied\n',
+    ])
+    expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
+  })
+
+  it('holds a function the line defines on a redirect through a link', async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/tmp/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const line = 'printf x > /tmp/m; f() { echo hi; }; f > /tmp/l'
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([126, 'f: Permission denied\n'])
+    expect((await w.shell('test -e /tmp/m')).exitCode).toBe(1)
+    expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
+  })
+
+  it("holds the line on a folder's star the top-level root ties", async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'deny', echo: 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('echo before; cat /data/f.txt', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+  })
+
+  it("holds a walk from above the folder on the folder's star", async () => {
+    const w = new Workspace({ '/srv/vault/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('echo keep > /srv/vault/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/srv/vault': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('echo before; grep -r keep /srv', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+  })
+
+  it("lets a function defined with redirects run past a folder's star", async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/out/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny', ls: 'allow', cd: 'allow' } } },
+      }),
+    })
+    await w.shell('cd /data', { sessionId: 's' })
+    const ran = await w.shell('f(){ ls; } >/out/o 2>&1; f', { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode((await w.shell('cat /out/o')).stdout)).toBe('f.txt\n')
+  })
+
   it('holds a function the line defines on a redirect into another entry', async () => {
     const w = new Workspace(
       { '/data/': new RAMVFS(), '/vault/': new RAMVFS() },

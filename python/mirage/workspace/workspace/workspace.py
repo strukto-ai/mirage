@@ -543,8 +543,10 @@ class Workspace:
         )
         self._profiles: dict[str, SessionProfile] = {}
         self._default_profile_name: str | None = None
+        # Mounts keys wait for the built-in mounts (``_mount_views``):
+        # checked once every mount is in place, below.
         for name, doc in (profiles or {}).items():
-            self.set_profile(name, doc)
+            self._take_profile(name, doc, held=False)
         self._session_mgr = SessionManager(
             session_id,
             store=stores.sessions,

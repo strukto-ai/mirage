@@ -440,6 +440,9 @@ class Judged:
             been skipped or failed, ran before it (``Walked.lost``,
             ``Walked.elsewhere``, ``Walked.deferred``), so ``ctx.cwd``
             is the shell's.
+        namespace (Namespace | None): the link table the command was
+            judged against, so a redirect target is followed through its
+            links as the run follows it.
     """
 
     judgment: Judgment
@@ -451,6 +454,7 @@ class Judged:
     session: SessionState | None = None
     defined: bool = False
     placed: bool = True
+    namespace: Namespace | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -770,6 +774,7 @@ async def _judge_words(
         ctx,
         session,
         placed=placed,
+        namespace=namespace,
     )
     # env's command runs in the environment env builds for it, and a
     # nested shell's line in a new shell started from this one.
@@ -903,9 +908,11 @@ def _in_folder(one: Judged) -> bool:
     entry's tree, and the command surely works inside that folder: a
     word of its own names an absolute path there, or the walk knows
     where it stands (``Judged.placed``) and its cwd or a path it reaches
-    is there. Where the walk only guesses the cwd (after ``cd -``,
-    ``cd "$d"``, a ``cd`` that may fail), the per-command gate judges
-    the command in the cwd the shell really has.
+    is there, or it walks or moves a whole tree from an absolute path
+    the folder lies under (``grep -r x /a`` for a folder ``/a/b``), as
+    the matcher's ``touches`` reads it. Where the walk only guesses the
+    cwd (after ``cd -``, ``cd "$d"``, a ``cd`` that may fail), the
+    per-command gate judges the command in the cwd the shell really has.
 
     Args:
         one (Judged): one command's explanation and its place.
@@ -921,10 +928,14 @@ def _in_folder(one: Judged) -> bool:
         for path in (ctx.cwd, *(p.virtual for p in ctx.paths))
     ):
         return True
+    walks = ctx.walks or ctx.subtree
     return any(
         word.path is not None
         and word.text.startswith("/")
-        and under_path(word.path.virtual, rule.mount)
+        and (
+            under_path(word.path.virtual, rule.mount)
+            or (walks and under_path(rule.mount, word.path.virtual))
+        )
         for word in ctx.words
     )
 
@@ -949,7 +960,7 @@ def _opens_held(one: Judged) -> bool:
         word.kind is WordKind.REDIRECT
         and word.path is not None
         and (one.placed or word.text.startswith("/"))
-        and redirect_asked([word.path], session, None) is not None
+        and redirect_asked([word.path], session, one.namespace) is not None
         for word in ctx.words
     )
 
@@ -3002,10 +3013,15 @@ def _with_calls(
     base = tree.start_byte
     defined: dict[str, int] = {}
     for node in tree.named_children:
-        if node.type == NodeType.FUNCTION_DEFINITION and not is_backgrounded(
-            node
-        ):
-            defined.setdefault(get_function_name(node), node.end_byte - base)
+        if is_backgrounded(node):
+            continue
+        definition = node
+        if node.type == NodeType.REDIRECTED_STATEMENT and node.named_children:
+            definition = node.named_children[0]
+        if definition.type == NodeType.FUNCTION_DEFINITION:
+            defined.setdefault(
+                get_function_name(definition), node.end_byte - base
+            )
     if not defined:
         return list(judged)
     nodes = list(walk_tree(tree))

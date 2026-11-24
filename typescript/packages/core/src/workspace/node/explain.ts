@@ -318,6 +318,11 @@ export interface Judged {
    */
   readonly session?: SessionState
   /**
+   * The link table the command was judged against, so a redirect target is
+   * followed through its links as the run follows it.
+   */
+  readonly namespace?: Namespace | null
+  /**
    * The word calls a function the line surely defines before it runs
    * (`withCalls`), so the gate, which sees the call, says whether a tree
    * root's own decision speaks for it (`isTool`).
@@ -663,6 +668,7 @@ async function* judgeWords(
     ctx,
     session,
     placed,
+    namespace,
   }
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
@@ -1279,8 +1285,10 @@ function byDefault(expl: Judgment): boolean {
  * Whether the leaf that decided the command belongs to a mount entry's
  * tree, and the command surely works inside that folder: a word of its own
  * names an absolute path there, or the walk knows where it stands
- * (`Judged.placed`) and its cwd or a path it reaches is there. Where the
- * walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
+ * (`Judged.placed`) and its cwd or a path it reaches is there, or it walks
+ * or moves a whole tree from an absolute path the folder lies under
+ * (`grep -r x /a` for a folder `/a/b`), as the matcher's `touches` reads it.
+ * Where the walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
  * fail), the per-command gate judges the command in the cwd the shell
  * really has. Mirrors the Python `_in_folder`.
  */
@@ -1295,9 +1303,12 @@ function inFolder(one: Judged): boolean {
   ) {
     return true
   }
+  const walks = ctx.walks === true || ctx.subtree === true
   return (ctx.words ?? []).some(
     (word) =>
-      word.path !== null && word.text.startsWith('/') && underPath(word.path.virtual, mount),
+      word.path !== null &&
+      word.text.startsWith('/') &&
+      (underPath(word.path.virtual, mount) || (walks && underPath(mount, word.path.virtual))),
   )
 }
 
@@ -1318,7 +1329,7 @@ function opensHeld(one: Judged): boolean {
       word.kind === WordKind.REDIRECT &&
       word.path !== null &&
       (one.placed !== false || word.text.startsWith('/')) &&
-      redirectAsked([word.path], session, null) !== null,
+      redirectAsked([word.path], session, one.namespace ?? null) !== null,
   )
 }
 
@@ -2201,8 +2212,11 @@ function withCalls(
   const base = tree.startIndex ?? 0
   const defined = new Map<string, number>()
   for (const node of tree.namedChildren) {
-    if (node.type !== NodeType.FUNCTION_DEFINITION || isBackgrounded(node)) continue
-    const name = getFunctionName(node)
+    if (isBackgrounded(node)) continue
+    const definition =
+      node.type === NodeType.REDIRECTED_STATEMENT ? (node.namedChildren[0] ?? node) : node
+    if (definition.type !== NodeType.FUNCTION_DEFINITION) continue
+    const name = getFunctionName(definition)
     if (!defined.has(name)) defined.set(name, (node.endIndex ?? 0) - base)
   }
   if (defined.size === 0) return [...judged]

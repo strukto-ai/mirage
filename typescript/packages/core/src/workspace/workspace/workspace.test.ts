@@ -757,7 +757,7 @@ describe('profile mounts keys', () => {
     expect(ws.listSessions().map((s) => s.sessionId)).not.toContain('b')
   })
 
-  it('refuses a default profile keying a folder at load', () => {
+  it('refuses a default profile keying a folder at load', async () => {
     expect(
       () =>
         new Workspace(
@@ -775,6 +775,14 @@ describe('profile mounts keys', () => {
           },
         ),
     ).toThrow('profile agent: mounts key /usr/bin/x is not a mount')
+    const usr = new Workspace(
+      { '/usr': new RAMVFS() },
+      {
+        profiles: { agent: SessionProfile({ mounts: { '/usr/bin': { mode: 'read' } } }) },
+        profile: 'agent',
+      },
+    )
+    await usr.close()
   })
 
   it('keeps a snapshot profile whose nested mount was unmounted', async () => {

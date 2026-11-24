@@ -860,6 +860,33 @@
    ]
   },
   {
+   "id": "a_folders_star_meets_stored_functions_ties_and_redirected_definitions",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "ls": "allow"}}}}},
+    {"op": "session", "id": "tied", "profile": {"commands": {"*": "deny", "echo": "allow"}, "mounts": {"/data": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "exec", "command": "echo top > /data/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "f() { cat; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "f < /data/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": "g() { echo hi; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "g > /data/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/f.txt: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "cat /data/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "tied", "command": "echo before; cat /data/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": "cd /data; h(){ ls; } >/out.txt 2>&1; h; cat /out.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "session": "kept", "command": "cd /data; h(){ ls; } >/out.txt 2>&1; h", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /out.txt", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
+   "id": "a_folders_star_holds_a_walk_from_above_its_mount",
+   "settings": {"mode": "write", "mounts": {"/srv/vault": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/srv/vault": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "exec", "command": "echo top > /srv/vault/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "echo before; grep -r top /srv", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "grep: Permission denied\n", "decision": "kept"}}}
+   ]
+  },
+  {
    "id": "a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [

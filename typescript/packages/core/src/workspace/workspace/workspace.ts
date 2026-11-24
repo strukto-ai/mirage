@@ -551,8 +551,10 @@ export class Workspace {
     // and max_env below, a line's time limit as the line starts.
     this.registry.ceilings = options.ceilings ?? {}
     this.processTable.ceiling = this.registry.ceilings.maxProcesses ?? null
+    // Mounts keys wait for the built-in mounts (`mountViews`): checked once
+    // every mount is in place, below.
     for (const [name, profile] of Object.entries(options.profiles ?? {})) {
-      this.setProfile(name, profile)
+      this.takeProfile(name, profile, false)
     }
     // Admission policies, consulted in registration order after the
     // built-ins the registry seeds: the document's command tiers
