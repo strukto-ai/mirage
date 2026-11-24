@@ -550,12 +550,14 @@ describe('explain', () => {
           ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
           ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
           ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
-          ['g() { f; }; f() { ls; }; g', 0, 'f.txt\n', ''],
+          ['f() { ls; }; g() { f; }; g', 0, 'f.txt\n', ''],
+          ['g() { f; }; f() { ls; }; g', 126, '', 'f: Permission denied\n'],
           ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
-          ['{ f() { ls; }; }; f', 0, 'f.txt\n', ''],
-          ['(f() { ls; }; f)', 0, 'f.txt\n', ''],
+          ['{ f() { ls; }; }; f', 126, '', 'f: Permission denied\n'],
+          ['(f() { ls; }; f)', 126, '', 'f: Permission denied\n'],
           ['f() { ls; }; (f)', 0, 'f.txt\n', ''],
-          ['timeout() { ls; }; timeout 1 rm f.txt', 0, 'f.txt\n', ''],
+          ['  f() { ls; }; f', 0, 'f.txt\n', ''],
+          ['timeout() { ls; }; timeout 1 rm f.txt', 126, '', 'rm: Permission denied\n'],
         ] as const
       ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
     ),
@@ -582,6 +584,52 @@ describe('explain', () => {
       expect([said.exitCode, said.stderr]).toEqual([code, err])
     },
   )
+
+  it.each([
+    ['printf x > /data/marker; false && f() { ls; }; f', 'f'],
+    ['printf x > /data/marker; true && f() { ls; }; f', 'f'],
+    ['f() { ls; }; unset -f f; printf x > /data/marker; f', 'f'],
+    ['printf x > /data/marker; f() { ls; }; unset f; f', 'f'],
+    ['printf x > /data/marker; f() { ls; }; unset -v x; f', 'f'],
+    ["printf x > /data/marker; f() { ls; }; un''set -f f; f", 'f'],
+    ['printf x > /data/marker; f() { ls; }; command unset -f f; f', 'f'],
+    ['printf x > /data/marker; (f() { ls; }); f', 'f'],
+    ['printf x > /data/marker; f() { ls; } | ls; f', 'f'],
+    ['printf x > /data/marker; f() { ls; } & f', 'f'],
+    ['printf x > /data/marker; cat() { :; }; command cat a', 'cat'],
+    ["printf x > /data/marker; eval 'f() { ls; }'; f", 'f'],
+    ['printf x > /data/marker; trap : ERR; f() { ls; }; f', 'f'],
+    ['printf x > /data/marker; f() { cat a; }; f', 'cat'],
+  ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'eval', 'trap']
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: {
+          '/data/keep': {
+            commands: {
+              '*': 'deny',
+              ...Object.fromEntries(allowed.map((name) => [name, 'allow'])),
+            },
+          },
+        },
+      }),
+    })
+    await w.shell('cd /data/keep', { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    const stderr = `${heldOn}: Permission denied\n`
+    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+      126,
+      '',
+      stderr,
+    ])
+    expect([said.exitCode, said.stderr]).toEqual([126, stderr])
+    expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
+  })
 
   it.each([
     'printf x > /data/marker; cat f.txt; (cat() { :; })',

@@ -59,6 +59,7 @@ import {
 } from '../../shell/node_kind.ts'
 import { parseOptionWord } from '../../shell/options.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
+import { walkTree } from '../../shell/parse/names.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type PolicyDecision } from '../../types.ts'
@@ -137,6 +138,23 @@ const ASSIGNED_TILDE = /^[A-Za-z_][A-Za-z0-9_]*=(?:[^~'"\\]*[:=])?~/
  * run in this shell, and the directory stack.
  */
 const CWD_MOVERS: ReadonlySet<string> = new Set(['eval', '.', 'source', 'pushd', 'popd'])
+
+/**
+ * Words after which a function the line defined may no longer be one, or
+ * that run text in this shell the walk does not read as the line's:
+ * `unset`, a line run in this shell, a trap's action.
+ */
+const FUNCTION_DROPPERS: ReadonlySet<string> = new Set(['unset', 'eval', '.', 'source', 'trap'])
+
+/** The nodes a word is spelled with, quoted or not. */
+const WORD_TYPES: ReadonlySet<string> = new Set([
+  NodeType.WORD,
+  NodeType.CONCATENATION,
+  NodeType.STRING,
+  NodeType.RAW_STRING,
+  NodeType.ANSI_C_STRING,
+  NodeType.TRANSLATED_STRING,
+])
 
 /**
  * How many other places a line may stand in before the walk calls its cwd
@@ -295,10 +313,9 @@ export interface Judged {
    */
   readonly session?: SessionState
   /**
-   * The word calls a function the line has defined where the word runs
-   * (`withCalls`), or it is a word such a call's arguments spell, which
-   * never runs as written; either way the gate, which sees the call, says
-   * whether a tree root's own decision speaks for it (`isTool`).
+   * The word calls a function the line surely defines before it runs
+   * (`withCalls`), so the gate, which sees the call, says whether a tree
+   * root's own decision speaks for it (`isTool`).
    */
   readonly defined?: boolean
 }
@@ -1377,7 +1394,6 @@ export async function lineJudgments(
   const marked = withCalls(
     root,
     judged.flatMap(([, explained]) => explained),
-    session,
     handed.origin,
   )
   let at = 0
@@ -1901,7 +1917,7 @@ export async function explainLine(
   )) {
     judged.push(one)
   }
-  return withCalls(root, judged, session, null)
+  return withCalls(root, judged, null)
 }
 
 /**
@@ -1993,6 +2009,21 @@ export function explainedLine(
       stderr: '',
     }
   }
+  const tree = reparse(line)
+  const commands = new Map<string, Judgment[]>()
+  const keys: (string | null)[] = []
+  for (const one of judged) {
+    const at = one.occurrence
+    if (at.parent !== null) {
+      keys.push(null)
+      continue
+    }
+    const span = `${String(at.start)}:${String(at.end)}`
+    const list = commands.get(span) ?? []
+    keys.push(`${span}:${String(list.length)}`)
+    list.push(one.judgment)
+    commands.set(span, list)
+  }
   const redirects = new Map<string, Judgment[]>()
   for (const open of opened) {
     const at = open.occurrence
@@ -2002,9 +2033,9 @@ export function explainedLine(
     list.push(open.judgment)
     redirects.set(span, list)
   }
-  const [traced, calling] = functionCalls(reparse(line), judged, session, null, redirects)
+  const traced = lineStatus(tree, commands, redirects, session)
   const parts = inLineOrder(
-    judged.filter((_, i) => calling[i] !== true),
+    judged.filter((one, i) => !callsFunction(one, keys[i] ?? null, traced)),
     opened,
   )
   let strictest = Outcome.ALLOW
@@ -2062,71 +2093,94 @@ interface Traced {
 }
 
 /**
- * What the line does (`lineStatus`), and for each of its judgments whether
- * it is a tree root's own decision about a word that calls a function
- * (`callsFunction`); `origin` is the node the line was evaluated from, null
- * for a typed line. Mirrors the Python `_function_calls`.
- */
-function functionCalls(
-  tree: TSNodeLike,
-  judged: readonly Judged[],
-  session: SessionState,
-  origin: Occurrence | null,
-  redirects: ReadonlyMap<string, readonly Judgment[]> = new Map(),
-): [Traced, boolean[]] {
-  const commands = new Map<string, Judgment[]>()
-  const keys: (string | null)[] = []
-  for (const one of judged) {
-    const at = one.occurrence
-    if (!sameAt(at.parent, origin)) {
-      keys.push(null)
-      continue
-    }
-    const span = `${String(at.start)}:${String(at.end)}`
-    const list = commands.get(span) ?? []
-    keys.push(`${span}:${String(list.length)}`)
-    list.push(one.judgment)
-    commands.set(span, list)
-  }
-  const traced = lineStatus(tree, commands, redirects, session)
-  return [traced, judged.map((one, i) => callsFunction(one, keys[i] ?? null, traced, origin))]
-}
-
-/**
- * The line's judgments with `Judged.defined` set where the word calls a
- * function the line has defined where it runs, or where a command is
- * spelled by such a call's arguments (`timeout() { :; }; timeout 1 rm f`),
- * which runs the function and not the command. Whether a definition counts
- * follows the shell: one in a subshell, a pipeline segment or a
- * substitution is gone when it ends, and a body sees the functions defined
- * at every call of it. The fold runs only when a folder entry's root
- * refuses some command, the one verdict `defined` changes. Mirrors the
- * Python `_with_calls`.
+ * The line's judgments with `Judged.defined` set on a word the line has
+ * surely made a function call by the time it runs. The rule is kept narrow
+ * so it never has to follow the shell: the word heads a simple command of
+ * the line itself or of a function body the line defines; the line defines
+ * a function of that name before it as one of its top-level statements,
+ * not sent to the background, so under no `&&`, `||`, `!`, pipeline,
+ * compound command or substitution, where it may not run or may not last;
+ * and no word of the line, nor any command it is judged to run, can take a
+ * function away or run text in this shell (`FUNCTION_DROPPERS`). Anything
+ * else stays a folder's refusal, held with the line. It is worked out only
+ * when a folder entry's root refuses some command, the one verdict
+ * `defined` changes. Mirrors the Python `_with_calls`.
  */
 function withCalls(
-  root: TSNodeLike,
+  tree: TSNodeLike,
   judged: readonly Judged[],
-  session: SessionState,
   origin: Occurrence | null,
 ): Judged[] {
   const folder = judged.some(
     (one) => one.judgment.exitCode !== 0 && byDefault(one.judgment) && inFolder(one.judgment),
   )
   if (!folder) return [...judged]
-  const [, calling] = functionCalls(root, judged, session, origin)
-  const callers = judged.filter((_, i) => calling[i] === true).map((one) => one.occurrence)
-  return judged.map((one, i) => ({
+  const base = tree.startIndex ?? 0
+  const defined = new Map<string, number>()
+  for (const node of tree.namedChildren) {
+    if (node.type !== NodeType.FUNCTION_DEFINITION || isBackgrounded(node)) continue
+    const name = getFunctionName(node)
+    if (!defined.has(name)) defined.set(name, (node.endIndex ?? 0) - base)
+  }
+  const nodes = [...walkTree(tree)]
+  if (
+    defined.size === 0 ||
+    judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) ||
+    nodes.some(
+      (node) =>
+        node.type === NodeType.UNSET_COMMAND ||
+        (WORD_TYPES.has(node.type) && FUNCTION_DROPPERS.has(literalWord(node) ?? '')),
+    )
+  ) {
+    return [...judged]
+  }
+  const heads = new Map<string, string | null>()
+  const bodies = new Set<number>()
+  for (const node of nodes) {
+    const start = (node.startIndex ?? 0) - base
+    if (node.type === NodeType.FUNCTION_DEFINITION) bodies.add(start)
+    const head = node.namedChildren[0]
+    if (node.type !== NodeType.COMMAND || head?.type !== NodeType.COMMAND_NAME) continue
+    heads.set(`${String(start)}:${String((node.endIndex ?? 0) - base)}`, literalWord(head))
+  }
+  return judged.map((one) => ({
     ...one,
-    defined: calling[i] === true || runsUnder(one.occurrence, callers),
+    defined: callsDefined(one, origin, defined, heads, bodies),
   }))
 }
 
-/** Whether a command stands in a line some caller's words spell. Mirrors the Python `_runs_under`. */
-function runsUnder(at: Occurrence, callers: readonly Occurrence[]): boolean {
-  for (let parent = at.parent; parent !== null; parent = parent.parent) {
-    if (callers.some((caller) => sameAt(parent, caller))) return true
+/**
+ * Whether a judgment is about the head word of a simple command that
+ * stands, on the line or in a function body the line defines, after the
+ * line's top-level definition of a function of that name: `defined` holds
+ * where each such definition first ends, `heads` each simple command's head
+ * word by its span, `bodies` where each definition starts. Mirrors the
+ * Python `_calls_defined`.
+ */
+function callsDefined(
+  one: Judged,
+  origin: Occurrence | null,
+  defined: ReadonlyMap<string, number>,
+  heads: ReadonlyMap<string, string | null>,
+  bodies: ReadonlySet<number>,
+): boolean {
+  const at = one.occurrence
+  let offset = 0
+  if (!sameAt(at.parent, origin)) {
+    const parent = at.parent
+    if (parent === null || !sameAt(parent.parent, origin) || !bodies.has(parent.start)) {
+      return false
+    }
+    offset = parent.start
   }
-  return false
+  const name = one.judgment.command
+  const end = defined.get(name)
+  const start = offset + at.start
+  return (
+    end !== undefined &&
+    end <= start &&
+    heads.get(`${String(start)}:${String(offset + at.end)}`) === name
+  )
 }
 
 /**
@@ -2140,14 +2194,9 @@ function runsUnder(at: Occurrence, callers: readonly Occurrence[]): boolean {
  * substitution or a line a command runs, when the function was defined
  * where that command stands. Mirrors the Python `_calls_function`.
  */
-function callsFunction(
-  one: Judged,
-  key: string | null,
-  traced: Traced,
-  origin: Occurrence | null,
-): boolean {
+function callsFunction(one: Judged, key: string | null, traced: Traced): boolean {
   if (key !== null && traced.reached.has(key)) return traced.calls.has(key)
-  const start = lineStart(one.occurrence, origin)
+  const start = lineStart(one.occurrence)
   const visible = traced.bodies.get(start) ?? traced.at.get(start) ?? new Set<string>()
   return visible.has(one.judgment.command) && byDefault(one.judgment)
 }
@@ -2169,14 +2218,13 @@ function inLineOrder(judged: readonly Judged[], opened: readonly Opened[]): Judg
 }
 
 /**
- * Where on the line a part stands: its own start, or for a part a nested
- * line runs, the start of what runs that line; `origin` is the node the
- * line was evaluated from, null for a typed line. Mirrors the Python
+ * Where on the typed line a part stands: its own start, or for a part a
+ * nested line runs, the start of what runs that line. Mirrors the Python
  * `_line_start`.
  */
-function lineStart(at: Occurrence, origin: Occurrence | null = null): number {
+function lineStart(at: Occurrence): number {
   let top = at
-  while (top.parent !== null && !sameAt(top.parent, origin)) top = top.parent
+  while (top.parent !== null) top = top.parent
   return top.start
 }
 

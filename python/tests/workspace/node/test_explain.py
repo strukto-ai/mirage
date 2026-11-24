@@ -415,12 +415,19 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
             b"echo: Permission denied\n",
         ),
         ("f; f() { ls; }", 126, b"", b"f: Permission denied\n"),
-        ("g() { f; }; f() { ls; }; g", 0, b"f.txt\n", b""),
+        ("f() { ls; }; g() { f; }; g", 0, b"f.txt\n", b""),
+        ("g() { f; }; f() { ls; }; g", 126, b"", b"f: Permission denied\n"),
         ("(f() { ls; }); f", 126, b"", b"f: Permission denied\n"),
-        ("{ f() { ls; }; }; f", 0, b"f.txt\n", b""),
-        ("(f() { ls; }; f)", 0, b"f.txt\n", b""),
+        ("{ f() { ls; }; }; f", 126, b"", b"f: Permission denied\n"),
+        ("(f() { ls; }; f)", 126, b"", b"f: Permission denied\n"),
         ("f() { ls; }; (f)", 0, b"f.txt\n", b""),
-        ("timeout() { ls; }; timeout 1 rm f.txt", 0, b"f.txt\n", b""),
+        ("  f() { ls; }; f", 0, b"f.txt\n", b""),
+        (
+            "timeout() { ls; }; timeout 1 rm f.txt",
+            126,
+            b"",
+            b"rm: Permission denied\n",
+        ),
     ],
 )
 async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
@@ -448,6 +455,62 @@ async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
         stderr,
     )
     assert (said.exit_code, said.stderr) == (exit_code, stderr.decode())
+    await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "held_on"),
+    [
+        ("printf x > /data/marker; false && f() { ls; }; f", "f"),
+        ("printf x > /data/marker; true && f() { ls; }; f", "f"),
+        ("f() { ls; }; unset -f f; printf x > /data/marker; f", "f"),
+        ("printf x > /data/marker; f() { ls; }; unset f; f", "f"),
+        ("printf x > /data/marker; f() { ls; }; unset -v x; f", "f"),
+        ("printf x > /data/marker; f() { ls; }; un''set -f f; f", "f"),
+        ("printf x > /data/marker; f() { ls; }; command unset -f f; f", "f"),
+        ("printf x > /data/marker; (f() { ls; }); f", "f"),
+        ("printf x > /data/marker; f() { ls; } | ls; f", "f"),
+        ("printf x > /data/marker; f() { ls; } & f", "f"),
+        ("printf x > /data/marker; cat() { :; }; command cat a", "cat"),
+        ("printf x > /data/marker; eval 'f() { ls; }'; f", "f"),
+        ("printf x > /data/marker; trap : ERR; f() { ls; }; f", "f"),
+        ("printf x > /data/marker; f() { cat a; }; f", "cat"),
+    ],
+)
+async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
+    line, held_on
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    allowed = ["cd", "ls", "printf", "false", "true", ":", "command"]
+    allowed += ["unset", "eval", "trap"]
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {
+                "/data/keep": {
+                    "commands": {
+                        "*": "deny",
+                        **dict.fromkeys(allowed, "allow"),
+                    }
+                }
+            },
+        },
+    )
+    await ws.shell("cd /data/keep", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    stderr = f"{held_on}: Permission denied\n"
+    assert (ran.exit_code, ran.stdout, ran.stderr) == (
+        126,
+        b"",
+        stderr.encode(),
+    )
+    assert (said.exit_code, said.stderr) == (126, stderr)
+    marker = await ws.shell("test -e /data/marker")
+    assert marker.exit_code == 1
     await ws.close()
 
 

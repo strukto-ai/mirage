@@ -79,6 +79,7 @@ from mirage.shell.node_kind import (
 )
 from mirage.shell.options import parse_option_word
 from mirage.shell.parse import opaque_reads, parse, referenced_names
+from mirage.shell.parse.names import walk_tree
 from mirage.shell.types import NodeType
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, PolicyDecision
@@ -190,6 +191,23 @@ REDIRECT_TYPES = frozenset(
 # Commands that move the shell's cwd where the walk cannot follow: a line
 # run in this shell, and the directory stack.
 CWD_MOVERS = frozenset({"eval", ".", "source", "pushd", "popd"})
+
+# Words after which a function the line defined may no longer be one, or
+# that run text in this shell the walk does not read as the line's:
+# ``unset``, a line run in this shell, a trap's action.
+FUNCTION_DROPPERS = frozenset({"unset", "eval", ".", "source", "trap"})
+
+# The nodes a word is spelled with, quoted or not.
+WORD_TYPES = frozenset(
+    {
+        NodeType.WORD,
+        NodeType.CONCATENATION,
+        NodeType.STRING,
+        NodeType.RAW_STRING,
+        NodeType.ANSI_C_STRING,
+        NodeType.TRANSLATED_STRING,
+    }
+)
 
 # How many other places a line may stand in before the walk calls its cwd
 # lost: each relative ``cd`` doubles them.
@@ -410,11 +428,10 @@ class Judged:
             judged in, set beside ``ctx``: for a command a line runs in
             turn (``eval``), the one its own walk reached, so a ``cd``
             before it in that line is where it stands.
-        defined (bool): the word calls a function the line has defined
-            where the word runs (:func:`_with_calls`), or it is a word
-            such a call's arguments spell, which never runs as written;
-            either way the gate, which sees the call, says whether a
-            tree root's own decision speaks for it (``is_tool``).
+        defined (bool): the word calls a function the line surely
+            defines before it runs (:func:`_with_calls`), so the gate,
+            which sees the call, says whether a tree root's own decision
+            speaks for it (``is_tool``).
     """
 
     judgment: Judgment
@@ -1658,7 +1675,6 @@ async def line_judgments(
         _with_calls(
             ast,
             [one for _, explained in judged for one in explained],
-            session,
             handed.origin,
         )
     )
@@ -2638,7 +2654,7 @@ async def explain_line(
             mode,
         )
     ]
-    return _with_calls(ast, judged, session, None)
+    return _with_calls(ast, judged, None)
 
 
 def explain_redirects(
@@ -2810,14 +2826,27 @@ def explained_line(
         return ShellExplanation(
             line=line, node=node, outcome=outcome, reason=reason, source=source
         )
+    tree = parse(line, aliases)
+    commands: dict[tuple[int, int], list[Judgment]] = {}
+    keys: list[tuple[int, int, int] | None] = []
+    for one in judged:
+        at = one.occurrence
+        if at.parent is None:
+            listed = commands.setdefault((at.start, at.end), [])
+            keys.append((at.start, at.end, len(listed)))
+            listed.append(one.judgment)
+        else:
+            keys.append(None)
     redirects: dict[tuple[int, int], list[Judgment]] = {}
     for open_ in opened:
         at = open_.occurrence
         if at.parent is None:
             redirects.setdefault((at.start, at.end), []).append(open_.judgment)
-    traced, calling = _function_calls(
-        parse(line, aliases), judged, session, None, redirects
-    )
+    traced = _line_status(tree, commands, redirects, session)
+    calling = [
+        _calls_function(one, key, traced)
+        for one, key in zip(judged, keys, strict=True)
+    ]
     parts = _in_line_order(
         [one for one, call in zip(judged, calling, strict=True) if not call],
         opened,
@@ -2843,64 +2872,26 @@ def explained_line(
     )
 
 
-def _function_calls(
-    tree: Any,
-    judged: Sequence[Judged],
-    session: SessionState,
-    origin: Occurrence | None,
-    redirects: Mapping[tuple[int, int], Sequence[Judgment]] | None = None,
-) -> tuple[Traced, list[bool]]:
-    """What the line does (:func:`_line_status`), and for each of its
-    judgments whether it is a tree root's own decision about a word that
-    calls a function (:func:`_calls_function`).
-
-    Args:
-        tree (Any): the line, parsed.
-        judged (Sequence[Judged]): the line's command judgments.
-        session (SessionState): the shell whose pipeline options are read.
-        origin (Occurrence | None): the node the line was evaluated
-            from, None for a typed line.
-        redirects (Mapping[tuple[int, int], Sequence[Judgment]] | None):
-            the judgments of the redirects no command owns, by the span
-            of the node they open for.
-    """
-    commands: dict[tuple[int, int], list[Judgment]] = {}
-    keys: list[tuple[int, int, int] | None] = []
-    for one in judged:
-        at = one.occurrence
-        if at.parent == origin:
-            listed = commands.setdefault((at.start, at.end), [])
-            keys.append((at.start, at.end, len(listed)))
-            listed.append(one.judgment)
-        else:
-            keys.append(None)
-    traced = _line_status(tree, commands, redirects or {}, session)
-    return traced, [
-        _calls_function(one, key, traced, origin)
-        for one, key in zip(judged, keys, strict=True)
-    ]
-
-
 def _with_calls(
-    tree: Any,
-    judged: Sequence[Judged],
-    session: SessionState,
-    origin: Occurrence | None,
+    tree: Any, judged: Sequence[Judged], origin: Occurrence | None
 ) -> list[Judged]:
-    """The line's judgments with ``Judged.defined`` set where the word
-    calls a function the line has defined where it runs, or where a
-    command is spelled by such a call's arguments (``timeout() { :; };
-    timeout 1 rm f``), which runs the function and not the command.
-    Whether a definition counts follows the shell: one in a subshell, a
-    pipeline segment or a substitution is gone when it ends, and a body
-    sees the functions defined at every call of it. The fold runs only
-    when a folder entry's root refuses some command, the one verdict
-    ``defined`` changes.
+    """The line's judgments with ``Judged.defined`` set on a word the
+    line has surely made a function call by the time it runs. The rule
+    is kept narrow so it never has to follow the shell: the word heads
+    a simple command of the line itself or of a function body the line
+    defines; the line defines a function of that name before it as one
+    of its top-level statements, not sent to the background, so under
+    no ``&&``, ``||``, ``!``, pipeline, compound command or
+    substitution, where it may not run or may not last; and no word of
+    the line, nor any command it is judged to run, can take a function
+    away or run text in this shell (``FUNCTION_DROPPERS``). Anything
+    else stays a folder's refusal, held with the line. It is worked out
+    only when a folder entry's root refuses some command, the one
+    verdict ``defined`` changes.
 
     Args:
         tree (Any): the line, parsed.
         judged (Sequence[Judged]): the line's command judgments.
-        session (SessionState): the shell whose pipeline options are read.
         origin (Occurrence | None): the node the line was evaluated
             from, None for a typed line.
     """
@@ -2911,41 +2902,88 @@ def _with_calls(
         for one in judged
     ):
         return list(judged)
-    _, calling = _function_calls(tree, judged, session, origin)
-    callers = [
-        one.occurrence
-        for one, call in zip(judged, calling, strict=True)
-        if call
-    ]
+    base = tree.start_byte
+    defined: dict[str, int] = {}
+    for node in tree.named_children:
+        if node.type == NodeType.FUNCTION_DEFINITION and not is_backgrounded(
+            node
+        ):
+            defined.setdefault(get_function_name(node), node.end_byte - base)
+    nodes = list(walk_tree(tree))
+    if (
+        not defined
+        or any(one.judgment.command in FUNCTION_DROPPERS for one in judged)
+        or any(
+            node.type == NodeType.UNSET_COMMAND
+            or (
+                node.type in WORD_TYPES
+                and literal_word(node) in FUNCTION_DROPPERS
+            )
+            for node in nodes
+        )
+    ):
+        return list(judged)
+    heads = {
+        (node.start_byte - base, node.end_byte - base): literal_word(head)
+        for node in nodes
+        if node.type == NodeType.COMMAND
+        for head in node.named_children[:1]
+        if head.type == NodeType.COMMAND_NAME
+    }
+    bodies = frozenset(
+        node.start_byte - base
+        for node in nodes
+        if node.type == NodeType.FUNCTION_DEFINITION
+    )
     return [
         dataclasses.replace(
-            one, defined=call or _runs_under(one.occurrence, callers)
+            one, defined=_calls_defined(one, origin, defined, heads, bodies)
         )
-        for one, call in zip(judged, calling, strict=True)
+        for one in judged
     ]
 
 
-def _runs_under(at: Occurrence, callers: Sequence[Occurrence]) -> bool:
-    """Whether a command stands in a line some caller's words spell.
+def _calls_defined(
+    one: Judged,
+    origin: Occurrence | None,
+    defined: Mapping[str, int],
+    heads: Mapping[tuple[int, int], str | None],
+    bodies: frozenset[int],
+) -> bool:
+    """Whether a judgment is about the head word of a simple command
+    that stands, on the line or in a function body the line defines,
+    after the line's top-level definition of a function of that name.
 
     Args:
-        at (Occurrence): the command's occurrence.
-        callers (Sequence[Occurrence]): the occurrences of words that
-            call a function.
+        one (Judged): one command's judgment and place.
+        origin (Occurrence | None): the node the line was evaluated
+            from, None for a typed line.
+        defined (Mapping[str, int]): where each function the line
+            defines at its top level first ends.
+        heads (Mapping[tuple[int, int], str | None]): each simple
+            command's head word, by its span.
+        bodies (frozenset[int]): where each function definition on the
+            line starts.
     """
-    parent = at.parent
-    while parent is not None:
-        if parent in callers:
-            return True
-        parent = parent.parent
-    return False
+    at = one.occurrence
+    offset = 0
+    if at.parent != origin:
+        parent = at.parent
+        if (
+            parent is None
+            or parent.parent != origin
+            or parent.start not in bodies
+        ):
+            return False
+        offset = parent.start
+    name = one.judgment.command
+    end = defined.get(name)
+    span = (offset + at.start, offset + at.end)
+    return end is not None and end <= span[0] and heads.get(span) == name
 
 
 def _calls_function(
-    one: Judged,
-    key: tuple[int, int, int] | None,
-    traced: Traced,
-    origin: Occurrence | None = None,
+    one: Judged, key: tuple[int, int, int] | None, traced: Traced
 ) -> bool:
     """Whether a judgment is a tree root's own decision about a command
     that calls a function, which no root's own decision speaks for
@@ -2962,13 +3000,11 @@ def _calls_function(
         key (tuple[int, int, int] | None): its span and place on the
             typed line, None for one a nested line runs.
         traced (Traced): what the line does.
-        origin (Occurrence | None): the node the line was evaluated
-            from, None for a typed line.
     """
     if key is not None and key in traced.reached:
         return key in traced.calls
     judgment = one.judgment
-    start = _line_start(one.occurrence, origin)
+    start = _line_start(one.occurrence)
     visible = traced.bodies.get(start, traced.at.get(start, frozenset()))
     return judgment.command in visible and _by_default(judgment)
 
@@ -2994,16 +3030,14 @@ def _in_line_order(
     return [judgment for _, judgment in placed]
 
 
-def _line_start(at: Occurrence, origin: Occurrence | None = None) -> int:
-    """Where on the line a part stands: its own start, or for a part a
-    nested line runs, the start of what runs that line.
+def _line_start(at: Occurrence) -> int:
+    """Where on the typed line a part stands: its own start, or for a
+    part a nested line runs, the start of what runs that line.
 
     Args:
         at (Occurrence): the part's occurrence.
-        origin (Occurrence | None): the node the line was evaluated
-            from, None for a typed line.
     """
-    while at.parent is not None and at.parent != origin:
+    while at.parent is not None:
         at = at.parent
     return at.start
 
