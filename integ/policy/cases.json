@@ -846,6 +846,20 @@
    ]
   },
   {
+   "id": "a_redirect_into_the_folder_holds_a_function_the_line_defines",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
+    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "printf x > /data/marker; f() { echo hi; }; f > /data/keep/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "printf x > /data/marker; f() { cat; }; f < /data/keep/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
+    {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "cat /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "top\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "f() { echo hi; }; f > /data/out.txt; cat /data/out.txt", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}}
+   ]
+  },
+  {
    "id": "a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate",
    "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
    "steps": [
