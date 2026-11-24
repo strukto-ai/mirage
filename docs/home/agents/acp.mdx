@@ -60,10 +60,13 @@ Gemini CLI or `permission` for OpenCode.
 
 ### Codewhale
 
-Add Mirage to [Codewhale's MCP configuration](/home/access/mcp#connect), then
-configure your editor to launch `codewhale serve --acp` directly. Codewhale
-v0.10.3 uses its own MCP configuration and rejects the server that `mirage acp`
-adds to the session request. See [Codewhale's editor setup](https://github.com/codewhale-hq/Codewhale/blob/v0.10.3/docs/ACP.md).
+MCP tools over ACP require Codewhale v0.10.3 or later. Add Mirage to
+[Codewhale's MCP configuration](/home/access/mcp#connect), then configure your
+editor to launch `codewhale serve --acp` directly. Codewhale rejects the server
+that `mirage acp` adds to the session request. See [Codewhale's editor setup](https://github.com/codewhale-hq/Codewhale/blob/v0.10.3/docs/ACP.md).
+
+Codewhale's built-in file tools use the host filesystem. Use the Mirage MCP tools
+to read and write files in the Mirage workspace.
 
 ## Set up
 
