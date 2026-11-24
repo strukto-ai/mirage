@@ -141,7 +141,7 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             raise
         config = through_hermes(loaded, secrets)
         values = dict(secrets)
-        # Keyed by the values too, so two hermes profiles never share one.
+        # Keyed by the values too, so profiles with different keys never share one.
         key = (path, tuple(sorted(values.items())))
         with self._lock:
             if self._closed:
