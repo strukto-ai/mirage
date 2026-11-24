@@ -116,6 +116,18 @@ export function copyMachine(accessor: MachineAccessor): string | null {
 }
 
 /**
+ * The machine a whole file's bytes come from, which the file lands on: the
+ * running program's, for its `>` (`runningMachine`), or the source's of a
+ * copy made by a read and a write (`copyMachine`); null for any other write.
+ * Mirrors Python's `origin_machine`.
+ *
+ * @param accessor the mount's machines.
+ */
+export function originMachine(accessor: MachineAccessor): string | null {
+  return runningMachine(accessor) ?? copyMachine(accessor)
+}
+
+/**
  * Note a machine whose file the copy being made by a read and a write reads
  * (`Caller.copiedFrom`); nothing outside such a copy. Mirrors Python's
  * `note_copy_source`.
@@ -326,7 +338,8 @@ export async function newNameMachine(
 
 /**
  * The machine a write goes to. What a program's `>` replaces lands on the
- * program's machine, whose disk the program reads next. Any other write of
+ * program's machine, whose disk the program reads next, and a copy made by
+ * a read and a write on its source's (`originMachine`). Any other write of
  * a name some machine holds goes to that copy (`chosen`), and a new name
  * goes where its folder is (`newNameMachine`).
  *
@@ -342,13 +355,12 @@ export async function writeMachine(
   path: PathSpec,
   opts: { replaces?: boolean; parents?: boolean } = {},
 ): Promise<string> {
-  const running =
-    opts.replaces === true ? (runningMachine(accessor) ?? copyMachine(accessor)) : null
-  if (running === null) {
+  const origin = opts.replaces === true ? originMachine(accessor) : null
+  if (origin === null) {
     const held = await holders(accessor, path)
     if (held.length > 0) return chosen(accessor, held).machine
   }
-  const target = running ?? (await newNameMachine(accessor, path, opts.parents === true))
+  const target = origin ?? (await newNameMachine(accessor, path, opts.parents === true))
   await refuseHidden(accessor, target, path)
   return target
 }

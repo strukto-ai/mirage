@@ -21,6 +21,10 @@ import {
   type Answer,
 } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
+import { bindCaller, currentCaller } from '../../context/session_context.ts'
+import { MachineName } from '../../execution/types.ts'
+import type { ByteSource } from '../../io/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -29,6 +33,11 @@ import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
+
+/** Run `fn` as a program running on machine `name`. */
+function runningOn<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  return bindCaller({ ...currentCaller(), machine: new MachineName('scripted', name) }, fn)
+}
 
 /** A mount of /tmp over machines a, b, c, ... holding `files`. */
 function shared(...files: FakeFiles[]): MachineVFS {
@@ -252,10 +261,20 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
-  it.each([false, true])(
-    'never makes a folder through a link to a hidden one (read and write: %s)',
-    async (judged) => {
-      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' })
+  const copiedIntoHidden =
+    "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n"
+  it.each([
+    ['cp /srv/a/k /tmp/public/missing/k', false, copiedIntoHidden],
+    ['cp /srv/a/k /tmp/public/missing/k', true, copiedIntoHidden],
+    [
+      'gen > /tmp/public/missing/k',
+      false,
+      'bash: line 1: /tmp/public/missing/k: No such file or directory\n',
+    ],
+  ])(
+    'never makes a folder through a link to a hidden one: %s (read and write: %s)',
+    async (line, judged, said) => {
+      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' }, ['gen'])
       a.links.set('/tmp/public', '/tmp/secret')
       const b = new FakeFiles()
       b.dirs.add('/tmp/public')
@@ -268,16 +287,27 @@ describe('MachineVFS', () => {
       )
       if (judged) ws.policies.add({ postVfs: (): Action | null => null })
       const agent = await ws.session('agent', { profile: 'agent' })
-      const done = await agent.shell('cp /srv/a/k /tmp/public/missing/k')
-      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([
-        1,
-        "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n",
-      ])
+      const done = await agent.shell(line)
+      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([1, said])
       expect(Object.keys(texts(a)).sort()).toEqual(['/srv/a/k', '/tmp/secret/s'])
       expect([...a.dirs].some((dir) => dir.endsWith('/missing'))).toBe(false)
       await ws.close()
     },
   )
+
+  it("lands a program's output on its machine as a copy does", async () => {
+    const a = new FakeFiles({}, ['gen'])
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.dirs.add('/tmp/only')
+    b.written.set('/tmp/k', 2_000_000_000)
+    const ws = two(a, b)
+    expect(await run(ws, 'gen > /tmp/only/out')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/only/out'], b.files.has('/tmp/only/out')]).toEqual(['ran\n', false])
+    expect(await run(ws, 'gen > /tmp/k')).toEqual([0, '', ''])
+    expect(b.files.has('/tmp/k')).toBe(false)
+    expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'ran\n', ''])
+    await ws.close()
+  })
 
   it('makes a folder only another machine holds for a cp into it', async () => {
     const a = new FakeFiles({ '/tmp/d/kept': 'k' })
@@ -687,5 +717,196 @@ describe('bytes between machines', () => {
     expect(b.files.has('/tmp/k')).toBe(false)
     expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'new\n', ''])
     await ws.close()
+  })
+})
+
+/** Write a name as a program's `>` on machine `name` does. */
+function writeOn(name: string, vfs: MachineVFS, path: string, data: ByteSource): Promise<void> {
+  return runningOn(name, () => vfs.write(spec(path), data))
+}
+
+describe('a landed write', () => {
+  it.each(['write', 'copy'])(
+    "leaves another machine's live write of the name: %s",
+    async (landing) => {
+      const a = new FakeFiles({ '/tmp/src': 'from a\n' })
+      const b = new FakeFiles({ '/tmp/k': 'old\n' })
+      const vfs = shared(a, b)
+      let pulled = (): void => undefined
+      const started = new Promise<void>((resolve) => {
+        pulled = resolve
+      })
+      let release = (): void => undefined
+      const released = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      async function* slow(): AsyncGenerator<Uint8Array> {
+        pulled()
+        await released
+        yield ENC.encode('from b\n')
+      }
+      const writing = writeOn('b', vfs, '/k', slow())
+      await started
+      if (landing === 'write') await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+      else await vfs.copy(spec('/src'), spec('/k'))
+      expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', true])
+      release()
+      await writing
+      expect([a.files.has('/tmp/k'), texts(b)['/tmp/k']]).toEqual([false, 'from b\n'])
+    },
+  )
+
+  it('leaves the copy landed meanwhile when a live write fails', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.written.set('/tmp/k', 2_000_000_000)
+    const vfs = shared(a, b)
+    let pulled = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      pulled = resolve
+    })
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const failing: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<Uint8Array>> => {
+          pulled()
+          await released
+          throw new Error('EIO')
+        },
+      }),
+    }
+    const writing = writeOn('b', vfs, '/k', failing)
+    await started
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    release()
+    await expect(writing).rejects.toThrow('EIO')
+    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
+
+  it('keeps the copy of the write that ends last', async () => {
+    const a = new FakeFiles()
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    const vfs = shared(a, b)
+    let pulled = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      pulled = resolve
+    })
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* slow(): AsyncGenerator<Uint8Array> {
+      pulled()
+      await released
+      yield ENC.encode('from b\n')
+    }
+    const writing = vfs.write(spec('/k'), slow())
+    await started
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    release()
+    await writing
+    expect([a.files.has('/tmp/k'), texts(b)['/tmp/k']]).toEqual([false, 'from b\n'])
+  })
+
+  it('leaves one copy when writes on two machines end together', async () => {
+    const machines = { a: new FakeFiles(), b: new FakeFiles() }
+    const vfs = shared(machines.a, machines.b)
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const pulled: Promise<void>[] = []
+    function held(name: string): AsyncGenerator<Uint8Array> {
+      let started = (): void => undefined
+      pulled.push(
+        new Promise<void>((resolve) => {
+          started = resolve
+        }),
+      )
+      return (async function* (): AsyncGenerator<Uint8Array> {
+        started()
+        await released
+        yield ENC.encode(`from ${name}\n`)
+      })()
+    }
+    const writes = Object.keys(machines).map((name) => writeOn(name, vfs, '/k', held(name)))
+    await Promise.all(pulled)
+    release()
+    await Promise.all(writes)
+    const kept = Object.entries(machines).filter(([, files]) => files.files.has('/tmp/k'))
+    expect(kept).toHaveLength(1)
+    expect(kept.map(([name, files]) => [name, texts(files)['/tmp/k']])).toEqual(
+      kept.map(([name]) => [name, `from ${name}\n`]),
+    )
+  })
+})
+
+/** A machine whose next line holding every part `armed` names waits for `go`. */
+class Gated extends ScriptedMachine {
+  armed: readonly string[] = []
+  private markHeld: () => void = () => undefined
+  readonly held = new Promise<void>((resolve) => {
+    this.markHeld = resolve
+  })
+  private open: () => void = () => undefined
+  private readonly opened = new Promise<void>((resolve) => {
+    this.open = resolve
+  })
+
+  go(): void {
+    this.open()
+  }
+
+  protected override async execArgv(
+    argv: readonly string[],
+    stdin: ByteSource | null,
+    env: Record<string, string>,
+    cwd: string,
+    output: OutputFn,
+    errors: OutputFn,
+  ): Promise<RunResult> {
+    const line = argv.join(' ')
+    if (this.armed.length > 0 && this.armed.every((part) => line.includes(part))) {
+      this.armed = []
+      this.markHeld()
+      await this.opened
+    }
+    return super.execArgv(argv, stdin, env, cwd, output, errors)
+  }
+}
+
+describe('a settling', () => {
+  it('keeps a copy landed while it looks', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles()
+    const a = new Gated('a', aFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(a, new ScriptedMachine('b', bFiles.answer)), 'a')
+    a.armed = ['/tmp/k', '-maxdepth 0']
+    const first = writeOn('b', vfs, '/k', ENC.encode('from b\n'))
+    await a.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    a.go()
+    await first
+    expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
+
+  it('never takes with a removal a copy written after it began', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles({ '/tmp/k': 'old\n' })
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'a')
+    b.armed = ['rm --', '/tmp/k']
+    const first = writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    await b.held
+    const second = writeOn('b', vfs, '/k', ENC.encode('from b\n'))
+    await Promise.race([second, new Promise((resolve) => setTimeout(resolve, 200))])
+    b.go()
+    await Promise.all([first, second])
+    expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, 'from b\n'])
   })
 })

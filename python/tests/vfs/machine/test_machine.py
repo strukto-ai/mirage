@@ -12,11 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.context.session_context import (
+    CallerToken,
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
+from mirage.execution.types import MachineName
+from mirage.io.types import ByteSource
 from mirage.policy.base import Policy
-from mirage.runtime.types import RunAnswer
+from mirage.runtime.types import OutputFn, RunAnswer, RunResult
+from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.machine import MachineVFS
 from mirage.vfs.ram import RAMVFS
@@ -705,11 +716,31 @@ async def test_a_copy_by_a_read_and_a_write_lands_as_a_direct_copy_does():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("policies", [[], [Judged()]])
-async def test_a_copy_never_makes_a_folder_through_a_link_to_a_hidden_one(
-    policies,
+@pytest.mark.parametrize(
+    ("line", "policies", "said"),
+    [
+        (
+            "cp /srv/a/k /tmp/public/missing/k",
+            policies,
+            "cp: cannot create regular file '/tmp/public/missing/k':"
+            " No such file or directory\n",
+        )
+        for policies in ([], [Judged()])
+    ]
+    + [
+        (
+            "gen > /tmp/public/missing/k",
+            [],
+            "bash: line 1: /tmp/public/missing/k: No such file or directory\n",
+        )
+    ],
+)
+async def test_a_write_never_makes_a_folder_through_a_link_to_a_hidden_one(
+    line, policies, said
 ):
-    a = FakeFiles({"/srv/a/k": b"key\n", "/tmp/secret/s": b"s"})
+    a = FakeFiles(
+        {"/srv/a/k": b"key\n", "/tmp/secret/s": b"s"}, programs=("gen",)
+    )
     a.links["/tmp/public"] = "/tmp/secret"
     b = FakeFiles()
     b.dirs.update({"/tmp/public", "/tmp/public/missing"})
@@ -721,12 +752,214 @@ async def test_a_copy_never_makes_a_folder_through_a_link_to_a_hidden_one(
         profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}},
     )
     agent = await ws.session("agent", profile="agent")
-    done = await agent.shell("cp /srv/a/k /tmp/public/missing/k")
-    assert (done.exit_code, await done.stderr_str()) == (
-        1,
-        "cp: cannot create regular file '/tmp/public/missing/k':"
-        " No such file or directory\n",
-    )
+    done = await agent.shell(line)
+    assert (done.exit_code, await done.stderr_str()) == (1, said)
     assert sorted(a.files) == ["/srv/a/k", "/tmp/secret/s"]
     assert not any(d.endswith("/missing") for d in a.dirs)
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_s_output_lands_on_its_machine_as_a_copy_does():
+    a = FakeFiles(programs=("gen",))
+    b = FakeFiles({"/tmp/k": b"old\n"})
+    b.dirs.add("/tmp/only")
+    b.written["/tmp/k"] = 2 * 10**9
+    ws = two(a, b)
+    assert await run(ws, "gen > /tmp/only/out") == (0, "", "")
+    assert (a.files["/tmp/only/out"], "/tmp/only/out" in b.files) == (
+        b"ran\n",
+        False,
+    )
+    assert await run(ws, "gen > /tmp/k") == (0, "", "")
+    assert "/tmp/k" not in b.files
+    assert await run(ws, "cat /tmp/k") == (0, "ran\n", "")
+    await ws.close()
+
+
+def running_on(name: str) -> CallerToken:
+    """Bind a program running on machine ``name`` as the caller.
+
+    Args:
+        name (str): the machine.
+    """
+    return bind_caller(
+        current_caller().changed({"machine": MachineName("scripted", name)})
+    )
+
+
+async def write_on(
+    name: str, vfs: MachineVFS, path: PathSpec, data: ByteSource
+) -> None:
+    """Write a name as a program's ``>`` on machine ``name`` does.
+
+    Args:
+        name (str): the program's machine.
+        vfs (MachineVFS): the mount.
+        path (PathSpec): the name.
+        data (ByteSource): what the program writes.
+    """
+    token = running_on(name)
+    try:
+        await vfs.write(path, data)
+    finally:
+        reset_caller(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("landing", ["write", "copy"])
+async def test_a_landing_leaves_another_machine_s_live_write(landing):
+    a = FakeFiles({"/tmp/src": b"from a\n"})
+    b = FakeFiles({"/tmp/k": b"old\n"})
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def slow():
+        pulled.set()
+        await released.wait()
+        yield b"from b\n"
+
+    writing = asyncio.create_task(write_on("b", vfs, spec("/k"), slow()))
+    await pulled.wait()
+    if landing == "write":
+        await write_on("a", vfs, spec("/k"), b"from a\n")
+    else:
+        await vfs.copy(spec("/src"), spec("/k"))
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", True)
+    released.set()
+    await writing
+    assert ("/tmp/k" in a.files, b.files["/tmp/k"]) == (False, b"from b\n")
+
+
+@pytest.mark.asyncio
+async def test_a_live_write_that_fails_leaves_the_copy_landed_meanwhile():
+    a, b = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    b.written["/tmp/k"] = 2 * 10**9
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def failing():
+        pulled.set()
+        await released.wait()
+        raise OSError(5, "Input/output error")
+        yield b""
+
+    writing = asyncio.create_task(write_on("b", vfs, spec("/k"), failing()))
+    await pulled.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    released.set()
+    with pytest.raises(OSError):
+        await writing
+    assert (a.files["/tmp/k"], "/tmp/k" in b.files) == (b"from a\n", False)
+
+
+@pytest.mark.asyncio
+async def test_the_write_ending_last_is_the_copy_kept():
+    a, b = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    vfs = shared(a, b)
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def slow():
+        pulled.set()
+        await released.wait()
+        yield b"from b\n"
+
+    writing = asyncio.create_task(vfs.write(spec("/k"), slow()))
+    await pulled.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    released.set()
+    await writing
+    assert ("/tmp/k" in a.files, b.files["/tmp/k"]) == (False, b"from b\n")
+
+
+@pytest.mark.asyncio
+async def test_writes_ending_together_on_two_machines_leave_one_copy():
+    machines = {"a": FakeFiles(), "b": FakeFiles()}
+    vfs = shared(*machines.values())
+    released = asyncio.Event()
+    pulled = {name: asyncio.Event() for name in machines}
+
+    async def held(name):
+        pulled[name].set()
+        await released.wait()
+        yield f"from {name}\n".encode()
+
+    writes = [
+        asyncio.create_task(write_on(name, vfs, spec("/k"), held(name)))
+        for name in machines
+    ]
+    await asyncio.gather(*(event.wait() for event in pulled.values()))
+    released.set()
+    await asyncio.gather(*writes)
+    kept = {
+        name: files.files["/tmp/k"]
+        for name, files in machines.items()
+        if "/tmp/k" in files.files
+    }
+    assert len(kept) == 1
+    ((name, data),) = kept.items()
+    assert data == f"from {name}\n".encode()
+
+
+class Gated(ScriptedMachine):
+    """A machine whose next line holding every part ``armed`` names waits
+    for ``go``, setting ``held`` as it starts to wait."""
+
+    def __init__(self, name: str, answer) -> None:
+        super().__init__(name, answer)
+        self.armed: tuple[str, ...] = ()
+        self.held = asyncio.Event()
+        self.go = asyncio.Event()
+
+    async def _exec_argv(
+        self,
+        argv: tuple[str, ...],
+        stdin: ByteSource | None,
+        env: dict[str, str],
+        cwd: str,
+        output: OutputFn,
+        errors: OutputFn,
+    ) -> RunResult:
+        line = " ".join(argv)
+        if self.armed and all(part in line for part in self.armed):
+            self.armed = ()
+            self.held.set()
+            await self.go.wait()
+        return await super()._exec_argv(argv, stdin, env, cwd, output, errors)
+
+
+@pytest.mark.asyncio
+async def test_a_settling_keeps_a_copy_landed_while_it_looks():
+    a_files, b_files = FakeFiles(), FakeFiles()
+    a = Gated("a", a_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(a, ScriptedMachine("b", b_files.answer)), "a")
+    a.armed = ("/tmp/k", "-maxdepth 0")
+    first = asyncio.create_task(write_on("b", vfs, spec("/k"), b"from b\n"))
+    await a.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    a.go.set()
+    await first
+    assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
+        b"from a\n",
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_removal_never_takes_a_copy_written_after_it_began():
+    a_files, b_files = FakeFiles(), FakeFiles({"/tmp/k": b"old\n"})
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "a")
+    b.armed = ("rm --", "/tmp/k")
+    first = asyncio.create_task(write_on("a", vfs, spec("/k"), b"from a\n"))
+    await b.held.wait()
+    second = asyncio.create_task(write_on("b", vfs, spec("/k"), b"from b\n"))
+    await asyncio.wait({second}, timeout=0.2)
+    b.go.set()
+    await asyncio.gather(first, second)
+    assert ("/tmp/k" in a_files.files, b_files.files.get("/tmp/k")) == (
+        False,
+        b"from b\n",
+    )
