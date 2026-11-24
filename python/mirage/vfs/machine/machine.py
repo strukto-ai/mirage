@@ -245,24 +245,57 @@ class MachineVFS(BaseVFS):
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
         landing = await _landing_of(self.accessor, path, data, replaces=True)
-        async with self._writes.landing(
-            landing.machine, path, replaces=landing.origin
-        ):
-            await _write(
-                self.accessor,
-                landing.machine,
-                path,
-                data,
-                atomic=atomic,
-                make_parent=landing.make_parent,
-            )
+        await self._write_at(
+            landing, path, data, replaces=landing.origin, atomic=atomic
+        )
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
         landing = await _landing_of(self.accessor, path, data)
-        async with self._writes.landing(landing.machine, path, replaces=False):
-            await _write(
-                self.accessor, landing.machine, path, data, append=True
-            )
+        await self._write_at(landing, path, data, replaces=False, append=True)
+
+    async def _write_at(
+        self,
+        landing: Landing,
+        path: PathSpec,
+        data: ByteSource,
+        *,
+        replaces: bool,
+        append: bool = False,
+        atomic: bool = False,
+    ) -> None:
+        """Write bytes where they land, counted as a live write
+        (``LiveWrites``). Bytes that never reach the write, as when it is
+        cancelled while it waits for a removal of the name there, are
+        closed, so their writer stops.
+
+        Args:
+            landing (Landing): where the bytes land.
+            path (PathSpec): the file.
+            data (ByteSource): the bytes.
+            replaces (bool): the write replaces the name across the
+                machines.
+            append (bool): add the bytes to the end instead.
+            atomic (bool): show nothing until the bytes have ended whole.
+        """
+        handed = False
+        try:
+            async with self._writes.landing(
+                landing.machine, path, replaces=replaces
+            ):
+                handed = True
+                await _write(
+                    self.accessor,
+                    landing.machine,
+                    path,
+                    data,
+                    append=append,
+                    atomic=atomic,
+                    make_parent=landing.make_parent,
+                )
+        except BaseException:
+            if not handed:
+                await close_quietly(data)
+            raise
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         landing = await place.landing(self.accessor, path)

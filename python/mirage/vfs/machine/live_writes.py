@@ -16,6 +16,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import partial
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine import place
@@ -33,6 +34,23 @@ def _removal_slot(path: PathSpec, machine: str) -> str:
         machine (str): the machine.
     """
     return f"{machine}\0{path.virtual}"
+
+
+async def _unlink_older(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> None:
+    """Take an older copy of a name off a machine; one already gone is no
+    error.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine holding the copy.
+        path (PathSpec): the name.
+    """
+    try:
+        await _unlink(accessor, machine, path)
+    except FileNotFoundError as exc:
+        logger.debug("%s already gone from %s: %s", path.virtual, machine, exc)
 
 
 class LiveWrites:
@@ -55,7 +73,7 @@ class LiveWrites:
         self._landings = 0
         self._settling: dict[str, int] = {}
         self._unsettled: set[str] = set()
-        self._removing: dict[str, asyncio.Event] = {}
+        self._removing: dict[str, asyncio.Task[None]] = {}
 
     @asynccontextmanager
     async def landing(
@@ -71,8 +89,8 @@ class LiveWrites:
                 no other machine's copy of it stays.
         """
         slot = _removal_slot(path, machine)
-        while (gone := self._removing.get(slot)) is not None:
-            await gone.wait()
+        while (removal := self._removing.get(slot)) is not None:
+            await asyncio.wait({removal})
         self._live.setdefault(path.virtual, []).append(machine)
         try:
             yield
@@ -123,8 +141,9 @@ class LiveWrites:
         landed on (``_latest``), so one copy shows, the newest. The latest
         is looked up again before every removal, and a write landing
         meanwhile makes the look start over with its copy kept. A machine
-        still writing the name keeps its copy and leaves the name
-        unsettled, for the last write of it to settle (``_end``).
+        still writing the name keeps its copy, found or not yet made, and
+        leaves the name unsettled, for the last write of it to settle
+        (``_end``).
 
         Args:
             path (PathSpec): the name.
@@ -133,6 +152,8 @@ class LiveWrites:
         self._settling[key] = self._settling.get(key, 0) + 1
         try:
             while self._accessor.several and (seen := self._latest.get(key)):
+                if any(m != seen[1] for m in self._live.get(key, ())):
+                    self._unsettled.add(key)
                 for one in await place.holders(self._accessor, path):
                     if self._latest.get(key) != seen:
                         break
@@ -151,28 +172,40 @@ class LiveWrites:
             self._forget(key)
 
     async def _remove_copy(self, machine: str, path: PathSpec) -> None:
-        """Take an older copy of a name off a machine, a write of the name
-        there waiting until it is gone (``landing``); nothing when a
-        removal of it is already under way, and a copy already gone is no
-        error.
+        """Take an older copy of a name off a machine, once: a settling
+        that finds the removal under way waits for it and shares its
+        outcome, a failure too, and a write of the name there waits until
+        it is gone (``landing``).
 
         Args:
             machine (str): the machine holding the copy.
             path (PathSpec): the name.
         """
         slot = _removal_slot(path, machine)
-        if slot in self._removing:
-            return
-        gone = self._removing[slot] = asyncio.Event()
-        try:
-            await _unlink(self._accessor, machine, path)
-        except FileNotFoundError as exc:
-            logger.debug(
-                "%s already gone from %s: %s", path.virtual, machine, exc
+        removal = self._removing.get(slot)
+        if removal is None:
+            removal = asyncio.ensure_future(
+                _unlink_older(self._accessor, machine, path)
             )
-        finally:
+            self._removing[slot] = removal
+            removal.add_done_callback(partial(self._removed, slot))
+        await asyncio.shield(removal)
+
+    def _removed(self, slot: str, removal: asyncio.Task[None]) -> None:
+        """Let go of a finished removal, logging a failure no settling
+        waits on any more.
+
+        Args:
+            slot (str): the removal's key (``_removal_slot``).
+            removal (asyncio.Task[None]): the removal.
+        """
+        if self._removing.get(slot) is removal:
             del self._removing[slot]
-            gone.set()
+        if (
+            not removal.cancelled()
+            and (exc := removal.exception()) is not None
+        ):
+            logger.debug("removing an older copy failed: %s", exc)
 
     def _forget(self, key: str) -> None:
         """Let go of a name's latest landing once nothing writes or settles

@@ -18,6 +18,7 @@ import { PathSpec } from '../../src/types.ts'
 import type { RunAnswer } from '../../src/runtime/types.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { MachineVFSConfig } from '../../src/vfs/machine/config.ts'
+import { MachineVFS } from '../../src/vfs/machine/machine.ts'
 import { MountMode } from '../../src/types.ts'
 import type { MountSpec, WorkspaceOptions } from '../../src/workspace/workspace/types.ts'
 import { Workspace } from '../../src/workspace/workspace/workspace.ts'
@@ -302,4 +303,14 @@ export async function run(ws: Workspace, line: string): Promise<[number, string,
 /** A machine's files as text, by path. */
 export function texts(files: FakeFiles): Record<string, string> {
   return Object.fromEntries([...files.files].map(([k, v]) => [k, DEC.decode(v)]))
+}
+
+/** A mount of /tmp over machines a, b, c, ... holding `files`. Mirrors Python's `shared`. */
+export function shared(...files: FakeFiles[]): MachineVFS {
+  const vfs = new MachineVFS({ root: '/tmp' })
+  vfs.bindMachines(
+    tableOf(...files.map((one, at) => new ScriptedMachine('abcdef'.charAt(at), one.answer))),
+    'a',
+  )
+  return vfs
 }

@@ -30,6 +30,27 @@ function removalSlot(path: PathSpec, machine: string): string {
 }
 
 /**
+ * Take an older copy of a name off a machine; one already gone is no error.
+ * Mirrors Python's `_unlink_older`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine holding the copy.
+ * @param path the name.
+ */
+async function unlinkOlder(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<void> {
+  try {
+    await machineUnlink(accessor, machine, path)
+  } catch (err) {
+    if (!isMissingPath(err)) throw err
+    console.debug(`${path.virtual} already gone from ${machine}:`, err)
+  }
+}
+
+/**
  * The writes landing on a machine mount's names, kept so that once the
  * writes of a name end, one copy of it shows, the newest. A write that
  * replaces a name settles it: every other machine's copy goes (`settle`). A
@@ -67,7 +88,7 @@ export class LiveWrites {
   ): Promise<T> {
     const slot = removalSlot(path, machine)
     for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
-      await gone
+      await gone.catch(() => undefined)
     let live = this.live.get(path.virtual)
     if (live === undefined) {
       live = []
@@ -130,9 +151,9 @@ export class LiveWrites {
    * Take a name off every machine but the one its latest write landed on
    * (`latest`), so one copy shows, the newest. The latest is looked up again
    * before every removal, and a write landing meanwhile makes the look start
-   * over with its copy kept. A machine still writing the name keeps its copy
-   * and leaves the name unsettled, for the last write of it to settle
-   * (`end`).
+   * over with its copy kept. A machine still writing the name keeps its copy,
+   * found or not yet made, and leaves the name unsettled, for the last write
+   * of it to settle (`end`).
    *
    * @param path the name.
    */
@@ -145,6 +166,9 @@ export class LiveWrites {
         this.accessor.several && seen !== undefined;
         seen = this.latest.get(key)
       ) {
+        const kept = seen[1]
+        if (this.live.get(key)?.some((machine) => machine !== kept) === true)
+          this.unsettled.add(key)
         for (const one of await holders(this.accessor, path)) {
           if (this.latest.get(key) !== seen) break
           if (one.machine === seen[1] || one.isFolder) continue
@@ -165,32 +189,23 @@ export class LiveWrites {
   }
 
   /**
-   * Take an older copy of a name off a machine, a write of the name there
-   * waiting until it is gone (`landing`); nothing when a removal of it is
-   * already under way, and a copy already gone is no error.
+   * Take an older copy of a name off a machine, once: a settling that finds
+   * the removal under way waits for it and shares its outcome, a failure too,
+   * and a write of the name there waits until it is gone (`landing`).
    *
    * @param machine the machine holding the copy.
    * @param path the name.
    */
   private async removeCopy(machine: string, path: PathSpec): Promise<void> {
     const slot = removalSlot(path, machine)
-    if (this.removing.has(slot)) return
-    let gone = (): void => undefined
-    this.removing.set(
-      slot,
-      new Promise<void>((resolve) => {
-        gone = resolve
-      }),
-    )
-    try {
-      await machineUnlink(this.accessor, machine, path)
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-      console.debug(`${path.virtual} already gone from ${machine}:`, err)
-    } finally {
-      this.removing.delete(slot)
-      gone()
+    let removal = this.removing.get(slot)
+    if (removal === undefined) {
+      removal = unlinkOlder(this.accessor, machine, path).finally(() => {
+        this.removing.delete(slot)
+      })
+      this.removing.set(slot, removal)
     }
+    await removal
   }
 
   /**
