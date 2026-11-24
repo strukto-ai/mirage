@@ -1398,6 +1398,50 @@
           }
         }
       }
+    },
+    {
+      "name": "profile: a mounts key is a mount, not a folder inside one",
+      "error": "profile agent: mounts key /data/keep is not a mount",
+      "config": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "agent": {
+            "mounts": {
+              "/data/keep": {
+                "commands": {
+                  "rm": "deny"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "profile: a glob mounts key inside a mount is not a mount",
+      "error": "profile agent: mounts key /data/*/sub is not a mount",
+      "config": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        },
+        "profiles": {
+          "agent": {
+            "mounts": {
+              "/data/*/sub": {
+                "commands": {
+                  "rm": "deny"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

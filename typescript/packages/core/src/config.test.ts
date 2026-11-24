@@ -79,3 +79,23 @@ describe('@<machine>', () => {
     expect([vfs.name, vfs.config.root, vfs.config.machines]).toEqual(['machine', '/tmp', ['gpu']])
   })
 })
+
+describe('profile mounts keys', () => {
+  it.each(['/data/keep', '/data/*/sub'])('refuses %s inside a mount at the loader', (key) => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/data': { vfs: 'ram' } },
+        profiles: { agent: { mounts: { [key]: { commands: { rm: 'deny' } } } } },
+      }),
+    ).toThrow(`profile agent: mounts key ${key} is not a mount`)
+  })
+
+  it('loads a key that is a mount or under none', () => {
+    loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' }, '/data/keep': { vfs: 'ram' } },
+      profiles: {
+        agent: { mounts: { '/data/keep': { mode: 'read' }, '/later/x': { mode: 'read' } } },
+      },
+    })
+  })
+})

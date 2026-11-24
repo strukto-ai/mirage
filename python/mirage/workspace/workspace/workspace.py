@@ -123,6 +123,7 @@ from mirage.policy import (
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.match.grammar import unread_names
+from mirage.policy.profile import folder_mount_key
 from mirage.policy.types import (
     AdmissionRules,
     DryRun,
@@ -541,11 +542,9 @@ class Workspace:
             else None
         )
         self._profiles: dict[str, SessionProfile] = {}
+        self._default_profile_name: str | None = None
         for name, doc in (profiles or {}).items():
             self.set_profile(name, doc)
-        self._default_profile_name = profile
-        if profile is not None and profile not in self._profiles:
-            raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
             session_id,
             store=stores.sessions,
@@ -636,25 +635,9 @@ class Workspace:
         self._implicit_root = install_mounts(
             self._registry, specs, index, mode
         )
-        # What the workspace and its mounts hide from every session,
-        # stamped onto the default session now and onto every session
-        # created or hydrated later.
-        # The workspace's own session is a session created without a
-        # name, so the default profile shapes it too: the primary agent
-        # is not the one agent the document cannot reach.
-        default_base = self._base_profile(None)
-        self._session_mgr.default_profile = (
-            self._compile(default_base, None)
-            if default_base is not None
-            or self._workspace_processes is not None
-            else None
-        )
-        # Every session starts within max_env, this one with the
-        # workspace's env and its profile's.
-        self._session_mgr.max_env = self._registry.max_env
-        check_env_fits(
-            self._session_mgr.get(session_id), self._registry.max_env
-        )
+        for name, doc in self._profiles.items():
+            self._check_profile_mounts(f"profile {name}", doc)
+        self._use_default_profile(profile)
 
         self.observer = Observer(
             store=stores.observe,
@@ -2643,6 +2626,7 @@ class Workspace:
         # state did not record, so the restored sessions keep the
         # narrowing it gives them, as a checkout's do.
         built_for_state = profiles is None and profile is None
+        recorded = profiles is None
         # No read= here: each restored Mount carries its own spec, and
         # its own mode, so `mode` reaches only a scratch root the
         # workspace adds, for a state that saved none.
@@ -2660,8 +2644,8 @@ class Workspace:
             clis=args.clis,
             secrets=secrets,
             command_limits=args.command_limits,
-            profiles=args.profiles if profiles is None else profiles,
-            profile=args.profile if built_for_state else profile,
+            profiles=None if recorded else profiles,
+            profile=None if recorded else profile,
             processes=args.processes,
             ceilings=ceilings,
             machines=machines,
@@ -2679,6 +2663,12 @@ class Workspace:
                 for r in mounts.values()
             }
         try:
+            if recorded:
+                ws._adopt_profiles(
+                    args.profiles,
+                    args.profile if built_for_state else profile,
+                    picked=profile is not None,
+                )
             await apply_state_dict(
                 ws, state, built_for_state=built_for_state, shared=shared
             )
@@ -2738,8 +2728,9 @@ class Workspace:
                 inline document of ask and deny rules and hides.
 
         Raises:
-            PolicyError: an unknown profile name, or an inline document
-                that states a script.
+            PolicyError: an unknown profile name, an inline document
+                that states a script, or a ``mounts`` key that is a
+                folder inside a mount.
         """
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
@@ -2753,6 +2744,10 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
+        self._check_profile_mounts(
+            self._profile_label(profile, session_id), base
+        )
+        self._check_profile_mounts(f"session {session_id}", inline)
         compiled = self._compile(base, profile, inline, defer=False)
         return self._session_mgr.create(session_id, profile=compiled)
 
@@ -2992,6 +2987,9 @@ class Workspace:
             profile (SessionProfile | Mapping[str, Any]): the document,
                 or the plain mapping a YAML file or the TypeScript
                 constructor would hold.
+
+        Raises:
+            PolicyError: a ``mounts`` key is a folder inside a mount.
         """
         check_name("profile name", name)
         doc = SessionProfile.model_validate(profile)
@@ -3003,8 +3001,108 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
+        self._check_profile_mounts(f"profile {name}", doc)
         self._compile(doc, name)
         self._profiles[name] = doc
+
+    def _use_default_profile(self, profile: str | None) -> None:
+        """Name the profile a session gets when it names none, and shape
+        the workspace's own session by it: that session is one created
+        without a name, so the default profile reaches it too, and the
+        primary agent is not the one agent the document cannot reach.
+
+        Args:
+            profile (str | None): the default profile's name; None for
+                ``profiles.default`` when the table has one.
+
+        Raises:
+            PolicyError: the table has no profile of that name.
+        """
+        if profile is not None and profile not in self._profiles:
+            raise PolicyError(f"unknown profile {profile!r}")
+        self._default_profile_name = profile
+        default_base = self._base_profile(None)
+        self._session_mgr.default_profile = (
+            self._compile(default_base, None)
+            if default_base is not None
+            or self._workspace_processes is not None
+            else None
+        )
+        self._session_mgr.max_env = self._registry.max_env
+        check_env_fits(
+            self._session_mgr.get(self._session_mgr.default_id),
+            self._registry.max_env,
+        )
+
+    def _adopt_profiles(
+        self,
+        profiles: Mapping[str, SessionProfile],
+        profile: str | None,
+        picked: bool,
+    ) -> None:
+        """Take a recorded profile table as the workspace held it.
+
+        A key the table puts on a folder stays: the mount it named may
+        have been unmounted since, leaving the folder inside another
+        mount, and a session taking that profile is refused then, not
+        the restore. A default the caller picks is such a session taking
+        it, so it is held against the mounts as ``create_session`` holds
+        it.
+
+        Args:
+            profiles (Mapping[str, SessionProfile]): the table by name.
+            profile (str | None): the default profile's name.
+            picked (bool): the caller named the default, rather than the
+                state recording it.
+
+        Raises:
+            PolicyError: a picked default keys a folder inside a mount.
+        """
+        for name, doc in profiles.items():
+            doc = SessionProfile.model_validate(doc)
+            self._compile(doc, name)
+            self._profiles[name] = doc
+        if picked and profile is not None and profile in self._profiles:
+            self._check_profile_mounts(
+                f"profile {profile}", self._profiles[profile]
+            )
+        self._use_default_profile(profile)
+
+    def _check_profile_mounts(
+        self, label: str, doc: SessionProfile | None
+    ) -> None:
+        """Refuse a document whose ``mounts`` key is a folder inside one
+        of the mounts there are now rather than a mount.
+
+        Args:
+            label (str): what the error names, ``profile <name>`` or
+                ``session <id>`` for an inline document.
+            doc (SessionProfile | None): the document; None for none.
+
+        Raises:
+            PolicyError: a key is a folder inside a mount.
+        """
+        if doc is None:
+            return
+        key = folder_mount_key(
+            doc, (entry.prefix for entry in self._registry.mounts())
+        )
+        if key is not None:
+            raise PolicyError(f"{label}: mounts key {key} is not a mount")
+
+    def _profile_label(
+        self, profile: str | SessionProfile | None, session_id: str
+    ) -> str:
+        """What a refusal of the profile a session takes names: the
+        profile by its name, or the session for a document passed whole.
+
+        Args:
+            profile (str | SessionProfile | None): what the caller
+                named, None for the workspace default.
+            session_id (str): the session taking it.
+        """
+        name = self._profile_name(profile)
+        return f"profile {name}" if name else f"session {session_id}"
 
     async def set_session_profile(
         self,
@@ -3027,9 +3125,11 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        compiled = self._compile(
-            self._base_profile(profile), profile, defer=False
+        base = self._base_profile(profile)
+        self._check_profile_mounts(
+            self._profile_label(profile, session_id), base
         )
+        compiled = self._compile(base, profile, defer=False)
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()
         if self._shutting_down:

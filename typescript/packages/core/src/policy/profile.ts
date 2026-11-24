@@ -710,6 +710,25 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
 }
 
 /**
+ * The first `mounts` key that is a folder inside a mount rather than a
+ * mount. A key names a mount, so one lying under a mount other than the
+ * root without being a mount itself fails to load; a key under the root
+ * alone, or under no mount, may name a mount not attached yet and passes.
+ * Mirrors Python `folder_mount_key`.
+ */
+export function folderMountKey(profile: SessionProfile, mounts: Iterable<string>): string | null {
+  const prefixes = new Set([...mounts].map((prefix) => norm(prefix)))
+  for (const key of profile.mounts?.keys() ?? []) {
+    const root = norm(key)
+    if (prefixes.has(root)) continue
+    for (const prefix of prefixes) {
+      if (prefix !== '/' && root.startsWith(`${prefix}/`)) return root
+    }
+  }
+  return null
+}
+
+/**
  * A profile as the document that parses back to it: the shape a
  * `profiles:` entry has in YAML, which either host reads. Every block is
  * spelled as the document spells it, a program's runtime settings

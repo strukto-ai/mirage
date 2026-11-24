@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, TypeAlias
 
@@ -690,6 +690,33 @@ class SessionProfile(BaseModel):
                 _absolute_paths(paths, f"{where}.commands paths")
                 _under_mount(paths, prefix, f"{where}.commands paths")
         return self
+
+
+def folder_mount_key(
+    profile: SessionProfile, mounts: Iterable[str]
+) -> str | None:
+    """The first ``mounts`` key that is a folder inside a mount rather
+    than a mount. A key names a mount, so one lying under a mount other
+    than the root without being a mount itself fails to load; a key
+    under the root alone, or under no mount, may name a mount not
+    attached yet and passes.
+
+    Args:
+        profile (SessionProfile): the document.
+        mounts (Iterable[str]): the workspace's mount prefixes.
+
+    Returns:
+        str | None: the key, None when every key passes.
+    """
+    prefixes = {norm(prefix) for prefix in mounts}
+    for key in profile.mounts or {}:
+        root = norm(key)
+        if root not in prefixes and any(
+            prefix != "/" and root.startswith(prefix + "/")
+            for prefix in prefixes
+        ):
+            return root
+    return None
 
 
 def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:

@@ -682,3 +682,107 @@ it.each(['4GB', '8GB'])('runs a line under a max_memory of %s', async (maxMemory
     await ws.close()
   }
 })
+
+describe('profile mounts keys', () => {
+  const keep = 'mounts key /data/keep is not a mount'
+  const folder = (): SessionProfile =>
+    SessionProfile({ mounts: { '/data/keep': { commands: { rm: 'deny' } } } })
+
+  it('refuses a key inside a mount at every entry a document takes', async () => {
+    expect(
+      () => new Workspace({ '/data': new RAMVFS() }, { profiles: { agent: folder() } }),
+    ).toThrow(`profile agent: ${keep}`)
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new RAMVFS() },
+          {
+            profiles: {
+              agent: SessionProfile({ mounts: { '/data/*/sub': { mode: 'read' } } }),
+            },
+          },
+        ),
+    ).toThrow('profile agent: mounts key /data/*/sub is not a mount')
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    expect(() => {
+      ws.setProfile('agent', folder())
+    }).toThrow(`profile agent: ${keep}`)
+    expect(() => ws.createSession('a', { profile: folder() })).toThrow(`session a: ${keep}`)
+    expect(() => ws.createSession('b', { permissions: folder() })).toThrow(`session b: ${keep}`)
+    expect(() => ws.createSession('c', { mounts: { '/data/keep': 'read' } })).toThrow(
+      `session c: ${keep}`,
+    )
+    await expect(ws.setSessionProfile(ws.defaultSessionId, folder())).rejects.toThrow(keep)
+    expect('agent' in ws.profiles).toBe(false)
+    const ids = ws.listSessions().map((s) => s.sessionId)
+    expect(ids.filter((id) => ['a', 'b', 'c'].includes(id))).toEqual([])
+  })
+
+  it('loads a key that is a mount or under none', async () => {
+    const typed: SessionProfile = {
+      mounts: new Map([['/data/', { mode: MountMode.READ }]]),
+    }
+    const ws = new Workspace(
+      { '/data': new RAMVFS(), '/data/keep': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          agent: SessionProfile({
+            mounts: {
+              '/data/': { mode: 'read' },
+              '/data/keep': { commands: { rm: 'deny' } },
+              '/later/x': { mode: 'read' },
+              '/later/*': { commands: { rm: 'deny' } },
+            },
+          }),
+          typed,
+        },
+      },
+    )
+    open.push(ws)
+    ws.createSession('a', { profile: 'agent' })
+    const io = await ws.shell('echo x > /data/keep/f; rm /data/keep/f', { sessionId: 'a' })
+    expect(io.exitCode).toBe(126)
+  })
+
+  it('refuses a named profile when a session takes it inside a later mount', async () => {
+    const ws = new Workspace({ '/tmp': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    ws.setProfile('agent', folder())
+    ws.createSession('a', { profile: 'agent' })
+    ws.addMount('/data', new RAMVFS(), MountMode.WRITE)
+    expect(() => ws.createSession('b', { profile: 'agent' })).toThrow(`profile agent: ${keep}`)
+    await expect(ws.setSessionProfile('a', 'agent')).rejects.toThrow(`profile agent: ${keep}`)
+    expect(ws.listSessions().map((s) => s.sessionId)).not.toContain('b')
+  })
+
+  it('refuses a default profile keying a folder at load', () => {
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new RAMVFS() },
+          { profiles: { agent: folder() }, profile: 'agent' },
+        ),
+    ).toThrow(`profile agent: ${keep}`)
+  })
+
+  it('keeps a snapshot profile whose nested mount was unmounted', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(ws)
+    ws.addMount('/data/keep', new RAMVFS(), MountMode.WRITE)
+    ws.setProfile('agent', folder())
+    await ws.unmount('/data/keep')
+    const tar = await ws.snapshot()
+    const loaded = await Workspace.load(tar)
+    open.push(loaded)
+    expect(loaded.profiles.agent?.mounts?.has('/data/keep')).toBe(true)
+    expect(() => loaded.createSession('a', { profile: 'agent' })).toThrow(`profile agent: ${keep}`)
+    await expect(Workspace.load(tar, { profiles: { agent: folder() } })).rejects.toThrow(
+      `profile agent: ${keep}`,
+    )
+    await expect(Workspace.load(tar, { profile: 'agent' })).rejects.toThrow(
+      `profile agent: ${keep}`,
+    )
+  })
+})

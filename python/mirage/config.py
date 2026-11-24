@@ -54,6 +54,7 @@ from mirage.policy.profile import (
     ProfilePolicy,
     SessionProfile,
     compile_program,
+    folder_mount_key,
     parse_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
@@ -872,6 +873,16 @@ class WorkspaceConfig(BaseModel):
             self.profiles or {}
         ):
             raise ValueError(f"unknown profile {self.profile!r}")
+        return self
+
+    @model_validator(mode="after")
+    def _v_profile_mounts(self) -> "WorkspaceConfig":
+        for name, doc in (self.profiles or {}).items():
+            key = folder_mount_key(doc, self.mounts)
+            if key is not None:
+                raise ValueError(
+                    f"profile {name}: mounts key {key} is not a mount"
+                )
         return self
 
     @model_validator(mode="after")

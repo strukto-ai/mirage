@@ -17,6 +17,7 @@ import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
 import {
   commandTree,
+  folderMountKey,
   compileProgram,
   parseProfileMounts,
   parseProfilePolicy,
@@ -531,5 +532,24 @@ describe('commandTree', () => {
     [{ rm: [] }, 'lists no decision'],
   ])('refuses a misshapen block %#', (block, message) => {
     expect(() => commandTree(block)).toThrow(message)
+  })
+})
+
+describe('folderMountKey', () => {
+  it.each([
+    ['/data/keep', '/data/keep'],
+    ['/data/keep/', '/data/keep'],
+    ['/data/*/sub', '/data/*/sub'],
+    ['/data', null],
+    ['/data/', null],
+    ['/data/sub', null],
+    ['/later', null],
+    ['/later/x', null],
+    ['/', null],
+  ])('finds %s inside a mount: %s', (key, found) => {
+    const profile: SessionProfile = {
+      mounts: new Map([[key, { commands: commandTree({ rm: 'deny' }) }]]),
+    }
+    expect(folderMountKey(profile, ['/', '/data/', '/data/sub/'])).toBe(found)
   })
 })
