@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WordKind } from '../../commands/spec/types.ts'
 import { currentCaller, voiceName } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, decisionOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
@@ -1301,6 +1302,25 @@ function inFolder(one: Judged): boolean {
 }
 
 /**
+ * Whether a redirect target of the command lies in the folder of the mount
+ * entry whose leaf decided it: an absolute one always, a relative one where
+ * the walk knows where the command stands (`Judged.placed`), as `inFolder`
+ * reads a path. Mirrors the Python `_opens_in_folder`.
+ */
+function opensInFolder(one: Judged): boolean {
+  const mount = one.judgment.rule?.mount ?? ''
+  const ctx = one.ctx
+  if (mount === '' || ctx === undefined) return false
+  return (ctx.words ?? []).some(
+    (word) =>
+      word.kind === WordKind.REDIRECT &&
+      word.path !== null &&
+      (one.placed !== false || word.text.startsWith('/')) &&
+      underPath(word.path.virtual, mount),
+  )
+}
+
+/**
  * Whether the profile refuses a command no tree names (by a root's own
  * decision, or a CLI that reaches a service, `unlistedService`), on its
  * own words, which nothing that runs before it on the line can change.
@@ -1350,11 +1370,17 @@ function asksFor(one: Judged): boolean {
  * about those paths, so it holds the line where the command surely works
  * inside that folder (`inFolder`), except for a word the line defines as a
  * function (`Judged.defined`): the call runs the function, whose body's
- * commands are each judged, and the gate sees whether it does.
+ * commands are each judged, and the gate sees whether it does. The call's
+ * redirect targets are not the body's: the shell opens them whatever the
+ * body does, so one inside the folder (`opensInFolder`) holds the line
+ * still.
  */
 function isVerdict(one: Judged): boolean {
   const expl = one.judgment
-  if (expl.exitCode === 0 || (byDefault(expl) && (one.defined === true || !inFolder(one)))) {
+  if (
+    expl.exitCode === 0 ||
+    (byDefault(expl) && ((one.defined === true && !opensInFolder(one)) || !inFolder(one)))
+  ) {
     return false
   }
   if (expl.rule !== null && expl.outcome === Outcome.DENY) return true

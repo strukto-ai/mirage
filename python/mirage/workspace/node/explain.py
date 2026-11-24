@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from mirage.commands.spec.types import WordKind
 from mirage.context.session_context import current_caller, voice_name
 from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
@@ -857,14 +858,19 @@ def _is_verdict(one: Judged) -> bool:
     surely works inside that folder (``_in_folder``), except for a word
     the line defines as a function (``Judged.defined``): the call runs
     the function, whose body's commands are each judged, and the gate
-    sees whether it does.
+    sees whether it does. The call's redirect targets are not the
+    body's: the shell opens them whatever the body does, so one inside
+    the folder (``_opens_in_folder``) holds the line still.
 
     Args:
         one (Judged): one command's explanation and its place.
     """
     expl = one.judgment
     if expl.exit_code == 0 or (
-        _by_default(expl) and (one.defined or not _in_folder(one))
+        _by_default(expl)
+        and (
+            (one.defined and not _opens_in_folder(one)) or not _in_folder(one)
+        )
     ):
         return False
     if expl.rule is not None and expl.outcome is Outcome.DENY:
@@ -920,6 +926,28 @@ def _in_folder(one: Judged) -> bool:
     return any(
         word.path is not None
         and word.text.startswith("/")
+        and under_path(word.path.virtual, rule.mount)
+        for word in ctx.words
+    )
+
+
+def _opens_in_folder(one: Judged) -> bool:
+    """Whether a redirect target of the command lies in the folder of
+    the mount entry whose leaf decided it: an absolute one always, a
+    relative one where the walk knows where the command stands
+    (``Judged.placed``), as :func:`_in_folder` reads a path.
+
+    Args:
+        one (Judged): one command's explanation and its place.
+    """
+    rule = one.judgment.rule
+    ctx = one.ctx
+    if rule is None or not rule.mount or ctx is None:
+        return False
+    return any(
+        word.kind is WordKind.REDIRECT
+        and word.path is not None
+        and (one.placed or word.text.startswith("/"))
         and under_path(word.path.virtual, rule.mount)
         for word in ctx.words
     )
