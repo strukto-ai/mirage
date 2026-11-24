@@ -42,7 +42,7 @@ A Mirage workspace mounts services as folders, such as S3, GitHub, Slack, Linear
 
 ## Keys
 
-The plugin reads keys only from Hermes, with `get_secret`, so each Hermes profile gets its own keys and its own workspace. `${NAME}` anywhere in the YAML, `{from: env, key: NAME}` in a mount, CLI or machine config, and an `env:` entry with `from: env` all read `NAME` from the active profile.
+The plugin reads keys only from Hermes, with `get_secret`, so each Hermes profile uses its own keys. Workspaces are kept apart by YAML path and key values: two profiles with different keys never share one, while profiles with the same keys, or a YAML that names none, share one. `${NAME}` anywhere in the YAML, `{from: env, key: NAME}` in a mount, CLI or machine config, and an `env:` entry with `from: env` all read `NAME` from the active profile.
 
 The plugin refuses a workspace YAML that would reach a key any other way, and the error names each place:
 
@@ -56,7 +56,7 @@ The plugin refuses a workspace YAML that would reach a key any other way, and th
 - a `postgres` dsn without a password, which reads `PGPASSWORD` or `~/.pgpass`;
 - a `chroma` mount, which reads `CHROMA_*` variables and `./.env`;
 - a `mongodb` or `gridfs` uri using `MONGODB-AWS` without a key, which reads `~/.aws`;
-- a `lancedb` `db://` uri without `api_key`, or a cloud uri without `storage_options`.
+- a `lancedb` `db://` uri without `api_key`, or any other cloud uri unless it is `s3://` with a key pair in `storage_options`.
 
 ### OAuth
 
@@ -68,7 +68,7 @@ Mirage refreshes OAuth tokens itself, and a Hermes plugin may not, so a mount wi
 - **Keys:** read from the active Hermes profile when a Hermes task starts, and held in memory for the workspace's life. The plugin writes no key anywhere.
 - **Local files:** a `disk` mount reads and writes the folder its `root` names.
 - **Commands:** commands run inside the workspace. A program Mirage does not run itself runs on a machine the YAML adds. A `docker`, `apple_container`, `smolvm` or `microsandbox` machine runs that tool's CLI on your computer, with your environment and that tool's own configuration (for Docker, `DOCKER_HOST` and its contexts). A `host` machine runs programs directly on your computer, where they reach whatever your user account can, unless a `sandbox` block confines them (Linux only).
-- **Background work:** each Hermes task gets its own sessions in one workspace per profile, and a background job lives until its task ends. The workspaces close when Hermes exits. A YAML with a FUSE mount serves one set of keys: a second profile needs its own YAML.
+- **Background work:** each Hermes task gets its own sessions in the workspace for its YAML and keys, and a background job lives until its task ends. The workspaces close when Hermes exits. A YAML with a FUSE mount serves one set of keys: a second profile needs its own YAML.
 - **Approvals:** Hermes' `approvals.mode` still decides which commands ask first, and the workspace's command rules apply as well.
 
 Full guide: [docs.mirage.strukto.ai/home/agents/hermes](https://docs.mirage.strukto.ai/home/agents/hermes)

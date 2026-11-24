@@ -45,5 +45,6 @@ OUTSIDE = (
     "code outside Mirage's own list, whose keys the plugin cannot vouch for"
 )
 LOCAL_SCHEMES = frozenset({"", "file", "db"})
+LANCE_S3_KEYS = ("aws_access_key_id", "aws_secret_access_key")
 MONGO_VFS = frozenset({"mongodb", "gridfs"})
 AWS_MECHANISM = "MONGODB-AWS"

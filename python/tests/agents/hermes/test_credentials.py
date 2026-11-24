@@ -152,6 +152,11 @@ REFUSED = {
         "  /l: {vfs: lancedb, config: {uri: 'gcs://b/x'}}\n",
         "storage_options",
     ),
+    "lancedb on s3 with options but no keys": (
+        "  /l: {vfs: lancedb, config: {uri: 's3://b/x', "
+        "storage_options: {aws_region: us-east-1}}}\n",
+        "S3 key pair",
+    ),
     "lancedb cloud with no key": (
         "  /l: {vfs: lancedb, config: {uri: 'db://x'}}\n",
         "LANCEDB_API_KEY",
@@ -197,6 +202,9 @@ ALLOWED = {
     "{dsn: {from: env, key: DSN}}}\n",
     "an e2b machine with a key": "machines:\n  e: {provider: e2b, "
     "api_key: '${KEY}'}\n",
+    "lancedb on s3 with a key pair": "  /l: {vfs: lancedb, config: "
+    "{uri: 's3://b/x', storage_options: {aws_access_key_id: '${KEY}', "
+    "aws_secret_access_key: '${SECRET}'}}}\n",
     "a built-in CLI": "clis:\n  gh: {cli: gh, machine: in_process, "
     "config: {token: '${TOKEN}'}}\n",
     "a docker machine": "machines:\n  d: {provider: docker, container: c}\n",

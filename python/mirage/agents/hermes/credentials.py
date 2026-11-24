@@ -25,6 +25,7 @@ from mirage.agents.hermes.constants import (
     AMBIENT_VFS,
     AWS_MECHANISM,
     KEYED_MACHINES,
+    LANCE_S3_KEYS,
     LOCAL_SCHEMES,
     MONGO_VFS,
     OAUTH_CLIS,
@@ -354,10 +355,12 @@ def _mount_refusal(prefix: str, vfs: str, config: Mapping[str, Any]) -> str:
             return (
                 f"{label}: a db:// uri with no api_key reads LANCEDB_API_KEY"
             )
-        if scheme not in LOCAL_SCHEMES and not config.get("storage_options"):
+        options = config.get("storage_options") or {}
+        keyed = scheme == "s3" and all(options.get(f) for f in LANCE_S3_KEYS)
+        if scheme not in LOCAL_SCHEMES and not keyed:
             return (
-                f"{label}: a {scheme}:// uri with no storage_options "
-                "reads the cloud's own login"
+                f"{label}: a {scheme}:// uri without an S3 key pair in "
+                "storage_options reads the cloud's own login"
             )
     if _s3_shaped(vfs):
         return _s3_refusal(label, config) or ""

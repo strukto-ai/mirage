@@ -52,14 +52,16 @@ Hermes installs `mirage-ai` into its own environment. Every command its terminal
 
 ### Keys
 
-The terminal backend takes every key from the active Hermes profile, so each profile gets its own keys and its own workspace. Set the key in Hermes and name it in the YAML:
+The terminal backend takes every key from the active Hermes profile. Workspaces are kept apart by YAML path and key values, so two profiles with different keys never share one. Set the key in Hermes and name it in the YAML:
 
 ```bash
 hermes config set GITHUB_TOKEN ghp_...
 ```
 
 ```yaml /Users/me/workspace.yaml
+processes: workspace
 mounts:
+  /tmp: { vfs: ram, mode: write }
   /github:
     vfs: github
     mode: read
@@ -80,7 +82,7 @@ mounts:
 | A `postgres` dsn without a password | `PGPASSWORD` or `~/.pgpass` |
 | A `chroma` mount | `CHROMA_*` variables and `./.env` |
 | A `mongodb` or `gridfs` uri using `MONGODB-AWS` without a key | `~/.aws` |
-| A `lancedb` `db://` uri without `api_key`, or a cloud uri without `storage_options` | `LANCEDB_API_KEY` or the cloud's own login |
+| A `lancedb` `db://` uri without `api_key`, or any other cloud uri unless it is `s3://` with a key pair in `storage_options` | `LANCEDB_API_KEY` or the cloud's own login |
 | A Google, Box or Dropbox mount, or the `gws` CLI, with a `refresh_token` or `client_secret` | no file, but Mirage would refresh the OAuth token itself, which a Hermes plugin may not |
 
 A Google or Box mount works with a short-lived `access_token` until it expires.
