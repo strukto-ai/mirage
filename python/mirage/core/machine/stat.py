@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
@@ -144,13 +146,13 @@ async def hidden_machines(
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the path an op names.
     """
-    if not hidden_under(current_caller().visibility, mount_prefix(path)):
+    if not has_hides(path):
         return []
-    return [
-        machine
-        for machine in accessor.names()
-        if await is_hidden_on(accessor, machine, path)
-    ]
+    names = accessor.names()
+    hidden = await asyncio.gather(
+        *(is_hidden_on(accessor, machine, path) for machine in names)
+    )
+    return [machine for machine, yes in zip(names, hidden) if yes]
 
 
 async def _real_path(
@@ -196,9 +198,9 @@ async def is_hidden_on(
         machine (str): the machine asked.
         path (PathSpec): the path an op names.
     """
-    vis = current_caller().visibility
-    if not hidden_under(vis, mount_prefix(path)):
+    if not has_hides(path):
         return False
+    vis = current_caller().visibility
     real = await _real_path(accessor, machine, machine_path(accessor, path))
     if real is None:
         return False

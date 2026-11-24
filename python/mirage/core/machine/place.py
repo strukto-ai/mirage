@@ -18,7 +18,7 @@ from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller, note_decision
 from mirage.core.machine.constants import KERNEL_VIEWS
 from mirage.core.machine.stat import hidden_machines, stat_entry
-from mirage.core.machine.types import Holder
+from mirage.core.machine.types import Copies, Holder, Landing
 from mirage.core.machine.utils import folder_of, machine_path
 from mirage.errors.fs import eacces, enoent, enotdir
 from mirage.types import PathSpec, PolicyDecision
@@ -256,11 +256,9 @@ def chosen(accessor: MachineAccessor, held: list[Holder]) -> Holder:
     return next((one for one in latest if one.machine == about), latest[0])
 
 
-async def existing_holders(
-    accessor: MachineAccessor, path: PathSpec
-) -> list[Holder]:
-    """The machines holding a name that must exist, every one of which a
-    removal or a rename reaches.
+async def existing_copies(accessor: MachineAccessor, path: PathSpec) -> Copies:
+    """Every machine's copy of a name that must exist, each of which a
+    removal or a rename reaches, and the one shown (``chosen``).
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -272,7 +270,7 @@ async def existing_holders(
     held = await holders(accessor, path)
     if not held:
         raise enoent(path)
-    return held
+    return Copies(tuple(held), chosen(accessor, held))
 
 
 async def holding_machine(accessor: MachineAccessor, path: PathSpec) -> str:
@@ -286,7 +284,7 @@ async def holding_machine(accessor: MachineAccessor, path: PathSpec) -> str:
     Raises:
         FileNotFoundError: no machine holds it.
     """
-    return chosen(accessor, await existing_holders(accessor, path)).machine
+    return (await existing_copies(accessor, path)).shown.machine
 
 
 async def refuse_hidden(
@@ -307,6 +305,26 @@ async def refuse_hidden(
         raise enoent(path)
 
 
+async def _folder_copies(
+    accessor: MachineAccessor, folder: PathSpec, path: PathSpec
+) -> list[Holder]:
+    """The machines holding a folder as a folder, for a name made in it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        folder (PathSpec): the folder.
+        path (PathSpec): the name made in it, which a refusal names.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file,
+            whatever an older folder on another machine is.
+    """
+    held = await holders(accessor, folder)
+    if held and not chosen(accessor, held).is_folder:
+        raise enotdir(path)
+    return [one for one in held if one.is_folder]
+
+
 async def machines_lacking_folder(
     accessor: MachineAccessor, machines: list[str], path: PathSpec
 ) -> list[str]:
@@ -325,11 +343,28 @@ async def machines_lacking_folder(
     """
     if not accessor.several:
         return []
-    held = await holders(accessor, folder_of(path))
-    if held and not chosen(accessor, held).is_folder:
-        raise enotdir(path)
-    folders = [one.machine for one in held if one.is_folder]
+    folders = [
+        one.machine
+        for one in await _folder_copies(accessor, folder_of(path), path)
+    ]
     return [m for m in machines if folders and m not in folders]
+
+
+async def _lacks_folder(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> bool:
+    """Whether a new name landing on a machine must make its folder there
+    first (``machines_lacking_folder``).
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the name lands on.
+        path (PathSpec): the new name.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file.
+    """
+    return bool(await machines_lacking_folder(accessor, [machine], path))
 
 
 async def new_name_machine(
@@ -357,10 +392,7 @@ async def new_name_machine(
         return about
     above = folder_of(path)
     while True:
-        held = await holders(accessor, above)
-        if held and not chosen(accessor, held).is_folder:
-            raise enotdir(path)
-        folders = [one for one in held if one.is_folder]
+        folders = await _folder_copies(accessor, above, path)
         if folders or not parents or not above.vfs_path:
             break
         above = folder_of(above)
@@ -401,3 +433,62 @@ async def write_machine(
     target = origin or await new_name_machine(accessor, path, parents)
     await refuse_hidden(accessor, target, path)
     return target
+
+
+async def landing(
+    accessor: MachineAccessor,
+    path: PathSpec,
+    *,
+    replaces: bool = False,
+) -> Landing:
+    """Where a write of a name lands (``write_machine``), refusing bytes a
+    program or a copy brings from another machine (``refuse_crossing``).
+    A whole file whose bytes come from the machine it lands on
+    (``origin_machine``) replaces the name across the machines, and its
+    folder is made there when only another machine holds it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): the name written.
+        replaces (bool): the write replaces the whole file.
+
+    Raises:
+        PermissionError: the bytes come from another machine.
+        FileNotFoundError: the machine's own links lead the name to one
+            the session hides.
+        NotADirectoryError: the copy shown of the name's folder is a file.
+    """
+    machine = await write_machine(accessor, path, replaces=replaces)
+    refuse_crossing(accessor, machine, path)
+    if not replaces or origin_machine(accessor) != machine:
+        return Landing(machine)
+    return Landing(
+        machine,
+        origin=True,
+        make_parent=await _lacks_folder(accessor, machine, path),
+    )
+
+
+async def landing_on(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> Landing:
+    """A copy's landing on the machine its source is on, which the copy
+    never leaves: refused where the machine's own links lead the name to
+    a hidden one, its folder made there when only another machine holds
+    it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the source's machine.
+        path (PathSpec): the copy's name.
+
+    Raises:
+        FileNotFoundError: the name leads to a hidden one there.
+        NotADirectoryError: the copy shown of the name's folder is a file.
+    """
+    await refuse_hidden(accessor, machine, path)
+    return Landing(
+        machine,
+        origin=True,
+        make_parent=await _lacks_folder(accessor, machine, path),
+    )
