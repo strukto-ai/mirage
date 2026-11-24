@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from functools import partial
 from typing import Any
 
 from mirage.accessor.machine import MachineAccessor
@@ -66,29 +67,6 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.live_writes import LiveWrites
-
-
-async def _landing_of(
-    accessor: MachineAccessor,
-    path: PathSpec,
-    data: ByteSource,
-    *,
-    replaces: bool = False,
-) -> Landing:
-    """Where bytes being written land (``place.landing``), closing them
-    when they may not land, so their writer stops.
-
-    Args:
-        accessor (MachineAccessor): the mount's machines.
-        path (PathSpec): the file.
-        data (ByteSource): what would be written.
-        replaces (bool): the write replaces the whole file.
-    """
-    try:
-        return await place.landing(accessor, path, replaces=replaces)
-    except BaseException:
-        await close_quietly(data)
-        raise
 
 
 class MachineVFS(BaseVFS):
@@ -244,18 +222,13 @@ class MachineVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        landing = await _landing_of(self.accessor, path, data, replaces=True)
-        await self._write_at(
-            landing, path, data, replaces=landing.origin, atomic=atomic
-        )
+        await self._write_at(path, data, replaces=True, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        landing = await _landing_of(self.accessor, path, data)
-        await self._write_at(landing, path, data, replaces=False, append=True)
+        await self._write_at(path, data, replaces=False, append=True)
 
     async def _write_at(
         self,
-        landing: Landing,
         path: PathSpec,
         data: ByteSource,
         *,
@@ -263,25 +236,24 @@ class MachineVFS(BaseVFS):
         append: bool = False,
         atomic: bool = False,
     ) -> None:
-        """Write bytes where they land, counted as a live write
-        (``LiveWrites``). Bytes that never reach the write, as when it is
-        cancelled while it waits for a removal of the name there, are
-        closed, so their writer stops.
+        """Write bytes where they land (``place.landing``), counted as a
+        live write (``LiveWrites``). Bytes that never reach the write, as
+        when it is refused or cancelled while it waits for a removal of
+        the name there, are closed, so their writer stops.
 
         Args:
-            landing (Landing): where the bytes land.
             path (PathSpec): the file.
             data (ByteSource): the bytes.
-            replaces (bool): the write replaces the name across the
-                machines.
+            replaces (bool): the write replaces the whole file.
             append (bool): add the bytes to the end instead.
             atomic (bool): show nothing until the bytes have ended whole.
         """
         handed = False
         try:
             async with self._writes.landing(
-                landing.machine, path, replaces=replaces
-            ):
+                path,
+                partial(place.landing, self.accessor, path, replaces=replaces),
+            ) as landing:
                 handed = True
                 await _write(
                     self.accessor,
@@ -298,20 +270,26 @@ class MachineVFS(BaseVFS):
             raise
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        landing = await place.landing(self.accessor, path)
-        await _pwrite(self.accessor, landing.machine, path, data, offset)
+        async with self._writes.landing(
+            path, partial(place.landing, self.accessor, path)
+        ) as landing:
+            await _pwrite(self.accessor, landing.machine, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
-        landing = await place.landing(self.accessor, path)
-        await _create(self.accessor, landing.machine, path)
+        async with self._writes.landing(
+            path, partial(place.landing, self.accessor, path)
+        ) as landing:
+            await _create(self.accessor, landing.machine, path)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        landing = await place.landing(self.accessor, path)
-        await _truncate(
-            self.accessor, landing.machine, path, length, no_create
-        )
+        async with self._writes.landing(
+            path, partial(place.landing, self.accessor, path)
+        ) as landing:
+            await _truncate(
+                self.accessor, landing.machine, path, length, no_create
+            )
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         machine = await place.write_machine(
@@ -415,10 +393,12 @@ class MachineVFS(BaseVFS):
             src (PathSpec): the file.
             dst (PathSpec): the copy's name.
         """
-        landing = await place.landing_on(
-            self.accessor, await place.holding_machine(self.accessor, src), dst
-        )
-        async with self._writes.landing(landing.machine, dst, replaces=True):
+
+        async def choose() -> Landing:
+            machine = await place.holding_machine(self.accessor, src)
+            return await place.landing_on(self.accessor, machine, dst)
+
+        async with self._writes.landing(dst, choose) as landing:
             await _copy(
                 self.accessor, landing.machine, src, dst, landing.make_parent
             )
@@ -447,18 +427,21 @@ class MachineVFS(BaseVFS):
         """
         if not isinstance(source, MachineVFS):
             raise exdev(dst)
-        machine = await place.holding_machine(source.accessor, src)
-        if machine not in self.accessor.names():
-            target = await place.write_machine(
-                self.accessor, dst, replaces=True
-            )
-            raise place.crossing_refused(machine, target, dst)
-        landing = await place.landing_on(self.accessor, machine, dst)
-        async with self._writes.landing(machine, dst, replaces=True):
+
+        async def choose() -> Landing:
+            machine = await place.holding_machine(source.accessor, src)
+            if machine not in self.accessor.names():
+                target = await place.write_machine(
+                    self.accessor, dst, replaces=True
+                )
+                raise place.crossing_refused(machine, target, dst)
+            return await place.landing_on(self.accessor, machine, dst)
+
+        async with self._writes.landing(dst, choose) as landing:
             await _copy_from(
                 source.accessor,
                 self.accessor,
-                machine,
+                landing.machine,
                 src,
                 dst,
                 landing.make_parent,

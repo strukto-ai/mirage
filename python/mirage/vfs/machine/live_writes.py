@@ -14,12 +14,13 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
 
 from mirage.accessor.machine import MachineAccessor
 from mirage.core.machine import place
+from mirage.core.machine.types import Landing
 from mirage.core.machine.unlink import unlink as _unlink
 from mirage.types import PathSpec
 
@@ -56,11 +57,13 @@ async def _unlink_older(
 class LiveWrites:
     """The writes landing on a machine mount's names, kept so that once
     the writes of a name end, one copy of it shows, the newest. A write
-    that replaces a name settles it: every other machine's copy goes
-    (``_settle``). A machine still writing the name keeps its copy, and
-    the last write of the name to end settles it again, a failed one too.
-    A write waits for a removal of its name on its machine that is under
-    way, so the removal never takes the new copy.
+    is live from before it chooses its machine until it ends
+    (``landing``). One that replaces a name settles it: every other
+    machine's copy goes (``_settle``). A write live meanwhile, on another
+    machine or still choosing one, keeps its copy and leaves the name
+    unsettled, and the last write of the name to end settles it again, a
+    failed one too. A write waits for a removal of its name on its
+    machine that is under way, so the removal never takes the new copy.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -68,7 +71,7 @@ class LiveWrites:
 
     def __init__(self, accessor: MachineAccessor) -> None:
         self._accessor = accessor
-        self._live: dict[str, list[str]] = {}
+        self._live: dict[str, list[str | None]] = {}
         self._latest: dict[str, tuple[int, str]] = {}
         self._landings = 0
         self._settling: dict[str, int] = {}
@@ -77,30 +80,48 @@ class LiveWrites:
 
     @asynccontextmanager
     async def landing(
-        self, machine: str, path: PathSpec, *, replaces: bool
-    ) -> AsyncIterator[None]:
-        """Count a write of a name on a machine as live while it lands,
-        and end it (``_end``).
+        self, path: PathSpec, choose: Callable[[], Awaitable[Landing]]
+    ) -> AsyncIterator[Landing]:
+        """Count a write of a name as live from before it chooses its
+        machine until it ends (``_end``): a settling meanwhile may look at
+        that machine before the write's copy is there, so it leaves the
+        name for the write to settle, and a write that begins while the
+        name settles leaves it unsettled at once. Once chosen, the write
+        waits for a removal of the name there that is under way.
 
         Args:
-            machine (str): the machine written.
             path (PathSpec): the name.
-            replaces (bool): the write replaces the name, so once it lands
+            choose (Callable[[], Awaitable[Landing]]): where the write
+                lands; one whose bytes come from that machine
+                (``Landing.origin``) replaces the name, so once it lands
                 no other machine's copy of it stays.
         """
-        slot = _removal_slot(path, machine)
-        while (removal := self._removing.get(slot)) is not None:
-            await asyncio.wait({removal})
-        self._live.setdefault(path.virtual, []).append(machine)
+        key = path.virtual
+        live = self._live.setdefault(key, [])
+        live.append(None)
+        if key in self._settling:
+            self._unsettled.add(key)
+        machine: str | None = None
         try:
-            yield
+            landing = await choose()
+            machine = landing.machine
+            live[live.index(None)] = machine
+            slot = _removal_slot(path, machine)
+            while (removal := self._removing.get(slot)) is not None:
+                await asyncio.wait({removal})
+            yield landing
         except BaseException:
-            await self._end(machine, path, landed=False, replaces=replaces)
+            await self._end(machine, path, landed=False, replaces=False)
             raise
-        await self._end(machine, path, landed=True, replaces=replaces)
+        await self._end(machine, path, landed=True, replaces=landing.origin)
 
     async def _end(
-        self, machine: str, path: PathSpec, *, landed: bool, replaces: bool
+        self,
+        machine: str | None,
+        path: PathSpec,
+        *,
+        landed: bool,
+        replaces: bool,
     ) -> None:
         """End a live write of a name. One that landed is the name's latest
         copy, noted while the name has other writes to settle with
@@ -108,7 +129,8 @@ class LiveWrites:
         the last write of an unsettled name to end.
 
         Args:
-            machine (str): the machine written.
+            machine (str | None): the machine written; None for a write
+                that ended before choosing one.
             path (PathSpec): the name.
             landed (bool): the write landed; a failed one leaves the
                 copies of those that did.
@@ -120,7 +142,7 @@ class LiveWrites:
         if not live:
             del self._live[key]
         busy = bool(live) or key in self._unsettled or key in self._settling
-        if landed and (replaces or busy):
+        if landed and machine is not None and (replaces or busy):
             self._landings += 1
             self._latest[key] = (self._landings, machine)
         last_of_unsettled = not live and key in self._unsettled
@@ -140,10 +162,11 @@ class LiveWrites:
         """Take a name off every machine but the one its latest write
         landed on (``_latest``), so one copy shows, the newest. The latest
         is looked up again before every removal, and a write landing
-        meanwhile makes the look start over with its copy kept. A machine
-        still writing the name keeps its copy, found or not yet made, and
-        leaves the name unsettled, for the last write of it to settle
-        (``_end``).
+        meanwhile makes the look start over with its copy kept. A write
+        live as the look starts, on another machine or still choosing one,
+        keeps its copy, found or not yet made, and leaves the name
+        unsettled, as one beginning meanwhile does (``landing``), for the
+        last write of it to settle (``_end``).
 
         Args:
             path (PathSpec): the name.
@@ -157,10 +180,11 @@ class LiveWrites:
                 for one in await place.holders(self._accessor, path):
                     if self._latest.get(key) != seen:
                         break
-                    if one.machine == seen[1] or one.is_folder:
-                        continue
-                    if one.machine in self._live.get(key, ()):
-                        self._unsettled.add(key)
+                    if (
+                        one.machine == seen[1]
+                        or one.is_folder
+                        or one.machine in self._live.get(key, ())
+                    ):
                         continue
                     await self._remove_copy(one.machine, path)
                 if self._latest.get(key) == seen:

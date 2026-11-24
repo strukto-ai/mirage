@@ -52,7 +52,6 @@ import { filesContaining as machineFilesContaining } from '../../core/machine/se
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
 import { hasHides, holderStat, stat as machineStat } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
-import type { Landing } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
@@ -76,29 +75,6 @@ import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { MachineVFSConfig } from './config.ts'
 import { LiveWrites } from './live_writes.ts'
-
-/**
- * Where bytes being written land (`landing`), closing them when they may not
- * land, so their writer stops. Mirrors Python's `_landing_of`.
- *
- * @param accessor the mount's machines.
- * @param path the file.
- * @param data what would be written.
- * @param replaces the write replaces the whole file.
- */
-async function landingOf(
-  accessor: MachineAccessor,
-  path: PathSpec,
-  data: ByteSource,
-  replaces = false,
-): Promise<Landing> {
-  try {
-    return await landing(accessor, path, { replaces })
-  } catch (err) {
-    await closeQuietly(data)
-    throw err
-  }
-}
 
 /**
  * A machine's own files at a prefix, reached through the exec the workspace
@@ -260,32 +236,69 @@ export class MachineVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    const landed = await landingOf(this.accessor, path, data, true)
-    await this.writes.landing(landed.machine, path, landed.origin, () =>
-      machineWrite(this.accessor, landed.machine, path, data, false, atomic, landed.makeParent),
-    )
+    await this.writeAt(path, data, true, false, atomic)
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    const landed = await landingOf(this.accessor, path, data)
-    await this.writes.landing(landed.machine, path, false, () =>
-      machineWrite(this.accessor, landed.machine, path, data, true),
+    await this.writeAt(path, data, false, true)
+  }
+
+  /**
+   * Write bytes where they land (`landing`), counted as a live write
+   * (`LiveWrites`). Bytes refused a landing are closed, so their writer
+   * stops; once the write has them, it closes them. Mirrors Python's
+   * `_write_at`.
+   *
+   * @param path the file.
+   * @param data the bytes.
+   * @param replaces the write replaces the whole file.
+   * @param append add the bytes to the end instead.
+   * @param atomic show nothing until the bytes have ended whole.
+   */
+  private async writeAt(
+    path: PathSpec,
+    data: ByteSource,
+    replaces: boolean,
+    append = false,
+    atomic = false,
+  ): Promise<void> {
+    await this.writes.landing(
+      path,
+      async () => {
+        try {
+          return await landing(this.accessor, path, { replaces })
+        } catch (err) {
+          await closeQuietly(data)
+          throw err
+        }
+      },
+      (landed) =>
+        machineWrite(this.accessor, landed.machine, path, data, append, atomic, landed.makeParent),
     )
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    const landed = await landing(this.accessor, path)
-    await machinePwrite(this.accessor, landed.machine, path, data, offset)
+    await this.writes.landing(
+      path,
+      () => landing(this.accessor, path),
+      (landed) => machinePwrite(this.accessor, landed.machine, path, data, offset),
+    )
   }
 
   override async create(path: PathSpec): Promise<void> {
-    const landed = await landing(this.accessor, path)
-    await machineCreate(this.accessor, landed.machine, path)
+    await this.writes.landing(
+      path,
+      () => landing(this.accessor, path),
+      (landed) => machineCreate(this.accessor, landed.machine, path),
+    )
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    const landed = await landing(this.accessor, path)
-    await machineTruncate(this.accessor, landed.machine, path, length, noCreate)
+    await this.writes.landing(
+      path,
+      () => landing(this.accessor, path),
+      (landed) => machineTruncate(this.accessor, landed.machine, path, length, noCreate),
+    )
   }
 
   override async mkdir(path: PathSpec, parents = false): Promise<void> {
@@ -382,9 +395,10 @@ export class MachineVFS extends BaseVFS {
    * @param dst the copy's name.
    */
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    const landed = await landingOn(this.accessor, await holdingMachine(this.accessor, src), dst)
-    await this.writes.landing(landed.machine, dst, true, () =>
-      machineCopy(this.accessor, landed.machine, src, dst, landed.makeParent),
+    await this.writes.landing(
+      dst,
+      async () => landingOn(this.accessor, await holdingMachine(this.accessor, src), dst),
+      (landed) => machineCopy(this.accessor, landed.machine, src, dst, landed.makeParent),
     )
   }
 
@@ -405,14 +419,19 @@ export class MachineVFS extends BaseVFS {
    */
   override async copyFrom(source: BaseVFS, src: PathSpec, dst: PathSpec): Promise<void> {
     if (!(source instanceof MachineVFS)) throw exdev(dst)
-    const machine = await holdingMachine(source.accessor, src)
-    if (!this.accessor.names().includes(machine)) {
-      const target = await writeMachine(this.accessor, dst, { replaces: true })
-      throw crossingRefused(machine, target, dst)
-    }
-    const landed = await landingOn(this.accessor, machine, dst)
-    await this.writes.landing(machine, dst, true, () =>
-      machineCopyFrom(source.accessor, this.accessor, machine, src, dst, landed.makeParent),
+    const machines = source.accessor
+    await this.writes.landing(
+      dst,
+      async () => {
+        const machine = await holdingMachine(machines, src)
+        if (!this.accessor.names().includes(machine)) {
+          const target = await writeMachine(this.accessor, dst, { replaces: true })
+          throw crossingRefused(machine, target, dst)
+        }
+        return landingOn(this.accessor, machine, dst)
+      },
+      (landed) =>
+        machineCopyFrom(machines, this.accessor, landed.machine, src, dst, landed.makeParent),
     )
   }
 

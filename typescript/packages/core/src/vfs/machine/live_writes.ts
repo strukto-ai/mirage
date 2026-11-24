@@ -14,6 +14,7 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { holders } from '../../core/machine/place.ts'
+import type { Landing } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { isMissingPath } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
@@ -52,15 +53,17 @@ async function unlinkOlder(
 
 /**
  * The writes landing on a machine mount's names, kept so that once the
- * writes of a name end, one copy of it shows, the newest. A write that
+ * writes of a name end, one copy of it shows, the newest. A write is live
+ * from before it chooses its machine until it ends (`landing`). One that
  * replaces a name settles it: every other machine's copy goes (`settle`). A
- * machine still writing the name keeps its copy, and the last write of the
- * name to end settles it again, a failed one too. A write waits for a removal
- * of its name on its machine that is under way, so the removal never takes
- * the new copy. Mirrors Python's `LiveWrites`.
+ * write live meanwhile, on another machine or still choosing one, keeps its
+ * copy and leaves the name unsettled, and the last write of the name to end
+ * settles it again, a failed one too. A write waits for a removal of its name
+ * on its machine that is under way, so the removal never takes the new copy.
+ * Mirrors Python's `LiveWrites`.
  */
 export class LiveWrites {
-  private readonly live = new Map<string, string[]>()
+  private readonly live = new Map<string, (string | null)[]>()
   private readonly latest = new Map<string, readonly [number, string]>()
   private landings = 0
   private readonly settling = new Map<string, number>()
@@ -71,38 +74,48 @@ export class LiveWrites {
   constructor(private readonly accessor: MachineAccessor) {}
 
   /**
-   * Count a write of a name on a machine as live while it lands, and end it
-   * (`end`).
+   * Count a write of a name as live from before it chooses its machine until
+   * it ends (`end`): a settling meanwhile may look at that machine before the
+   * write's copy is there, so it leaves the name for the write to settle, and
+   * a write that begins while the name settles leaves it unsettled at once.
+   * Once chosen, the write waits for a removal of the name there that is
+   * under way.
    *
-   * @param machine the machine written.
    * @param path the name.
-   * @param replaces the write replaces the name, so once it lands no other
+   * @param choose where the write lands; one whose bytes come from that
+   *   machine (`Landing.origin`) replaces the name, so once it lands no other
    *   machine's copy of it stays.
-   * @param write the write.
+   * @param write the write, where it lands.
    */
   async landing<T>(
-    machine: string,
     path: PathSpec,
-    replaces: boolean,
-    write: () => Promise<T>,
+    choose: () => Promise<Landing>,
+    write: (landed: Landing) => Promise<T>,
   ): Promise<T> {
-    const slot = removalSlot(path, machine)
-    for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
-      await gone.catch(() => undefined)
-    let live = this.live.get(path.virtual)
+    const key = path.virtual
+    let live = this.live.get(key)
     if (live === undefined) {
       live = []
-      this.live.set(path.virtual, live)
+      this.live.set(key, live)
     }
-    live.push(machine)
+    live.push(null)
+    if (this.settling.has(key)) this.unsettled.add(key)
+    let machine: string | null = null
+    let landed: Landing
     let done: T
     try {
-      done = await write()
+      landed = await choose()
+      machine = landed.machine
+      live[live.indexOf(null)] = machine
+      const slot = removalSlot(path, machine)
+      for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
+        await gone.catch(() => undefined)
+      done = await write(landed)
     } catch (err) {
-      await this.end(machine, path, false, replaces)
+      await this.end(machine, path, false, false)
       throw err
     }
-    await this.end(machine, path, true, replaces)
+    await this.end(machine, path, true, landed.origin)
     return done
   }
 
@@ -112,14 +125,15 @@ export class LiveWrites {
    * replaces the name settles it, and so does the last write of an unsettled
    * name to end.
    *
-   * @param machine the machine written.
+   * @param machine the machine written; null for a write that ended before
+   *   choosing one.
    * @param path the name.
    * @param landed the write landed; a failed one leaves the copies of those
    *   that did.
    * @param replaces the write replaces the name.
    */
   private async end(
-    machine: string,
+    machine: string | null,
     path: PathSpec,
     landed: boolean,
     replaces: boolean,
@@ -129,7 +143,7 @@ export class LiveWrites {
     live.splice(live.indexOf(machine), 1)
     if (live.length === 0) this.live.delete(key)
     const busy = live.length > 0 || this.unsettled.has(key) || this.settling.has(key)
-    if (landed && (replaces || busy)) {
+    if (landed && machine !== null && (replaces || busy)) {
       this.landings += 1
       this.latest.set(key, [this.landings, machine])
     }
@@ -151,9 +165,10 @@ export class LiveWrites {
    * Take a name off every machine but the one its latest write landed on
    * (`latest`), so one copy shows, the newest. The latest is looked up again
    * before every removal, and a write landing meanwhile makes the look start
-   * over with its copy kept. A machine still writing the name keeps its copy,
-   * found or not yet made, and leaves the name unsettled, for the last write
-   * of it to settle (`end`).
+   * over with its copy kept. A write live as the look starts, on another
+   * machine or still choosing one, keeps its copy, found or not yet made, and
+   * leaves the name unsettled, as one beginning meanwhile does (`landing`),
+   * for the last write of it to settle (`end`).
    *
    * @param path the name.
    */
@@ -171,11 +186,12 @@ export class LiveWrites {
           this.unsettled.add(key)
         for (const one of await holders(this.accessor, path)) {
           if (this.latest.get(key) !== seen) break
-          if (one.machine === seen[1] || one.isFolder) continue
-          if (this.live.get(key)?.includes(one.machine) === true) {
-            this.unsettled.add(key)
+          if (
+            one.machine === kept ||
+            one.isFolder ||
+            this.live.get(key)?.includes(one.machine) === true
+          )
             continue
-          }
           await this.removeCopy(one.machine, path)
         }
         if (this.latest.get(key) === seen) return

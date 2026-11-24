@@ -16,9 +16,11 @@ import { describe, expect, it } from 'vitest'
 import { ScriptedMachine, failed, tableOf, type Answer } from '../../../tests/fixtures/machine.ts'
 import { FakeFiles, shared, spec, texts } from '../../../tests/fixtures/machine_files.ts'
 import { bindCaller, currentCaller } from '../../context/session_context.ts'
+import { Landing } from '../../core/machine/types.ts'
 import { MachineName } from '../../execution/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
+import { LiveWrites } from './live_writes.ts'
 import { MachineVFS } from './machine.ts'
 
 const ENC = new TextEncoder()
@@ -284,5 +286,79 @@ describe('a settling', () => {
     expect(await firstDone).toMatchObject({ code: 'EACCES' })
     expect(await secondDone).toMatchObject({ code: 'EACCES' })
     expect(texts(cFiles)['/tmp/k']).toBe('old\n')
+  })
+
+  it('marks a name a write is still choosing a machine for', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles()
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'a')
+    b.armed = ['/tmp/k', '-maxdepth 0']
+    let pulled = (): void => undefined
+    const started = new Promise<void>((resolve) => {
+      pulled = resolve
+    })
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    async function* slow(): AsyncGenerator<Uint8Array> {
+      pulled()
+      await released
+      yield ENC.encode('from b\n')
+    }
+    const appending = writeOn('b', vfs, '/k', slow(), true)
+    await b.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    b.go()
+    await started
+    release()
+    await appending
+    expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, 'from b\n'])
+  })
+
+  it('marks a name a write begins on while it looks', async () => {
+    const aFiles = new FakeFiles({ '/tmp/k': 'from a\n' })
+    const bFiles = new FakeFiles()
+    const a = new Gated('a', aFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(a, new ScriptedMachine('b', bFiles.answer)), 'a')
+    const writes = new LiveWrites(vfs.accessor)
+    a.armed = ['/tmp/k', '-maxdepth 0']
+    const replacing = writes.landing(
+      spec('/k'),
+      () => Promise.resolve(new Landing('a', true)),
+      () => Promise.resolve(),
+    )
+    await a.held
+    await expect(
+      writes.landing(
+        spec('/k'),
+        () => Promise.resolve(new Landing('b')),
+        () => {
+          bFiles.files.set('/tmp/k', ENC.encode('part of b\n'))
+          return Promise.reject(new Error('EIO'))
+        },
+      ),
+    ).rejects.toThrow('EIO')
+    a.go()
+    await replacing
+    expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
+
+  it('marks a name another machine is still creating', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles()
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'a')
+    b.armed = [': >>', '/tmp/k']
+    const creating = runningOn('b', () => vfs.create(spec('/k')))
+    await b.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    b.go()
+    await creating
+    expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, ''])
   })
 })

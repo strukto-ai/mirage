@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from functools import partial
 
 import pytest
 
@@ -22,11 +23,13 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
+from mirage.core.machine.types import Landing
 from mirage.execution.types import MachineName
 from mirage.io.types import ByteSource
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
+from mirage.vfs.machine.live_writes import LiveWrites
 from mirage.vfs.machine.machine import MachineVFS
 from tests.fixtures.machine import ScriptedMachine, failed, table_of
 from tests.fixtures.machine_files import FakeFiles, shared, spec
@@ -291,3 +294,95 @@ async def test_a_settling_shares_the_failure_of_a_removal_under_way():
     with pytest.raises(PermissionError):
         await second
     assert c_files.files["/tmp/k"] == b"old\n"
+
+
+@pytest.mark.asyncio
+async def test_a_settling_marks_a_name_a_write_is_still_choosing_a_machine_for():
+    a_files, b_files = FakeFiles(), FakeFiles()
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "a")
+    b.armed = ("/tmp/k", "-maxdepth 0")
+    pulled, released = asyncio.Event(), asyncio.Event()
+
+    async def slow():
+        pulled.set()
+        await released.wait()
+        yield b"from b\n"
+
+    appending = asyncio.create_task(
+        write_on("b", vfs, spec("/k"), slow(), append=True)
+    )
+    await b.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    b.go.set()
+    await pulled.wait()
+    released.set()
+    await appending
+    assert ("/tmp/k" in a_files.files, b_files.files["/tmp/k"]) == (
+        False,
+        b"from b\n",
+    )
+
+
+async def lands_on(machine: str, origin: bool = False) -> Landing:
+    """Choose ``machine`` for a write, as a mount does.
+
+    Args:
+        machine (str): the machine.
+        origin (bool): the bytes come from it, so the write replaces the
+            name.
+    """
+    return Landing(machine, origin=origin)
+
+
+@pytest.mark.asyncio
+async def test_a_settling_marks_a_name_a_write_begins_on_while_it_looks():
+    a_files, b_files = FakeFiles({"/tmp/k": b"from a\n"}), FakeFiles()
+    a = Gated("a", a_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(a, ScriptedMachine("b", b_files.answer)), "a")
+    writes = LiveWrites(vfs.accessor)
+    a.armed = ("/tmp/k", "-maxdepth 0")
+
+    async def replace():
+        async with writes.landing(
+            spec("/k"), partial(lands_on, "a", origin=True)
+        ):
+            pass
+
+    replacing = asyncio.create_task(replace())
+    await a.held.wait()
+    with pytest.raises(OSError):
+        async with writes.landing(spec("/k"), partial(lands_on, "b")):
+            b_files.files["/tmp/k"] = b"part of b\n"
+            raise OSError(5, "Input/output error")
+    a.go.set()
+    await replacing
+    assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
+        b"from a\n",
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_settling_marks_a_name_another_machine_is_still_creating():
+    a_files, b_files = FakeFiles(), FakeFiles()
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "a")
+    b.armed = (": >>", "/tmp/k")
+
+    async def create_on_b():
+        token = running_on("b")
+        try:
+            await vfs.create(spec("/k"))
+        finally:
+            reset_caller(token)
+
+    creating = asyncio.create_task(create_on_b())
+    await b.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    b.go.set()
+    await creating
+    assert ("/tmp/k" in a_files.files, b_files.files["/tmp/k"]) == (False, b"")
