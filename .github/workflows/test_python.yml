@@ -446,7 +446,9 @@ jobs:
             | tar xz -C "$RUNNER_TEMP/hermes" --strip-components 1
           uv sync --frozen --project "$RUNNER_TEMP/hermes"
           HERMES_PYTHON="$RUNNER_TEMP/hermes/.venv/bin/python"
-          uv pip install --python "$HERMES_PYTHON" . pytest
+          # hermes resolves a plugin inside its own locked versions, so a pin mirage-ai cannot meet fails here.
+          uv export --frozen --project "$RUNNER_TEMP/hermes" --all-extras --no-hashes --no-emit-project -o "$RUNNER_TEMP/hermes-pins.txt"
+          uv pip install --python "$HERMES_PYTHON" -c "$RUNNER_TEMP/hermes-pins.txt" . pytest
           "$HERMES_PYTHON" -c "import agent.terminal_env_provider, tools.environments.base, mirage.agents.hermes"
           "$HERMES_PYTHON" - <<'PY'
           import importlib.util

@@ -2883,7 +2883,7 @@ requires-dist = [
     { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.7.32" },
     { name = "dulwich", specifier = ">=1.2.9" },
     { name = "e2b", marker = "extra == 'e2b'", specifier = ">=2.62.0" },
-    { name = "fastapi", specifier = ">=0.135.1" },
+    { name = "fastapi", specifier = ">=0.133.1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = ">=0.33.0" },
