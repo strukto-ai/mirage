@@ -56,11 +56,11 @@ async function unlinkOlder(
  * writes of a name end, one copy of it shows, the newest. A write is live
  * from before it chooses its machine until it ends (`landing`). One that
  * replaces a name settles it: every other machine's copy goes (`settle`). A
- * write live meanwhile, on another machine or still choosing one, keeps its
- * copy and leaves the name unsettled, and the last write of the name to end
- * settles it again, a failed one too. A write waits for a removal of its name
- * on its machine that is under way, so the removal never takes the new copy.
- * Mirrors Python's `LiveWrites`.
+ * write live meanwhile leaves the name unsettled, and the last write of the
+ * name to end settles it again, a failed one too. No copy goes while a write
+ * still chooses its machine, nor the copy of a machine a live write chose,
+ * and a write whose machine's copy is being removed chooses again, so a
+ * write never builds on a copy that is going. Mirrors Python's `LiveWrites`.
  */
 export class LiveWrites {
   private readonly live = new Map<string, (string | null)[]>()
@@ -75,11 +75,12 @@ export class LiveWrites {
 
   /**
    * Count a write of a name as live from before it chooses its machine until
-   * it ends (`end`): a settling meanwhile may look at that machine before the
-   * write's copy is there, so it leaves the name for the write to settle, and
-   * a write that begins while the name settles leaves it unsettled at once.
-   * Once chosen, the write waits for a removal of the name there that is
-   * under way.
+   * it ends (`end`). While it chooses, a settling takes no copy of the name
+   * away, since the write may land on any, and leaves the name for the write
+   * to settle; a write that begins while the name settles leaves it unsettled
+   * at once. A write whose machine's copy is being removed waits for the
+   * removal and chooses again, so it neither builds on a copy that is going
+   * nor has the removal take its bytes.
    *
    * @param path the name.
    * @param choose where the write lands; one whose bytes come from that
@@ -105,11 +106,16 @@ export class LiveWrites {
     let done: T
     try {
       landed = await choose()
+      for (
+        let gone = this.removing.get(removalSlot(path, landed.machine));
+        gone !== undefined;
+        gone = this.removing.get(removalSlot(path, landed.machine))
+      ) {
+        await gone.catch(() => undefined)
+        landed = await choose()
+      }
       machine = landed.machine
       live[live.indexOf(null)] = machine
-      const slot = removalSlot(path, machine)
-      for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
-        await gone.catch(() => undefined)
       done = await write(landed)
     } catch (err) {
       await this.end(machine, path, false, false)
@@ -166,9 +172,10 @@ export class LiveWrites {
    * (`latest`), so one copy shows, the newest. The latest is looked up again
    * before every removal, and a write landing meanwhile makes the look start
    * over with its copy kept. A write live as the look starts, on another
-   * machine or still choosing one, keeps its copy, found or not yet made, and
-   * leaves the name unsettled, as one beginning meanwhile does (`landing`),
-   * for the last write of it to settle (`end`).
+   * machine or still choosing one, leaves the name unsettled, as one beginning
+   * meanwhile does (`landing`), for the last write of it to settle (`end`). A
+   * machine a live write chose keeps its copy, found or not yet made, and no
+   * copy goes while a write still chooses its machine.
    *
    * @param path the name.
    */
@@ -186,10 +193,12 @@ export class LiveWrites {
           this.unsettled.add(key)
         for (const one of await holders(this.accessor, path)) {
           if (this.latest.get(key) !== seen) break
+          const live = this.live.get(key) ?? []
           if (
             one.machine === kept ||
             one.isFolder ||
-            this.live.get(key)?.includes(one.machine) === true
+            live.includes(one.machine) ||
+            live.includes(null)
           )
             continue
           await this.removeCopy(one.machine, path)

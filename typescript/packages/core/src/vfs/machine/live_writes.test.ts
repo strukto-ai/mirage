@@ -361,4 +361,57 @@ describe('a settling', () => {
     await creating
     expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, ''])
   })
+
+  it('takes no copy away while a write chooses its machine', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles({ '/tmp/k': 'prefix\n' })
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'b')
+    b.armed = ['/tmp/k', '-maxdepth 0']
+    const appending = vfs.append(spec('/k'), ENC.encode('suffix\n'))
+    await b.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    b.go()
+    await appending
+    expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([
+      false,
+      'prefix\nsuffix\n',
+    ])
+  })
+
+  it('makes a write whose copy is being removed choose again', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles({ '/tmp/k': 'prefix\n' })
+    bFiles.written.set('/tmp/k', 2_000_000_000)
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'a')
+    b.armed = ['rm --', '/tmp/k']
+    const replacing = writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    await b.held
+    const appending = vfs.append(spec('/k'), ENC.encode('suffix\n'))
+    await Promise.race([appending, new Promise((resolve) => setTimeout(resolve, 200))])
+    b.go()
+    await Promise.all([replacing, appending])
+    expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual([
+      'from a\nsuffix\n',
+      false,
+    ])
+  })
+
+  it('takes no copy away for a truncate that makes no file', async () => {
+    const aFiles = new FakeFiles()
+    const bFiles = new FakeFiles()
+    const b = new Gated('b', bFiles.answer)
+    const vfs = new MachineVFS({ root: '/tmp' })
+    vfs.bindMachines(tableOf(new ScriptedMachine('a', aFiles.answer), b), 'b')
+    b.armed = ['/tmp/k', '-maxdepth 0']
+    const truncating = vfs.truncate(spec('/k'), 0, true)
+    await b.held
+    await writeOn('a', vfs, '/k', ENC.encode('from a\n'))
+    b.go()
+    await truncating
+    expect([texts(aFiles)['/tmp/k'], bFiles.files.has('/tmp/k')]).toEqual(['from a\n', false])
+  })
 })

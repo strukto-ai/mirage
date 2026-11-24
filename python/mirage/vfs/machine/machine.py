@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from functools import partial
 from typing import Any
 
@@ -67,6 +68,8 @@ from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.machine.config import MachineVFSConfig
 from mirage.vfs.machine.live_writes import LiveWrites
+
+logger = logging.getLogger(__name__)
 
 
 class MachineVFS(BaseVFS):
@@ -284,12 +287,33 @@ class MachineVFS(BaseVFS):
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        async with self._writes.landing(
-            path, partial(place.landing, self.accessor, path)
-        ) as landing:
-            await _truncate(
-                self.accessor, landing.machine, path, length, no_create
-            )
+        """Set a file's length where it lands. One that makes no file
+        (``no_create``) goes to the copy shown, and of a name no machine
+        holds it does nothing, as the disk does: it lands nowhere, so a
+        settling never keeps a copy it did not make.
+
+        Args:
+            path (PathSpec): the file.
+            length (int): its new length.
+            no_create (bool): leave a missing file missing.
+        """
+
+        async def choose() -> Landing:
+            if not no_create:
+                return await place.landing(self.accessor, path)
+            machine = await place.holding_machine(self.accessor, path)
+            place.refuse_crossing(self.accessor, machine, path)
+            return Landing(machine)
+
+        try:
+            async with self._writes.landing(path, choose) as landing:
+                await _truncate(
+                    self.accessor, landing.machine, path, length, no_create
+                )
+        except FileNotFoundError as exc:
+            if not no_create:
+                raise
+            logger.debug("%s left missing: %s", path.virtual, exc)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         machine = await place.write_machine(

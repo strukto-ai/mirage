@@ -59,11 +59,12 @@ class LiveWrites:
     the writes of a name end, one copy of it shows, the newest. A write
     is live from before it chooses its machine until it ends
     (``landing``). One that replaces a name settles it: every other
-    machine's copy goes (``_settle``). A write live meanwhile, on another
-    machine or still choosing one, keeps its copy and leaves the name
-    unsettled, and the last write of the name to end settles it again, a
-    failed one too. A write waits for a removal of its name on its
-    machine that is under way, so the removal never takes the new copy.
+    machine's copy goes (``_settle``). A write live meanwhile leaves the
+    name unsettled, and the last write of the name to end settles it
+    again, a failed one too. No copy goes while a write still chooses
+    its machine, nor the copy of a machine a live write chose, and a
+    write whose machine's copy is being removed chooses again, so a
+    write never builds on a copy that is going.
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -83,11 +84,13 @@ class LiveWrites:
         self, path: PathSpec, choose: Callable[[], Awaitable[Landing]]
     ) -> AsyncIterator[Landing]:
         """Count a write of a name as live from before it chooses its
-        machine until it ends (``_end``): a settling meanwhile may look at
-        that machine before the write's copy is there, so it leaves the
-        name for the write to settle, and a write that begins while the
-        name settles leaves it unsettled at once. Once chosen, the write
-        waits for a removal of the name there that is under way.
+        machine until it ends (``_end``). While it chooses, a settling
+        takes no copy of the name away, since the write may land on any,
+        and leaves the name for the write to settle; a write that begins
+        while the name settles leaves it unsettled at once. A write whose
+        machine's copy is being removed waits for the removal and chooses
+        again, so it neither builds on a copy that is going nor has the
+        removal take its bytes.
 
         Args:
             path (PathSpec): the name.
@@ -104,11 +107,15 @@ class LiveWrites:
         machine: str | None = None
         try:
             landing = await choose()
+            while (
+                removal := self._removing.get(
+                    _removal_slot(path, landing.machine)
+                )
+            ) is not None:
+                await asyncio.wait({removal})
+                landing = await choose()
             machine = landing.machine
             live[live.index(None)] = machine
-            slot = _removal_slot(path, machine)
-            while (removal := self._removing.get(slot)) is not None:
-                await asyncio.wait({removal})
             yield landing
         except BaseException:
             await self._end(machine, path, landed=False, replaces=False)
@@ -164,9 +171,10 @@ class LiveWrites:
         is looked up again before every removal, and a write landing
         meanwhile makes the look start over with its copy kept. A write
         live as the look starts, on another machine or still choosing one,
-        keeps its copy, found or not yet made, and leaves the name
-        unsettled, as one beginning meanwhile does (``landing``), for the
-        last write of it to settle (``_end``).
+        leaves the name unsettled, as one beginning meanwhile does
+        (``landing``), for the last write of it to settle (``_end``). A
+        machine a live write chose keeps its copy, found or not yet made,
+        and no copy goes while a write still chooses its machine.
 
         Args:
             path (PathSpec): the name.
@@ -180,10 +188,12 @@ class LiveWrites:
                 for one in await place.holders(self._accessor, path):
                     if self._latest.get(key) != seen:
                         break
+                    live = self._live.get(key, ())
                     if (
                         one.machine == seen[1]
                         or one.is_folder
-                        or one.machine in self._live.get(key, ())
+                        or one.machine in live
+                        or None in live
                     ):
                         continue
                     await self._remove_copy(one.machine, path)

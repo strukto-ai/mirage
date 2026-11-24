@@ -386,3 +386,65 @@ async def test_a_settling_marks_a_name_another_machine_is_still_creating():
     b.go.set()
     await creating
     assert ("/tmp/k" in a_files.files, b_files.files["/tmp/k"]) == (False, b"")
+
+
+@pytest.mark.asyncio
+async def test_a_settling_takes_no_copy_away_while_a_write_chooses_its_machine():
+    a_files = FakeFiles()
+    b_files = FakeFiles({"/tmp/k": b"prefix\n"})
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "b")
+    b.armed = ("/tmp/k", "-maxdepth 0")
+    appending = asyncio.create_task(vfs.append(spec("/k"), b"suffix\n"))
+    await b.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    b.go.set()
+    await appending
+    assert ("/tmp/k" in a_files.files, b_files.files["/tmp/k"]) == (
+        False,
+        b"prefix\nsuffix\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_copy_is_being_removed_chooses_again():
+    a_files = FakeFiles()
+    b_files = FakeFiles({"/tmp/k": b"prefix\n"})
+    b_files.written["/tmp/k"] = 2 * 10**9
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "a")
+    b.armed = ("rm --", "/tmp/k")
+    replacing = asyncio.create_task(
+        write_on("a", vfs, spec("/k"), b"from a\n")
+    )
+    await b.held.wait()
+    appending = asyncio.create_task(vfs.append(spec("/k"), b"suffix\n"))
+    await asyncio.wait({appending}, timeout=0.2)
+    b.go.set()
+    await asyncio.gather(replacing, appending)
+    assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
+        b"from a\nsuffix\n",
+        False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_truncate_that_makes_no_file_takes_no_copy_away():
+    a_files, b_files = FakeFiles(), FakeFiles()
+    b = Gated("b", b_files.answer)
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(table_of(ScriptedMachine("a", a_files.answer), b), "b")
+    b.armed = ("/tmp/k", "-maxdepth 0")
+    truncating = asyncio.create_task(
+        vfs.truncate(spec("/k"), 0, no_create=True)
+    )
+    await b.held.wait()
+    await write_on("a", vfs, spec("/k"), b"from a\n")
+    b.go.set()
+    await truncating
+    assert (a_files.files["/tmp/k"], "/tmp/k" in b_files.files) == (
+        b"from a\n",
+        False,
+    )

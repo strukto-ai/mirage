@@ -52,10 +52,19 @@ import { filesContaining as machineFilesContaining } from '../../core/machine/se
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
 import { hasHides, holderStat, stat as machineStat } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
+import { Landing } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import { eisdir, enoent, enotdir, enotempty, enotsup, exdev } from '../../errors/fs.ts'
+import {
+  eisdir,
+  enoent,
+  enotdir,
+  enotempty,
+  enotsup,
+  exdev,
+  isMissingPath,
+} from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import { closeQuietly } from '../../io/stream.ts'
@@ -293,12 +302,32 @@ export class MachineVFS extends BaseVFS {
     )
   }
 
+  /**
+   * Set a file's length where it lands. One that makes no file (`noCreate`)
+   * goes to the copy shown, and of a name no machine holds it does nothing,
+   * as the disk does: it lands nowhere, so a settling never keeps a copy it
+   * did not make. Mirrors Python's `MachineVFS.truncate`.
+   *
+   * @param path the file.
+   * @param length its new length.
+   * @param noCreate leave a missing file missing.
+   */
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    await this.writes.landing(
-      path,
-      () => landing(this.accessor, path),
-      (landed) => machineTruncate(this.accessor, landed.machine, path, length, noCreate),
-    )
+    try {
+      await this.writes.landing(
+        path,
+        async () => {
+          if (!noCreate) return landing(this.accessor, path)
+          const machine = await holdingMachine(this.accessor, path)
+          refuseCrossing(this.accessor, machine, path)
+          return new Landing(machine)
+        },
+        (landed) => machineTruncate(this.accessor, landed.machine, path, length, noCreate),
+      )
+    } catch (err) {
+      if (!noCreate || !isMissingPath(err)) throw err
+      console.debug(`${path.virtual} left missing:`, err)
+    }
   }
 
   override async mkdir(path: PathSpec, parents = false): Promise<void> {
