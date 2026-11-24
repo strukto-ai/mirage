@@ -900,11 +900,13 @@
     {"op": "exec", "session": "moves", "command": "f() { mv /t/m.txt /; }; cd /; f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "command": "cat /m.txt", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "vault", "command": "cd /data", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "explain", "session": "vault", "command": "f() { ls; }; f > /vault/out", "expect": {"value": {"outcome": "ask", "reason": "vault needs a nod", "decision": "pending", "exit_code": 1, "stderr": "bash: line 1: /vault/out: Permission denied\n"}}},
     {"op": "exec", "session": "vault", "command": "f() { ls; }; f > /vault/out", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /vault/out: Permission denied\n", "decision": "vault needs a nod"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "vault", "command": "f() { ls; }; f > /vault/out", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "command": "cat /vault/out", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "stored", "command": "g() { :; }", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "explain", "session": "stored", "command": "g > /data/a > /out", "expect": {"value": {"outcome": "ask", "reason": "data needs a nod", "decision": "pending", "exit_code": 1, "stderr": "bash: line 1: /data/a: Permission denied\n"}}},
     {"op": "exec", "session": "stored", "command": "g > /data/a > /out", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/a: Permission denied\n", "decision": "data needs a nod"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "stored", "command": "g > /data/a > /out", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}

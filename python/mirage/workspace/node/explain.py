@@ -93,6 +93,7 @@ from mirage.workspace.executor.builtins.env.env import env_child, env_vars
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_facts
+from mirage.workspace.lookup.constants import SHELL_ONLY_BUILTINS
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -2807,9 +2808,10 @@ def explain_redirects(
     before it on the line included, as ``admit_redirect`` judges it when
     the shell opens it, without asking anyone: an ask reads the session's
     standing grants and stops there (``Decisions.held``), as a command's
-    does in :func:`_explained`. A target only the runtime can expand
-    (``> $f``), or a relative one after a ``cd`` the walk could not
-    follow, is left to the run.
+    does in :func:`_explained`. A function call's redirects count as no
+    command's too (:func:`_runs_a_function`), as the gate judges them. A
+    target only the runtime can expand (``> $f``), or a relative one
+    after a ``cd`` the walk could not follow, is left to the run.
 
     Args:
         ast (Any): the parsed root node.
@@ -2819,7 +2821,7 @@ def explain_redirects(
     """
     out: list[Opened] = []
     for item in _walked_line(ast, session, opens=True):
-        if item.words:
+        if item.words and not _runs_a_function(item, registry):
             continue
         at = item.occurrence
         row = encode_text(at.source)[: at.start].count(b"\n") + 1
@@ -2861,6 +2863,27 @@ def explain_redirects(
                 )
             out.append(Opened(judgment, at))
     return out
+
+
+def _runs_a_function(item: Walked, registry: MountRegistry) -> bool:
+    """Whether a walked command calls a function: one the session holds
+    (``runs_function``), or one the line defines before it, which
+    shadows the name as a held one does unless the shell keeps the name
+    (``SHELL_ONLY_BUILTINS``).
+
+    Args:
+        item (Walked): the command, where it stands.
+        registry (MountRegistry): registry holding the command layers.
+    """
+    head = item.words[0].text
+    return head is not None and (
+        runs_function(head, item.session, registry)
+        or (
+            item.pipeline is not None
+            and head in item.pipeline.functions
+            and head not in SHELL_ONLY_BUILTINS
+        )
+    )
 
 
 def explained_line(

@@ -219,9 +219,7 @@ impl AdmissionMatcher {
                 if best.as_ref().is_none_or(|(held, _, held_standing)| {
                     let (now, then) = (rank(verdict.outcome), rank(held.outcome));
                     now > then
-                        || (now == then
-                            && now > rank(Outcome::Allow)
-                            && standing > *held_standing)
+                        || (now == then && now > rank(Outcome::Allow) && standing > *held_standing)
                 }) {
                     best = Some((verdict, subject, standing));
                 }
@@ -893,11 +891,11 @@ mod tests {
         let ruling = named.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
         assert_eq!(ruling.outcome, Deny);
         let rule = &named.rules()[ruling.rule.unwrap()];
-        assert_eq!((rule.mount.clone(), rule.at.clone()), (None, text("/cat/*")));
-        let inner = matcher(
-            json!({"*": "deny"}),
-            &[("/d", json!({"cat": "deny"}))],
+        assert_eq!(
+            (rule.mount.clone(), rule.at.clone()),
+            (None, text("/cat/*"))
         );
+        let inner = matcher(json!({"*": "deny"}), &[("/d", json!({"cat": "deny"}))]);
         let ruling = inner.decide(&facts("/d", &["cat", "f.txt"], &["/d/f.txt"]));
         assert_eq!(inner.rules()[ruling.rule.unwrap()].at, text("/cat/*"));
     }

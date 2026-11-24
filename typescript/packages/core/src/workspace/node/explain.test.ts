@@ -857,6 +857,12 @@ describe('explain', () => {
       }),
     })
     await w.shell('cd /data', { sessionId: 's' })
+    const said = await w.explain('f() { ls; }; f > /vault/out', 's')
+    expect([said.outcome, said.exitCode, said.stderr]).toEqual([
+      Outcome.ASK,
+      1,
+      'bash: line 1: /vault/out: Permission denied\n',
+    ])
     const ran = await w.shell('f() { ls; }; f > /vault/out', { sessionId: 's' })
     expect([ran.exitCode, DEC.decode(ran.stderr), asked.length]).toEqual([0, '', 1])
     expect(DEC.decode((await w.shell('cat /vault/out')).stdout)).toBe('f.txt\n')
@@ -876,8 +882,27 @@ describe('explain', () => {
       }),
     })
     await w.shell('f() { :; }', { sessionId: 's' })
+    const said = await w.explain('f > /data/a > /out', 's')
+    expect([said.outcome, said.exitCode]).toEqual([Outcome.ASK, 1])
     const ran = await w.shell('f > /data/a > /out', { sessionId: 's' })
     expect([ran.exitCode, DEC.decode(ran.stderr), asked.length]).toEqual([0, '', 1])
+  })
+
+  it("explains a stored function's refused redirect", async () => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    await w.shell('g() { echo hi; }', { sessionId: 's' })
+    const said = await w.explain('g > /data/f.txt', 's')
+    const ran = await w.shell('g > /data/f.txt', { sessionId: 's' })
+    const refused = 'bash: line 1: /data/f.txt: Permission denied\n'
+    expect([said.outcome, said.exitCode, said.stderr]).toEqual([Outcome.DENY, 1, refused])
+    expect([ran.exitCode, DEC.decode(ran.stderr)]).toEqual([1, refused])
   })
 
   it.each([

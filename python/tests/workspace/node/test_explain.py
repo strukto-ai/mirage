@@ -783,6 +783,12 @@ async def test_a_redirect_another_entry_asks_about_is_its_own_question():
         },
     )
     await ws.shell("cd /data", session_id="s")
+    said = await ws.explain("f() { ls; }; f > /vault/out", "s")
+    assert (said.outcome, said.exit_code, said.stderr) == (
+        Outcome.ASK,
+        1,
+        "bash: line 1: /vault/out: Permission denied\n",
+    )
     ran = await ws.shell("f() { ls; }; f > /vault/out", session_id="s")
     assert (ran.exit_code, ran.stderr or b"", len(asked)) == (0, b"", 1)
     listed = await ws.shell("cat /vault/out")
@@ -806,8 +812,33 @@ async def test_a_stored_functions_redirects_are_each_asked_once():
         },
     )
     await ws.shell("f() { :; }", session_id="s")
+    said = await ws.explain("f > /data/a > /out", "s")
+    assert (said.outcome, said.exit_code) == (Outcome.ASK, 1)
     ran = await ws.shell("f > /data/a > /out", session_id="s")
     assert (ran.exit_code, ran.stderr or b"", len(asked)) == (0, b"", 1)
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_reports_a_stored_functions_refused_redirect():
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    await ws.shell("g() { echo hi; }", session_id="s")
+    said = await ws.explain("g > /data/f.txt", "s")
+    ran = await ws.shell("g > /data/f.txt", session_id="s")
+    refused = "bash: line 1: /data/f.txt: Permission denied\n"
+    assert (said.outcome, said.exit_code, said.stderr) == (
+        Outcome.DENY,
+        1,
+        refused,
+    )
+    assert (ran.exit_code, ran.stderr) == (1, refused.encode())
     await ws.close()
 
 

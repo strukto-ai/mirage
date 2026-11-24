@@ -71,6 +71,7 @@ import { resolvePath } from '../../utils/path.ts'
 import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { scanOptions } from '../executor/builtins/getopt.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
+import { SHELL_ONLY_BUILTINS } from '../lookup/constants.ts'
 import { lineFacts } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
@@ -2628,14 +2629,30 @@ function caseArm(node: TSNodeLike): number | null {
 }
 
 /**
+ * Whether a walked command calls a function: one the session holds
+ * (`runsFunction`), or one the line defines before it, which shadows the name
+ * as a held one does unless the shell keeps the name (`SHELL_ONLY_BUILTINS`).
+ * Mirrors the Python `_runs_a_function`.
+ */
+function runsAFunction(item: Walked, registry: MountRegistry): boolean {
+  const head = item.words[0]?.text ?? null
+  return (
+    head !== null &&
+    (runsFunction(head, item.session, registry) ||
+      (item.pipeline?.functions.has(head) === true && !SHELL_ONLY_BUILTINS.has(head)))
+  )
+}
+
+/**
  * Every redirect of a line no command owns that the session's trees refuse
  * or ask about, judged where its statement stands, a `cd` before it on the
  * line included, as `admitRedirect` judges it when the shell opens it,
  * without asking anyone: an ask reads the session's standing grants and
- * stops there (`Decisions.held`), as a command's does. A target only the
- * runtime can expand (`> $f`), or a relative one after a `cd` the walk
- * could not follow, is left to the run. Mirrors the Python
- * `explain_redirects`.
+ * stops there (`Decisions.held`), as a command's does. A function call's
+ * redirects count as no command's too (`runsAFunction`), as the gate judges
+ * them. A target only the runtime can expand (`> $f`), or a relative one
+ * after a `cd` the walk could not follow, is left to the run. Mirrors the
+ * Python `explain_redirects`.
  */
 export async function explainRedirects(
   root: TSNodeLike,
@@ -2646,7 +2663,7 @@ export async function explainRedirects(
 ): Promise<Opened[]> {
   const out: Opened[] = []
   for (const item of walkedLine(root, session, reparse, null, false, true)) {
-    if (item.words.length > 0) continue
+    if (item.words.length > 0 && !runsAFunction(item, registry)) continue
     const at = item.occurrence
     const row = at.source.slice(0, at.start).split('\n').length
     const voice = `${voiceName(item.session)}: line ${String(row)}: `
