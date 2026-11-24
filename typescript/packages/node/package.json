@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-node",
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.0",
   "description": "A virtual terminal for AI agents, with a unified virtual filesystem, virtual CLIs and virtual machines behind one shell",
   "keywords": [
     "virtual-terminal",
