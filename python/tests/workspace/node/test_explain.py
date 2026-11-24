@@ -521,6 +521,7 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "ask"])
 @pytest.mark.parametrize(
     "line",
     [
@@ -529,7 +530,7 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
     ],
 )
 async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
-    line,
+    decision, line
 ):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
@@ -537,7 +538,7 @@ async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
         "s",
         profile={
             "commands": {"*": "allow"},
-            "mounts": {"/data/keep": {"commands": {"*": "deny"}}},
+            "mounts": {"/data/keep": {"commands": {"*": decision}}},
         },
     )
     said = await ws.explain(line, "s")

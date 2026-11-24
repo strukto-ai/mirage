@@ -638,30 +638,37 @@ describe('explain', () => {
     expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
   })
 
-  it.each([
-    'printf x > /data/marker; f() { echo hi; }; f > /data/keep/f.txt',
-    'printf x > /data/marker; f() { cat; }; f < /data/keep/f.txt',
-  ])('holds a function the line defines on a redirect into the folder: %s', async (line) => {
-    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
-    open.push(w)
-    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
-    w.createSession('s', {
-      profile: SessionProfile({
-        commands: { '*': 'allow' },
-        mounts: { '/data/keep': { commands: { '*': 'deny' } } },
-      }),
-    })
-    const said = await w.explain(line, 's')
-    const ran = await w.shell(line, { sessionId: 's' })
-    expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
-      126,
-      '',
-      'f: Permission denied\n',
-    ])
-    expect([said.exitCode, said.stderr]).toEqual([126, 'f: Permission denied\n'])
-    expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
-    expect(DEC.decode((await w.shell('cat /data/keep/f.txt')).stdout)).toBe('kept\n')
-  })
+  it.each(
+    (['deny', 'ask'] as const).flatMap((decision) =>
+      [
+        'printf x > /data/marker; f() { echo hi; }; f > /data/keep/f.txt',
+        'printf x > /data/marker; f() { cat; }; f < /data/keep/f.txt',
+      ].map((line) => [decision, line] as const),
+    ),
+  )(
+    'holds a function the line defines on a redirect into the folder %s: %s',
+    async (decision, line) => {
+      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(w)
+      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      w.createSession('s', {
+        profile: SessionProfile({
+          commands: { '*': 'allow' },
+          mounts: { '/data/keep': { commands: { '*': decision } } },
+        }),
+      })
+      const said = await w.explain(line, 's')
+      const ran = await w.shell(line, { sessionId: 's' })
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        126,
+        '',
+        'f: Permission denied\n',
+      ])
+      expect([said.exitCode, said.stderr]).toEqual([126, 'f: Permission denied\n'])
+      expect((await w.shell('test -e /data/marker')).exitCode).toBe(1)
+      expect(DEC.decode((await w.shell('cat /data/keep/f.txt')).stdout)).toBe('kept\n')
+    },
+  )
 
   it.each([
     ['/', 'cd /data/keep; cd -; echo hi', 0, '/\nhi\n', ''],
