@@ -174,14 +174,16 @@ impl AdmissionMatcher {
     }
 
     /// Judge a line: every tree that applies to it, once for each path it
-    /// names (once when it names none), the strictest result winning.
+    /// names (once when it names none), the strictest result winning, and
+    /// between two equally strict refusals a mount's tree over the
+    /// top-level one, as the narrower scope that spoke.
     /// Every ask behind an ask result is reported, since the host needs
     /// each one answered.
     pub fn decide(&self, facts: &CommandFacts) -> Ruling {
         let read = Read::new(&facts.tokens, facts.line.as_ref());
         let line = read.line(facts.tool);
         let subjects = subjects(facts);
-        let mut best: Option<(Verdict, &Subject)> = None;
+        let mut best: Option<(Verdict, &Subject, bool)> = None;
         let mut asks: Vec<usize> = Vec::new();
         for scoped in &self.trees {
             if scoped
@@ -191,6 +193,7 @@ impl AdmissionMatcher {
             {
                 continue;
             }
+            let mounted = scoped.mount.is_some();
             let branches = scoped.tree.walk(&line);
             for subject in &subjects {
                 let verdict = resolve(&branches, &self.table, &|id| self.reaches(id, subject));
@@ -199,15 +202,16 @@ impl AdmissionMatcher {
                         asks.push(id);
                     }
                 }
-                if best
-                    .as_ref()
-                    .is_none_or(|(held, _)| rank(verdict.outcome) > rank(held.outcome))
-                {
-                    best = Some((verdict, subject));
+                if best.as_ref().is_none_or(|(held, _, held_mounted)| {
+                    let (now, then) = (rank(verdict.outcome), rank(held.outcome));
+                    now > then
+                        || (now == then && now > rank(Outcome::Allow) && mounted && !held_mounted)
+                }) {
+                    best = Some((verdict, subject, mounted));
                 }
             }
         }
-        let Some((verdict, subject)) = best else {
+        let Some((verdict, subject, _)) = best else {
             return Ruling::default();
         };
         Ruling {
@@ -848,6 +852,20 @@ mod tests {
         let ruling = asks.redirect(&[text("/d/secret.txt")]);
         assert_eq!((ruling.outcome, ruling.asks.len()), (Ask, 2));
         assert_eq!(asks.redirect(&[text("/e/x")]).outcome, Allow);
+    }
+
+    #[test]
+    fn a_mount_tree_answers_a_refusal_the_top_level_root_ties() {
+        let tied = matcher(
+            json!({"*": "deny", "echo": "allow"}),
+            &[("/d", json!({"*": "deny"}))],
+        );
+        let ruling = tied.decide(&facts("/", &["cat", "/d/f.txt"], &["/d/f.txt"]));
+        assert_eq!(ruling.outcome, Deny);
+        assert_eq!(tied.rules()[ruling.rule.unwrap()].mount, Some(text("/d")));
+        let outside = tied.decide(&facts("/", &["cat", "/e/f.txt"], &["/e/f.txt"]));
+        assert_eq!(outside.outcome, Deny);
+        assert_eq!(tied.rules()[outside.rule.unwrap()].mount, None);
     }
 
     #[test]
