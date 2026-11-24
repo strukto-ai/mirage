@@ -1443,7 +1443,10 @@ def _deferred(walk: Walk) -> Walk:
         try:
             item = next(walk)
         except StopIteration as done:
-            return done.value
+            ended: tuple[SessionState, bool, tuple[SessionState, ...]] = (
+                done.value
+            )
+            return ended
         yield dataclasses.replace(item, deferred=True)
 
 

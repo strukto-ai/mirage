@@ -665,7 +665,11 @@ describe('explain', () => {
       })
       await w.shell(`cd ${cwd}`, { sessionId: 's' })
       const ran = await w.shell(line, { sessionId: 's' })
-      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([code, out, err])
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([
+        code,
+        out,
+        err,
+      ])
     },
   )
 
