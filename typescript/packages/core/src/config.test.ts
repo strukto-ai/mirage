@@ -103,6 +103,18 @@ describe('profile mounts keys', () => {
     ).toThrow('profile agent: mounts key /usr/bin/private is not a mount')
   })
 
+  it.each(['/usr/bin/private', '/dev/x', '/.bash_history/private'])(
+    'refuses %s inside a built-in mount',
+    (key) => {
+      expect(() =>
+        loadWorkspaceConfig({
+          mounts: { '/data': { vfs: 'ram' } },
+          profiles: { agent: { mounts: { [key]: { mode: 'read' } } } },
+        }),
+      ).toThrow(`profile agent: mounts key ${key} is not a mount`)
+    },
+  )
+
   it('loads a key that is a mount or under none', () => {
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' }, '/data/keep': { vfs: 'ram' } },

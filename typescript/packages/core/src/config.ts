@@ -75,7 +75,9 @@ import { coerceWritePolicy } from './workspace/mount/write_policy.ts'
 import type { WorkspaceStateStore } from './workspace/store/base.ts'
 import type { WorkspaceOptions } from './workspace/workspace/workspace.ts'
 import type { BaseVFS } from './vfs/base.ts'
+import { HISTORY_PREFIX } from './vfs/history/history.ts'
 import { MACHINE_MARK } from './vfs/machine/constants.ts'
+import { DEV_PREFIX } from './workspace/mount/registry.ts'
 
 function coerceMountMode(value: string | undefined, fallback: MountMode): MountMode {
   if (value === undefined) return fallback
@@ -299,7 +301,12 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   // shape the SDK and REST take), so a typo like `path:` on a deny rule
   // fails here rather than widening the rule.
   if (raw.profiles !== undefined && raw.profiles !== null) {
-    const mounts = [...(isPlainObject(raw.mounts) ? Object.keys(raw.mounts) : []), BIN_PREFIX]
+    const mounts = [
+      ...(isPlainObject(raw.mounts) ? Object.keys(raw.mounts) : []),
+      BIN_PREFIX,
+      DEV_PREFIX,
+      HISTORY_PREFIX,
+    ]
     for (const [name, doc] of Object.entries(parseProfiles(raw.profiles))) {
       const key = folderMountKey(doc, mounts)
       if (key !== null) throw new Error(`profile ${name}: mounts key ${key} is not a mount`)

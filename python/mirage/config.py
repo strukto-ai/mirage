@@ -91,9 +91,11 @@ from mirage.utils.loader import (
 from mirage.utils.path import norm
 from mirage.utils.size import parse_limit
 from mirage.utils.yaml import parse_yaml
+from mirage.vfs.history.history import HISTORY_PREFIX
 from mirage.vfs.machine.constants import MACHINE_MARK
 from mirage.vfs.registry import build_vfs
 from mirage.vfs.s3.config import S3Config
+from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.mount.read_policy import (
     coerce_read_policy,
     coerce_read_ttl,
@@ -879,7 +881,9 @@ class WorkspaceConfig(BaseModel):
     @model_validator(mode="after")
     def _v_profile_mounts(self) -> "WorkspaceConfig":
         for name, doc in (self.profiles or {}).items():
-            key = folder_mount_key(doc, [*self.mounts, BIN_PREFIX])
+            key = folder_mount_key(
+                doc, [*self.mounts, BIN_PREFIX, DEV_PREFIX, HISTORY_PREFIX]
+            )
             if key is not None:
                 raise ValueError(
                     f"profile {name}: mounts key {key} is not a mount"

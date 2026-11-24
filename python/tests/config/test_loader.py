@@ -2141,6 +2141,22 @@ def test_a_profile_mounts_key_on_the_program_view_counts_as_a_mount():
         load_config(doc)
 
 
+@pytest.mark.parametrize(
+    "key", ["/usr/bin/private", "/dev/x", "/.bash_history/private"]
+)
+def test_a_profile_mounts_key_inside_a_view_mount_is_refused(key):
+    with pytest.raises(
+        ValueError,
+        match=re.escape(f"profile agent: mounts key {key} is not a mount"),
+    ):
+        load_config(
+            {
+                "mounts": {"/data": {"vfs": "ram"}},
+                "profiles": {"agent": {"mounts": {key: {"mode": "read"}}}},
+            }
+        )
+
+
 def test_a_profile_mounts_key_that_is_a_mount_or_under_none_loads():
     load_config(
         {
