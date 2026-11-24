@@ -1113,6 +1113,17 @@
     {"op": "exec", "session": "rm_r", "command": "rm --bogus -r /data/d", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "rm --recursive is not allowed", "matched": {"command": ["rm"], "flags": ["--recursive"], "keys": []}}}},
     {"op": "exec", "session": "delete", "command": "ls /data/d", "expect": {"value": {"exit_code": 0, "stdout": "a.txt\n", "stderr": "", "decision": null}}}
    ]
+  },
+  {
+   "id": "a_profile_mounts_key_inside_a_mount_is_refused_at_session_creation",
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "steps": [
+    {"op": "session", "id": "folder", "profile": {"mounts": {"/data/keep": {"commands": {"rm": "deny"}}}}, "expect": {"error": "session folder: mounts key /data/keep is not a mount"}},
+    {"op": "session", "id": "glob", "profile": {"mounts": {"/data/*/sub": {"commands": {"rm": "deny"}}}}, "expect": {"error": "session glob: mounts key /data/*/sub is not a mount"}},
+    {"op": "session", "id": "later", "profile": {"commands": {"*": "allow"}, "mounts": {"/data": {"commands": {"rm": "deny"}}, "/later/x": {"commands": {"rm": "deny"}}}}},
+    {"op": "exec", "command": "echo hi > /data/x", "expect": {"value": {"exit_code": 0}}},
+    {"op": "exec", "session": "later", "command": "rm /data/x", "expect": {"value": {"exit_code": 126, "stderr": "rm: Permission denied\n"}}}
+   ]
   }
 ]
 }
