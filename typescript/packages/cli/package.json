@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-cli",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "A virtual terminal for AI agents, with a unified virtual filesystem, virtual CLIs and virtual machines behind one shell",
   "keywords": [
     "virtual-terminal",

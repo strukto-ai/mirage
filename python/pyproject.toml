@@ -1,6 +1,6 @@
 [project]
 name = "mirage-ai"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "A virtual terminal for AI agents, with a unified virtual filesystem, virtual CLIs and virtual machines behind one shell. S3, Google Drive, Slack, Gmail, GitHub, Notion, Postgres and more appear as files that agents work with the Unix-like commands they already know."
 readme = "README.md"
 license = "Apache-2.0"
