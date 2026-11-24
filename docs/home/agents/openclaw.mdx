@@ -1,0 +1,84 @@
+---
+title: OpenClaw
+description: Give OpenClaw Mirage's tools through its MCP config, or install the Mirage plugin for the tools and skills.
+icon: /images/openclaw-logo.svg
+---
+
+[OpenClaw](https://github.com/openclaw/openclaw) runs MCP servers and installs agent plugin bundles. Mirage reaches it two ways:
+
+| Way | OpenClaw gets | Workspace |
+| --- | --- | --- |
+| [MCP](#mcp) | Mirage's seven tools | the one you name, local or on a Mirage server |
+| [Plugin](#plugin) | the seven tools, plus the `mirage-filesystem` and `mirage-vfs-authoring` skills | `~/.mirage/workspace.yaml` |
+
+OpenClaw keeps its own exec and file tools. Mirage sees only the calls to its tools.
+
+## Install
+
+<CodeGroup>
+```bash uv
+uv tool install mirage-ai
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+Install [OpenClaw](https://docs.openclaw.ai) separately.
+
+## Workspace
+
+```yaml workspace.yaml
+mounts:
+  /data: { vfs: ram, mode: write }
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+## MCP
+
+OpenClaw changes and probes MCP servers only while its Gateway is stopped:
+
+```bash
+openclaw gateway stop
+```
+
+Stop a foreground `openclaw gateway run` with Ctrl-C instead. Then add Mirage:
+
+<CodeGroup>
+```bash mirage mcp
+openclaw mcp set mirage '{"command":"mirage","args":["mcp","-w","demo"]}'
+```
+```bash Mirage server
+openclaw mcp set mirage '{"url":"https://mirage.example.com/v1/workspaces/demo/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${MIRAGE_TOKEN}"}}'
+```
+</CodeGroup>
+
+```bash
+openclaw mcp probe mirage
+openclaw gateway start
+```
+
+The probe prints `mirage: 7 tools`. Restart a foreground Gateway with `openclaw gateway run` instead of `start`. Sessions on the `coding` and `messaging` tool profiles then get the tools; the `minimal` profile and a `tools.deny` of `bundle-mcp` hide them.
+
+`mirage mcp` sends your saved [login](/home/access/cli#log-in) or the local token file. OpenClaw starts it with only `HOME`, `PATH`, `USER` and `LOGNAME`, so a `MIRAGE_TOKEN` in the Gateway's environment does not reach it. If the Gateway runs as a service, set `command` to the path `command -v mirage` prints.
+
+For a Mirage server, OpenClaw fills `${MIRAGE_TOKEN}` in the header from the environment of the process that connects: export it in your shell for the probe, and in the Gateway's environment for sessions.
+
+## Plugin
+
+```bash
+openclaw plugins install mirage --marketplace strukto-ai/mirage
+openclaw plugins inspect mirage
+```
+
+Answer `y` to both prompts: one confirms a source from outside ClawHub, the other the plugin's skills. `inspect` shows `Bundle capabilities: skills, mcpServers`. The skills and tools load in the next session.
+
+The plugin starts `npx -y @struktoai/mirage-cli mcp` from its folder under `~/.openclaw/extensions/`, so it serves the workspace in your home folder, not `demo`:
+
+```yaml ~/.mirage/workspace.yaml
+mounts:
+  /data: { vfs: ram, mode: write }
+```

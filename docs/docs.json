@@ -137,7 +137,8 @@
                 "group": "Personal Agents",
                 "icon": "user",
                 "pages": [
-                  "home/agents/hermes"
+                  "home/agents/hermes",
+                  "home/agents/openclaw"
                 ]
               },
               {

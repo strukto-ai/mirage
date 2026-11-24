@@ -1,0 +1,8 @@
+{
+  "name": "@struktoai/mirage",
+  "version": "0.1.0",
+  "description": "Use Mirage-mounted cloud, database, and local data as a virtual filesystem.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": true
+}
