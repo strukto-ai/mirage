@@ -432,6 +432,21 @@ describe('fillEnv through execute', () => {
     expect(() => makeWs(undefined, profile)).toThrow(/unknown secrets source/)
   })
 
+  it('a snapshot profile naming an unknown source fails to load', async () => {
+    registerSecrets('fake-snap', FakeConfig, () => Promise.reject(new Error('sealed')))
+    const ws = makeWs(undefined, SessionProfile({ env: { T: { from: 'fake-snap', ref: 'r' } } }))
+    const state = await toStateDict(ws)
+    await ws.close()
+    const p = state.profiles?.p
+    expect(p).toBeDefined()
+    if (p === undefined) return
+    state.profiles = {
+      ...state.profiles,
+      p: { ...p, env: { T: { from: 'nope-never', ref: 'r' } } },
+    }
+    await expect(Workspace.fromState(state)).rejects.toThrow(/unknown secrets source/)
+  })
+
   // A profile's env speaks the workspace env grammar, so a credential a
   // profile names is a pointer: fetched when a line reads it, in the
   // default session and a created one alike, and written as its pointer by

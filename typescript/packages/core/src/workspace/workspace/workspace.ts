@@ -786,8 +786,7 @@ export class Workspace {
     picked: boolean,
   ): void {
     for (const [name, doc] of Object.entries(profiles)) {
-      this.compile(doc, name)
-      this.profilesInternal[name] = doc
+      this.takeProfile(name, doc, false)
     }
     const chosen = profile === null ? undefined : this.profilesInternal[profile]
     if (picked && profile !== null && chosen !== undefined) {
@@ -1704,6 +1703,16 @@ export class Workspace {
    * creating a session.
    */
   setProfile(name: string, profile: SessionProfile): void {
+    this.takeProfile(name, profile, true)
+  }
+
+  /**
+   * Check a named profile and put it in the table: its name, its fields, the
+   * env sources it names, and, when held, its `mounts` keys against the
+   * mounts there are now. A recorded table is not held, as the mount a key
+   * named may have been unmounted since. Mirrors the Python `_take_profile`.
+   */
+  private takeProfile(name: string, profile: SessionProfile, held: boolean): void {
     checkName('profile name', name)
     // A typed caller does not pass the parser, so this entry point repeats
     // its checks: no field outside the type, and a policy block is whole.
@@ -1742,7 +1751,7 @@ export class Workspace {
         sourceFor(entry.managed.source)
       }
     }
-    this.checkProfileMounts(`profile ${name}`, profile)
+    if (held) this.checkProfileMounts(`profile ${name}`, profile)
     this.compile(profile, name)
     this.profilesInternal[name] = profile
   }

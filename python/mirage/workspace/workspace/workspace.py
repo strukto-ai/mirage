@@ -2991,6 +2991,28 @@ class Workspace:
         Raises:
             PolicyError: a ``mounts`` key is a folder inside a mount.
         """
+        self._take_profile(name, profile, held=True)
+
+    def _take_profile(
+        self,
+        name: str,
+        profile: SessionProfile | Mapping[str, Any],
+        held: bool,
+    ) -> None:
+        """Check a named profile and put it in the table: its name, the
+        env sources it names, and, when held, its ``mounts`` keys
+        against the mounts there are now.
+
+        Args:
+            name (str): the profile's name.
+            profile (SessionProfile | Mapping[str, Any]): the document.
+            held (bool): hold its ``mounts`` keys against the mounts; a
+                recorded table is not, as the mount a key named may have
+                been unmounted since.
+
+        Raises:
+            PolicyError: a held ``mounts`` key is a folder inside a mount.
+        """
         check_name("profile name", name)
         doc = SessionProfile.model_validate(profile)
         # Its env names pointers in the workspace env grammar, so the
@@ -3001,7 +3023,8 @@ class Workspace:
                 and var.managed.source not in self._declared_sources
             ):
                 source_for(var.managed.source)
-        self._check_profile_mounts(f"profile {name}", doc)
+        if held:
+            self._check_profile_mounts(f"profile {name}", doc)
         self._compile(doc, name)
         self._profiles[name] = doc
 
@@ -3059,9 +3082,7 @@ class Workspace:
             PolicyError: a picked default keys a folder inside a mount.
         """
         for name, doc in profiles.items():
-            doc = SessionProfile.model_validate(doc)
-            self._compile(doc, name)
-            self._profiles[name] = doc
+            self._take_profile(name, doc, held=False)
         if picked and profile is not None and profile in self._profiles:
             self._check_profile_mounts(
                 f"profile {profile}", self._profiles[profile]
