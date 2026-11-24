@@ -70,6 +70,7 @@ from mirage.secrets.sources import (
     resolve_sources_for,
 )
 from mirage.secrets.summary import mask_values
+from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
     KERNEL_BACKENDS,
     Limit,
@@ -878,7 +879,7 @@ class WorkspaceConfig(BaseModel):
     @model_validator(mode="after")
     def _v_profile_mounts(self) -> "WorkspaceConfig":
         for name, doc in (self.profiles or {}).items():
-            key = folder_mount_key(doc, self.mounts)
+            key = folder_mount_key(doc, [*self.mounts, BIN_PREFIX])
             if key is not None:
                 raise ValueError(
                     f"profile {name}: mounts key {key} is not a mount"

@@ -90,6 +90,19 @@ describe('profile mounts keys', () => {
     ).toThrow(`profile agent: mounts key ${key} is not a mount`)
   })
 
+  it('counts the program view as a mount', () => {
+    loadWorkspaceConfig({
+      mounts: { '/usr': { vfs: 'ram' } },
+      profiles: { agent: { mounts: { '/usr/bin': { mode: 'read' } } } },
+    })
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/usr': { vfs: 'ram' } },
+        profiles: { agent: { mounts: { '/usr/bin/private': { mode: 'read' } } } },
+      }),
+    ).toThrow('profile agent: mounts key /usr/bin/private is not a mount')
+  })
+
   it('loads a key that is a mount or under none', () => {
     loadWorkspaceConfig({
       mounts: { '/data': { vfs: 'ram' }, '/data/keep': { vfs: 'ram' } },

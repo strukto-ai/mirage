@@ -2123,6 +2123,24 @@ def test_a_profile_mounts_key_inside_a_mount_is_refused_at_the_loader(key):
         )
 
 
+def test_a_profile_mounts_key_on_the_program_view_counts_as_a_mount():
+    doc = {
+        "mounts": {"/usr": {"vfs": "ram"}},
+        "profiles": {"agent": {"mounts": {"/usr/bin": {"mode": "read"}}}},
+    }
+    load_config(doc)
+    doc["profiles"] = {
+        "agent": {"mounts": {"/usr/bin/private": {"mode": "read"}}}
+    }
+    with pytest.raises(
+        ValueError,
+        match=re.escape(
+            "profile agent: mounts key /usr/bin/private is not a mount"
+        ),
+    ):
+        load_config(doc)
+
+
 def test_a_profile_mounts_key_that_is_a_mount_or_under_none_loads():
     load_config(
         {

@@ -37,6 +37,7 @@ import {
   type ProfilePolicy,
 } from './policy/profile.ts'
 import { statedProcesses } from './execution/process/config.ts'
+import { BIN_PREFIX } from './shell/constants.ts'
 import type { MachineHandle } from './machine/handle.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime } from './runtime/base.ts'
@@ -298,7 +299,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   // shape the SDK and REST take), so a typo like `path:` on a deny rule
   // fails here rather than widening the rule.
   if (raw.profiles !== undefined && raw.profiles !== null) {
-    const mounts = isPlainObject(raw.mounts) ? Object.keys(raw.mounts) : []
+    const mounts = [...(isPlainObject(raw.mounts) ? Object.keys(raw.mounts) : []), BIN_PREFIX]
     for (const [name, doc] of Object.entries(parseProfiles(raw.profiles))) {
       const key = folderMountKey(doc, mounts)
       if (key !== null) throw new Error(`profile ${name}: mounts key ${key} is not a mount`)
