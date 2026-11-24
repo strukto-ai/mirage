@@ -642,6 +642,9 @@ export class Workspace {
       })
       this.syntheticRootAnchor = true
     }
+    for (const [name, doc] of Object.entries(this.profiles)) {
+      this.checkProfileMounts(`profile ${name}`, doc)
+    }
     this.useDefaultProfile(options.profile ?? null)
     this.applyLimits(options)
     // Every connection a line or an op opens must clear the workspace's

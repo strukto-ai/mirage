@@ -635,9 +635,6 @@ class Workspace:
         self._implicit_root = install_mounts(
             self._registry, specs, index, mode
         )
-        for name, doc in self._profiles.items():
-            self._check_profile_mounts(f"profile {name}", doc)
-        self._use_default_profile(profile)
 
         self.observer = Observer(
             store=stores.observe,
@@ -653,6 +650,9 @@ class Workspace:
         # clears these, not only what the state store would hand out.
         self._planes = (stores.namespace, stores.observe, stores.sessions)
         self._mount_views()
+        for name, doc in self._profiles.items():
+            self._check_profile_mounts(f"profile {name}", doc)
+        self._use_default_profile(profile)
         # The facade delegates every op to the dispatcher, so FUSE and
         # programmatic ws.vfs walk the same pipeline as a shell command
         # and the policy gates fire exactly once, at that entry point. It runs

@@ -1218,6 +1218,15 @@ async def test_a_default_profile_keying_a_folder_is_refused_at_load():
         Workspace(
             {"/data": RAMVFS()}, profiles={"agent": FOLDER}, profile="agent"
         )
+    with pytest.raises(
+        PolicyError,
+        match=re.escape("profile agent: mounts key /usr/bin/x is not a mount"),
+    ):
+        Workspace(
+            {"/data": RAMVFS()},
+            profiles={"agent": {"mounts": {"/usr/bin/x": {"mode": "read"}}}},
+            profile="agent",
+        )
 
 
 @pytest.mark.asyncio

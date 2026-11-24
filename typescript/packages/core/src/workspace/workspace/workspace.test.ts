@@ -765,6 +765,16 @@ describe('profile mounts keys', () => {
           { profiles: { agent: folder() }, profile: 'agent' },
         ),
     ).toThrow(`profile agent: ${keep}`)
+    expect(
+      () =>
+        new Workspace(
+          { '/data': new RAMVFS() },
+          {
+            profiles: { agent: SessionProfile({ mounts: { '/usr/bin/x': { mode: 'read' } } }) },
+            profile: 'agent',
+          },
+        ),
+    ).toThrow('profile agent: mounts key /usr/bin/x is not a mount')
   })
 
   it('keeps a snapshot profile whose nested mount was unmounted', async () => {
