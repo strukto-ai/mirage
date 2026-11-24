@@ -1,0 +1,205 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import type { MachineAccessor } from '../../accessor/machine.ts'
+import { holders } from '../../core/machine/place.ts'
+import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
+import { isMissingPath } from '../../errors/fs.ts'
+import type { PathSpec } from '../../types.ts'
+
+/**
+ * The key a removal of a name on a machine is under while it runs. Mirrors
+ * Python's `_removal_slot`.
+ *
+ * @param path the name.
+ * @param machine the machine.
+ */
+function removalSlot(path: PathSpec, machine: string): string {
+  return `${machine}\0${path.virtual}`
+}
+
+/**
+ * The writes landing on a machine mount's names, kept so that once the
+ * writes of a name end, one copy of it shows, the newest. A write that
+ * replaces a name settles it: every other machine's copy goes (`settle`). A
+ * machine still writing the name keeps its copy, and the last write of the
+ * name to end settles it again, a failed one too. A write waits for a removal
+ * of its name on its machine that is under way, so the removal never takes
+ * the new copy. Mirrors Python's `LiveWrites`.
+ */
+export class LiveWrites {
+  private readonly live = new Map<string, string[]>()
+  private readonly latest = new Map<string, readonly [number, string]>()
+  private landings = 0
+  private readonly settling = new Map<string, number>()
+  private readonly unsettled = new Set<string>()
+  private readonly removing = new Map<string, Promise<void>>()
+
+  /** @param accessor the mount's machines. */
+  constructor(private readonly accessor: MachineAccessor) {}
+
+  /**
+   * Count a write of a name on a machine as live while it lands, and end it
+   * (`end`).
+   *
+   * @param machine the machine written.
+   * @param path the name.
+   * @param replaces the write replaces the name, so once it lands no other
+   *   machine's copy of it stays.
+   * @param write the write.
+   */
+  async landing<T>(
+    machine: string,
+    path: PathSpec,
+    replaces: boolean,
+    write: () => Promise<T>,
+  ): Promise<T> {
+    const slot = removalSlot(path, machine)
+    for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
+      await gone
+    let live = this.live.get(path.virtual)
+    if (live === undefined) {
+      live = []
+      this.live.set(path.virtual, live)
+    }
+    live.push(machine)
+    let done: T
+    try {
+      done = await write()
+    } catch (err) {
+      await this.end(machine, path, false, replaces)
+      throw err
+    }
+    await this.end(machine, path, true, replaces)
+    return done
+  }
+
+  /**
+   * End a live write of a name. One that landed is the name's latest copy,
+   * noted while the name has other writes to settle with (`latest`). One that
+   * replaces the name settles it, and so does the last write of an unsettled
+   * name to end.
+   *
+   * @param machine the machine written.
+   * @param path the name.
+   * @param landed the write landed; a failed one leaves the copies of those
+   *   that did.
+   * @param replaces the write replaces the name.
+   */
+  private async end(
+    machine: string,
+    path: PathSpec,
+    landed: boolean,
+    replaces: boolean,
+  ): Promise<void> {
+    const key = path.virtual
+    const live = this.live.get(key) ?? []
+    live.splice(live.indexOf(machine), 1)
+    if (live.length === 0) this.live.delete(key)
+    const busy = live.length > 0 || this.unsettled.has(key) || this.settling.has(key)
+    if (landed && (replaces || busy)) {
+      this.landings += 1
+      this.latest.set(key, [this.landings, machine])
+    }
+    const lastOfUnsettled = live.length === 0 && this.unsettled.has(key)
+    if (!(landed && replaces) && !lastOfUnsettled) {
+      this.forget(key)
+      return
+    }
+    if (lastOfUnsettled) this.unsettled.delete(key)
+    try {
+      await this.settle(path)
+    } catch (err) {
+      if (landed) throw err
+      console.debug(`older copies of ${key} kept:`, err)
+    }
+  }
+
+  /**
+   * Take a name off every machine but the one its latest write landed on
+   * (`latest`), so one copy shows, the newest. The latest is looked up again
+   * before every removal, and a write landing meanwhile makes the look start
+   * over with its copy kept. A machine still writing the name keeps its copy
+   * and leaves the name unsettled, for the last write of it to settle
+   * (`end`).
+   *
+   * @param path the name.
+   */
+  private async settle(path: PathSpec): Promise<void> {
+    const key = path.virtual
+    this.settling.set(key, (this.settling.get(key) ?? 0) + 1)
+    try {
+      for (
+        let seen = this.latest.get(key);
+        this.accessor.several && seen !== undefined;
+        seen = this.latest.get(key)
+      ) {
+        for (const one of await holders(this.accessor, path)) {
+          if (this.latest.get(key) !== seen) break
+          if (one.machine === seen[1] || one.isFolder) continue
+          if (this.live.get(key)?.includes(one.machine) === true) {
+            this.unsettled.add(key)
+            continue
+          }
+          await this.removeCopy(one.machine, path)
+        }
+        if (this.latest.get(key) === seen) return
+      }
+    } finally {
+      const left = (this.settling.get(key) ?? 1) - 1
+      if (left > 0) this.settling.set(key, left)
+      else this.settling.delete(key)
+      this.forget(key)
+    }
+  }
+
+  /**
+   * Take an older copy of a name off a machine, a write of the name there
+   * waiting until it is gone (`landing`); nothing when a removal of it is
+   * already under way, and a copy already gone is no error.
+   *
+   * @param machine the machine holding the copy.
+   * @param path the name.
+   */
+  private async removeCopy(machine: string, path: PathSpec): Promise<void> {
+    const slot = removalSlot(path, machine)
+    if (this.removing.has(slot)) return
+    let gone = (): void => undefined
+    this.removing.set(
+      slot,
+      new Promise<void>((resolve) => {
+        gone = resolve
+      }),
+    )
+    try {
+      await machineUnlink(this.accessor, machine, path)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      console.debug(`${path.virtual} already gone from ${machine}:`, err)
+    } finally {
+      this.removing.delete(slot)
+      gone()
+    }
+  }
+
+  /**
+   * Let go of a name's latest landing once nothing writes or settles it.
+   *
+   * @param key the name.
+   */
+  private forget(key: string): void {
+    if (!this.live.has(key) && !this.unsettled.has(key) && !this.settling.has(key))
+      this.latest.delete(key)
+  }
+}

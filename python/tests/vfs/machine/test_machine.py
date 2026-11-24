@@ -24,6 +24,7 @@ from mirage.context.session_context import (
     reset_caller,
 )
 from mirage.execution.types import MachineName
+from mirage.io.stream import OutputStream
 from mirage.io.types import ByteSource
 from mirage.policy.base import Policy
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
@@ -963,3 +964,22 @@ async def test_a_removal_never_takes_a_copy_written_after_it_began():
         False,
         b"from b\n",
     )
+
+
+async def _endless():
+    while True:
+        yield b"x"
+
+
+@pytest.mark.asyncio
+async def test_a_write_refused_before_it_lands_closes_its_bytes():
+    vfs = shared(FakeFiles({"/tmp/f": b"file"}), FakeFiles())
+    closed: list[bool] = []
+
+    async def close() -> None:
+        closed.append(True)
+
+    for write in (vfs.write, vfs.append):
+        with pytest.raises(NotADirectoryError):
+            await write(spec("/f/x"), OutputStream(_endless(), close))
+    assert closed == [True, True]

@@ -15,7 +15,7 @@
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import type { PathSpec } from '../../types.ts'
 import { singleQuote } from '../../utils/quote.ts'
-import { runChecked, machinePath } from './utils.ts'
+import { inFolder, runChecked, machinePath } from './utils.ts'
 
 /**
  * Rename on the source's machine, the destination taken as the new name
@@ -37,10 +37,6 @@ export async function rename(
 ): Promise<void> {
   const old = singleQuote(machinePath(accessor, src))
   const fresh = machinePath(accessor, dst)
-  let line = `mv -T -- ${old} ${singleQuote(fresh)}`
-  if (makeParent) {
-    const parent = fresh.slice(0, fresh.lastIndexOf('/')) || '/'
-    line = `mkdir -p -- ${singleQuote(parent)} && ${line}`
-  }
+  const line = inFolder(`mv -T -- ${old} ${singleQuote(fresh)}`, fresh, makeParent)
   await runChecked(accessor, machine, line, dst)
 }

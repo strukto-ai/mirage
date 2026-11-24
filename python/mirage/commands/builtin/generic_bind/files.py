@@ -701,8 +701,8 @@ def stat_size(
     async def size(path: PathSpec) -> int | None:
         try:
             st = await files.stat(path)
-        except FS_ERRORS:
-            logger.debug("%s: no size for a width", path.virtual)
+        except FS_ERRORS as exc:
+            logger.debug("%s: no size for a width: %s", path.virtual, exc)
             return None
         return st.size if st.type == FileType.FILE else None
 

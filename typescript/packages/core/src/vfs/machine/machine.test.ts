@@ -23,6 +23,7 @@ import {
 import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
 import { bindCaller, currentCaller } from '../../context/session_context.ts'
 import { MachineName } from '../../execution/types.ts'
+import { OutputStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
@@ -908,5 +909,30 @@ describe('a settling', () => {
     b.go()
     await Promise.all([first, second])
     expect([aFiles.files.has('/tmp/k'), texts(bFiles)['/tmp/k']]).toEqual([false, 'from b\n'])
+  })
+})
+
+async function* endless(): AsyncGenerator<Uint8Array> {
+  for (;;) {
+    await Promise.resolve()
+    yield ENC.encode('x')
+  }
+}
+
+describe('a write refused before it lands', () => {
+  it('closes its bytes', async () => {
+    const vfs = shared(new FakeFiles({ '/tmp/f': 'file' }), new FakeFiles())
+    let closed = 0
+    const close = (): Promise<void> => {
+      closed += 1
+      return Promise.resolve()
+    }
+    await expect(vfs.write(spec('/f/x'), new OutputStream(endless(), close))).rejects.toMatchObject(
+      { code: 'ENOTDIR' },
+    )
+    await expect(
+      vfs.append(spec('/f/x'), new OutputStream(endless(), close)),
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    expect(closed).toBe(2)
   })
 })

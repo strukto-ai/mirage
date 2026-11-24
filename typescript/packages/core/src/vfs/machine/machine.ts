@@ -24,17 +24,16 @@ import { create as machineCreate } from '../../core/machine/create.ts'
 import { mkdir as machineMkdir } from '../../core/machine/mkdir.ts'
 import {
   askedMachines,
-  chosen,
   commandMachine,
   crossingRefused,
-  existingHolders,
+  existingCopies,
   holders,
   holdingMachine,
+  landing,
+  landingOn,
   machinesLackingFolder,
   noteCopySource,
-  originMachine,
   refuseCrossing,
-  refuseHidden,
   writeMachine,
 } from '../../core/machine/place.ts'
 import { pwrite as machinePwrite } from '../../core/machine/pwrite.ts'
@@ -53,18 +52,11 @@ import { filesContaining as machineFilesContaining } from '../../core/machine/se
 import { setAttrs as machineSetAttrs } from '../../core/machine/set_attrs.ts'
 import { hasHides, holderStat, stat as machineStat } from '../../core/machine/stat.ts'
 import { truncate as machineTruncate } from '../../core/machine/truncate.ts'
+import type { Landing } from '../../core/machine/types.ts'
 import { unlink as machineUnlink } from '../../core/machine/unlink.ts'
 import { leaf } from '../../core/machine/utils.ts'
 import { write as machineWrite } from '../../core/machine/write.ts'
-import {
-  eisdir,
-  enoent,
-  enotdir,
-  enotempty,
-  enotsup,
-  exdev,
-  isMissingPath,
-} from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty, enotsup, exdev } from '../../errors/fs.ts'
 import type { MachineTable } from '../../execution/machine/table.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import { closeQuietly } from '../../io/stream.ts'
@@ -83,61 +75,28 @@ import { LOCAL_WALK_LIMIT } from '../constants.ts'
 import type { RedactedSchema } from '../secrets.ts'
 import type { ConfigState, Handed } from '../types.ts'
 import { MachineVFSConfig } from './config.ts'
+import { LiveWrites } from './live_writes.ts'
 
 /**
- * Refuse bytes landing on a machine they may not go to (`refuseCrossing`),
- * closing what would have been written so its writer stops. Mirrors
- * Python's `_refuse_landing`.
+ * Where bytes being written land (`landing`), closing them when they may not
+ * land, so their writer stops. Mirrors Python's `_landing_of`.
  *
  * @param accessor the mount's machines.
- * @param machine the machine the write lands on.
  * @param path the file.
- * @param data what would have been written.
- * @throws FsError the bytes come from another machine.
+ * @param data what would be written.
+ * @param replaces the write replaces the whole file.
  */
-async function refuseLanding(
+async function landingOf(
   accessor: MachineAccessor,
-  machine: string,
   path: PathSpec,
   data: ByteSource,
-): Promise<void> {
+  replaces = false,
+): Promise<Landing> {
   try {
-    refuseCrossing(accessor, machine, path)
+    return await landing(accessor, path, { replaces })
   } catch (err) {
     await closeQuietly(data)
     throw err
-  }
-}
-
-/**
- * The key a removal of a name on a machine is under while it runs.
- *
- * @param path the name.
- * @param machine the machine.
- */
-function removalSlot(path: PathSpec, machine: string): string {
-  return `${machine}\0${path.virtual}`
-}
-
-/**
- * Take an older copy of a name off a machine; one already gone, which
- * another settling took first, is no error. Mirrors Python's
- * `_unlink_older`.
- *
- * @param accessor the mount's machines.
- * @param machine the machine holding the copy.
- * @param path the name.
- */
-async function unlinkOlder(
-  accessor: MachineAccessor,
-  machine: string,
-  path: PathSpec,
-): Promise<void> {
-  try {
-    await machineUnlink(accessor, machine, path)
-  } catch (err) {
-    if (!isMissingPath(err)) throw err
-    console.debug(`${path.virtual} already gone from ${machine}:`, err)
   }
 }
 
@@ -167,17 +126,13 @@ export class MachineVFS extends BaseVFS {
   override walkLimit: number = LOCAL_WALK_LIMIT
   readonly config: MachineVFSConfig
   override readonly accessor: MachineAccessor
-  private readonly liveWrites = new Map<string, string[]>()
-  private readonly latest = new Map<string, readonly [number, string]>()
-  private landings = 0
-  private readonly settling = new Map<string, number>()
-  private readonly unsettled = new Set<string>()
-  private readonly removing = new Map<string, Promise<void>>()
+  private readonly writes: LiveWrites
 
   constructor(config: MachineVFSConfig) {
     super()
     this.config = config
     this.accessor = new MachineAccessor(config)
+    this.writes = new LiveWrites(this.accessor)
   }
 
   /**
@@ -221,7 +176,7 @@ export class MachineVFS extends BaseVFS {
   }
 
   override async stat(path: PathSpec): Promise<FileStat> {
-    const one = chosen(this.accessor, await existingHolders(this.accessor, path))
+    const one = (await existingCopies(this.accessor, path)).shown
     if (one.entry === null) return machineStat(this.accessor, one.machine, path)
     return holderStat(leaf(path), one)
   }
@@ -274,12 +229,8 @@ export class MachineVFS extends BaseVFS {
 
   override async readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     if (hasHides(path)) return null
-    const held = await existingHolders(this.accessor, path)
-    const shown = await machineTree(
-      this.accessor,
-      held.map((one) => one.machine),
-      path,
-    )
+    const copies = await existingCopies(this.accessor, path)
+    const shown = await machineTree(this.accessor, copies.machines, path)
     if (shown === null) return null
     const stats = new Map<string, FileStat>()
     for (const [rel, one] of shown) stats.set(rel, holderStat(rel.split('/').pop() ?? rel, one))
@@ -309,224 +260,32 @@ export class MachineVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    const machine = await writeMachine(this.accessor, path, { replaces: true })
-    await refuseLanding(this.accessor, machine, path, data)
-    const origin = originMachine(this.accessor) === machine
-    await this.liveWrite(machine, path, origin, () =>
-      origin
-        ? this.landAtOrigin(machine, path, data, atomic)
-        : machineWrite(this.accessor, machine, path, data, false, atomic),
+    const landed = await landingOf(this.accessor, path, data, true)
+    await this.writes.landing(landed.machine, path, landed.origin, () =>
+      machineWrite(this.accessor, landed.machine, path, data, false, atomic, landed.makeParent),
     )
   }
 
   override async append(path: PathSpec, data: ByteSource): Promise<void> {
-    const machine = await writeMachine(this.accessor, path)
-    await refuseLanding(this.accessor, machine, path, data)
-    await this.liveWrite(machine, path, false, () =>
-      machineWrite(this.accessor, machine, path, data, true),
+    const landed = await landingOf(this.accessor, path, data)
+    await this.writes.landing(landed.machine, path, false, () =>
+      machineWrite(this.accessor, landed.machine, path, data, true),
     )
-  }
-
-  /**
-   * Count a write of a name on a machine as live while it lands, and end it
-   * (`endWrite`). A removal of the name there that is under way ends first
-   * (`removeCopy`), so it never takes the new copy. Mirrors Python's
-   * `MachineVFS._live_write`.
-   *
-   * @param machine the machine written.
-   * @param path the name.
-   * @param replaces the write replaces the name, so once it lands no other
-   *   machine's copy of it stays.
-   * @param write the write.
-   */
-  private async liveWrite<T>(
-    machine: string,
-    path: PathSpec,
-    replaces: boolean,
-    write: () => Promise<T>,
-  ): Promise<T> {
-    const slot = removalSlot(path, machine)
-    for (let gone = this.removing.get(slot); gone !== undefined; gone = this.removing.get(slot))
-      await gone
-    let live = this.liveWrites.get(path.virtual)
-    if (live === undefined) {
-      live = []
-      this.liveWrites.set(path.virtual, live)
-    }
-    live.push(machine)
-    let done: T
-    try {
-      done = await write()
-    } catch (err) {
-      await this.endWrite(machine, path, false, replaces)
-      throw err
-    }
-    await this.endWrite(machine, path, true, replaces)
-    return done
-  }
-
-  /**
-   * End a live write of a name. One that landed is the name's latest copy,
-   * noted while the name has other writes to settle with (`latest`). One that
-   * replaces the name settles it (`settle`), and so does the last write of an
-   * unsettled name to end, a failed one too, so once the writes end one copy
-   * shows, the newest. Mirrors Python's `MachineVFS._end_write`.
-   *
-   * @param machine the machine written.
-   * @param path the name.
-   * @param landed the write landed; a failed one leaves the copies of those
-   *   that did.
-   * @param replaces the write replaces the name.
-   */
-  private async endWrite(
-    machine: string,
-    path: PathSpec,
-    landed: boolean,
-    replaces: boolean,
-  ): Promise<void> {
-    const key = path.virtual
-    const live = this.liveWrites.get(key) ?? []
-    live.splice(live.indexOf(machine), 1)
-    if (live.length === 0) this.liveWrites.delete(key)
-    if (
-      landed &&
-      (replaces || live.length > 0 || this.unsettled.has(key) || this.settling.has(key))
-    ) {
-      this.landings += 1
-      this.latest.set(key, [this.landings, machine])
-    }
-    if (!(landed && replaces) && (live.length > 0 || !this.unsettled.has(key))) {
-      this.forget(key)
-      return
-    }
-    if (live.length === 0) this.unsettled.delete(key)
-    try {
-      await this.settle(path)
-    } catch (err) {
-      if (landed) throw err
-      console.debug(`older copies of ${key} kept:`, err)
-    }
-  }
-
-  /**
-   * Take a name off every machine but the one its latest write landed on
-   * (`latest`), so one copy shows, the newest. The latest is looked up again
-   * before every removal, and a write landing meanwhile makes the look start
-   * over with its copy kept. A machine still writing the name keeps its copy
-   * and leaves the name unsettled, for the last write of it to settle
-   * (`endWrite`). Mirrors Python's `MachineVFS._settle`.
-   *
-   * @param path the name.
-   */
-  private async settle(path: PathSpec): Promise<void> {
-    const key = path.virtual
-    this.settling.set(key, (this.settling.get(key) ?? 0) + 1)
-    try {
-      for (
-        let seen = this.latest.get(key);
-        this.accessor.several && seen !== undefined;
-        seen = this.latest.get(key)
-      ) {
-        for (const one of await holders(this.accessor, path)) {
-          if (this.latest.get(key) !== seen) break
-          if (one.machine === seen[1] || one.isFolder) continue
-          if (this.liveWrites.get(key)?.includes(one.machine) === true) {
-            this.unsettled.add(key)
-            continue
-          }
-          await this.removeCopy(one.machine, path)
-        }
-        if (this.latest.get(key) === seen) return
-      }
-    } finally {
-      const left = (this.settling.get(key) ?? 1) - 1
-      if (left > 0) this.settling.set(key, left)
-      else this.settling.delete(key)
-      this.forget(key)
-    }
-  }
-
-  /**
-   * Take an older copy of a name off a machine, a write of the name there
-   * waiting until it is gone (`liveWrite`); nothing when a removal of it is
-   * already under way. Mirrors Python's `MachineVFS._remove_copy`.
-   *
-   * @param machine the machine holding the copy.
-   * @param path the name.
-   */
-  private async removeCopy(machine: string, path: PathSpec): Promise<void> {
-    const slot = removalSlot(path, machine)
-    if (this.removing.has(slot)) return
-    let gone = (): void => undefined
-    this.removing.set(
-      slot,
-      new Promise<void>((resolve) => {
-        gone = resolve
-      }),
-    )
-    try {
-      await unlinkOlder(this.accessor, machine, path)
-    } finally {
-      this.removing.delete(slot)
-      gone()
-    }
-  }
-
-  /**
-   * Let go of a name's latest landing once nothing writes or settles it.
-   * Mirrors Python's `MachineVFS._forget`.
-   *
-   * @param key the name.
-   */
-  private forget(key: string): void {
-    if (!this.liveWrites.has(key) && !this.unsettled.has(key) && !this.settling.has(key))
-      this.latest.delete(key)
-  }
-
-  /**
-   * Land a whole file on the machine its bytes come from (`originMachine`: a
-   * program's `>`, or a copy made by a read and a write) as a direct copy
-   * lands (`copyFrom`): its folder made there when only another machine
-   * holds it; the other machines' copies of the name go once it lands
-   * (`endWrite`). Mirrors Python's `MachineVFS._land_at_origin`.
-   *
-   * @param machine the machine the bytes come from.
-   * @param path the file.
-   * @param data its bytes.
-   * @param atomic show nothing until the bytes have ended whole.
-   */
-  private async landAtOrigin(
-    machine: string,
-    path: PathSpec,
-    data: ByteSource,
-    atomic: boolean,
-  ): Promise<void> {
-    let lacking: string[]
-    try {
-      lacking = await machinesLackingFolder(this.accessor, [machine], path)
-    } catch (err) {
-      await closeQuietly(data)
-      throw err
-    }
-    await machineWrite(this.accessor, machine, path, data, false, atomic, lacking.length > 0)
   }
 
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
-    const machine = await writeMachine(this.accessor, path)
-    refuseCrossing(this.accessor, machine, path)
-    await machinePwrite(this.accessor, machine, path, data, offset)
+    const landed = await landing(this.accessor, path)
+    await machinePwrite(this.accessor, landed.machine, path, data, offset)
   }
 
   override async create(path: PathSpec): Promise<void> {
-    const machine = await writeMachine(this.accessor, path)
-    refuseCrossing(this.accessor, machine, path)
-    await machineCreate(this.accessor, machine, path)
+    const landed = await landing(this.accessor, path)
+    await machineCreate(this.accessor, landed.machine, path)
   }
 
   override async truncate(path: PathSpec, length: number, noCreate = false): Promise<void> {
-    const machine = await writeMachine(this.accessor, path)
-    refuseCrossing(this.accessor, machine, path)
-    await machineTruncate(this.accessor, machine, path, length, noCreate)
+    const landed = await landing(this.accessor, path)
+    await machineTruncate(this.accessor, landed.machine, path, length, noCreate)
   }
 
   override async mkdir(path: PathSpec, parents = false): Promise<void> {
@@ -541,11 +300,10 @@ export class MachineVFS extends BaseVFS {
    * @param path the file.
    */
   override async unlink(path: PathSpec): Promise<void> {
-    const held = await existingHolders(this.accessor, path)
-    const shown = chosen(this.accessor, held)
-    await machineUnlink(this.accessor, shown.machine, path)
-    for (const one of held) {
-      if (one !== shown && !one.isFolder) await machineUnlink(this.accessor, one.machine, path)
+    const copies = await existingCopies(this.accessor, path)
+    await machineUnlink(this.accessor, copies.shown.machine, path)
+    for (const one of copies.others) {
+      if (!one.isFolder) await machineUnlink(this.accessor, one.machine, path)
     }
   }
 
@@ -557,24 +315,23 @@ export class MachineVFS extends BaseVFS {
    * @param path the folder.
    */
   override async rmdir(path: PathSpec): Promise<void> {
-    const held = await existingHolders(this.accessor, path)
-    const shown = chosen(this.accessor, held)
-    const folders = held.filter((one) => one.isFolder).map((one) => one.machine)
+    const copies = await existingCopies(this.accessor, path)
+    const folders = copies.folders
     if (
-      shown.isFolder &&
+      copies.shown.isFolder &&
       folders.length > 1 &&
       (await machineReaddir(this.accessor, folders, path)).length > 0
     )
       throw enotempty(path)
-    await machineRmdir(this.accessor, shown.machine, path)
-    for (const one of held) {
-      if (one !== shown && one.isFolder) await machineRmdir(this.accessor, one.machine, path)
+    await machineRmdir(this.accessor, copies.shown.machine, path)
+    for (const one of copies.others) {
+      if (one.isFolder) await machineRmdir(this.accessor, one.machine, path)
     }
   }
 
   override async rmR(path: PathSpec): Promise<void> {
-    for (const one of await existingHolders(this.accessor, path)) {
-      await machineRmR(this.accessor, one.machine, path)
+    for (const machine of (await existingCopies(this.accessor, path)).machines) {
+      await machineRmR(this.accessor, machine, path)
     }
   }
 
@@ -589,12 +346,10 @@ export class MachineVFS extends BaseVFS {
    * @param dst the new name.
    */
   override async rename(src: PathSpec, dst: PathSpec): Promise<void> {
-    const held = await existingHolders(this.accessor, src)
-    const moved = chosen(this.accessor, held)
+    const copies = await existingCopies(this.accessor, src)
+    const moved = copies.shown
     const folder = moved.isFolder
-    const movers = folder
-      ? held.filter((one) => one.isFolder).map((one) => one.machine)
-      : [moved.machine]
+    const movers = folder ? copies.folders : [moved.machine]
     const several = this.accessor.several
     const there = several ? await holders(this.accessor, dst) : []
     const replaced = there.filter((one) => !movers.includes(one.machine))
@@ -611,7 +366,7 @@ export class MachineVFS extends BaseVFS {
       if (folder) await machineRmdir(this.accessor, one.machine, dst)
       else await machineUnlink(this.accessor, one.machine, dst)
     }
-    for (const one of held) {
+    for (const one of copies.held) {
       if (!movers.includes(one.machine) && !one.isFolder)
         await machineUnlink(this.accessor, one.machine, src)
     }
@@ -627,11 +382,9 @@ export class MachineVFS extends BaseVFS {
    * @param dst the copy's name.
    */
   override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
-    const machine = await holdingMachine(this.accessor, src)
-    await refuseHidden(this.accessor, machine, dst)
-    const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
-    await this.liveWrite(machine, dst, true, () =>
-      machineCopy(this.accessor, machine, src, dst, lacking.length > 0),
+    const landed = await landingOn(this.accessor, await holdingMachine(this.accessor, src), dst)
+    await this.writes.landing(landed.machine, dst, true, () =>
+      machineCopy(this.accessor, landed.machine, src, dst, landed.makeParent),
     )
   }
 
@@ -657,10 +410,9 @@ export class MachineVFS extends BaseVFS {
       const target = await writeMachine(this.accessor, dst, { replaces: true })
       throw crossingRefused(machine, target, dst)
     }
-    await refuseHidden(this.accessor, machine, dst)
-    const lacking = await machinesLackingFolder(this.accessor, [machine], dst)
-    await this.liveWrite(machine, dst, true, () =>
-      machineCopyFrom(source.accessor, this.accessor, machine, src, dst, lacking.length > 0),
+    const landed = await landingOn(this.accessor, machine, dst)
+    await this.writes.landing(machine, dst, true, () =>
+      machineCopyFrom(source.accessor, this.accessor, machine, src, dst, landed.makeParent),
     )
   }
 
@@ -673,12 +425,10 @@ export class MachineVFS extends BaseVFS {
    * @param dst the copy's name.
    */
   override async dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
-    const held = await existingHolders(this.accessor, src)
-    const [only] = held
-    if (held.length > 1 || only === undefined) throw enotsup(this.name, 'dir_copy', src)
-    await refuseHidden(this.accessor, only.machine, dst)
-    const lacking = await machinesLackingFolder(this.accessor, [only.machine], dst)
-    await machineDirCopy(this.accessor, only.machine, src, dst, lacking.length > 0)
+    const copies = await existingCopies(this.accessor, src)
+    if (copies.held.length > 1) throw enotsup(this.name, 'dir_copy', src)
+    const landed = await landingOn(this.accessor, copies.shown.machine, dst)
+    await machineDirCopy(this.accessor, landed.machine, src, dst, landed.makeParent)
   }
 
   override async setattr(

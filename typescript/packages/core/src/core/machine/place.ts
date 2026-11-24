@@ -19,7 +19,7 @@ import type { FsError } from '../../errors/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { KERNEL_VIEWS } from './constants.ts'
 import { hiddenMachines, statEntry } from './stat.ts'
-import { Holder } from './types.ts'
+import { Copies, Holder, Landing } from './types.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { folderOf, machinePath } from './utils.ts'
@@ -242,24 +242,22 @@ export function chosen(accessor: MachineAccessor, held: Holder[]): Holder {
  * @throws ENOENT when no machine holds it.
  */
 export async function holdingMachine(accessor: MachineAccessor, path: PathSpec): Promise<string> {
-  return chosen(accessor, await existingHolders(accessor, path)).machine
+  return (await existingCopies(accessor, path)).shown.machine
 }
 
 /**
- * The machines holding a name that must exist, every one of which a removal
- * or a rename reaches.
+ * Every machine's copy of a name that must exist, each of which a removal or
+ * a rename reaches, and the one shown (`chosen`). Mirrors Python's
+ * `existing_copies`.
  *
  * @param accessor the mount's machines.
  * @param path the name.
  * @throws ENOENT when no machine holds it.
  */
-export async function existingHolders(
-  accessor: MachineAccessor,
-  path: PathSpec,
-): Promise<Holder[]> {
+export async function existingCopies(accessor: MachineAccessor, path: PathSpec): Promise<Copies> {
   const held = await holders(accessor, path)
   if (held.length === 0) throw enoent(path)
-  return held
+  return new Copies(held, chosen(accessor, held))
 }
 
 /**
@@ -280,6 +278,26 @@ export async function refuseHidden(
 }
 
 /**
+ * The machines holding a folder as a folder, for a name made in it. Mirrors
+ * Python's `_folder_copies`.
+ *
+ * @param accessor the mount's machines.
+ * @param folder the folder.
+ * @param path the name made in it, which a refusal names.
+ * @throws ENOTDIR when the copy shown of the folder is a file, whatever an
+ *   older folder on another machine is.
+ */
+async function folderCopies(
+  accessor: MachineAccessor,
+  folder: PathSpec,
+  path: PathSpec,
+): Promise<Holder[]> {
+  const held = await holders(accessor, folder)
+  if (held.length > 0 && !chosen(accessor, held).isFolder) throw enotdir(path)
+  return held.filter((one) => one.isFolder)
+}
+
+/**
  * The machines a new name lands on that must make its folder first, since
  * only other machines hold it; none where no machine holds the folder,
  * whose lack the op reports.
@@ -296,10 +314,25 @@ export async function machinesLackingFolder(
   path: PathSpec,
 ): Promise<string[]> {
   if (!accessor.several) return []
-  const held = await holders(accessor, folderOf(path))
-  if (held.length > 0 && !chosen(accessor, held).isFolder) throw enotdir(path)
-  const folders = held.filter((one) => one.isFolder).map((one) => one.machine)
+  const folders = (await folderCopies(accessor, folderOf(path), path)).map((one) => one.machine)
   return machines.filter((m) => folders.length > 0 && !folders.includes(m))
+}
+
+/**
+ * Whether a new name landing on a machine must make its folder there first
+ * (`machinesLackingFolder`). Mirrors Python's `_lacks_folder`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine the name lands on.
+ * @param path the new name.
+ * @throws ENOTDIR when the copy shown of the folder is a file.
+ */
+async function lacksFolder(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<boolean> {
+  return (await machinesLackingFolder(accessor, [machine], path)).length > 0
 }
 
 /**
@@ -326,9 +359,7 @@ export async function newNameMachine(
   let above = folderOf(path)
   let folders: Holder[] = []
   for (;;) {
-    const held = await holders(accessor, above)
-    if (held.length > 0 && !chosen(accessor, held).isFolder) throw enotdir(path)
-    folders = held.filter((one) => one.isFolder)
+    folders = await folderCopies(accessor, above, path)
     if (folders.length > 0 || !parents || above.vfsPath === '') break
     above = folderOf(above)
   }
@@ -363,4 +394,51 @@ export async function writeMachine(
   const target = origin ?? (await newNameMachine(accessor, path, opts.parents === true))
   await refuseHidden(accessor, target, path)
   return target
+}
+
+/**
+ * Where a write of a name lands (`writeMachine`), refusing bytes a program or
+ * a copy brings from another machine (`refuseCrossing`). A whole file whose
+ * bytes come from the machine it lands on (`originMachine`) replaces the name
+ * across the machines, and its folder is made there when only another machine
+ * holds it. Mirrors Python's `landing`.
+ *
+ * @param accessor the mount's machines.
+ * @param path the name written.
+ * @param opts `replaces`: the write replaces the whole file.
+ * @throws EACCES when the bytes come from another machine; ENOENT when the
+ *   machine's own links lead the name to one the session hides; ENOTDIR when
+ *   the copy shown of the name's folder is a file.
+ */
+export async function landing(
+  accessor: MachineAccessor,
+  path: PathSpec,
+  opts: { replaces?: boolean } = {},
+): Promise<Landing> {
+  const replaces = opts.replaces === true
+  const machine = await writeMachine(accessor, path, { replaces })
+  refuseCrossing(accessor, machine, path)
+  if (!replaces || originMachine(accessor) !== machine) return new Landing(machine)
+  return new Landing(machine, true, await lacksFolder(accessor, machine, path))
+}
+
+/**
+ * A copy's landing on the machine its source is on, which the copy never
+ * leaves: refused where the machine's own links lead the name to a hidden
+ * one, its folder made there when only another machine holds it. Mirrors
+ * Python's `landing_on`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the source's machine.
+ * @param path the copy's name.
+ * @throws ENOENT when the name leads to a hidden one there; ENOTDIR when the
+ *   copy shown of the name's folder is a file.
+ */
+export async function landingOn(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<Landing> {
+  await refuseHidden(accessor, machine, path)
+  return new Landing(machine, true, await lacksFolder(accessor, machine, path))
 }

@@ -148,11 +148,10 @@ export function hasHides(path: PathSpec): boolean {
  * @param path the path an op names.
  */
 export async function hiddenMachines(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
-  if (!hiddenUnder(currentCaller().session?.visibility ?? null, mountPrefix(path))) return []
-  const hidden: string[] = []
-  for (const machine of accessor.names())
-    if (await isHiddenOn(accessor, machine, path)) hidden.push(machine)
-  return hidden
+  if (!hasHides(path)) return []
+  const names = accessor.names()
+  const hidden = await Promise.all(names.map((machine) => isHiddenOn(accessor, machine, path)))
+  return names.filter((_, at) => hidden[at])
 }
 
 /**
@@ -202,8 +201,8 @@ export async function isHiddenOn(
   machine: string,
   path: PathSpec,
 ): Promise<boolean> {
+  if (!hasHides(path)) return false
   const vis = currentCaller().session?.visibility ?? null
-  if (!hiddenUnder(vis, mountPrefix(path))) return false
   const real = await realPath(accessor, machine, machinePath(accessor, path))
   if (real === null) return false
   const seen = virtualPath(accessor, path, real)
