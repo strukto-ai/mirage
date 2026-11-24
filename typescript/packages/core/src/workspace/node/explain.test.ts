@@ -546,18 +546,19 @@ describe('explain', () => {
       (
         [
           ['f() { ls; }; f', 0, 'f.txt\n', ''],
-          ['f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
+          ['f() { cat /data/keep/f.txt; }; f', 126, '', 'cat: Permission denied\n'],
           ['f() { ls; }; f; cat f.txt', 126, '', 'cat: Permission denied\n'],
           ['echo before; f() { ls; }; f', 126, '', 'echo: Permission denied\n'],
           ['f; f() { ls; }', 126, '', 'f: Permission denied\n'],
           ['f() { ls; }; g() { f; }; g', 0, 'f.txt\n', ''],
-          ['g() { f; }; f() { ls; }; g', 126, '', 'f: Permission denied\n'],
+          ['g() { f; }; f() { ls; }; g', 0, 'f.txt\n', ''],
           ['(f() { ls; }); f', 126, '', 'f: Permission denied\n'],
           ['{ f() { ls; }; }; f', 126, '', 'f: Permission denied\n'],
           ['(f() { ls; }; f)', 126, '', 'f: Permission denied\n'],
           ['f() { ls; }; (f)', 0, 'f.txt\n', ''],
           ['  f() { ls; }; f', 0, 'f.txt\n', ''],
-          ['timeout() { ls; }; timeout 1 rm f.txt', 126, '', 'rm: Permission denied\n'],
+          ['timeout() { ls; }; timeout 1 rm f.txt', 0, 'f.txt\n', ''],
+          ['f() { ls; }; MODE=test f', 0, 'f.txt\n', ''],
         ] as const
       ).map(([line, code, out, err]) => [decision, line, code, out, err] as const),
     ),
@@ -600,7 +601,9 @@ describe('explain', () => {
     ['printf x > /data/marker; cat() { ls; }; timeout 1 cat f.txt', 'cat'],
     ['printf x > /data/marker; cat() { ls; }; sh -c "cat f.txt"', 'cat'],
     ['printf x > /data/marker; trap : ERR; f() { ls; }; f', 'f'],
-    ['printf x > /data/marker; f() { cat a; }; f', 'cat'],
+    ['printf x > /data/marker; f() { cat /data/keep/a; }; f', 'cat'],
+    ['printf x > /data/marker; timeout 1 cat f.txt', 'cat'],
+    ['printf x > /data/marker; sh -c "cat f.txt"', 'cat'],
   ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
     const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
@@ -634,18 +637,21 @@ describe('explain', () => {
   })
 
   it.each([
-    ['/', 'cd /data/keep; cd -; echo hi', '/\nhi\n', ''],
-    ['/', 'cd /data/keep; D=/data; cd $D; echo hi', 'hi\n', ''],
+    ['/', 'cd /data/keep; cd -; echo hi', 0, '/\nhi\n', ''],
+    ['/', 'cd /data/keep; D=/data; cd $D; echo hi', 0, 'hi\n', ''],
     [
       '/',
       'cd /data/keep/nope; echo hi',
+      0,
       'hi\n',
       'bash: line 1: cd: /data/keep/nope: No such file or directory\n',
     ],
-    ['/data/keep', "eval 'f() { ls; }'; f", 'f.txt\n', ''],
+    ['/data/keep', "eval 'f() { ls; }'; f", 0, 'f.txt\n', ''],
+    ['/data/keep', 'report() { echo hi; }; cd /data; report', 0, 'hi\n', ''],
+    ['/data/keep', 'f() { cat f.txt; }; f', 126, '', 'cat: Permission denied\n'],
   ])(
     "leaves a command the walk cannot place to the gate under a folder's *: %s %s",
-    async (cwd, line, out, err) => {
+    async (cwd, line, code, out, err) => {
       const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
       open.push(w)
       await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
@@ -659,7 +665,7 @@ describe('explain', () => {
       })
       await w.shell(`cd ${cwd}`, { sessionId: 's' })
       const ran = await w.shell(line, { sessionId: 's' })
-      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([0, out, err])
+      expect([ran.exitCode, DEC.decode(ran.stdout), DEC.decode(ran.stderr)]).toEqual([code, out, err])
     },
   )
 
@@ -669,7 +675,7 @@ describe('explain', () => {
     'printf x > /data/marker; cat f.txt; v=$(cat() { :; })',
     'printf x > /data/marker; cat f.txt; cat() { :; } | :',
     'printf x > /data/marker; cat f.txt; { cat() { :; }; }',
-    'f() { printf x > /data/marker; cat f.txt; }; f; (cat() { :; })',
+    'f() { printf x > /data/marker; cat /data/keep/f.txt; }; f; (cat() { :; })',
   ])('holds a line whose word cannot see a definition of its name: %s', async (line) => {
     const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)

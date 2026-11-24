@@ -263,7 +263,9 @@ export interface Judgment {
  * session's cwd is not where it stands. `stated` (true when absent) says
  * whether the gate admits the command on these words once each is literal
  * (`TestRead.stated`). `elsewhere` holds the other places the command may
- * stand, where a `cd` before it was skipped or failed.
+ * stand, where a `cd` before it was skipped or failed. `deferred` says the
+ * command stands in a function body, which runs where the function is
+ * called, not where the walk reads the definition.
  */
 export interface Walked {
   readonly words: readonly Word[]
@@ -277,6 +279,7 @@ export interface Walked {
   readonly elsewhere?: readonly SessionState[]
   readonly open?: boolean
   readonly pipeline?: PipelineWalk | undefined
+  readonly deferred?: boolean
 }
 
 /**
@@ -320,9 +323,11 @@ export interface Judged {
    */
   readonly defined?: boolean
   /**
-   * The walk knows where the command stands: no `cd` it could not follow,
+   * The walk knows where the command stands: it is not in a function body,
+   * which runs where it is called, and no `cd` the walk could not follow,
    * nor one that may have been skipped or failed, ran before it
-   * (`Walked.lost`, `Walked.elsewhere`), so `ctx.cwd` is the shell's.
+   * (`Walked.lost`, `Walked.elsewhere`, `Walked.deferred`), so `ctx.cwd` is
+   * the shell's.
    * Absent means known.
    */
   readonly placed?: boolean
@@ -560,7 +565,7 @@ async function* judgeWords(
     stdin = null,
     open = false,
   } = item
-  const placed = !lost && (item.elsewhere ?? []).length === 0
+  const placed = !lost && (item.elsewhere ?? []).length === 0 && item.deferred !== true
   const wholeLine = takesWholeLine(mode)
   const words = wholeLine ? item.words.map(machineWord) : item.words
   const redirectWords = wholeLine ? item.redirects.map(machineWord) : item.redirects
@@ -1066,7 +1071,20 @@ function* walkNode(
   ) {
     lost = true
   }
-  return yield* walkChildren(node, session, homes, frame, reparse, pipeline, lost, elsewhere)
+  const walk = walkChildren(node, session, homes, frame, reparse, pipeline, lost, elsewhere)
+  return yield* scope === ScopeKind.DEFERRED ? deferred(walk) : walk
+}
+
+/**
+ * A function body's walk, each command marked as standing in it
+ * (`Walked.deferred`). Mirrors the Python `_deferred`.
+ */
+function* deferred(walk: Walk): Walk {
+  for (;;) {
+    const next = walk.next()
+    if (next.done === true) return next.value
+    yield { ...next.value, deferred: true }
+  }
 }
 
 /**
@@ -2138,7 +2156,9 @@ interface Traced {
  * compound command or substitution, where it may not run or may not last;
  * and no word of the line, nor any command it is judged to run, can take a
  * function away or run text in this shell (`FUNCTION_DROPPERS`). Anything
- * else stays a folder's refusal, held with the line. It is worked out only
+ * else stays a folder's refusal, held with the line. The words of such a
+ * call that a wrapper's grammar reads as a command (`timeout 1 rm f`) never
+ * run, so they are let through with it. It is worked out only
  * when a folder entry's root refuses some command, the one verdict
  * `defined` changes. Mirrors the Python `_with_calls`.
  */
@@ -2159,8 +2179,8 @@ function withCalls(
     if (!defined.has(name)) defined.set(name, (node.endIndex ?? 0) - base)
   }
   const nodes = [...walkTree(tree)]
+  if (defined.size === 0) return [...judged]
   if (
-    defined.size === 0 ||
     judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) ||
     nodes.some(
       (node) =>
@@ -2175,14 +2195,29 @@ function withCalls(
   for (const node of nodes) {
     const start = (node.startIndex ?? 0) - base
     if (node.type === NodeType.FUNCTION_DEFINITION) bodies.add(start)
-    const head = node.namedChildren[0]
-    if (node.type !== NodeType.COMMAND || head?.type !== NodeType.COMMAND_NAME) continue
+    if (node.type !== NodeType.COMMAND) continue
+    const head = node.namedChildren.find((child) => child.type === NodeType.COMMAND_NAME)
+    if (head === undefined) continue
     heads.set(`${String(start)}:${String((node.endIndex ?? 0) - base)}`, literalWord(head))
   }
-  return judged.map((one) => ({
+  const calls = judged.map((one) => callsDefined(one, origin, defined, heads, bodies))
+  const callers = judged.filter((_, i) => calls[i] === true).map((one) => one.occurrence)
+  return judged.map((one, i) => ({
     ...one,
-    defined: callsDefined(one, origin, defined, heads, bodies),
+    defined: calls[i] === true || runsUnder(one.occurrence, callers),
   }))
+}
+
+/**
+ * Whether a command is spelled by the words of a call to a function
+ * (`timeout() { ls; }; timeout 1 rm f`), which runs the function and never
+ * the command. Mirrors the Python `_runs_under`.
+ */
+function runsUnder(at: Occurrence, callers: readonly Occurrence[]): boolean {
+  for (let parent = at.parent; parent !== null; parent = parent.parent) {
+    if (callers.some((caller) => sameAt(parent, caller))) return true
+  }
+  return false
 }
 
 /**

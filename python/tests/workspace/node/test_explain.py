@@ -406,7 +406,12 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
     ("line", "exit_code", "stdout", "stderr"),
     [
         ("f() { ls; }; f", 0, b"f.txt\n", b""),
-        ("f() { cat f.txt; }; f", 126, b"", b"cat: Permission denied\n"),
+        (
+            "f() { cat /data/keep/f.txt; }; f",
+            126,
+            b"",
+            b"cat: Permission denied\n",
+        ),
         ("f() { ls; }; f; cat f.txt", 126, b"", b"cat: Permission denied\n"),
         (
             "echo before; f() { ls; }; f",
@@ -416,18 +421,14 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
         ),
         ("f; f() { ls; }", 126, b"", b"f: Permission denied\n"),
         ("f() { ls; }; g() { f; }; g", 0, b"f.txt\n", b""),
-        ("g() { f; }; f() { ls; }; g", 126, b"", b"f: Permission denied\n"),
+        ("g() { f; }; f() { ls; }; g", 0, b"f.txt\n", b""),
         ("(f() { ls; }); f", 126, b"", b"f: Permission denied\n"),
         ("{ f() { ls; }; }; f", 126, b"", b"f: Permission denied\n"),
         ("(f() { ls; }; f)", 126, b"", b"f: Permission denied\n"),
         ("f() { ls; }; (f)", 0, b"f.txt\n", b""),
         ("  f() { ls; }; f", 0, b"f.txt\n", b""),
-        (
-            "timeout() { ls; }; timeout 1 rm f.txt",
-            126,
-            b"",
-            b"rm: Permission denied\n",
-        ),
+        ("timeout() { ls; }; timeout 1 rm f.txt", 0, b"f.txt\n", b""),
+        ("f() { ls; }; MODE=test f", 0, b"f.txt\n", b""),
     ],
 )
 async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
@@ -476,7 +477,9 @@ async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
         ("printf x > /data/marker; cat() { ls; }; timeout 1 cat f.txt", "cat"),
         ('printf x > /data/marker; cat() { ls; }; sh -c "cat f.txt"', "cat"),
         ("printf x > /data/marker; trap : ERR; f() { ls; }; f", "f"),
-        ("printf x > /data/marker; f() { cat a; }; f", "cat"),
+        ("printf x > /data/marker; f() { cat /data/keep/a; }; f", "cat"),
+        ("printf x > /data/marker; timeout 1 cat f.txt", "cat"),
+        ('printf x > /data/marker; sh -c "cat f.txt"', "cat"),
     ],
 )
 async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
@@ -517,21 +520,36 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("cwd", "line", "stdout", "stderr"),
+    ("cwd", "line", "exit_code", "stdout", "stderr"),
     [
-        ("/", "cd /data/keep; cd -; echo hi", b"/\nhi\n", b""),
-        ("/", "cd /data/keep; D=/data; cd $D; echo hi", b"hi\n", b""),
+        ("/", "cd /data/keep; cd -; echo hi", 0, b"/\nhi\n", b""),
+        ("/", "cd /data/keep; D=/data; cd $D; echo hi", 0, b"hi\n", b""),
         (
             "/",
             "cd /data/keep/nope; echo hi",
+            0,
             b"hi\n",
             b"bash: line 1: cd: /data/keep/nope: No such file or directory\n",
         ),
-        ("/data/keep", "eval 'f() { ls; }'; f", b"f.txt\n", b""),
+        ("/data/keep", "eval 'f() { ls; }'; f", 0, b"f.txt\n", b""),
+        (
+            "/data/keep",
+            "report() { echo hi; }; cd /data; report",
+            0,
+            b"hi\n",
+            b"",
+        ),
+        (
+            "/data/keep",
+            "f() { cat f.txt; }; f",
+            126,
+            b"",
+            b"cat: Permission denied\n",
+        ),
     ],
 )
 async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate(
-    cwd, line, stdout, stderr
+    cwd, line, exit_code, stdout, stderr
 ):
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
@@ -553,7 +571,7 @@ async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate
     await ws.shell(f"cd {cwd}", session_id="s")
     ran = await ws.shell(line, session_id="s")
     assert (ran.exit_code, ran.stdout, ran.stderr or b"") == (
-        0,
+        exit_code,
         stdout,
         stderr,
     )
@@ -569,7 +587,7 @@ async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate
         "printf x > /data/marker; cat f.txt; v=$(cat() { :; })",
         "printf x > /data/marker; cat f.txt; cat() { :; } | :",
         "printf x > /data/marker; cat f.txt; { cat() { :; }; }",
-        "f() { printf x > /data/marker; cat f.txt; }; f; (cat() { :; })",
+        "f() { printf x > /data/marker; cat /data/keep/f.txt; }; f; (cat() { :; })",
     ],
 )
 async def test_a_definition_where_the_word_cannot_see_it_leaves_the_line_held(

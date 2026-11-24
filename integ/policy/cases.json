@@ -826,7 +826,7 @@
     {"op": "exec", "session": "scoped", "command": "printf x > /data/marker; cat f.txt; (cat() { :; })", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "scoped", "command": "printf x > /data/marker; cat f.txt; v=$(cat() { :; })", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "scoped", "command": "timeout() { :; }; timeout 1 rm f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "rm: Permission denied\n", "decision": "kept"}}}
+    {"op": "exec", "session": "scoped", "command": "timeout() { :; }; timeout 1 rm f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}}
    ]
   },
   {
@@ -840,7 +840,9 @@
     {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "f() { ls; }; unset -f f; printf x > /data/marker; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
-    {"op": "exec", "session": "kept", "command": "f() { ls; }; f", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}}
+    {"op": "exec", "session": "kept", "command": "f() { ls; }; f", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "f() { ls; }; MODE=test f", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
+    {"op": "exec", "session": "kept", "command": "report() { ls; }; cd /data; report; cd /data/keep", "expect": {"value": {"exit_code": 0, "stdout": "keep\n", "stderr": "", "decision": null}}}
    ]
   },
   {

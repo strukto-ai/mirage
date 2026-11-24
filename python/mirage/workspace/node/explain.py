@@ -433,10 +433,12 @@ class Judged:
             defines before it runs (:func:`_with_calls`), so the gate,
             which sees the call, says whether a tree root's own decision
             speaks for it (``is_tool``).
-        placed (bool): the walk knows where the command stands: no
-            ``cd`` it could not follow, nor one that may have been
-            skipped or failed, ran before it (``Walked.lost``,
-            ``Walked.elsewhere``), so ``ctx.cwd`` is the shell's.
+        placed (bool): the walk knows where the command stands: it is
+            not in a function body, which runs where it is called, and
+            no ``cd`` the walk could not follow, nor one that may have
+            been skipped or failed, ran before it (``Walked.lost``,
+            ``Walked.elsewhere``, ``Walked.deferred``), so ``ctx.cwd``
+            is the shell's.
     """
 
     judgment: Judgment
@@ -645,7 +647,7 @@ async def _judge_words(
     session = item.session
     intrinsic = item.intrinsic
     lost = item.lost
-    placed = not lost and not item.elsewhere
+    placed = not lost and not item.elsewhere and not item.deferred
     open_ = item.open_
     head = words[0]
     rules = session.commands
@@ -1097,6 +1099,9 @@ class Walked:
             failed.
         open_ (bool): the runtime appends operands the gate cannot read
             (``xargs``, ``find -exec``, ``mapfile -C``).
+        deferred (bool): the command stands in a function body, which
+            runs where the function is called, not where the walk reads
+            the definition.
     """
 
     words: list[Word]
@@ -1110,6 +1115,7 @@ class Walked:
     elsewhere: tuple[SessionState, ...] = ()
     open_: bool = False
     pipeline: _PipelineWalk | None = None
+    deferred: bool = False
 
 
 # Where a scope leaves the shell: the session, whether a `cd` the walk
@@ -1418,11 +1424,27 @@ def _walk_node(
         node, session, homes, pipeline
     ):
         lost = True
-    return (
-        yield from _walk_children(
-            node, session, homes, frame, pipeline, lost, elsewhere
-        )
+    walk = _walk_children(
+        node, session, homes, frame, pipeline, lost, elsewhere
     )
+    return (
+        yield from _deferred(walk) if scope == ScopeKind.DEFERRED else walk
+    )
+
+
+def _deferred(walk: Walk) -> Walk:
+    """A function body's walk, each command marked as standing in it
+    (``Walked.deferred``).
+
+    Args:
+        walk (Walk): the body's walk.
+    """
+    while True:
+        try:
+            item = next(walk)
+        except StopIteration as done:
+            return done.value
+        yield dataclasses.replace(item, deferred=True)
 
 
 def _moves(
@@ -2925,7 +2947,10 @@ def _with_calls(
     substitution, where it may not run or may not last; and no word of
     the line, nor any command it is judged to run, can take a function
     away or run text in this shell (``FUNCTION_DROPPERS``). Anything
-    else stays a folder's refusal, held with the line. It is worked out
+    else stays a folder's refusal, held with the line. The words of such
+    a call that a wrapper's grammar reads as a command
+    (``timeout 1 rm f``) never run, so they are let through with it. It
+    is worked out
     only when a folder entry's root refuses some command, the one
     verdict ``defined`` changes.
 
@@ -2950,24 +2975,21 @@ def _with_calls(
         ):
             defined.setdefault(get_function_name(node), node.end_byte - base)
     nodes = list(walk_tree(tree))
-    if (
-        not defined
-        or any(one.judgment.command in FUNCTION_DROPPERS for one in judged)
-        or any(
-            node.type == NodeType.UNSET_COMMAND
-            or (
-                node.type in WORD_TYPES
-                and literal_word(node) in FUNCTION_DROPPERS
-            )
-            for node in nodes
+    if not defined:
+        return list(judged)
+    if any(one.judgment.command in FUNCTION_DROPPERS for one in judged) or any(
+        node.type == NodeType.UNSET_COMMAND
+        or (
+            node.type in WORD_TYPES and literal_word(node) in FUNCTION_DROPPERS
         )
+        for node in nodes
     ):
         return list(judged)
     heads = {
         (node.start_byte - base, node.end_byte - base): literal_word(head)
         for node in nodes
         if node.type == NodeType.COMMAND
-        for head in node.named_children[:1]
+        for head in node.named_children
         if head.type == NodeType.COMMAND_NAME
     }
     bodies = frozenset(
@@ -2975,12 +2997,36 @@ def _with_calls(
         for node in nodes
         if node.type == NodeType.FUNCTION_DEFINITION
     )
+    calls = [
+        _calls_defined(one, origin, defined, heads, bodies) for one in judged
+    ]
+    callers = [
+        one.occurrence for one, call in zip(judged, calls, strict=True) if call
+    ]
     return [
         dataclasses.replace(
-            one, defined=_calls_defined(one, origin, defined, heads, bodies)
+            one, defined=call or _runs_under(one.occurrence, callers)
         )
-        for one in judged
+        for one, call in zip(judged, calls, strict=True)
     ]
+
+
+def _runs_under(at: Occurrence, callers: Sequence[Occurrence]) -> bool:
+    """Whether a command is spelled by the words of a call to a function
+    (``timeout() { ls; }; timeout 1 rm f``), which runs the function and
+    never the command.
+
+    Args:
+        at (Occurrence): the command's occurrence.
+        callers (Sequence[Occurrence]): the occurrences of words that
+            surely call a function.
+    """
+    parent = at.parent
+    while parent is not None:
+        if parent in callers:
+            return True
+        parent = parent.parent
+    return False
 
 
 def _calls_defined(
