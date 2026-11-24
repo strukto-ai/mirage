@@ -249,9 +249,9 @@
   },
   {
    "id": "a_mount_rule_with_no_paths_holds_where_a_command_reads_into_its_mount",
-   "settings": {"mode": "write", "mounts": {"/repo": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
+   "settings": {"mode": "write", "mounts": {"/repo": {"vfs": "ram", "config": {}}, "/repo/private": {"vfs": "ram", "config": {}}}, "clis": {"git": {"cli": "git", "machine": "in_process"}}},
    "steps": [
-    {"op": "exec", "command": "export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q /repo && cd /repo && mkdir private && echo SECRET > private/s.txt && echo public > pub.txt && git add -A && git commit -q -m c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "export GIT_AUTHOR_NAME=A GIT_AUTHOR_EMAIL=a@example.com GIT_COMMITTER_NAME=A GIT_COMMITTER_EMAIL=a@example.com && git init -q /repo && cd /repo && echo SECRET > private/s.txt && echo public > pub.txt && git add -A && git commit -q -m c", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "session", "id": "deny", "profile": {"cwd": "/repo", "mounts": {"/repo/private": {"commands": {"git": {"decision": "deny", "reason": "private"}}}}}},
     {"op": "session", "id": "ask", "profile": {"cwd": "/repo", "mounts": {"/repo/private": {"commands": {"git": {"decision": "ask", "reason": "private"}}}}}},
     {"op": "exec", "session": "deny", "command": "git cat-file -p e97e9c7e81609428bcb70ec1e588bb73ce9c24e4", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "git cat-file: /repo/private/s.txt: Permission denied\n", "decision": "private"}}},
@@ -757,13 +757,13 @@
   },
   {
    "id": "a_folder_entrys_star_answers_a_redirect_no_command_owns",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
     {"op": "session", "id": "asks", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "ask", "reason": "keep needs a nod"}}}}}},
     {"op": "session", "id": "listing", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": "deny", "ls": "allow"}}}}},
     {"op": "session", "id": "named", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"cat": "deny", "echo": "deny"}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "{ cat; } < /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": ">> /data/keep/f.txt", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/keep/f.txt: Permission denied\n", "decision": "kept"}}},
@@ -789,11 +789,11 @@
   },
   {
    "id": "a_folder_entrys_star_holds_the_whole_line",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
     {"op": "session", "id": "asks", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "ask", "reason": "keep needs a nod"}}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "echo before; cat /data/keep/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "cat /data/keep/f.txt; echo after", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "session": "kept", "command": "f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "cat: Permission denied\n", "decision": "kept"}}},
@@ -810,10 +810,10 @@
   },
   {
    "id": "a_function_the_line_defines_is_not_held_by_a_folders_star",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "ls": "allow"}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "cd /data/keep", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "f() { ls; }; f", "expect": {"value": {"exit_code": 0, "stdout": "f.txt\n", "stderr": "", "decision": null}}},
     {"op": "explain", "session": "kept", "command": "f() { ls; }; f", "expect": {"value": {"outcome": "allow", "exit_code": 0, "stderr": ""}}},
@@ -831,10 +831,10 @@
   },
   {
    "id": "a_function_the_line_may_not_have_defined_holds_a_folders_line",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "ls": "allow", "printf": "allow", "false": "allow", "unset": "allow"}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "cd /data/keep", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "printf x > /data/marker; false && f() { ls; }; f", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
@@ -847,10 +847,10 @@
   },
   {
    "id": "a_redirect_into_the_folder_holds_a_function_the_line_defines",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "printf x > /data/marker; f() { echo hi; }; f > /data/keep/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
     {"op": "exec", "command": "test -e /data/marker", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "printf x > /data/marker; f() { cat; }; f < /data/keep/f.txt", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "f: Permission denied\n", "decision": "kept"}}},
@@ -861,10 +861,10 @@
   },
   {
    "id": "a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate",
-   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}}},
+   "settings": {"mode": "write", "mounts": {"/data": {"vfs": "ram", "config": {}}, "/data/keep": {"vfs": "ram", "config": {}}}},
    "steps": [
     {"op": "session", "id": "kept", "profile": {"commands": {"*": "allow"}, "mounts": {"/data/keep": {"commands": {"*": {"decision": "deny", "reason": "kept"}, "cd": "allow", "ls": "allow"}}}}},
-    {"op": "exec", "command": "mkdir -p /data/keep && echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
+    {"op": "exec", "command": "echo top > /data/keep/f.txt", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "cd /data/keep; cd -; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "/\nhi\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "cd /data/keep; D=/data; cd $D; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "", "decision": null}}},
     {"op": "exec", "session": "kept", "command": "cd /; cd /data/keep/nope; echo hi", "expect": {"value": {"exit_code": 0, "stdout": "hi\n", "stderr": "bash: line 1: cd: /data/keep/nope: No such file or directory\n", "decision": null}}},

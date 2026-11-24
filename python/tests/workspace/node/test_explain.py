@@ -383,8 +383,10 @@ async def test_an_asked_command_holds_the_line_until_it_is_answered(ws):
     ],
 )
 async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     ws.create_session(
         "s",
         profile={
@@ -436,8 +438,10 @@ async def test_a_folder_entrys_star_holds_the_whole_line(decision, line):
 async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
     decision, line, exit_code, stdout, stderr
 ):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     ws.create_session(
         "s",
         profile={
@@ -487,8 +491,10 @@ async def test_a_function_the_line_defines_is_not_held_by_a_folders_star(
 async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
     line, held_on
 ):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     allowed = ["cd", "ls", "printf", "false", "true", ":", "command"]
     allowed += ["unset", "trap", "timeout", "sh"]
     ws.create_session(
@@ -532,8 +538,10 @@ async def test_a_function_the_line_may_not_have_defined_leaves_the_line_held(
 async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
     decision, line
 ):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     ws.create_session(
         "s",
         profile={
@@ -589,8 +597,10 @@ async def test_a_redirect_into_the_folder_holds_a_function_the_line_defines(
 async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate(
     cwd, line, exit_code, stdout, stderr
 ):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     allowed = ["cd", "ls", "eval"]
     ws.create_session(
         "s",
@@ -631,8 +641,10 @@ async def test_a_folders_star_leaves_a_command_the_walk_cannot_place_to_the_gate
 async def test_a_definition_where_the_word_cannot_see_it_leaves_the_line_held(
     line,
 ):
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir /data/keep && echo kept > /data/keep/f.txt")
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/keep/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/keep/f.txt")
     ws.create_session(
         "s",
         profile={

@@ -525,9 +525,12 @@ describe('explain', () => {
     ['ask', 'cat /data/keep/f.txt; echo after'],
     ['ask', 'f(){ cat /data/keep/f.txt; }; f; f(){ cat /data/keep/f.txt; }; f'],
   ])("holds the whole line on a folder entry's * %s: %s", async (decision, line) => {
-    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
     open.push(w)
-    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/keep/f.txt')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
@@ -567,9 +570,12 @@ describe('explain', () => {
   )(
     "a function the line defines is not held by a folder's * %s: %s",
     async (decision, line, code, out, err) => {
-      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      const w = new Workspace(
+        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
       open.push(w)
-      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/keep/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
@@ -607,9 +613,12 @@ describe('explain', () => {
     ['printf x > /data/marker; timeout 1 cat f.txt', 'cat'],
     ['printf x > /data/marker; sh -c "cat f.txt"', 'cat'],
   ])('holds a line that may not have defined the function it calls: %s', async (line, heldOn) => {
-    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
     open.push(w)
-    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/keep/f.txt')
     const allowed = ['cd', 'ls', 'printf', 'false', 'true', ':', 'command', 'unset', 'trap']
     allowed.push('timeout', 'sh')
     w.createSession('s', {
@@ -648,9 +657,12 @@ describe('explain', () => {
   )(
     'holds a function the line defines on a redirect into the folder %s: %s',
     async (decision, line) => {
-      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      const w = new Workspace(
+        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
       open.push(w)
-      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/keep/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
@@ -686,9 +698,12 @@ describe('explain', () => {
   ])(
     "leaves a command the walk cannot place to the gate under a folder's *: %s %s",
     async (cwd, line, code, out, err) => {
-      const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      const w = new Workspace(
+        { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+        { mode: MountMode.WRITE },
+      )
       open.push(w)
-      await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+      await w.shell('echo kept > /data/keep/f.txt')
       w.createSession('s', {
         profile: SessionProfile({
           commands: { '*': 'allow' },
@@ -715,9 +730,12 @@ describe('explain', () => {
     'printf x > /data/marker; cat f.txt; { cat() { :; }; }',
     'f() { printf x > /data/marker; cat /data/keep/f.txt; }; f; (cat() { :; })',
   ])('holds a line whose word cannot see a definition of its name: %s', async (line) => {
-    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/data/keep/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
     open.push(w)
-    await w.shell('mkdir /data/keep && echo kept > /data/keep/f.txt')
+    await w.shell('echo kept > /data/keep/f.txt')
     w.createSession('s', {
       profile: SessionProfile({
         commands: { '*': 'allow' },
