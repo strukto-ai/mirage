@@ -203,18 +203,26 @@ def check_tarball(name: str, url: str) -> list[str]:
     request = urllib.request.Request(
         url, headers={"User-Agent": "mirage-release-check"}
     )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        data = response.read()
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        files = {
-            m.name.removeprefix("package/")
-            for m in archive.getmembers()
-            if m.isfile() and m.name.startswith("package/")
-        }
-        if "package.json" not in files:
-            return ["tarball has no package/package.json"]
-        extracted = archive.extractfile("package/package.json")
-        package = json.load(extracted) if extracted else {}
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = response.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            files = {
+                m.name.removeprefix("package/")
+                for m in archive.getmembers()
+                if m.isfile() and m.name.startswith("package/")
+            }
+            if "package.json" not in files:
+                return ["tarball has no package/package.json"]
+            extracted = archive.extractfile("package/package.json")
+            package = json.load(extracted) if extracted else {}
+    except (
+        urllib.error.URLError,
+        TimeoutError,
+        tarfile.TarError,
+        EOFError,
+    ) as exc:
+        return [f"tarball {url} could not be read: {exc}"]
     wanted = {"LICENSE": "LICENSE", "package.json": "package.json"}
     for field in ENTRY_FIELDS:
         for path in entry_paths(field, package.get(field)):
