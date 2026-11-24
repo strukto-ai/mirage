@@ -199,6 +199,70 @@
         "stdout": "",
         "stderr": "sort: Permission denied\n"
       }
+    },
+    {
+      "id": "explain_a_folders_deny_holds_a_defined_calls_redirect",
+      "seq": 960060,
+      "targets": [
+        "ram"
+      ],
+      "session": "foldeny",
+      "session_profiles": {
+        "foldeny": {
+          "commands": {
+            "*": "allow"
+          },
+          "mounts": {
+            "/data2": {
+              "commands": {
+                "*": {
+                  "decision": "deny",
+                  "reason": "folder kept"
+                }
+              }
+            }
+          }
+        }
+      },
+      "explain": true,
+      "command": "f() { echo hi; }; f > /data2/fold_out.txt",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "f: Permission denied\n"
+      }
+    },
+    {
+      "id": "explain_a_folders_ask_holds_a_defined_calls_redirect",
+      "seq": 960061,
+      "targets": [
+        "ram"
+      ],
+      "session": "foldask",
+      "session_profiles": {
+        "foldask": {
+          "commands": {
+            "*": "allow"
+          },
+          "mounts": {
+            "/data2": {
+              "commands": {
+                "*": {
+                  "decision": "ask",
+                  "reason": "folder needs a nod"
+                }
+              }
+            }
+          }
+        }
+      },
+      "explain": true,
+      "command": "f() { echo hi; }; f > /data2/fold_out.txt",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "f: Permission denied\n"
+      }
     }
   ]
 }

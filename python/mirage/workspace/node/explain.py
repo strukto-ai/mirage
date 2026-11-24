@@ -19,6 +19,7 @@ from collections.abc import (
     AsyncIterator,
     Callable,
     Generator,
+    Iterable,
     Iterator,
     Mapping,
     Sequence,
@@ -2809,9 +2810,11 @@ def explain_redirects(
     the shell opens it, without asking anyone: an ask reads the session's
     standing grants and stops there (``Decisions.held``), as a command's
     does in :func:`_explained`. A function call's redirects count as no
-    command's too (:func:`_runs_a_function`), as the gate judges them. A
+    command's too (:func:`_runs_a_function`), as the gate judges them,
+    unless the line can drop a function (:func:`_drops_functions`). A
     target only the runtime can expand (``> $f``), or a relative one
-    after a ``cd`` the walk could not follow, is left to the run.
+    after a ``cd`` the walk could not follow or of a call in a function
+    body, whose cwd is its caller's, is left to the run.
 
     Args:
         ast (Any): the parsed root node.
@@ -2820,14 +2823,16 @@ def explain_redirects(
         namespace (Namespace | None): the link table.
     """
     out: list[Opened] = []
+    calls = not _drops_functions(walk_tree(ast))
     for item in _walked_line(ast, session, opens=True):
-        if item.words and not _runs_a_function(item, registry):
+        if item.words and not (calls and _runs_a_function(item, registry)):
             continue
         at = item.occurrence
         row = encode_text(at.source)[: at.start].count(b"\n") + 1
         voice = f"{voice_name(item.session)}: line {row}: "
+        unsure = item.lost or (bool(item.words) and item.deferred)
         for word in item.redirects:
-            if item.lost and not word.value.startswith("/"):
+            if unsure and not word.value.startswith("/"):
                 continue
             targets = redirect_paths([word], registry, item.session.cwd)
             asked = redirect_asked(targets, item.session, namespace)
@@ -2863,6 +2868,23 @@ def explain_redirects(
                 )
             out.append(Opened(judgment, at))
     return out
+
+
+def _drops_functions(nodes: Iterable[Any]) -> bool:
+    """Whether a line has a word that can take a function away or run
+    text in this shell (``FUNCTION_DROPPERS``), so which names are
+    functions where a command stands is the run's to know.
+
+    Args:
+        nodes (Iterable[Any]): the line's nodes.
+    """
+    return any(
+        node.type == NodeType.UNSET_COMMAND
+        or (
+            node.type in WORD_TYPES and literal_word(node) in FUNCTION_DROPPERS
+        )
+        for node in nodes
+    )
 
 
 def _runs_a_function(item: Walked, registry: MountRegistry) -> bool:
@@ -3082,13 +3104,9 @@ def _with_calls(
     if not defined:
         return list(judged)
     nodes = list(walk_tree(tree))
-    if any(one.judgment.command in FUNCTION_DROPPERS for one in judged) or any(
-        node.type == NodeType.UNSET_COMMAND
-        or (
-            node.type in WORD_TYPES and literal_word(node) in FUNCTION_DROPPERS
-        )
-        for node in nodes
-    ):
+    if any(
+        one.judgment.command in FUNCTION_DROPPERS for one in judged
+    ) or _drops_functions(nodes):
         return list(judged)
     heads = {
         (node.start_byte - base, node.end_byte - base): literal_word(head)

@@ -820,6 +820,38 @@ async def test_a_stored_functions_redirects_are_each_asked_once():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("rules", "cwd", "line"),
+    [
+        (
+            {"*": "deny", "ls": "allow"},
+            "/",
+            "ls() { :; }; unset -f ls; ls > /data/out",
+        ),
+        ({"*": "deny", "cd": "allow"}, "/data", "f() { g > out; }; cd /; f"),
+    ],
+)
+async def test_explain_leaves_an_unsure_function_redirect_to_the_run(
+    rules, cwd, line
+):
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": rules}},
+        },
+    )
+    await ws.shell("g() { :; }", session_id="s")
+    await ws.shell(f"cd {cwd}", session_id="s")
+    said = await ws.explain(line, "s")
+    ran = await ws.shell(line, session_id="s")
+    assert (said.outcome, said.exit_code) == (Outcome.ALLOW, 0)
+    assert ran.exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_explain_reports_a_stored_functions_refused_redirect():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     ws.create_session(

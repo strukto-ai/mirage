@@ -2247,14 +2247,7 @@ function withCalls(
   }
   if (defined.size === 0) return [...judged]
   const nodes = [...walkTree(tree)]
-  if (
-    judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) ||
-    nodes.some(
-      (node) =>
-        node.type === NodeType.UNSET_COMMAND ||
-        (WORD_TYPES.has(node.type) && FUNCTION_DROPPERS.has(literalWord(node) ?? '')),
-    )
-  ) {
+  if (judged.some((one) => FUNCTION_DROPPERS.has(one.judgment.command)) || dropsFunctions(nodes)) {
     return [...judged]
   }
   const heads = new Map<string, string | null>()
@@ -2629,6 +2622,23 @@ function caseArm(node: TSNodeLike): number | null {
 }
 
 /**
+ * Whether a line has a word that can take a function away or run text in
+ * this shell (`FUNCTION_DROPPERS`), so which names are functions where a
+ * command stands is the run's to know. Mirrors the Python `_drops_functions`.
+ */
+function dropsFunctions(nodes: Iterable<TSNodeLike>): boolean {
+  for (const node of nodes) {
+    if (
+      node.type === NodeType.UNSET_COMMAND ||
+      (WORD_TYPES.has(node.type) && FUNCTION_DROPPERS.has(literalWord(node) ?? ''))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * Whether a walked command calls a function: one the session holds
  * (`runsFunction`), or one the line defines before it, which shadows the name
  * as a held one does unless the shell keeps the name (`SHELL_ONLY_BUILTINS`).
@@ -2650,9 +2660,10 @@ function runsAFunction(item: Walked, registry: MountRegistry): boolean {
  * without asking anyone: an ask reads the session's standing grants and
  * stops there (`Decisions.held`), as a command's does. A function call's
  * redirects count as no command's too (`runsAFunction`), as the gate judges
- * them. A target only the runtime can expand (`> $f`), or a relative one
- * after a `cd` the walk could not follow, is left to the run. Mirrors the
- * Python `explain_redirects`.
+ * them, unless the line can drop a function (`dropsFunctions`). A target only
+ * the runtime can expand (`> $f`), or a relative one after a `cd` the walk
+ * could not follow or of a call in a function body, whose cwd is its
+ * caller's, is left to the run. Mirrors the Python `explain_redirects`.
  */
 export async function explainRedirects(
   root: TSNodeLike,
@@ -2662,13 +2673,15 @@ export async function explainRedirects(
   reparse: (line: string) => TSNodeLike,
 ): Promise<Opened[]> {
   const out: Opened[] = []
+  const calls = !dropsFunctions(walkTree(root))
   for (const item of walkedLine(root, session, reparse, null, false, true)) {
-    if (item.words.length > 0 && !runsAFunction(item, registry)) continue
+    if (item.words.length > 0 && !(calls && runsAFunction(item, registry))) continue
     const at = item.occurrence
     const row = at.source.slice(0, at.start).split('\n').length
     const voice = `${voiceName(item.session)}: line ${String(row)}: `
+    const unsure = item.lost === true || (item.words.length > 0 && item.deferred === true)
     for (const word of item.redirects) {
-      if (item.lost === true && !wordValue(word).startsWith('/')) continue
+      if (unsure && !wordValue(word).startsWith('/')) continue
       const targets = redirectPaths([word], registry, item.session.cwd)
       const asked = redirectAsked(targets, item.session, namespace)
       if (asked === null) continue

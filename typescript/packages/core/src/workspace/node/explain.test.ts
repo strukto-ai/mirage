@@ -888,6 +888,25 @@ describe('explain', () => {
     expect([ran.exitCode, DEC.decode(ran.stderr), asked.length]).toEqual([0, '', 1])
   })
 
+  it.each([
+    [{ '*': 'deny', ls: 'allow' }, '/', 'ls() { :; }; unset -f ls; ls > /data/out'],
+    [{ '*': 'deny', cd: 'allow' }, '/data', 'f() { g > out; }; cd /; f'],
+  ] as const)('leaves an unsure function redirect to the run: %#', async (rules, cwd, line) => {
+    const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    open.push(w)
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: rules } },
+      }),
+    })
+    await w.shell('g() { :; }', { sessionId: 's' })
+    await w.shell(`cd ${cwd}`, { sessionId: 's' })
+    const said = await w.explain(line, 's')
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect([said.outcome, said.exitCode, ran.exitCode]).toEqual([Outcome.ALLOW, 0, 0])
+  })
+
   it("explains a stored function's refused redirect", async () => {
     const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)
