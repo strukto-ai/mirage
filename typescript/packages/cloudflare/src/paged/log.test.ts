@@ -172,6 +172,29 @@ describe('the page log of a paged database', () => {
     expect([null, 9]).toContain(stampOf(again, 8))
   })
 
+  it('moves no page in the commit that abandons some, so it wants no room for that', () => {
+    const storage = new ObjectStorage()
+    const log = new PageLog(storage, SMALL)
+    for (let at = 0; at < 36; at++) log.write(at, page(at + 1))
+    log.flush()
+    // Four pages in six are abandoned, which leaves every row sparse and
+    // the log due to move the pages still in them.
+    const left = Array.from({ length: 36 }, (_, at) => at).filter((at) => at % 6 < 2)
+    log.abandon(Array.from({ length: 36 }, (_, at) => at).filter((at) => at % 6 >= 2))
+    log.write(0, page(100))
+    storage.room(4 * PAGE_BYTES)
+    log.flush()
+    const sparse = log.deadBytes
+    storage.room(1 << 20)
+    log.write(1, page(101))
+    log.flush()
+    expect(log.deadBytes).toBeLessThan(sparse)
+    const again = new PageLog(storage.restarted(), SMALL)
+    expect(left.map((at) => stampOf(again, at))).toEqual(
+      left.map((at) => (at === 0 ? 100 : at === 1 ? 101 : at + 1)),
+    )
+  })
+
   it('writes a commit as rows of many pages', () => {
     const storage = new ObjectStorage()
     const log = new PageLog(storage)

@@ -117,6 +117,8 @@ export class PageLog {
   // next commit has one of its own.
   private finalId = -1
   private broken: Error | null = null
+  // Whether pages were abandoned since the last commit.
+  private abandoned = false
   private readonly spare: Uint8Array[] = []
   private nextId = 1
   private readonly dirty = new Map<number, Uint8Array>()
@@ -240,6 +242,7 @@ export class PageLog {
       this.release(page)
       this.drop(page)
     }
+    this.abandoned = true
   }
 
   /**
@@ -267,6 +270,7 @@ export class PageLog {
     this.part = 0
     this.spilled.clear()
     this.provisional.clear()
+    this.abandoned = false
     if (this.spare.length > 256) this.spare.length = 0
     return this.counts.rowsWritten + this.counts.rowsDeleted - before
   }
@@ -552,7 +556,10 @@ export class PageLog {
   }
 
   private commit(): void {
-    this.compact()
+    // A commit that abandons pages frees room, and may not want room of its
+    // own to do it: the pages it would move wait for the next commit, which
+    // has the rows this one empties to write into.
+    if (!this.abandoned) this.compact()
     const before = this.finalId
     this.finalId = this.emit(true)
     for (const [id, count] of this.provisional) this.rows.set(id, { count, live: 0 })
