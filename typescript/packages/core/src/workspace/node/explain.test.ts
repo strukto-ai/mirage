@@ -713,6 +713,24 @@ describe('explain', () => {
     expect(DEC.decode((await w.shell('cat /data/f.txt')).stdout)).toBe('kept\n')
   })
 
+  it("holds a folder's line on a function body reading through a link", async () => {
+    const w = new Workspace(
+      { '/data/': new RAMVFS(), '/tmp/': new RAMVFS() },
+      { mode: MountMode.WRITE },
+    )
+    open.push(w)
+    await w.shell('echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l')
+    w.createSession('s', {
+      profile: SessionProfile({
+        commands: { '*': 'allow' },
+        mounts: { '/data': { commands: { '*': 'deny' } } },
+      }),
+    })
+    const ran = await w.shell('printf x > /tmp/m; f() { cat /tmp/l; }; f', { sessionId: 's' })
+    expect([ran.exitCode, DEC.decode(ran.stdout)]).toEqual([126, ''])
+    expect((await w.shell('test -e /tmp/m')).exitCode).toBe(1)
+  })
+
   it("holds the line on a folder's star the top-level root ties", async () => {
     const w = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     open.push(w)

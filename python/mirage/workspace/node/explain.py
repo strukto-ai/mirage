@@ -908,9 +908,10 @@ def _in_folder(one: Judged) -> bool:
     entry's tree, and the command surely works inside that folder: a
     word of its own names an absolute path there, or the walk knows
     where it stands (``Judged.placed``) and its cwd or a path it reaches
-    is there, or it walks or moves a whole tree from an absolute path
-    the folder lies under (``grep -r x /a`` for a folder ``/a/b``), as
-    the matcher's ``touches`` reads it. Where the walk only guesses the
+    is there, or, every path word being absolute, a path it reaches
+    through a link is there, or it walks or moves a whole tree from an
+    absolute path the folder lies under (``grep -r x /a`` for a folder
+    ``/a/b``), as the matcher's ``touches`` reads it. Where the walk only guesses the
     cwd (after ``cd -``, ``cd "$d"``, a ``cd`` that may fail), the
     per-command gate judges the command in the cwd the shell really has.
 
@@ -927,6 +928,10 @@ def _in_folder(one: Judged) -> bool:
         under_path(path, rule.mount)
         for path in (ctx.cwd, *(p.virtual for p in ctx.paths))
     ):
+        return True
+    if all(
+        word.path is None or word.text.startswith("/") for word in ctx.words
+    ) and any(under_path(p.virtual, rule.mount) for p in ctx.paths):
         return True
     walks = ctx.walks or ctx.subtree
     return any(

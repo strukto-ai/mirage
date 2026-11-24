@@ -1285,7 +1285,8 @@ function byDefault(expl: Judgment): boolean {
  * Whether the leaf that decided the command belongs to a mount entry's
  * tree, and the command surely works inside that folder: a word of its own
  * names an absolute path there, or the walk knows where it stands
- * (`Judged.placed`) and its cwd or a path it reaches is there, or it walks
+ * (`Judged.placed`) and its cwd or a path it reaches is there, or, every
+ * path word being absolute, a path it reaches through a link is there, or it walks
  * or moves a whole tree from an absolute path the folder lies under
  * (`grep -r x /a` for a folder `/a/b`), as the matcher's `touches` reads it.
  * Where the walk only guesses the cwd (after `cd -`, `cd "$d"`, a `cd` that may
@@ -1303,8 +1304,15 @@ function inFolder(one: Judged): boolean {
   ) {
     return true
   }
+  const words = ctx.words ?? []
+  if (
+    words.every((word) => word.path === null || word.text.startsWith('/')) &&
+    ctx.paths.some((path) => underPath(path.virtual, mount))
+  ) {
+    return true
+  }
   const walks = ctx.walks === true || ctx.subtree === true
-  return (ctx.words ?? []).some(
+  return words.some(
     (word) =>
       word.path !== null &&
       word.text.startsWith('/') &&

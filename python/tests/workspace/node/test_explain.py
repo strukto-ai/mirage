@@ -610,6 +610,27 @@ async def test_a_redirect_through_a_link_holds_a_function_the_line_defines():
 
 
 @pytest.mark.asyncio
+async def test_a_function_body_reading_through_a_link_holds_a_folders_line():
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/tmp/": RAMVFS()}, mode=MountMode.WRITE
+    )
+    await ws.shell("echo kept > /data/f.txt; ln -s /data/f.txt /tmp/l")
+    ws.create_session(
+        "s",
+        profile={
+            "commands": {"*": "allow"},
+            "mounts": {"/data": {"commands": {"*": "deny"}}},
+        },
+    )
+    ran = await ws.shell(
+        "printf x > /tmp/m; f() { cat /tmp/l; }; f", session_id="s"
+    )
+    assert (ran.exit_code, ran.stdout or b"") == (126, b"")
+    assert (await ws.shell("test -e /tmp/m")).exit_code == 1
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_folders_star_holds_the_line_when_the_top_level_root_ties():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("echo kept > /data/f.txt")
