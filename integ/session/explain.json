@@ -204,7 +204,9 @@
       "id": "explain_a_folders_deny_holds_a_defined_calls_redirect",
       "seq": 960060,
       "targets": [
-        "ram"
+        "ram",
+        "disk",
+        "opfs"
       ],
       "session": "foldeny",
       "session_profiles": {
@@ -236,7 +238,9 @@
       "id": "explain_a_folders_ask_holds_a_defined_calls_redirect",
       "seq": 960061,
       "targets": [
-        "ram"
+        "ram",
+        "disk",
+        "opfs"
       ],
       "session": "foldask",
       "session_profiles": {
