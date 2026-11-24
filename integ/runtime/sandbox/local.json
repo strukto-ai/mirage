@@ -724,6 +724,448 @@
           }
         }
       ]
+    },
+    {
+      "id": "programs_on_two_machines",
+      "note": "Over two machines that both take programs, a program runs where search order finds it: one only the second machine has runs there with nothing named, its redirect and the pipe it writes land there, and a lookup asks that machine. A program file both hold runs on a machine, the first unless the line names the other, and is not read into Mirage. The umask the session set reaches a program. uname answers for the machine the command is about, and nproc prints a row each until the line names one machine; from a folder in the shared /tmp only the second machine holds, a piped uname and nproc answer for that machine alone. A session that hides a name is still refused its programs, not told the program is missing.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "@external"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "d=$(mktemp -d /tmp/mirage-search.XXXXXX) && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"$1\"' dash $d && dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash /usr/local/bin/mirage-search-tool from-second",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool > $d/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/out.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat $d/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-search-tool | tee $d/piped.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cat \"$1/piped.txt\"' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "from-second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "which mirage-search-tool",
+          "expect": {
+            "exit": 0,
+            "stdout": "/usr/bin/mirage-search-tool\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash $d/tool.sh first-file",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'printf \"#!/bin/sh\\necho %s\\n\" \"$2\" > \"$1\" && chmod +x \"$1\"' dash $d/tool.sh second-file",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "$d/tool.sh",
+          "expect": {
+            "exit": 0,
+            "stdout": "first-file\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "$d/tool.sh",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "second-file\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "umask 077; dash -c 'touch \"$1/masked.txt\" && stat -c %a \"$1/masked.txt\"' dash $d; umask 022",
+          "expect": {
+            "exit": 0,
+            "stdout": "600\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "[ \"$(uname -r)\" != mirage ] && echo machine",
+          "expect": {
+            "exit": 0,
+            "stdout": "machine\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "[ \"$(uname -n)\" = \"$(dash -c 'cat /etc/hostname')\" ] && echo same",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "same\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "nproc | wc -l",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "nproc | wc -l",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"$1\" && cat /etc/hostname > \"$1/host\"' dash $d-only",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(cd $d-only && [ \"$(echo x | uname -n)\" = \"$(cat host)\" ] && echo second)",
+          "expect": {
+            "exit": 0,
+            "stdout": "second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(cd $d-only && nproc | wc -l)",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf \"$1\"; test -e \"$1\" || echo gone' dash $d-only",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        },
+        {
+          "profile": {
+            "paths": {
+              "hide": [
+                "/tmp/mirage-search-hidden"
+              ]
+            }
+          }
+        },
+        {
+          "command": "mirage-search-tool",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
+          }
+        },
+        {
+          "profile": {}
+        },
+        {
+          "command": "dash -c 'rm -rf \"$1\" /usr/local/bin/mirage-search-tool; test -e \"$1\" || echo gone' dash $d",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "bytes_between_two_machines",
+      "sdk_only": "The world mounts a machine VFS, which the CLI lanes' yaml carries only for ram worlds.",
+      "note": "Bytes go between a machine and a store, never from one machine to another. With a folder of each machine's own and a store, cp and mv from one machine's folder to the other's are refused (Permission denied, the source kept) and go through the store instead; a program reading a pipe runs on its writer's machine when that machine has it, and is refused where only another machine has it; a program's redirect onto the other machine's folder, and the other machine's file fed to a program, are refused; a program's output goes to the store. Under a folder both machines show, a program's output lands on its own machine as a copy does: the folder is made there when only the other machine holds it, and the other machine's copy of the name is removed, so it never shows again whatever its time.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_DOCKER_SECOND_CONTAINER"
+      ],
+      "also_machines": [
+        "second"
+      ],
+      "also_entries": [
+        {
+          "machine": "second",
+          "captures": [
+            "@external"
+          ],
+          "config": {
+            "container": "${MIRAGE_INTEG_DOCKER_SECOND_CONTAINER}"
+          }
+        }
+      ],
+      "world": {
+        "mounts": {
+          "/var/tmp/mirage-one": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-one",
+              "machines": [
+                "docker"
+              ]
+            }
+          },
+          "/var/tmp/mirage-two": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-two",
+              "machines": [
+                "second"
+              ]
+            }
+          },
+          "/var/tmp/mirage-both": {
+            "vfs": "machine",
+            "config": {
+              "root": "/var/tmp/mirage-both",
+              "machines": [
+                "docker",
+                "second"
+              ]
+            }
+          },
+          "/store": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ]
+      },
+      "steps": [
+        {
+          "command": "dash -c 'mkdir -p /var/tmp/mirage-one' && d=$(mktemp -d /var/tmp/mirage-one/b.XXXXXX) && n=${d##*/} && echo made",
+          "expect": {
+            "exit": 0,
+            "stdout": "made\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"/var/tmp/mirage-two/$1\" && echo key > \"/var/tmp/mirage-two/$1/k\" && echo second > \"/var/tmp/mirage-where-$1\" && printf \"#!/bin/sh\\necho gen\\n\" > /usr/local/bin/mirage-bytes-gen && printf \"#!/bin/sh\\ncat\\n\" > /usr/local/bin/mirage-bytes-sink && chmod +x /usr/local/bin/mirage-bytes-gen /usr/local/bin/mirage-bytes-sink' dash $n",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo first > \"/var/tmp/mirage-where-$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "{ cp /var/tmp/mirage-two/$n/k $d/k; echo rc=$?; mv /var/tmp/mirage-two/$n/k $d/moved; echo rc=$?; } 2>&1 | sed \"s|$d|D|\"; cat /var/tmp/mirage-two/$n/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "cp: cannot create regular file 'D/k': Permission denied\nrc=1\nmv: cannot create regular file 'D/moved': Permission denied\nrc=1\nkey\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cp /var/tmp/mirage-two/$n/k /store/k && cp /store/k $d/k && cat $d/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "key\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen | dash -c 'cat > /dev/null; cat \"/var/tmp/mirage-where-$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "second\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'echo hi' | mirage-bytes-sink; echo rc=$?",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=126\n",
+            "stderr": "mirage-bytes-sink: Permission denied\n"
+          }
+        },
+        {
+          "command": "{ mirage-bytes-gen > $d/out; echo rc=$?; mirage-bytes-sink < $d/k; echo rc=$?; } 2>&1 | sed \"s|$d|D|\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "bash: line 1: D/out: Permission denied\nrc=1\nbash: line 1: D/k: Permission denied\nrc=1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /store/gen && cat /store/gen",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'mkdir -p \"/var/tmp/mirage-both/$1/only\" && echo old > \"/var/tmp/mirage-both/$1/k\" && touch -d 2099-01-01 \"/var/tmp/mirage-both/$1/k\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /var/tmp/mirage-both/$n/only/out && cat /var/tmp/mirage-both/$n/only/out",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mirage-bytes-gen > /var/tmp/mirage-both/$n/k && cat /var/tmp/mirage-both/$n/k",
+          "expect": {
+            "exit": 0,
+            "stdout": "gen\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'ls \"/var/tmp/mirage-both/$1\"' dash $n",
+          "expect": {
+            "exit": 0,
+            "stdout": "only\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'rm -rf \"/var/tmp/mirage-two/$1\" \"/var/tmp/mirage-where-$1\" \"/var/tmp/mirage-both/$1\"' dash $n",
+          "machine": "second",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "rm -r $d && dash -c 'rm -rf \"/var/tmp/mirage-where-$1\" \"/var/tmp/mirage-both/$1\"' dash $n && echo gone",
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }

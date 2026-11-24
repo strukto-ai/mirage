@@ -35,6 +35,7 @@ import {
   Workspace,
   type D1DatabaseLike,
 } from '../src/index.ts'
+import { DurableObjectPagedSqlDriver } from '../src/paged/driver.ts'
 import { knownProviders } from '@struktoai/mirage-core/machine/registry'
 import { PipeServer } from '@struktoai/mirage-core/mount/sftp'
 import type { SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
@@ -50,7 +51,7 @@ interface Env {
 
 interface SqlRun {
   readonly lines: readonly string[]
-  readonly on: 'd1' | 'object'
+  readonly on: 'd1' | 'object' | 'paged'
   readonly walkLimit?: number
   // The workspace's sessions, and on `object` its Durable Object.
   readonly id: string
@@ -207,10 +208,21 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
   }
 }
 
-/** A SQLite-backed Durable Object whose workspace lives in its own storage. */
+/**
+ * A SQLite-backed Durable Object whose workspace lives in its own storage:
+ * in the storage's own tables, or on `paged` in a database inside it, opened
+ * for each request and closed, which flushes it, before the answer.
+ */
 export class SqlObject extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
-    return sqlLines(new DurableObjectSqlDriver(this.ctx.storage), (await request.json()) as SqlRun)
+    const run = (await request.json()) as SqlRun
+    if (run.on !== 'paged') return sqlLines(new DurableObjectSqlDriver(this.ctx.storage), run)
+    const driver = await DurableObjectPagedSqlDriver.open(this.ctx.storage)
+    try {
+      return await sqlLines(driver, run)
+    } finally {
+      await driver.close()
+    }
   }
 }
 

@@ -15,11 +15,9 @@
 import { SPECS, parseCommand } from '../../../commands/spec/index.ts'
 import { WordKind } from '../../../commands/spec/types.ts'
 import { findLayout } from '../../../rs/find.ts'
-import { isFsError } from '../../../errors/fs.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import type { CommandWord } from '../../../policy/types.ts'
 import type { RemoteRuntime } from '../../../runtime/machine/runtime.ts'
-import type { DispatchFn } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { unmarkGlobs } from '../../../utils/glob_walk.ts'
 import { norm } from '../../../utils/path.ts'
@@ -27,26 +25,19 @@ import type { NamespaceReader } from '../../dispatcher/reader.ts'
 import type { Argv } from '../../expand/argv.ts'
 import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
-import { FOLDER_FREE } from '../constants.ts'
+import { FOLDER_FREE, NETWORK_CLIENTS } from '../constants.ts'
 import { Consumer, type ExternalTarget } from '../types.ts'
-import {
-  isPiped,
-  machineHoldingAll,
-  machineMount,
-  machineMounts,
-  mountMachines,
-  onlyMachine,
-} from './mounts.ts'
+import { isPiped, machineHoldingAll, machineMounts, mountMachines, onlyMachine } from './mounts.ts'
 
 /**
  * The paths a command's options name (`grep -f /data/patterns`), which the
  * machine must hold as well as its operands; none for a command without a
- * spec. Mirrors Python's `_option_paths`.
+ * spec. Mirrors Python's `option_paths`.
  *
  * @param argv the command.
  * @param cwd the directory a relative path resolves against.
  */
-function optionPaths(argv: Argv, cwd: string): string[] {
+export function optionPaths(argv: Argv, cwd: string): string[] {
   const spec = SPECS[argv.name]
   if (spec === undefined) return []
   return parseCommand(spec, [...argv.args], cwd, argv.name).pathFlagValues.filter((p) => p !== '-')
@@ -55,12 +46,12 @@ function optionPaths(argv: Argv, cwd: string): string[] {
 /**
  * The paths a command takes as operands, the files it works on, and not as an
  * option's value: `grep -r -f /tmp/p` takes none, so it searches its folder.
- * Every path for a command without a spec. Mirrors Python's `_path_operands`.
+ * Every path for a command without a spec. Mirrors Python's `path_operands`.
  *
  * @param argv the command.
  * @param cwd the directory a relative path resolves against.
  */
-function pathOperands(argv: Argv, cwd: string): PathSpec[] {
+export function pathOperands(argv: Argv, cwd: string): PathSpec[] {
   const spec = SPECS[argv.name]
   if (spec === undefined) {
     return argv.operands.filter((w): w is PathSpec => w instanceof PathSpec)
@@ -127,15 +118,18 @@ function namedPaths(argv: Argv, cwd: string): [string[], boolean] {
  *
  * Mirage keeps the command when anything is piped into it, since its own
  * command leaves input it does not read for the next one (`... | while read
- * f; do grep x "$f"; done`) where a machine would drain it; when a path is
- * anywhere else (another mount, a machine mount at another root, a mount
- * nested under it); when no one machine holds every path (a new name, or a
- * name on several machines, which Mirage places by its own rules); when the
- * session's rules restrict its mount, a coded file policy speaks for the
- * session, or the mount is read-only; when a path, an option's or a `find
- * -exec` command's included, walks through a link of Mirage's own; or when
- * the machine lacks the program. `statedMachine` is the same rule as far as a
- * command's words tell it. Mirrors Python's `operand_machine`.
+ * f; do grep x "$f"; done`) where a machine would drain it; when it reaches
+ * a server (`NETWORK_CLIENTS`), whose connections the workspace's network
+ * rule and policies judge inside Mirage, one to `localhost` being
+ * `factMachine`'s; when a path is anywhere else (another mount, a machine
+ * mount at another root, a mount nested under it); when no one machine
+ * holds every path (a new name, or a name on several machines, which Mirage
+ * places by its own rules); when the session's rules restrict its mount, a
+ * coded file policy speaks for the session, or the mount is read-only; when
+ * a path, an option's or a `find -exec` command's included, walks through a
+ * link of Mirage's own; or when the machine lacks the program.
+ * `statedMachine` is the same rule as far as a command's words tell it.
+ * Mirrors Python's `operand_machine`.
  *
  * @param argv the command.
  * @param session the session it runs in.
@@ -150,7 +144,7 @@ export async function operandMachine(
   links: NamespaceReader,
   stdin: ByteSource | null,
 ): Promise<ExternalTarget | null> {
-  if (isPiped(stdin)) return null
+  if (isPiped(stdin) || NETWORK_CLIENTS.has(argv.name)) return null
   const [paths, relative] = namedPaths(argv, session.cwd)
   const scopes: [string, boolean][] = paths.map((path) => [path, true])
   const cwd = norm(session.cwd)
@@ -202,6 +196,7 @@ export function statedMachine(
       : [],
   )
   const name = words.find((w) => w.kind === WordKind.NAME)?.text ?? ''
+  if (NETWORK_CLIENTS.has(name)) return null
   const args = words
     .filter((w) => w.kind !== WordKind.NAME && w.kind !== WordKind.REDIRECT)
     .map((w) => w.text)
@@ -233,40 +228,4 @@ export function statedMachine(
     if (runtime !== null) return runtime
   }
   return null
-}
-
-/**
- * The machine a program named by its path runs on, when the file is one
- * machine's own at that path: the `venv/bin/python` a machine's `python -m
- * venv` made in /tmp runs there, as bash runs it, where Mirage would read the
- * binary and refuse it. The path is asked of the dispatcher first, so a
- * hidden or refused path stays with Mirage, which words the refusal. Mirrors
- * Python's `program_machine`.
- *
- * @param path the head word, as typed.
- * @param session the session it runs in.
- * @param registry the workspace's mounts and machines.
- * @param links the session's link table.
- * @param dispatch op dispatcher, which applies the session's hides and
- *   policies to the path.
- * @param stdin what is piped into it.
- */
-export async function programMachine(
-  path: string,
-  session: SessionState,
-  registry: MountRegistry,
-  links: NamespaceReader,
-  dispatch: DispatchFn,
-  stdin: ByteSource | null,
-): Promise<RemoteRuntime | null> {
-  const spec = PathSpec.fromStrPath(path, undefined, session.cwd)
-  if (machineMount(registry, links, spec.virtual, false) === null) return null
-  try {
-    await dispatch('stat', spec)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    console.debug(`${path}: not run on its machine: ${String(err)}`)
-    return null
-  }
-  return machineHoldingAll([[spec.virtual, false]], session, registry, links, stdin)
 }

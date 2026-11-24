@@ -629,6 +629,9 @@ importers:
       ssh2:
         specifier: ^1.16.0
         version: 1.17.0
+      wa-sqlite:
+        specifier: 1.0.0
+        version: 1.0.0
     devDependencies:
       '@1password/sdk':
         specifier: 0.5.0
@@ -7615,6 +7618,9 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  wa-sqlite@1.0.0:
+    resolution: {integrity: sha512-Kyybo5/BaJp76z7gDWGk2J6Hthl4NIPsE+swgraEjy3IY6r5zIR02wAs1OJH4XtJp1y3puj3Onp5eMGS0z7nUA==}
 
   walk-up-path@4.0.0:
     resolution: {integrity: sha512-3hu+tD8YzSLGuFYtPRb48vdhKMi0KQV5sn+uWr8+7dMEq/2G/dtLrdDinkLjqq5TIbIBjYJ4Ax/n3YiaW7QM8A==}
@@ -15097,6 +15103,8 @@ snapshots:
       '@types/node': 24.12.2
     transitivePeerDependencies:
       - msw
+
+  wa-sqlite@1.0.0: {}
 
   walk-up-path@4.0.0: {}
 

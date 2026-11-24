@@ -54,6 +54,7 @@ from mirage.machine.e2b.constants import (
     PTY_MARK,
     PTY_RAW,
 )
+from mirage.machine.mounts import kill_line, unmount_line
 from mirage.machine.types import MachinePipe
 from mirage.runtime.types import RunAnswer, RunResult
 from mirage.types import PathSpec
@@ -307,8 +308,9 @@ async def test_connect_attaches_by_id_with_api_key():
 class MapMemory:
     """A workspace's memory of the machines Mirage started, in a dict."""
 
-    def __init__(self, kept=None):
+    def __init__(self, kept=None, workspace_id="w1"):
         self.kept = dict(kept or {})
+        self.workspace_id = workspace_id
 
     async def recall(self, name):
         return self.kept.get(name)
@@ -399,6 +401,19 @@ async def test_a_sandbox_the_config_names_is_never_killed():
     await machine.destroy()
     assert (FakeMachine.killed, FakeMachine.created) == ([], [])
     assert not machine.started_by_mirage
+
+
+@pytest.mark.asyncio
+async def test_destroying_a_sandbox_the_config_names_releases_its_mounts():
+    machine = MountingE2BMachine(
+        config={"sandbox_id": "sb-live", "api_key": "k", "mount_type": "ssh"}
+    )
+    machine.table["/data"] = ("mirage-w1.box-0123abcd-1:/data", "fuse.sshfs")
+    machine.bind_memory(MapMemory())
+    await machine.destroy()
+    assert kill_line("mirage-w1.box-0123abcd-1:/data") in machine.lines
+    assert unmount_line("/data") in machine.lines
+    assert FakeMachine.killed == []
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/wo
 import { JobTable } from '../../../../execution/job/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { SessionState } from '../../../session/session.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { handleKill } from './kill.ts'
 import { pendingRun } from '../../../../../tests/workspace/fixtures/job_runners.ts'
@@ -59,6 +60,16 @@ describe('handleKill', () => {
   ] as const)('refuses %j in bash words', async (args, code, stderr) => {
     const [, io] = await handleKill(new JobTable(), ['kill', ...args])
     expect([io.exitCode, decode(io.stderr as Uint8Array)]).toEqual([code, stderr])
+  })
+
+  // A kill the shell runs after it took a signal to run its EXIT action leaves
+  // the status that signal found for the action.
+  it('keeps the status a fatal signal taken before it found', async () => {
+    const session = new SessionState({ sessionId: 's1', cwd: '/' })
+    session.fatalSignal = 15
+    session.statusBeforeSignal = 3
+    const [, io] = await handleKill(new JobTable(), ['kill', '999'], session)
+    expect([io.exitCode, session.statusBeforeSignal]).toEqual([1, 3])
   })
 
   it('kills a known job and returns 0', async () => {

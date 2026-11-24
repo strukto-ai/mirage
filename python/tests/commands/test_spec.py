@@ -342,6 +342,7 @@ def test_all_commands_have_specs():
         "history",
         "numfmt",
         "od",
+        "hexdump",
         "truncate",
     }
     assert set(SPECS.keys()) == expected

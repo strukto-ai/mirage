@@ -18,6 +18,7 @@ import { PathSpec } from '../../src/types.ts'
 import type { RunAnswer } from '../../src/runtime/types.ts'
 import type { MachineHandle } from '../../src/machine/handle.ts'
 import type { MachineVFSConfig } from '../../src/vfs/machine/config.ts'
+import { MachineVFS } from '../../src/vfs/machine/machine.ts'
 import { MountMode } from '../../src/types.ts'
 import type { MountSpec, WorkspaceOptions } from '../../src/workspace/workspace/types.ts'
 import { Workspace } from '../../src/workspace/workspace/workspace.ts'
@@ -159,8 +160,10 @@ export class FakeFiles {
     return failed(`${tool}: '${path}': No such file or directory\n`)
   }
 
-  private one(w: string[], data: Uint8Array | null): RunAnswer {
+  private one(words: string[], data: Uint8Array | null): RunAnswer {
+    const w = words[0]?.startsWith('PATH=') === true ? words.slice(1) : words
     const [head = '', second = ''] = w
+    if (head === 'cd' && second === '--') return this.dirs.has(w[2] ?? '') ? ok() : failed('')
     if (head === 'command' && second === '-v')
       return this.programs.has(w[2] ?? '') ? ok() : failed('')
     if (w.slice(0, 3).join(' ') === 'readlink -f --') {
@@ -282,10 +285,12 @@ export function two(
   a: FakeFiles,
   b: FakeFiles,
   mounts: Record<string, MountSpec | string> = {},
+  options: WorkspaceOptions = {},
 ): Workspace {
   return new Workspace(mounts, {
     mode: MountMode.WRITE,
     machines: { a: new ScriptedMachine('a', a.answer), b: new ScriptedMachine('b', b.answer) },
+    ...options,
   })
 }
 
@@ -298,4 +303,14 @@ export async function run(ws: Workspace, line: string): Promise<[number, string,
 /** A machine's files as text, by path. */
 export function texts(files: FakeFiles): Record<string, string> {
   return Object.fromEntries([...files.files].map(([k, v]) => [k, DEC.decode(v)]))
+}
+
+/** A mount of /tmp over machines a, b, c, ... holding `files`. Mirrors Python's `shared`. */
+export function shared(...files: FakeFiles[]): MachineVFS {
+  const vfs = new MachineVFS({ root: '/tmp' })
+  vfs.bindMachines(
+    tableOf(...files.map((one, at) => new ScriptedMachine('abcdef'.charAt(at), one.answer))),
+    'a',
+  )
+  return vfs
 }

@@ -16,6 +16,8 @@ import pytest
 
 from mirage.io import IOResult
 from mirage.shell.call_stack import CallStack
+from mirage.shell.console import JobConsole, Terminal
+from mirage.shell.errors import ExitSignal
 from mirage.workspace.executor.traps import (
     clear_traps,
     ignored_signals,
@@ -24,6 +26,7 @@ from mirage.workspace.executor.traps import (
     own_action,
     restore_function_traps,
     run_exit_trap,
+    run_signal_traps,
     start_job_traps,
 )
 from mirage.workspace.session.session import SessionState
@@ -66,6 +69,74 @@ async def test_action_runs_once_in_the_frames_given():
     ]
     assert session.exit_trap is None
     assert await run_exit_trap(run, session, 7) is None
+
+
+class Watcher:
+    """An evaluator that notes ``$?`` and the sink each line gets, then
+    answers with a result or raises it."""
+
+    def __init__(
+        self, session: SessionState, answer: IOResult | ExitSignal
+    ) -> None:
+        self.session = session
+        self.answer = answer
+        self.seen: list[tuple[str, int, JobConsole | None]] = []
+
+    async def __call__(self, line: str, **kwargs) -> IOResult:
+        self.seen.append(
+            (line, self.session.last_exit_code, kwargs.get("sink"))
+        )
+        if isinstance(self.answer, ExitSignal):
+            raise self.answer
+        return self.answer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answer", [IOResult(stdout=b"bye\n"), ExitSignal(3, stdout=b"bye\n")]
+)
+async def test_a_fatal_signal_runs_the_exit_action_and_keeps_its_status(
+    answer,
+):
+    session = make_session("echo bye")
+    session.fatal_signal, session.status_before_signal = 15, 4
+    session.last_exit_code = 143
+    sink = Terminal()
+    run = Watcher(session, answer)
+    with pytest.raises(ExitSignal) as raised:
+        await run_signal_traps(run, session, None, None, sink)
+    assert raised.value.exit_code == 143
+    assert raised.value.cleanup == b"bye\n"
+    assert run.seen == [("echo bye", 4, sink)]
+    assert session.last_exit_code == 143
+    assert (session.fatal_signal, session.exit_trap) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_fatal_signal_ends_a_shell_with_no_exit_action():
+    session = make_session()
+    session.fatal_signal = 2
+    run = Watcher(session, IOResult())
+    with pytest.raises(ExitSignal) as raised:
+        await run_signal_traps(run, session)
+    assert (raised.value.exit_code, run.seen) == (130, [])
+
+
+@pytest.mark.asyncio
+async def test_a_queued_action_runs_first_with_the_status_a_fatal_signal_found():
+    session = make_session("echo bye")
+    session.signal_traps = {10: "echo usr1"}
+    session.pending_signals = {10}
+    session.fatal_signal, session.status_before_signal = 15, 4
+    session.last_exit_code = 143
+    run = Watcher(session, IOResult())
+    with pytest.raises(ExitSignal) as raised:
+        await run_signal_traps(run, session)
+    assert raised.value.exit_code == 143
+    assert [(line, status) for line, status, _ in run.seen] == [
+        ("echo usr1", 4),
+        ("echo bye", 4),
+    ]
 
 
 @pytest.mark.parametrize(

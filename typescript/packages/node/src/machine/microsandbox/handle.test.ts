@@ -264,7 +264,7 @@ describe('MicrosandboxMachine', () => {
     ['bytes', ENC.encode('input'), []],
     ['empty bytes', new Uint8Array(), []],
     ['a pipe', piped(), []],
-    ['no stdin', null, ['--stream']],
+    ['no stdin', null, ['--stream', '--no-stdin']],
   ])('maps process requests with %s to the msb contract', async (_label, input, stream) => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
     const invoke = vi

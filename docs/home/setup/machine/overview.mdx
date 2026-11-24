@@ -41,8 +41,11 @@ Each entry names its `provider`: `in_process`, `host`, `remote` or a
 [provider](#providers). The entry's other keys are its settings, snake_case in
 YAML for both SDKs; a key it does not take is refused.
 
-With two `@external` machines the first one runs every program, and the
-second runs what it names on its own:
+With two `@external` machines a program runs on one that has it. Mirage
+looks in this order: the machine the session's folder is on, the machine
+holding the paths the command names, then the first listed. A program file
+both machines hold at the same path runs by the same order. A program a
+machine captures by name always runs there:
 
 ```yaml
 machines:
@@ -420,6 +423,21 @@ on the right, so a column you read by position stays where it is; `hostname`
 prints one name a line. Figures are never added up, as one program cannot use another machine's memory.
 With one machine, `free` answers for that machine alone, in the real `free`'s
 table, and `free --machine mirage` shows the workspace.
+
+A line that says which machine it is about gets that machine's answer alone:
+one that names a machine (`execute(machine=)`, a route), or one run from a
+folder only one machine has. Nothing else changes the rows.
+
+`uname` and `arch` have no row per machine. They answer for the machine the
+command is about: the one the line names, else the one whose program writes
+its pipe, else the one machine holding the session's folder, else the first
+that takes programs. `curl` and `wget` asked for `localhost` run on that same
+machine, so they reach a server a program started there; no other request
+runs on a machine. Mirage answers itself where no machine takes programs,
+where that machine would not find the command on the run's `PATH`, where a
+file the request reads or writes is not that machine's own (`wget` with no
+`-O` saves into the session's folder), and under a `network` limit or a
+network policy, which only Mirage enforces.
 
 ```bash
 $ nproc

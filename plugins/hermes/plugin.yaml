@@ -1,0 +1,15 @@
+manifest_version: 2
+name: mirage
+version: 0.1.0
+description: Run hermes' terminal and file tools in a Mirage workspace (terminal.backend mirage).
+kind: backend
+requires_hermes: ">=0.23.3"
+python_dependencies:
+  - "mirage-ai>0.1.0a3,<0.2"
+config_schema:
+  config:
+    type: str
+    required: true
+    description: Path to the Mirage workspace YAML the backend runs in.
+license: Apache-2.0
+homepage: https://docs.mirage.strukto.ai/home/agents/hermes

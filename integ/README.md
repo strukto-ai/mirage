@@ -94,6 +94,10 @@ and gzip 1.13 in `debian:stable-slim`.
 
 The `ast-grep-sql` target compares both registries against ast-grep 0.51.3 goldens on SQLite with a 100 MiB workspace. The shared Python battery and TypeScript jobs run this target. The browser suite exercises parser exhaustion and recovery, and the Cloudflare SQL tests run search, scan, outline and rewrites on Durable Object storage.
 
+The Rust `hexdump` stream (`rust/mirage-rs/src/hexdump/`) and its host
+builders use the same whole-host filters; `unix/hexdump/` and
+`crossmount/hexdump/` pin it against util-linux 2.41.5 in `debian:stable-slim`.
+
 The shared Rust `file` signature and MIME catalog and its host adapters use
 the same whole-host filters. The existing file corpus and host prefix-read
 tests cover their output and source lifetime.
@@ -441,7 +445,7 @@ needs both outputs.
 
 ```mermaid
 flowchart LR
-    PY["python/**<br/>minus server, cli, agents"] --> battery & hosting
+    PY["python/**<br/>minus server, cli, agents, environments"] --> battery & hosting
     SRV["python/mirage/server"] --> hosting
     TSX["typescript/**<br/>core · node · browser"] --> ts & battery & hosting & cloudflare & database
     SRVTS["server package"] --> ts & hosting & cloudflare
@@ -503,7 +507,8 @@ The `src/clis/` entries that install ast-grep, gh, office and the PDF tools
 reaches them through the runners and Node's entry points, the browser job
 through `integ/browser/suite.ts`, and the cloudflare job through the test
 Worker's imports.
-The agent adapter packages, `openai-agents` among them, select no job.
+The agent adapter packages, `openai-agents` among them, and the environment
+adapters under `python/mirage/environments` select no job.
 Rust filename sanitization (`rust/mirage-rs/src/sanitize.rs`), its mirrored
 `utils/sanitize` adapters, `core/generic/types`, and the condition `errors`
 modules stay under the same whole-host Python and TypeScript filters.

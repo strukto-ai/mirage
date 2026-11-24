@@ -34,6 +34,7 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import is_aborting, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import CommandTimeoutError, FsCondition
+from mirage.execution.types import MachineName
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
@@ -138,6 +139,7 @@ STREAM_OUTPUT_BUILTINS = frozenset(
         "fold",
         "fmt",
         "od",
+        "hexdump",
         "strings",
         "rev",
         "tac",
@@ -212,9 +214,10 @@ _Input = ByteSource | None | _Unreadable
 class PipeRecorder(Recorder):
     """Send FIFO writes immediately; preserve ordinary redirect recording.
 
-    While a pipe is in play (``live``), terminal output goes out as it is
-    written, through a copied descriptor too, so it keeps the command's
-    order. A write into a pipe whose reader has gone raises ``PipeClosed``.
+    While ``live``, terminal output goes out as it is written, through a
+    copied descriptor too, so it keeps the command's order and a command
+    cut short has shown what it wrote. A write into a pipe whose reader
+    has gone raises ``PipeClosed``.
     A channel ``stream_to`` binds goes into its file as it is written;
     two channels bound to one description share its writer, so they keep
     their order (``> f 2>&1``).
@@ -222,16 +225,17 @@ class PipeRecorder(Recorder):
     Args:
         dispatch (DispatchFn): op dispatcher the pipe writes go through.
         streams (dict[Channel, PathSpec]): channels bound to output pipes.
-        forward (dict[Channel, Channel]): terminal channels sent through.
+        forward (dict[Channel, Channel | Inherited]): terminal channels,
+            or the copied streams, sent through.
         sink (JobConsole | None): where the level writes.
-        live (bool): whether any input or output of the level is a pipe.
+        live (bool): whether terminal output goes out as it is written.
     """
 
     def __init__(
         self,
         dispatch: DispatchFn,
         streams: dict[Channel, PathSpec],
-        forward: dict[Channel, Channel],
+        forward: dict[Channel, Channel | Inherited],
         sink: JobConsole | None,
         live: bool,
     ) -> None:
@@ -451,10 +455,13 @@ class PipeRecorder(Recorder):
                 return
         scope = self.streams.get(channel)
         if scope is None:
-            if self.sink is not None and channel in self.forward:
-                await self.sink.emit(self.forward[channel], data)
-            else:
+            to = self.forward.get(channel)
+            if self.sink is None or to is None:
                 await super().emit(channel, data)
+            elif isinstance(to, Inherited):
+                await self.emit_to(to, data)
+            else:
+                await self.sink.emit(to, data)
         elif data:
             await self.dispatch("append", scope, data=data)
 
@@ -840,7 +847,7 @@ def _output_recorder(
     dispatch: DispatchFn,
     outputs: dict[int, _FdDest],
     files: list[FileDescription],
-    piped: set[int],
+    deferred: FileDescription | None,
     sink: JobConsole | None,
     command: TSNodeLike | None,
     follow: Callable[[str], str] | None,
@@ -852,7 +859,8 @@ def _output_recorder(
         dispatch (DispatchFn): the session's op dispatcher.
         outputs (dict[int, _FdDest]): where each descriptor writes.
         files (list[FileDescription]): the files the redirections opened.
-        piped (set[int]): the descriptors reading a pipe.
+        deferred (FileDescription | None): the final target the write
+            of an output-only command opens.
         sink (JobConsole | None): the enclosing console, if any.
         command (TSNodeLike | None): the redirected command, if any.
         follow (Callable[[str], str] | None): resolves a path's links.
@@ -860,16 +868,19 @@ def _output_recorder(
             enclosing join holds under.
     """
     streams: dict[Channel, PathSpec] = {}
-    forward: dict[Channel, Channel] = {}
+    forward: dict[Channel, Channel | Inherited] = {}
     for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
         target = outputs[fd]
         if target is _TO_STDOUT or target is _TO_STDERR:
             forward[channel] = (
                 Channel.STDOUT if target is _TO_STDOUT else Channel.STDERR
             )
+        elif isinstance(target, Inherited):
+            forward[channel] = target
         elif isinstance(target, FileDescription) and target.pipe:
             streams[channel] = target.scope
-    live = bool(streams) or bool(piped)
+    # Held for a deferred open: bash never runs a command whose open fails.
+    live = deferred is None
     recorder = PipeRecorder(
         dispatch, streams, forward if live else {}, sink, live
     )
@@ -922,6 +933,27 @@ def _output_recorder(
             if errs is target:
                 recorder.stream_to(target, Channel.STDERR)
     return recorder
+
+
+def _producing_machine(io: IOResult) -> MachineName | None:
+    """The machine whose program produced a command's output, bound as
+    the running command's machine while the output lands in its files: a
+    command Mirage handed to a machine (``cat /srv/a/x > /tmp/x``)
+    lands its output there, as a program's does, and never on another
+    machine (``place.refuse_crossing``). None where Mirage produced the
+    output, or that machine is bound already.
+
+    Args:
+        io (IOResult): the command's result.
+    """
+    producer = io.producer
+    if (
+        producer is None
+        or producer.machine is None
+        or producer.machine == current_caller().machine
+    ):
+        return None
+    return producer.machine
 
 
 async def _before_drain(
@@ -1581,10 +1613,17 @@ async def _handle_redirect(
         if failure is not None:
             return failure
     redirects = expanded
-    files, piped, targets = opened.files, opened.piped, opened.targets
+    files, targets = opened.files, opened.targets
 
     recorder = _output_recorder(
-        dispatch, outputs, files, piped, sink, command, follow, session
+        dispatch,
+        outputs,
+        files,
+        opened.deferred,
+        sink,
+        command,
+        follow,
+        session,
     )
     unwound: Exception | None = None
     refused = False
@@ -1659,6 +1698,7 @@ async def _handle_redirect(
     depth = len(session.shadowed)
     session.shadowed.extend(shadowed)
     cancelled: asyncio.CancelledError | CommandTimeoutError | None = None
+    produced: MachineName | None = None
     try:
         if command is None:
             if capture_input and not isinstance(inputs[0], _Unreadable):
@@ -1676,9 +1716,21 @@ async def _handle_redirect(
                     sink=recorder,
                 )
                 refused = result[2].refused
-                await _before_drain(recorder, result, outputs, files, name)
-                _, io, exec_node = await drained(recorder, *result)
-                await recorder.finish_writer()
+                produced = _producing_machine(result[1])
+                bound = (
+                    None
+                    if produced is None
+                    else bind_caller(
+                        current_caller().changed({"machine": produced})
+                    )
+                )
+                try:
+                    await _before_drain(recorder, result, outputs, files, name)
+                    _, io, exec_node = await drained(recorder, *result)
+                    await recorder.finish_writer()
+                finally:
+                    if bound is not None:
+                        reset_caller(bound)
 
             except PipeClosed:
                 # SIGPIPE ends a forked writer alone; a builtin's write,
@@ -1724,24 +1776,42 @@ async def _handle_redirect(
             else:
                 session.descriptors.pop(fd, None)
     if cancelled is not None:
+        kept = (
+            None
+            if produced is None
+            else bind_caller(current_caller().changed({"machine": produced}))
+        )
         try:
             await run_landing(
                 _keep_output(recorder, outputs, dispatch, session)
             )
         except Exception as exc:
             logger.debug("kept output not written: %s", exc)
+        finally:
+            if kept is not None:
+                reset_caller(kept)
         raise cancelled
-    stdout, unwound = await _land_output(
-        opened,
-        recorder,
-        route,
-        io,
-        redirects,
-        command,
-        refused,
-        unwound,
-        forked,
+    produced = _producing_machine(io)
+    bound = (
+        None
+        if produced is None
+        else bind_caller(current_caller().changed({"machine": produced}))
     )
+    try:
+        stdout, unwound = await _land_output(
+            opened,
+            recorder,
+            route,
+            io,
+            redirects,
+            command,
+            refused,
+            unwound,
+            forked,
+        )
+    finally:
+        if bound is not None:
+            reset_caller(bound)
     if unwound is not None:
         if (
             isinstance(unwound, ExitSignal)

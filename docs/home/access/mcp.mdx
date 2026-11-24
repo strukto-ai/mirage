@@ -49,6 +49,15 @@ These examples use the `demo` workspace from the [CLI quickstart](/home/access/c
     args = ["mcp", "-w", "demo"]
     ```
   </Tab>
+  <Tab title="Codewhale">
+    ```bash
+    codewhale mcp add mirage --command "$(command -v mirage)" --arg=mcp --arg=-w --arg=demo
+    codewhale mcp validate
+    codewhale mcp tools mirage
+    ```
+    If Codewhale is already open, run `/mcp reload`. Ask it to read
+    `/data/hello.txt` with `mcp_mirage_read` to try the connection.
+  </Tab>
 </Tabs>
 
 For a server elsewhere, give the client the URL and a token:

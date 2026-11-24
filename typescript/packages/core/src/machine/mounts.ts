@@ -167,6 +167,27 @@ export function darwinTableLine(prefixes: readonly string[]): string {
 }
 
 /**
+ * The prefixes a Mac's `mount` table may show `name`'s mounts at: for each row
+ * whose source is `<name>-<instance>-<n>:<prefix>`, every prefix the row reads
+ * as before one of its ` on /`, as a prefix can hold one too. The table read at
+ * those prefixes keeps the one mounted. Mirrors Python's `darwin_left`.
+ *
+ * @param text `mount`'s output.
+ * @param name the sources' name (`sourceName`).
+ */
+export function darwinLeft(text: string, name: string): Set<string> {
+  const left = new Set<string>()
+  for (const line of text.split('\n')) {
+    if (!line.startsWith(`${name}-`)) continue
+    const rest = /^[0-9a-f]{8}-[0-9]+:(\/.*)$/.exec(line.slice(name.length + 1))?.[1] ?? ''
+    for (let at = rest.indexOf(' on /'); at > 0; at = rest.indexOf(' on /', at + 1)) {
+      left.add(rest.slice(0, at))
+    }
+  }
+  return left
+}
+
+/**
  * `mountTable` for what `darwinTableLine` printed: each prefix's source and
  * type, by the real path it mounts at, and each prefix's real path, `known`
  * among them. A row is matched by that path, as a source can hold ` on /`;
@@ -790,6 +811,39 @@ export class MachineMounts {
   }
 
   /**
+   * Kill and unmount every mount this machine entry of the workspace left
+   * that this instance does not serve now, as the workspace is deleted: no later
+   * instance comes to take them back (`reclaim`), and their sshfs or
+   * mirage-fuse would hold the prefixes from every other workspace.
+   */
+  release(workspaceId: string): Promise<void> {
+    return this.locked(async () => {
+      if (this.served.size === 0) this.name = sourceName(workspaceId, this.machine)
+      let present = await this.table()
+      if (this.darwin === true) {
+        const listed = await this.run(darwinTableLine([]))
+        const left = darwinLeft(DECODER.decode(listed.stdout), this.name)
+        if ([...left].some((prefix) => !this.looked.has(prefix))) {
+          for (const prefix of left) this.looked.add(prefix)
+          present = await this.table()
+        }
+      }
+      const live = new Set([...this.served.values()].map((entry) => entry.source))
+      const failures: unknown[] = []
+      for (const [prefix, [source, kind]] of present) {
+        if (SERVED_KINDS.has(kind) && this.ours(source, prefix) && !live.has(source)) {
+          try {
+            await this.reclaim(source, prefix)
+          } catch (error) {
+            failures.push(error)
+          }
+        }
+      }
+      if (failures.length > 0) throw new AggregateError(failures, 'releasing mounts failed')
+    })
+  }
+
+  /**
    * Land every write a served prefix's server has acknowledged.
    *
    * sshfs answers close(2) once the file's writes are acknowledged and
@@ -1213,10 +1267,17 @@ export class MachineMounts {
    * `prefix`, then unmount it: unmounted alone, it stays blocked on its dead
    * pipe. The next serve may take the same source, so a failed unmount
    * fails loud rather than leaving the old mount to pass for the new one.
+   * Each command is let go after `UNMOUNT_WAIT_SECONDS`.
    */
   private async reclaim(source: string, prefix: string, signal?: AbortSignal): Promise<void> {
-    await this.run(this.killLine(source), signal)
-    const done = await this.run(this.unmountLine(prefix), signal)
+    await this.run(
+      this.killLine(source),
+      mergeSignals(signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000)),
+    )
+    const done = await this.run(
+      this.unmountLine(prefix),
+      mergeSignals(signal, AbortSignal.timeout(UNMOUNT_WAIT_SECONDS * 1000)),
+    )
     if (done.exitCode !== 0) {
       throw new Error(
         `${this.provider}: cannot unmount ${prefix}, which this workspace served before a restart: ${said(done.stderr)}`,

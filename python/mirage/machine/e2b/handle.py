@@ -405,10 +405,11 @@ class E2BMachine(MachineHandle, PipeTransportMixin):
 
     async def destroy(self) -> None:
         """Kill the sandbox Mirage started for this workspace, as the
-        workspace is deleted, and forget it; one the config names stays.
-        Reaches the one the workspace remembers when this build never
-        connected."""
+        workspace is deleted, and forget it; one the config names stays,
+        with the mounts the workspace left there released. Reaches the one
+        the workspace remembers when this build never connected."""
         if self.config.sandbox_id is not None:
+            await self._release_mounts()
             return
         self._stop_refresher()
         sandbox_id = self._sandbox_id

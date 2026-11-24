@@ -15,12 +15,13 @@ import errno
 import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
+from functools import partial
 
 from mirage.context import DEFAULT_UMASK
 from mirage.core.dev.constants import ZERO_CHUNK_SIZE
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
-from mirage.io.stream import drain, slice_stream
+from mirage.io.stream import OutputStream, close_quietly, drain, slice_stream
 from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
@@ -382,7 +383,8 @@ async def create_counted(
     *,
     append: bool = False,
 ) -> int:
-    """``create_file`` that answers how many bytes it wrote.
+    """``create_file`` that answers how many bytes it wrote. A store
+    that refuses the bytes unread still closes what produces them.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -403,5 +405,11 @@ async def create_counted(
                 size += len(part)
                 yield part
 
-    await create_file(dispatch, session, scope, counted(), append=append)
+    await create_file(
+        dispatch,
+        session,
+        scope,
+        OutputStream(counted(), partial(close_quietly, data)),
+        append=append,
+    )
     return size

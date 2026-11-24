@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { ScriptedMachine } from '../../../../tests/fixtures/machine.ts'
 import { FakeFiles, TOOLS, one, out } from '../../../../tests/fixtures/machine_files.ts'
-import { SessionProfile } from '../../../policy/profile.ts'
 import type { Action, CommandContext } from '../../../policy/types.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
@@ -117,41 +116,6 @@ describe('operand routing', () => {
     const ws = one(files)
     expect(await out(ws, 'cd /tmp && ls')).toBe('ran\n')
     expect(files.ran).toEqual(['ls'])
-    await ws.close()
-  })
-
-  it('runs a program named by a path the machine holds there', async () => {
-    const files = new FakeFiles({ '/tmp/venv/bin/python': '\x7fELF\x00' })
-    const ws = one(files)
-    expect(await out(ws, 'cd /tmp && venv/bin/python -V')).toBe('ran\n')
-    expect(await out(ws, '/tmp/venv/bin/python -V')).toBe('ran\n')
-    expect(files.ran).toEqual(['venv/bin/python -V', '/tmp/venv/bin/python -V'])
-    await ws.close()
-  })
-
-  // The machine runs its own /tmp/ls or /tmp/perl, so a closed tree refuses the
-  // path as it refuses one no machine holds, and a deny of the program's name
-  // refuses it by that name.
-
-  it.each([
-    [{ '*': 'deny', ls: 'allow' }, '/tmp/ls'],
-    [{ perl: 'deny' }, '/tmp/perl -e 1'],
-  ] as const)('refuses a program the machine holds under %j', async (commands, line) => {
-    const files = new FakeFiles({ '/tmp/ls': '\x7fELF\x00', '/tmp/perl': '\x7fELF\x00' })
-    const ws = one(files, {}, { profiles: { agent: SessionProfile({ commands }) } })
-    const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell(line)).exitCode).toBe(126)
-    expect(files.ran).toEqual([])
-    await ws.close()
-  })
-
-  it('keeps a hidden program path with Mirage', async () => {
-    const files = new FakeFiles({ '/tmp/secret/run': '\x7fELF\x00' })
-    const ws = one(files, {}, { profiles: { agent: { paths: { hide: ['/tmp/secret'] } } } })
-    const agent = await ws.session('agent', { profile: 'agent' })
-    const done = await agent.shell('/tmp/secret/run')
-    expect(done.exitCode).not.toBe(0)
-    expect(files.ran).toEqual([])
     await ws.close()
   })
 

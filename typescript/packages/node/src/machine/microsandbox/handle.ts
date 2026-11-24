@@ -145,8 +145,9 @@ export class MicrosandboxMachine extends ProgramMachine<MicrosandboxConfig> {
     await this.connect(signal)
     signal?.throwIfAborted()
     // Piped stdin skips --stream: msb fails more runs that close it early.
+    // No stdin says --no-stdin, else msb's EOF to a finished guest fails it.
     const [words, tail] = this.execWords()
-    const head = stdin === null ? [...words, '--stream'] : words
+    const head = stdin === null ? [...words, '--stream', '--no-stdin'] : words
     return this.execProgram(
       execArgs(head, tail, env, null, [
         '/bin/sh',

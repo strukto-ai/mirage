@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-cloudflare",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "Mirage on Cloudflare Workers and Durable Objects",
   "keywords": [
     "bash",
@@ -62,7 +62,8 @@
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-server": "workspace:*",
     "@xmldom/xmldom": "^0.9.12",
-    "ssh2": "^1.16.0"
+    "ssh2": "^1.16.0",
+    "wa-sqlite": "1.0.0"
   },
   "peerDependencies": {
     "@1password/sdk": "0.5.0"

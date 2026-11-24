@@ -15,6 +15,7 @@
 import type { MachineTable } from '../../execution/machine/table.ts'
 import { Runtime } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
+import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
 import { RemoteRuntime } from '../../runtime/machine/runtime.ts'
 import {
@@ -159,9 +160,26 @@ export class Runtimes {
         : new AggregateError(failures, 'runtime close failed')
   }
 
+  /**
+   * Make the entries the workspace's, logging each capture an earlier entry
+   * already takes while no route policy can reach the later one. `@external`
+   * on a later machine is not such a capture: search order runs a program
+   * there that the machines before it lack (`searchedMachine`).
+   *
+   * @param entries the entries, in precedence order.
+   * @param bindings each capture's first entry.
+   */
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
     const routed = this.registry.policies.hasPlacement()
+    const searched = new Set(
+      entries
+        .filter(
+          (entry) => entry instanceof RemoteRuntime && entry.captures.includes(EXTERNAL_COMMANDS),
+        )
+        .map((entry) => entry.name),
+    )
     for (const [capture, winner, shadowed] of routed ? [] : shadowedCaptures(entries)) {
+      if (capture === EXTERNAL_COMMANDS && searched.has(winner) && searched.has(shadowed)) continue
       logger.warn?.(
         `machine '${shadowed}' runs '${capture}' only when a route names it: '${winner}', listed before it, takes it`,
       )

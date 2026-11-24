@@ -38,7 +38,6 @@ Each agent's connections:
 | --- | :-: | :-: | :-: | :-: | :-: |
 | <img noZoom src="/images/google-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Antigravity](/home/agents/antigravity) | | ✓ | ✓ | ✓ | |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ | ✓ |
-| [Codewhale](/home/agents/codewhale) | | ✓ | | | |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | | ✓ | ✓ | ✓ | ✓ |
 | <img noZoom src="/images/cursor-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Cursor](/home/agents/remote-ssh) | | | ✓ | | |
 | <img noZoom src="/images/gemini-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Gemini CLI](/home/agents/acp) | | | | | ✓ |
@@ -62,6 +61,14 @@ Or load Mirage into the agent as a TypeScript plugin, which replaces its own fil
 | <img noZoom src="/images/opencode-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` |
 | <img noZoom src="/images/deepseek-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
 
+### Personal agents
+
+| Agent | Terminal backend | MCP | FUSE |
+| --- | :-: | :-: | :-: |
+| <img noZoom src="/images/hermes-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Hermes Agent](/home/agents/hermes) | ✓ | ✓ | ✓ |
+
+- **Terminal backend**: a Hermes plugin runs every command and file tool of Hermes in the workspace.
+
 ### Agent frameworks
 
 | Framework | Python | TypeScript |
@@ -82,6 +89,12 @@ Or load Mirage into the agent as a TypeScript plugin, which replaces its own fil
 | --- | --- | --- |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenAI Agents API | [Guide](/python/agents/openai-agents-api) | [Guide](/typescript/agents/openai-agents-api) |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />Claude Managed Agents | [Guide](/python/agents/claude-managed-agents) | [Guide](/typescript/agents/claude-managed-agents) |
+
+### RL & eval environments
+
+| Framework | Python | TypeScript |
+| --- | --- | --- |
+| <img noZoom src="/images/openenv-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />OpenEnv | [Guide](/python/environments/openenv) | |
 
 For a custom agent, use the [Python](/python/access/in-app) or
 [TypeScript](/typescript/access/in-app) workspace API. [Session profiles](/home/configuration/session)

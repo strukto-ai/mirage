@@ -13,18 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller, missingProgram } from '../context/session_context.ts'
+import {
+  DEFAULT_UMASK,
+  currentCaller,
+  missingProgram,
+  sessionUmask,
+} from '../context/session_context.ts'
 import { HANGUP_EXIT_CODE } from '../execution/job/constants.ts'
 import type { MachineProcess } from '../execution/machine/types.ts'
 import type { ProcessUsage } from '../execution/process/types.ts'
 import { MachineName, type MachinePid, type MachineResources } from '../execution/types.ts'
 import { PipeClosed } from '../io/errors.ts'
+import { BytePipe } from '../io/pipe.ts'
 import type { ByteSource } from '../io/types.ts'
 import { answerOf, type WorkspaceBinding } from '../runtime/binding.ts'
 import { coerceRuntimeConfig, type ConfigFields } from '../runtime/config.ts'
 import type { MachineMemory, MountType, RunStatus, ScanFacts } from './types.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
-import { CANNOT_EXECUTE_STATUS } from '../shell/constants.ts'
+import { CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS } from '../shell/constants.ts'
 import { abortable, mergeSignals, settledWithin } from '../utils/abort.ts'
 import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
@@ -242,6 +248,17 @@ export class OutputWatch {
 }
 
 /**
+ * Whether a PATH names a folder by where the run stands: an entry that is
+ * empty or not absolute, which a program lookup resolves against the working
+ * folder. Mirrors Python's `_leans_on_folder`.
+ *
+ * @param path the PATH, null for the machine's own.
+ */
+function leansOnFolder(path: string | null): boolean {
+  return path?.split(':').some((entry) => !entry.startsWith('/')) ?? false
+}
+
+/**
  * One machine a workspace runs programs on, reached through its provider:
  * the live connection, held once per workspace.
  *
@@ -309,7 +326,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   // waits for that, not only the one that started it.
   private waking: Promise<void> | null = null
   // Whether the machine has a program, by name, asked once each.
-  private readonly programs = new Map<string, Promise<boolean>>()
+  private readonly programs = new Map<string, Map<string, Promise<boolean>>>()
 
   /**
    * @param name the machine's name, its key under `machines:`.
@@ -360,11 +377,45 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
 
   /**
    * Remove the machine Mirage started for this handle, as its workspace is
-   * deleted, and forget it; one the user brought stays. A provider that
-   * starts machines overrides this.
+   * deleted, and forget it; one the user brought stays, with the mounts the
+   * workspace left there released (`releaseMounts`). A provider that starts
+   * machines overrides this.
    */
   destroy(): Promise<void> {
-    return Promise.resolve()
+    return this.releaseMounts()
+  }
+
+  /**
+   * Kill and unmount what the deleted workspace's earlier instances left
+   * serving in the machine (`MachineMounts.release`), which nothing else
+   * would take back. A connection opened for it is closed again. A failure
+   * to connect or release is logged: the workspace is deleted either way.
+   */
+  protected async releaseMounts(): Promise<void> {
+    if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
+    if (this.mounts === null || this.memory === null) return
+    const opened = this.connecting === null
+    try {
+      try {
+        if (await this.reachToRelease()) await this.mounts.release(this.memory.workspaceId)
+      } finally {
+        if (opened && this.connecting !== null) await this.close()
+      }
+    } catch (error) {
+      console.warn(
+        `${String(this.machine)}: releasing the deleted workspace's mounts failed:`,
+        error,
+      )
+    }
+  }
+  /**
+   * Reach the machine for `releaseMounts`, as a line does; false when it
+   * holds nothing to release. A provider whose connect starts a stopped
+   * machine overrides this.
+   */
+  protected async reachToRelease(): Promise<boolean> {
+    await this.ensureConnected()
+    return true
   }
 
   /**
@@ -486,8 +537,16 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       sink = outExit.write
     }
     const watch = new OutputWatch()
+    const mask = sessionUmask()
     const execution = this.execArgv(
-      runArgv(tag, nonce, run, missing, currentCaller().joinsErrors),
+      runArgv(
+        tag,
+        nonce,
+        run,
+        missing,
+        currentCaller().joinsErrors,
+        mask === DEFAULT_UMASK ? null : mask,
+      ),
       ctx.stdin,
       { ...given, ...clock },
       ctx.cwd.virtual,
@@ -517,6 +576,7 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     } finally {
       this.runs -= 1
     }
+    if (done.exitCode === NOT_FOUND_STATUS) this.forgetPrograms(argv)
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
     const lost =
@@ -842,6 +902,67 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
   }
 
   /**
+   * Execute one of Mirage's own shell lines on the machine, as `/bin/sh
+   * -c`, and hand its output over as it is read, never held whole: a reader
+   * that falls behind holds the line back, and one that stops early stops
+   * it. A line that fails, by its status or by what it says on stderr,
+   * throws `failed`'s error once the output before it has been read.
+   *
+   * @param line the raw shell line.
+   * @param env the merged environment.
+   * @param cwd the working directory, passed through verbatim.
+   * @param failed the error of a line that ended with this status and
+   *   stderr.
+   * @param signal stops the line, a read waiting on it included.
+   */
+  async *streamLine(
+    line: string,
+    env: Record<string, string>,
+    cwd: string,
+    failed: (status: number, err: Uint8Array) => Error,
+    signal?: AbortSignal,
+  ): AsyncGenerator<Uint8Array> {
+    const pipe = new BytePipe()
+    const said: Uint8Array[] = []
+    const stop = new AbortController()
+    const cancel = (): void => {
+      stop.abort(signal?.reason)
+    }
+    if (signal?.aborted === true) cancel()
+    else signal?.addEventListener('abort', cancel, { once: true })
+    const ran = this.busyWith(() =>
+      this.execArgv(
+        ['/bin/sh', '-c', line],
+        null,
+        env,
+        cwd,
+        (chunk) => pipe.write(chunk, stop.signal),
+        (chunk) => {
+          said.push(chunk)
+          return Promise.resolve()
+        },
+        stop.signal,
+      ),
+    ).then(
+      (done) => {
+        const err = concat(said)
+        pipe.end(done.exitCode !== 0 || err.byteLength > 0 ? failed(done.exitCode, err) : undefined)
+      },
+      (error: unknown) => {
+        pipe.end(error)
+      },
+    )
+    try {
+      yield* pipe.stream()
+    } finally {
+      signal?.removeEventListener('abort', cancel)
+      pipe.closeReader()
+      stop.abort()
+      await ran
+    }
+  }
+
+  /**
    * Count `work` as Mirage's work on the machine while it runs: the first
    * piece to start tells the provider the machine is busy (`becameBusy`),
    * and the last to end that it is idle (`becameIdle`). Mirrors Python's
@@ -894,15 +1015,64 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
    * @param name the program's name.
    */
   hasProgram(name: string): Promise<boolean> {
-    let known = this.programs.get(name)
-    if (known === undefined) {
-      known = this.ensureConnected()
-        .then(() => this.setup(`command -v ${shellQuote(name)} >/dev/null 2>&1`))
-        .then((done) => done.exitCode === 0)
-      known.catch(() => this.programs.delete(name))
-      this.programs.set(name, known)
-    }
-    return known
+    return this.programs.get(name)?.get(JSON.stringify([null, null])) ?? this.look(name, null, null)
+  }
+
+  /**
+   * Whether a run started now would find a program of this name: on the PATH
+   * the session exported, which the run gets, and asked again where the last
+   * answer was no, since the program may have been installed since. A PATH
+   * that names a folder by where the run stands (`venv/bin:/usr/bin`) is
+   * looked on from the run's folder, and its answer is kept for that folder
+   * alone.
+   *
+   * @param name the program's name.
+   * @param path the PATH the session exported; null for the machine's own.
+   * @param cwd the folder the run starts in.
+   */
+  async findsProgram(
+    name: string,
+    path: string | null = null,
+    cwd: string | null = null,
+  ): Promise<boolean> {
+    const at = leansOnFolder(path) ? cwd : null
+    const known = this.programs.get(name)?.get(JSON.stringify([path, at]))
+    return (known !== undefined && (await known)) || this.look(name, path, at)
+  }
+
+  /**
+   * Ask the machine for a program on a PATH, and keep the answer.
+   *
+   * @param name the program's name.
+   * @param path the PATH to look on; null for the machine's own.
+   * @param cwd the folder to look from; null for `/`. A machine without the
+   *   folder has no such program.
+   */
+  private look(name: string, path: string | null, cwd: string | null): Promise<boolean> {
+    const key = JSON.stringify([path, cwd])
+    const at = cwd === null ? '' : `cd -- ${shellQuote(cwd)} 2>/dev/null && `
+    const on = path === null ? '' : `PATH=${shellQuote(path)} `
+    const found = this.ensureConnected()
+      .then(() => this.setup(`${at}${on}command -v ${shellQuote(name)} >/dev/null 2>&1`))
+      .then((done) => done.exitCode === 0)
+    const kept = this.programs.get(name) ?? new Map<string, Promise<boolean>>()
+    this.programs.set(name, kept)
+    kept.set(key, found)
+    found.catch(() => {
+      if (kept.get(key) === found) kept.delete(key)
+    })
+    return found
+  }
+
+  /**
+   * Drop what is kept of the programs a run names, once it ended with
+   * `command not found`: one removed from the machine since it was last
+   * asked is asked for again, so the next search leaves the machine out.
+   *
+   * @param words the run's words.
+   */
+  private forgetPrograms(words: readonly string[]): void {
+    for (const word of words) this.programs.delete(word)
   }
 
   /**

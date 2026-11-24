@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
+from functools import partial
 from typing import Any
 
 from mirage.accessor.machine import MachineAccessor
@@ -19,6 +21,7 @@ from mirage.core.machine import place
 from mirage.core.machine.capacity import capacity as _capacity
 from mirage.core.machine.checksum import checksum as _checksum
 from mirage.core.machine.copy import copy as _copy
+from mirage.core.machine.copy import copy_from as _copy_from
 from mirage.core.machine.copy import dir_copy as _dir_copy
 from mirage.core.machine.create import create as _create
 from mirage.core.machine.mkdir import mkdir as _mkdir
@@ -27,6 +30,7 @@ from mirage.core.machine.read import first_lines as _first_lines
 from mirage.core.machine.read import last_lines as _last_lines
 from mirage.core.machine.read import line_count as _line_count
 from mirage.core.machine.read import read as _read
+from mirage.core.machine.read import read_stream as _read_stream
 from mirage.core.machine.readdir import readdir as _readdir
 from mirage.core.machine.readdir import tree as _tree
 from mirage.core.machine.rename import rename as _rename
@@ -38,11 +42,20 @@ from mirage.core.machine.stat import has_hides as _has_hides
 from mirage.core.machine.stat import holder_stat as _holder_stat
 from mirage.core.machine.stat import stat as _stat
 from mirage.core.machine.truncate import truncate as _truncate
+from mirage.core.machine.types import Landing
 from mirage.core.machine.unlink import unlink as _unlink
 from mirage.core.machine.utils import leaf as _leaf
 from mirage.core.machine.write import write as _write
-from mirage.errors.fs import eisdir, enoent, enotdir, enotempty, enotsup
+from mirage.errors.fs import (
+    eisdir,
+    enoent,
+    enotdir,
+    enotempty,
+    enotsup,
+    exdev,
+)
 from mirage.execution.machine.table import MachineTable
+from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -54,6 +67,9 @@ from mirage.utils.path import norm
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.machine.config import MachineVFSConfig
+from mirage.vfs.machine.live_writes import LiveWrites
+
+logger = logging.getLogger(__name__)
 
 
 class MachineVFS(BaseVFS):
@@ -86,6 +102,7 @@ class MachineVFS(BaseVFS):
         super().__init__()
         self.config = config
         self.accessor = MachineAccessor(config)
+        self._writes = LiveWrites(self.accessor)
 
     def bind_machines(self, machines: MachineTable, default: str) -> None:
         """Reach the workspace's machines once it has them.
@@ -130,8 +147,7 @@ class MachineVFS(BaseVFS):
         return f"{machine}:{self.config.root.rstrip('/') or '/'}"
 
     async def stat(self, path: PathSpec) -> FileStat:
-        held = await place.existing_holders(self.accessor, path)
-        one = place.chosen(self.accessor, held)
+        one = (await place.existing_copies(self.accessor, path)).shown
         if one.entry is None:
             return await _stat(self.accessor, one.machine, path)
         return _holder_stat(_leaf(path), one)
@@ -142,7 +158,21 @@ class MachineVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
     ) -> ByteSource:
+        """A file's bytes from the machine holding it; a whole file as a
+        stream, never held whole, where the machine's output can be read
+        as it comes. A program the line runs on another machine never
+        reads it (``place.refuse_crossing``).
+
+        Args:
+            path (PathSpec): the file.
+            offset (int): the first byte.
+            size (int | None): how many bytes; None for the rest.
+        """
         machine = await place.holding_machine(self.accessor, path)
+        place.refuse_crossing(self.accessor, machine, path, reads=True)
+        place.note_copy_source(machine)
+        if not offset and size is None and self.accessor.streams(machine):
+            return _read_stream(self.accessor, machine, path)
         return await _read(self.accessor, machine, path, offset, size)
 
     async def first_lines(self, path: PathSpec, n: int) -> bytes | None:
@@ -164,8 +194,8 @@ class MachineVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         if _has_hides(path):
             return None
-        held = await place.existing_holders(self.accessor, path)
-        shown = await _tree(self.accessor, [h.machine for h in held], path)
+        copies = await place.existing_copies(self.accessor, path)
+        shown = await _tree(self.accessor, copies.machines, path)
         if shown is None:
             return None
         return {
@@ -195,26 +225,95 @@ class MachineVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        machine = await place.write_machine(self.accessor, path, replaces=True)
-        await _write(self.accessor, machine, path, data, atomic=atomic)
+        await self._write_at(path, data, replaces=True, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        machine = await place.write_machine(self.accessor, path)
-        await _write(self.accessor, machine, path, data, append=True)
+        await self._write_at(path, data, replaces=False, append=True)
+
+    async def _write_at(
+        self,
+        path: PathSpec,
+        data: ByteSource,
+        *,
+        replaces: bool,
+        append: bool = False,
+        atomic: bool = False,
+    ) -> None:
+        """Write bytes where they land (``place.landing``), counted as a
+        live write (``LiveWrites``). Bytes that never reach the write, as
+        when it is refused or cancelled while it waits for a removal of
+        the name there, are closed, so their writer stops.
+
+        Args:
+            path (PathSpec): the file.
+            data (ByteSource): the bytes.
+            replaces (bool): the write replaces the whole file.
+            append (bool): add the bytes to the end instead.
+            atomic (bool): show nothing until the bytes have ended whole.
+        """
+        handed = False
+        try:
+            async with self._writes.landing(
+                path,
+                partial(place.landing, self.accessor, path, replaces=replaces),
+            ) as landing:
+                handed = True
+                await _write(
+                    self.accessor,
+                    landing.machine,
+                    path,
+                    data,
+                    append=append,
+                    atomic=atomic,
+                    make_parent=landing.make_parent,
+                )
+        except BaseException:
+            if not handed:
+                await close_quietly(data)
+            raise
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
-        machine = await place.write_machine(self.accessor, path)
-        await _pwrite(self.accessor, machine, path, data, offset)
+        async with self._writes.landing(
+            path, partial(place.landing, self.accessor, path)
+        ) as landing:
+            await _pwrite(self.accessor, landing.machine, path, data, offset)
 
     async def create(self, path: PathSpec) -> None:
-        machine = await place.write_machine(self.accessor, path)
-        await _create(self.accessor, machine, path)
+        async with self._writes.landing(
+            path, partial(place.landing, self.accessor, path)
+        ) as landing:
+            await _create(self.accessor, landing.machine, path)
 
     async def truncate(
         self, path: PathSpec, length: int, no_create: bool = False
     ) -> None:
-        machine = await place.write_machine(self.accessor, path)
-        await _truncate(self.accessor, machine, path, length, no_create)
+        """Set a file's length where it lands. One that makes no file
+        (``no_create``) goes to the copy shown, and of a name no machine
+        holds it does nothing, as the disk does: it lands nowhere, so a
+        settling never keeps a copy it did not make.
+
+        Args:
+            path (PathSpec): the file.
+            length (int): its new length.
+            no_create (bool): leave a missing file missing.
+        """
+
+        async def choose() -> Landing:
+            if not no_create:
+                return await place.landing(self.accessor, path)
+            machine = await place.holding_machine(self.accessor, path)
+            place.refuse_crossing(self.accessor, machine, path)
+            return Landing(machine)
+
+        try:
+            async with self._writes.landing(path, choose) as landing:
+                await _truncate(
+                    self.accessor, landing.machine, path, length, no_create
+                )
+        except FileNotFoundError as exc:
+            if not no_create:
+                raise
+            logger.debug("%s left missing: %s", path.virtual, exc)
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         machine = await place.write_machine(
@@ -230,11 +329,10 @@ class MachineVFS(BaseVFS):
         Args:
             path (PathSpec): the file.
         """
-        held = await place.existing_holders(self.accessor, path)
-        shown = place.chosen(self.accessor, held)
-        await _unlink(self.accessor, shown.machine, path)
-        for one in held:
-            if one is not shown and not one.is_folder:
+        copies = await place.existing_copies(self.accessor, path)
+        await _unlink(self.accessor, copies.shown.machine, path)
+        for one in copies.others:
+            if not one.is_folder:
                 await _unlink(self.accessor, one.machine, path)
 
     async def rmdir(self, path: PathSpec) -> None:
@@ -245,23 +343,24 @@ class MachineVFS(BaseVFS):
         Args:
             path (PathSpec): the folder.
         """
-        held = await place.existing_holders(self.accessor, path)
-        shown = place.chosen(self.accessor, held)
-        folders = [one.machine for one in held if one.is_folder]
+        copies = await place.existing_copies(self.accessor, path)
+        folders = copies.folders
         if (
-            shown.is_folder
+            copies.shown.is_folder
             and len(folders) > 1
             and await _readdir(self.accessor, folders, path)
         ):
             raise enotempty(path)
-        await _rmdir(self.accessor, shown.machine, path)
-        for one in held:
-            if one is not shown and one.is_folder:
+        await _rmdir(self.accessor, copies.shown.machine, path)
+        for one in copies.others:
+            if one.is_folder:
                 await _rmdir(self.accessor, one.machine, path)
 
     async def rm_r(self, path: PathSpec) -> None:
-        for one in await place.existing_holders(self.accessor, path):
-            await _rm_r(self.accessor, one.machine, path)
+        for machine in (
+            await place.existing_copies(self.accessor, path)
+        ).machines:
+            await _rm_r(self.accessor, machine, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
         """Rename a name where it is. A folder is renamed on every
@@ -275,13 +374,9 @@ class MachineVFS(BaseVFS):
             src (PathSpec): the name as it is.
             dst (PathSpec): the new name.
         """
-        held = await place.existing_holders(self.accessor, src)
-        moved = place.chosen(self.accessor, held)
-        movers = (
-            [one.machine for one in held if one.is_folder]
-            if moved.is_folder
-            else [moved.machine]
-        )
+        copies = await place.existing_copies(self.accessor, src)
+        moved = copies.shown
+        movers = copies.folders if moved.is_folder else [moved.machine]
         several = self.accessor.several
         there = await place.holders(self.accessor, dst) if several else []
         replaced = [one for one in there if one.machine not in movers]
@@ -308,7 +403,7 @@ class MachineVFS(BaseVFS):
                 await _rmdir(self.accessor, one.machine, dst)
             else:
                 await _unlink(self.accessor, one.machine, dst)
-        for one in held:
+        for one in copies.held:
             if one.machine not in movers and not one.is_folder:
                 await _unlink(self.accessor, one.machine, src)
 
@@ -322,19 +417,59 @@ class MachineVFS(BaseVFS):
             src (PathSpec): the file.
             dst (PathSpec): the copy's name.
         """
-        machine = await place.holding_machine(self.accessor, src)
-        await place.refuse_hidden(self.accessor, machine, dst)
-        lacking = await place.machines_lacking_folder(
-            self.accessor, [machine], dst
-        )
-        await _copy(
-            self.accessor, machine, src, dst, make_parent=bool(lacking)
-        )
-        if not self.accessor.several:
-            return
-        for one in await place.holders(self.accessor, dst):
-            if one.machine != machine and not one.is_folder:
-                await _unlink(self.accessor, one.machine, dst)
+
+        async def choose() -> Landing:
+            machine = await place.holding_machine(self.accessor, src)
+            return await place.landing_on(self.accessor, machine, dst)
+
+        async with self._writes.landing(dst, choose) as landing:
+            await _copy(
+                self.accessor, landing.machine, src, dst, landing.make_parent
+            )
+
+    async def copy_from(
+        self, source: BaseVFS, src: PathSpec, dst: PathSpec
+    ) -> None:
+        """Copy a file another machine mount shows, on the machine
+        holding it, when this mount shows that machine too: the copy
+        lands where its source is and its bytes never leave the machine
+        (``cp /srv/a/out /tmp/out``), replacing the name as ``copy``
+        does. A file of a machine this mount does not show is refused:
+        bytes go between a machine and a store, never from one machine to
+        another. A store's file is EXDEV, and its bytes come through
+        Mirage.
+
+        Args:
+            source (BaseVFS): the source mount's VFS.
+            src (PathSpec): the file, on ``source``.
+            dst (PathSpec): the copy, on this mount.
+
+        Raises:
+            OSError: EXDEV for a source that is no machine's file.
+            PermissionError: the source is a machine this mount does not
+                show.
+        """
+        if not isinstance(source, MachineVFS):
+            raise exdev(dst)
+
+        async def choose() -> Landing:
+            machine = await place.holding_machine(source.accessor, src)
+            if machine not in self.accessor.names():
+                target = await place.write_machine(
+                    self.accessor, dst, replaces=True
+                )
+                raise place.crossing_refused(machine, target, dst)
+            return await place.landing_on(self.accessor, machine, dst)
+
+        async with self._writes.landing(dst, choose) as landing:
+            await _copy_from(
+                source.accessor,
+                self.accessor,
+                landing.machine,
+                src,
+                dst,
+                landing.make_parent,
+            )
 
     async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
         """Copy a folder one machine holds, on that machine. A folder
@@ -345,16 +480,14 @@ class MachineVFS(BaseVFS):
             src (PathSpec): the folder.
             dst (PathSpec): the copy's name.
         """
-        held = await place.existing_holders(self.accessor, src)
-        if len(held) > 1:
+        copies = await place.existing_copies(self.accessor, src)
+        if len(copies.held) > 1:
             raise enotsup(self.name, "dir_copy", src)
-        machine = held[0].machine
-        await place.refuse_hidden(self.accessor, machine, dst)
-        lacking = await place.machines_lacking_folder(
-            self.accessor, [machine], dst
+        landing = await place.landing_on(
+            self.accessor, copies.shown.machine, dst
         )
         await _dir_copy(
-            self.accessor, machine, src, dst, make_parent=bool(lacking)
+            self.accessor, landing.machine, src, dst, landing.make_parent
         )
 
     async def setattr(

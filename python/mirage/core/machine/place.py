@@ -15,13 +15,13 @@
 import asyncio
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.context.session_context import current_caller
+from mirage.context.session_context import current_caller, note_decision
 from mirage.core.machine.constants import KERNEL_VIEWS
 from mirage.core.machine.stat import hidden_machines, stat_entry
-from mirage.core.machine.types import Holder
+from mirage.core.machine.types import Copies, Holder, Landing
 from mirage.core.machine.utils import folder_of, machine_path
-from mirage.errors.fs import enoent, enotdir
-from mirage.types import PathSpec
+from mirage.errors.fs import eacces, enoent, enotdir
+from mirage.types import PathSpec, PolicyDecision
 
 
 def running_machine(accessor: MachineAccessor) -> str | None:
@@ -36,6 +36,119 @@ def running_machine(accessor: MachineAccessor) -> str | None:
     if machine is None or machine.name not in accessor.names():
         return None
     return machine.name
+
+
+def copy_machine(accessor: MachineAccessor) -> str | None:
+    """The machine whose file the copy being made by a read and a write
+    read (``Caller.copied_from``), when it read one machine's file and
+    that machine is one of the mount's; None for any other write.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+    """
+    copied = current_caller().copied_from
+    if copied is None or len(copied) != 1:
+        return None
+    (machine,) = copied
+    return machine if machine in accessor.names() else None
+
+
+def origin_machine(accessor: MachineAccessor) -> str | None:
+    """The machine a whole file's bytes come from, which the file lands
+    on: the running program's, for its ``>`` (``running_machine``), or
+    the source's of a copy made by a read and a write
+    (``copy_machine``); None for any other write.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+    """
+    return running_machine(accessor) or copy_machine(accessor)
+
+
+def note_copy_source(machine: str) -> None:
+    """Note a machine whose file the copy being made by a read and a
+    write reads (``Caller.copied_from``); nothing outside such a copy.
+
+    Args:
+        machine (str): the machine holding the file read.
+    """
+    copied = current_caller().copied_from
+    if copied is not None:
+        copied.add(machine)
+
+
+def crossing_reason(source: str, target: str) -> str:
+    """Why bytes from one machine do not go to another, for the decision
+    record of the refusal (stderr says ``Permission denied``).
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+    """
+    return (
+        f"machine {source}'s bytes do not go to machine {target}:"
+        " copy them through a store"
+    )
+
+
+def crossing_refused(
+    source: str, target: str, path: PathSpec
+) -> PermissionError:
+    """The refusal of bytes going from one machine to another: EACCES for
+    the file, the reason on the line's decision record.
+
+    Args:
+        source (str): the machine the bytes come from.
+        target (str): the machine they would go to.
+        path (PathSpec): the file the refusal names.
+    """
+    note_decision(
+        PolicyDecision(kind="deny", reason=crossing_reason(source, target))
+    )
+    return eacces(path)
+
+
+def refuse_crossing(
+    accessor: MachineAccessor,
+    machine: str,
+    path: PathSpec,
+    reads: bool = False,
+) -> None:
+    """Refuse bytes going from one machine to another through a program
+    the line runs on a machine: a file of ``machine`` it reads
+    (``prog < /srv/b/in``), or its output landing there (``prog >
+    /srv/b/out``), when the program is on another of the workspace's
+    machines; and a copy made by a read and a write landing on another
+    machine than the one whose file it read (``Caller.copied_from``).
+    Bytes go between a machine and a store, never from one machine to
+    another. The refusal is ``Permission denied``, its reason on the
+    line's decision record.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the op reads from or lands on.
+        path (PathSpec): the file.
+        reads (bool): the program reads the file, whose bytes go from
+            ``machine`` to it; else its bytes land on ``machine``.
+
+    Raises:
+        PermissionError: the program runs on another machine.
+    """
+    caller = current_caller()
+    running = caller.machine
+    if (
+        running is not None
+        and running.name != machine
+        and accessor.is_machine(running.name)
+    ):
+        if reads:
+            raise crossing_refused(machine, running.name, path)
+        raise crossing_refused(running.name, machine, path)
+    if reads:
+        return
+    for source in sorted(caller.copied_from or ()):
+        if source != machine and accessor.is_machine(source):
+            raise crossing_refused(source, machine, path)
 
 
 def command_machine(accessor: MachineAccessor) -> str | None:
@@ -143,11 +256,9 @@ def chosen(accessor: MachineAccessor, held: list[Holder]) -> Holder:
     return next((one for one in latest if one.machine == about), latest[0])
 
 
-async def existing_holders(
-    accessor: MachineAccessor, path: PathSpec
-) -> list[Holder]:
-    """The machines holding a name that must exist, every one of which a
-    removal or a rename reaches.
+async def existing_copies(accessor: MachineAccessor, path: PathSpec) -> Copies:
+    """Every machine's copy of a name that must exist, each of which a
+    removal or a rename reaches, and the one shown (``chosen``).
 
     Args:
         accessor (MachineAccessor): the mount's machines.
@@ -159,7 +270,7 @@ async def existing_holders(
     held = await holders(accessor, path)
     if not held:
         raise enoent(path)
-    return held
+    return Copies(tuple(held), chosen(accessor, held))
 
 
 async def holding_machine(accessor: MachineAccessor, path: PathSpec) -> str:
@@ -173,7 +284,7 @@ async def holding_machine(accessor: MachineAccessor, path: PathSpec) -> str:
     Raises:
         FileNotFoundError: no machine holds it.
     """
-    return chosen(accessor, await existing_holders(accessor, path)).machine
+    return (await existing_copies(accessor, path)).shown.machine
 
 
 async def refuse_hidden(
@@ -194,6 +305,26 @@ async def refuse_hidden(
         raise enoent(path)
 
 
+async def _folder_copies(
+    accessor: MachineAccessor, folder: PathSpec, path: PathSpec
+) -> list[Holder]:
+    """The machines holding a folder as a folder, for a name made in it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        folder (PathSpec): the folder.
+        path (PathSpec): the name made in it, which a refusal names.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file,
+            whatever an older folder on another machine is.
+    """
+    held = await holders(accessor, folder)
+    if held and not chosen(accessor, held).is_folder:
+        raise enotdir(path)
+    return [one for one in held if one.is_folder]
+
+
 async def machines_lacking_folder(
     accessor: MachineAccessor, machines: list[str], path: PathSpec
 ) -> list[str]:
@@ -212,11 +343,28 @@ async def machines_lacking_folder(
     """
     if not accessor.several:
         return []
-    held = await holders(accessor, folder_of(path))
-    if held and not chosen(accessor, held).is_folder:
-        raise enotdir(path)
-    folders = [one.machine for one in held if one.is_folder]
+    folders = [
+        one.machine
+        for one in await _folder_copies(accessor, folder_of(path), path)
+    ]
     return [m for m in machines if folders and m not in folders]
+
+
+async def _lacks_folder(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> bool:
+    """Whether a new name landing on a machine must make its folder there
+    first (``machines_lacking_folder``).
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine the name lands on.
+        path (PathSpec): the new name.
+
+    Raises:
+        NotADirectoryError: the copy shown of the folder is a file.
+    """
+    return bool(await machines_lacking_folder(accessor, [machine], path))
 
 
 async def new_name_machine(
@@ -244,10 +392,7 @@ async def new_name_machine(
         return about
     above = folder_of(path)
     while True:
-        held = await holders(accessor, above)
-        if held and not chosen(accessor, held).is_folder:
-            raise enotdir(path)
-        folders = [one for one in held if one.is_folder]
+        folders = await _folder_copies(accessor, above, path)
         if folders or not parents or not above.vfs_path:
             break
         above = folder_of(above)
@@ -264,8 +409,9 @@ async def write_machine(
     parents: bool = False,
 ) -> str:
     """The machine a write goes to. What a program's ``>`` replaces lands
-    on the program's machine, whose disk the program reads next. Any
-    other write of a name some machine holds goes to that copy
+    on the program's machine, whose disk the program reads next, and a
+    copy made by a read and a write on its source's (``origin_machine``).
+    Any other write of a name some machine holds goes to that copy
     (``chosen``), and a new name goes where its folder is
     (``new_name_machine``).
 
@@ -279,11 +425,70 @@ async def write_machine(
         FileNotFoundError: the machine's own links lead the name to one
             the session hides.
     """
-    running = running_machine(accessor) if replaces else None
-    if running is None:
+    origin = origin_machine(accessor) if replaces else None
+    if origin is None:
         held = await holders(accessor, path)
         if held:
             return chosen(accessor, held).machine
-    target = running or await new_name_machine(accessor, path, parents)
+    target = origin or await new_name_machine(accessor, path, parents)
     await refuse_hidden(accessor, target, path)
     return target
+
+
+async def landing(
+    accessor: MachineAccessor,
+    path: PathSpec,
+    *,
+    replaces: bool = False,
+) -> Landing:
+    """Where a write of a name lands (``write_machine``), refusing bytes a
+    program or a copy brings from another machine (``refuse_crossing``).
+    A whole file whose bytes come from the machine it lands on
+    (``origin_machine``) replaces the name across the machines, and its
+    folder is made there when only another machine holds it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        path (PathSpec): the name written.
+        replaces (bool): the write replaces the whole file.
+
+    Raises:
+        PermissionError: the bytes come from another machine.
+        FileNotFoundError: the machine's own links lead the name to one
+            the session hides.
+        NotADirectoryError: the copy shown of the name's folder is a file.
+    """
+    machine = await write_machine(accessor, path, replaces=replaces)
+    refuse_crossing(accessor, machine, path)
+    if not replaces or origin_machine(accessor) != machine:
+        return Landing(machine)
+    return Landing(
+        machine,
+        origin=True,
+        make_parent=await _lacks_folder(accessor, machine, path),
+    )
+
+
+async def landing_on(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> Landing:
+    """A copy's landing on the machine its source is on, which the copy
+    never leaves: refused where the machine's own links lead the name to
+    a hidden one, its folder made there when only another machine holds
+    it.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the source's machine.
+        path (PathSpec): the copy's name.
+
+    Raises:
+        FileNotFoundError: the name leads to a hidden one there.
+        NotADirectoryError: the copy shown of the name's folder is a file.
+    """
+    await refuse_hidden(accessor, machine, path)
+    return Landing(
+        machine,
+        origin=True,
+        make_parent=await _lacks_folder(accessor, machine, path),
+    )

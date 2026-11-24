@@ -116,7 +116,8 @@ class Reporting extends ScriptedMachine {
     errors: OutputFn,
   ): Promise<RunResult> {
     if (isRun(argv) && !this.installed.has(argv[RUN_PROGRAM_AT] ?? '')) {
-      await errors(new TextEncoder().encode(`${argv[5] ?? ''}${argv[6] ?? ''}\n`))
+      const [lead, reason] = argv.slice(RUN_PROGRAM_AT - 4, RUN_PROGRAM_AT - 2)
+      await errors(new TextEncoder().encode(`${lead ?? ''}${reason ?? ''}\n`))
       return { exitCode: 127 }
     }
     return super.execArgv(argv, stdin, env, cwd, output, errors)

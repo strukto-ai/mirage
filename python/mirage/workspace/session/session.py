@@ -545,6 +545,9 @@ class SessionState:
     # run once it ends; a child shell starts with none.
     pending_signals: set[int] = field(default_factory=set, repr=False)
     signal_trap_running: bool = False
+    # The signal the shell ends of once its EXIT action runs, and `$?` then.
+    fatal_signal: int | None = field(default=None, repr=False)
+    status_before_signal: int = field(default=0, repr=False)
     signal_arrived: asyncio.Event | None = field(default=None, repr=False)
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
@@ -770,6 +773,31 @@ class SessionState:
         if not action:
             return False
         self.pending_signals.add(signal)
+        if self.signal_arrived is not None:
+            self.signal_arrived.set()
+        return True
+
+    def takes_fatal_signal(self, signal: int, pid: int) -> bool:
+        """Whether this shell takes ``signal`` sent to ``pid``, one it
+        neither traps nor ignores, to run its EXIT action before it ends
+        of it, as bash does: at once, its running command cut short and
+        a ``wait`` too, with ``$?`` as the signal found it. Only an EXIT
+        action of its own counts, and none while it runs.
+
+        Args:
+            signal (int): the signal.
+            pid (int): the process it was sent to.
+        """
+        if (
+            not self.exit_trap
+            or self.exit_trap_inherited
+            or self._trap_status is not None
+            or (self.process_id is not None and pid != self.process_id)
+        ):
+            return False
+        if self.fatal_signal is None:
+            self.fatal_signal = signal
+            self.status_before_signal = self.last_exit_code
         if self.signal_arrived is not None:
             self.signal_arrived.set()
         return True

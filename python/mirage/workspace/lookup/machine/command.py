@@ -12,28 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 import posixpath
 from collections.abc import Sequence
 
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.types import WordKind
-from mirage.errors.constants import FS_ERRORS
 from mirage.io.types import ByteSource
 from mirage.policy.types import CommandWord
 from mirage.rs.find import find_layout
 from mirage.runtime.machine import RemoteRuntime
-from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import unmark_globs
 from mirage.utils.path import norm
 from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.constants import FOLDER_FREE
+from mirage.workspace.lookup.constants import FOLDER_FREE, NETWORK_CLIENTS
 from mirage.workspace.lookup.machine.mounts import (
     is_piped,
     machine_holding_all,
-    machine_mount,
     machine_mounts,
     mount_machines,
     only_machine,
@@ -42,10 +38,8 @@ from mirage.workspace.lookup.types import ExternalTarget
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState
 
-logger = logging.getLogger(__name__)
 
-
-def _option_paths(argv: Argv, cwd: str) -> list[str]:
+def option_paths(argv: Argv, cwd: str) -> list[str]:
     """The paths a command's options name (``grep -f /data/patterns``),
     which the machine must hold as well as its operands; none for a
     command without a spec.
@@ -61,7 +55,7 @@ def _option_paths(argv: Argv, cwd: str) -> list[str]:
     return [p for p in parsed.path_flag_values if p != "-"]
 
 
-def _path_operands(argv: Argv, cwd: str) -> list[PathSpec]:
+def path_operands(argv: Argv, cwd: str) -> list[PathSpec]:
     """The paths a command takes as operands, the files it works on, and
     not as an option's value: ``grep -r -f /tmp/p`` takes none, so it
     searches its folder. Every path for a command without a spec.
@@ -114,13 +108,13 @@ def _named_paths(argv: Argv, cwd: str) -> tuple[list[str], bool]:
         cwd (str): the session's folder.
     """
     named = [w for w in argv.operands if isinstance(w, PathSpec)]
-    options = _option_paths(argv, cwd)
+    options = option_paths(argv, cwd)
     children = _child_paths(argv.name, argv.args, cwd)
     paths = [unmark_globs(w.virtual) for w in named]
     relative = (
-        not _path_operands(argv, cwd)
+        not path_operands(argv, cwd)
         or any(not w.raw_path.startswith("/") for w in named)
-        or options != _option_paths(argv, "/")
+        or options != option_paths(argv, "/")
     )
     return [*paths, *options, *children], relative
 
@@ -149,10 +143,13 @@ async def operand_machine(
     Mirage keeps the command when anything is piped into it, since its
     own command leaves input it does not read for the next one (``... |
     while read f; do grep x "$f"; done``) where a machine would drain it;
-    when a path is anywhere else (another mount, a machine mount at
-    another root, a mount nested under it); when no one machine holds
-    every path (a new name, or a name on several machines, which Mirage
-    places by its own rules); when the session's rules restrict its
+    when it reaches a server (``NETWORK_CLIENTS``), whose connections
+    the workspace's network rule and policies judge inside Mirage, one
+    to ``localhost`` being ``fact_machine``'s; when a path is anywhere
+    else (another mount, a machine mount at another root, a mount nested
+    under it); when no one machine holds every path (a new name, or a
+    name on several machines, which Mirage places by its own rules);
+    when the session's rules restrict its
     mount, a coded file policy speaks for the session, or the mount is
     read-only; when a path, an option's or a ``find -exec`` command's
     included, walks through a link of Mirage's own; or when the machine
@@ -166,7 +163,7 @@ async def operand_machine(
         links (NamespaceReader): the session's link table.
         stdin (ByteSource | None): what is piped into it.
     """
-    if is_piped(stdin):
+    if is_piped(stdin) or argv.name in NETWORK_CLIENTS:
         return None
     paths, relative = _named_paths(argv, session.cwd)
     scopes = [(p, True) for p in paths]
@@ -221,6 +218,8 @@ def stated_machine(
         and w.kind in (WordKind.OPERAND, WordKind.VALUE, WordKind.OPTION)
     ]
     name = next((w.text for w in words if w.kind is WordKind.NAME), "")
+    if name in NETWORK_CLIENTS:
+        return None
     args = [
         w.text
         for w in words
@@ -258,40 +257,3 @@ def stated_machine(
         if runtime is not None:
             return runtime
     return None
-
-
-async def program_machine(
-    path: str,
-    session: SessionState,
-    registry: MountRegistry,
-    links: NamespaceReader,
-    dispatch: DispatchFn,
-    stdin: ByteSource | None,
-) -> RemoteRuntime | None:
-    """The machine a program named by its path runs on, when the file is
-    one machine's own at that path: the ``venv/bin/python`` a machine's
-    ``python -m venv`` made in /tmp runs there, as bash runs it, where
-    Mirage would read the binary and refuse it. The path is asked of the
-    dispatcher first, so a hidden or refused path stays with Mirage,
-    which words the refusal.
-
-    Args:
-        path (str): the head word, as typed.
-        session (SessionState): the session it runs in.
-        registry (MountRegistry): the workspace's mounts and machines.
-        links (NamespaceReader): the session's link table.
-        dispatch (DispatchFn): op dispatcher, which applies the session's
-            hides and policies to the path.
-        stdin (ByteSource | None): what is piped into it.
-    """
-    spec = PathSpec.from_str_path(path, cwd=session.cwd)
-    if machine_mount(registry, links, spec.virtual, False) is None:
-        return None
-    try:
-        await dispatch("stat", spec)
-    except FS_ERRORS:
-        logger.debug("%s: not run on its machine", path, exc_info=True)
-        return None
-    return await machine_holding_all(
-        [(spec.virtual, False)], session, registry, links, stdin
-    )

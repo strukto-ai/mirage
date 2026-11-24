@@ -142,45 +142,6 @@ async def test_a_command_naming_no_path_runs_from_a_cwd_on_the_machine():
 
 
 @pytest.mark.asyncio
-async def test_a_program_named_by_a_path_the_machine_holds_runs_there():
-    files = FakeFiles({"/tmp/venv/bin/python": b"\x7fELF\x00"})
-    ws = one(files)
-    assert await out(ws, "cd /tmp && venv/bin/python -V") == "ran\n"
-    assert await out(ws, "/tmp/venv/bin/python -V") == "ran\n"
-    assert files.ran == ["venv/bin/python -V", "/tmp/venv/bin/python -V"]
-    await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "commands",
-    [{"*": "deny", "ls": "allow"}, {"perl": "deny"}],
-)
-async def test_a_policy_refuses_a_program_the_machine_holds(commands):
-    # The machine runs its own /tmp/ls or /tmp/perl, so a closed tree
-    # refuses the path as it refuses one no machine holds, and a deny of
-    # the program's name refuses it by that name.
-    files = FakeFiles({"/tmp/ls": b"\x7fELF\x00", "/tmp/perl": b"\x7fELF\x00"})
-    ws = one(files, profiles={"agent": {"commands": commands}})
-    agent = await ws.session("agent", profile="agent")
-    line = "/tmp/ls" if "ls" in commands else "/tmp/perl -e 1"
-    assert (await agent.shell(line)).exit_code == 126
-    assert files.ran == []
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_a_hidden_program_path_stays_with_mirage():
-    files = FakeFiles({"/tmp/secret/run": b"\x7fELF\x00"})
-    ws = one(files, profiles={"agent": {"paths": {"hide": ["/tmp/secret"]}}})
-    agent = await ws.session("agent", profile="agent")
-    done = await agent.shell("/tmp/secret/run")
-    assert done.exit_code != 0
-    assert files.ran == []
-    await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_a_command_in_a_read_loop_leaves_the_loop_its_input():
     files = FakeFiles({"/tmp/a.py": b"x"}, programs=TOOLS)
     ws = one(files)

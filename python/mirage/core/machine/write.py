@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from mirage.accessor.machine import MachineAccessor
-from mirage.core.machine.utils import machine_path, run_checked
+from mirage.core.machine.utils import in_folder, machine_path, run_checked
 from mirage.errors.fs import enotsup
 from mirage.io.cooperative import chunks
 from mirage.io.stream import close_quietly
@@ -55,6 +55,7 @@ async def write(
     data: ByteSource,
     append: bool = False,
     atomic: bool = False,
+    make_parent: bool = False,
 ) -> None:
     """Write a file on a machine, the bytes streamed to its ``cat``. A
     machine whose exec takes no input (Daytona) refuses the write.
@@ -66,6 +67,8 @@ async def write(
         data (ByteSource): the bytes, consumed once.
         append (bool): add them to the end instead.
         atomic (bool): show nothing until the stream has ended whole.
+        make_parent (bool): make the file's folder there first, when only
+            another machine holds it.
     """
     if not accessor.handle(machine).takes_input:
         await close_quietly(data)
@@ -80,7 +83,10 @@ async def write(
             yield part
 
     try:
-        command = write_command(machine_path(accessor, path), append, atomic)
+        target = machine_path(accessor, path)
+        command = in_folder(
+            write_command(target, append, atomic), target, make_parent
+        )
         await run_checked(accessor, machine, command, path, counted())
     finally:
         await close_quietly(data)

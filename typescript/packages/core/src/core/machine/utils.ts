@@ -18,6 +18,7 @@ import { refusal } from '../posix/errors.ts'
 import { joinRoot } from '../posix/utils.ts'
 import { PathSpec } from '../../types.ts'
 import { norm, parent } from '../../utils/path.ts'
+import { singleQuote } from '../../utils/quote.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 
 /**
@@ -109,4 +110,19 @@ export async function runChecked(
   const [status, out, err] = await accessor.run(machine, command, stdin, bounded)
   if (status !== 0 || err.length > 0) throw refusal(path, err)
   return out
+}
+
+/**
+ * A line that makes a new name, its folder made first when asked. Mirrors
+ * Python's `in_folder`.
+ *
+ * @param line the line making the name.
+ * @param target the new name's path on the machine.
+ * @param makeParent make its folder there first.
+ */
+export function inFolder(line: string, target: string, makeParent: boolean): string {
+  if (!makeParent) return line
+  const cut = target.lastIndexOf('/')
+  const folder = cut > 0 ? target.slice(0, cut) : '/'
+  return `mkdir -p -- ${singleQuote(folder)} && ${line}`
 }

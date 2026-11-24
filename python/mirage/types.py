@@ -44,6 +44,7 @@ from pydantic import (
     PositiveInt,
 )
 
+from mirage.execution.types import MachineName
 from mirage.utils.path import dotted_spelling, resolve_path
 
 
@@ -952,12 +953,17 @@ class Producer:
             (e.g. a CLI leaf); None for commands with no declaration.
         native (bool): a native program a runtime runs produced it,
             writing as it goes, so a redirect writes it as it arrives.
+        machine (MachineName | None): the machine whose program produced
+            it, one Mirage handed a command of its own to included; a
+            redirect lands it there and never on another machine. None
+            for output Mirage produced.
     """
 
     command: str
     prefixes: tuple[str, ...] = ()
     declared: Limit | None = None
     native: bool = False
+    machine: MachineName | None = None
 
 
 PolicyDecisionKind = Literal["deny", "pending", "failed"]

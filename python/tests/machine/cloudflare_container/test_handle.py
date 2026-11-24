@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -193,3 +194,43 @@ async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
     assert await asyncio.wait_for(pipe.reader.readexactly(2), 5) == b"ab"
     await pipe.stop()
     assert box.ran("sftp -e").killed == [15]
+
+
+@pytest.mark.asyncio
+async def test_a_delete_never_starts_a_stopped_container():
+    box = FakeContainer()
+
+    async def start() -> None:
+        box.start()
+
+    machine = ContainerMachine("box", {"mount_type": "ssh"}, box, start)
+    machine.bind_memory(SimpleNamespace(workspace_id="w1"))
+    box.down = RuntimeError("container is not running")
+    await asyncio.wait_for(machine.destroy(), 5)
+    assert box.starts == 0
+
+
+@pytest.mark.asyncio
+async def test_a_delete_releases_in_a_running_container_without_starting_it():
+    box = FakeContainer()
+
+    async def start() -> None:
+        box.start()
+
+    machine = ContainerMachine("box", {"mount_type": "ssh"}, box, start)
+    machine.bind_memory(SimpleNamespace(workspace_id="w1"))
+    await asyncio.wait_for(machine.destroy(), 5)
+    assert box.starts == 0
+    assert box.ran("cat /proc/mounts")
+
+
+@pytest.mark.asyncio
+async def test_a_delete_closes_the_relay_session_its_release_opened():
+    machine = ContainerMachine(
+        "box",
+        {"mount_type": "ssh", "url": "http://127.0.0.1:9", "token": "t"},
+    )
+    machine.bind_memory(SimpleNamespace(workspace_id="w1"))
+    await asyncio.wait_for(machine.destroy(), 10)
+    session = machine._relay._session
+    assert session is None or session.closed

@@ -107,6 +107,13 @@ class ProcessHandle:
         # ACTION TERM``), False when it ignores it (``trap '' TERM``),
         # None when it leaves it to what the signal does.
         self.catcher: Callable[[int, int], bool | None] | None = None
+        # The shell running a statement in it, which takes a signal it
+        # neither traps nor ignores to run its EXIT action before it ends
+        # of it: True when it took it.
+        self.exit_catcher: Callable[[int, int], bool] | None = None
+        # Its shell took a signal that way, and ends of it on its own once
+        # the action has run, whoever waits for it stopping or not.
+        self.exiting = False
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.
@@ -576,16 +583,22 @@ class ProcessHandle:
     async def reap(self) -> int:
         """Wait for the runner from the shell that forked it, as wait(2)
         does: its exit status, 128 plus the signal that stopped it. A
-        stop of the waiting shell itself stops the runner with it, and a
-        runner the host stopped (``revoked``) ends the wait cancelled.
+        stop of the waiting shell itself stops the runner with it, unless
+        the runner's shell took the signal to run its EXIT action first
+        (``exiting``), which it runs to its end before the wait goes on
+        stopping; a runner the host stopped (``revoked``) ends the wait
+        cancelled.
 
         Returns:
             int: the status.
         """
         try:
-            return await self.task
+            return await asyncio.shield(self.task)
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if self.revoked or (current is not None and current.cancelling()):
+                if self.revoked or not self.exiting:
+                    self.task.cancel()
+                await asyncio.wait({self.task})
                 raise
             return 128 + (self.signal or 9)

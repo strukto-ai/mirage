@@ -169,6 +169,28 @@ def darwin_table_line(prefixes: Sequence[str]) -> str:
     )
 
 
+def darwin_left(text: str, name: str) -> set[str]:
+    """The prefixes a Mac's ``mount`` table may show ``name``'s mounts at:
+    for each row whose source is ``<name>-<instance>-<n>:<prefix>``, every
+    prefix the row reads as before one of its `` on /``, as a prefix can
+    hold one too. The table read at those prefixes keeps the one mounted.
+
+    Args:
+        text (str): ``mount``'s output.
+        name (str): the sources' name (``source_name``).
+    """
+    shape = re.compile(rf"{re.escape(name)}-[0-9a-f]{{8}}-[0-9]+:(/.*)")
+    left: set[str] = set()
+    for line in text.split("\n"):
+        found = shape.match(line)
+        rest = found.group(1) if found is not None else ""
+        at = rest.find(" on /")
+        while at > 0:
+            left.add(rest[:at])
+            at = rest.find(" on /", at + 1)
+    return left
+
+
 def darwin_mount_table(
     text: str, known: Mapping[str, str]
 ) -> tuple[dict[str, tuple[str, str]], dict[str, str]]:
@@ -889,6 +911,43 @@ class MachineMounts:
             await self._unmount()
             self._session = None
 
+    async def release(self, workspace_id: str) -> None:
+        """Kill and unmount every mount this machine entry of the
+        workspace left that this instance does not serve now, as the
+        workspace is deleted: no later instance comes to take them back (``_reclaim``),
+        and their sshfs or mirage-fuse would hold the prefixes from every
+        other workspace.
+
+        Args:
+            workspace_id (str): the workspace's id.
+        """
+        async with self._lock:
+            if not self._served:
+                self._name = source_name(workspace_id, self._machine)
+            present = await self._table()
+            if self._darwin:
+                listed = await self._run(darwin_table_line([]))
+                left = darwin_left(
+                    listed.stdout.decode(errors="replace"), self._name
+                )
+                if not left <= self._looked:
+                    self._looked |= left
+                    present = await self._table()
+            live = {source for _, _, _, source in self._served.values()}
+            failures: list[Exception] = []
+            for prefix, (source, kind) in present.items():
+                if (
+                    kind in SERVED_KINDS
+                    and self._ours(source, prefix)
+                    and source not in live
+                ):
+                    try:
+                        await self._reclaim(source, prefix)
+                    except Exception as exc:
+                        failures.append(exc)
+            if failures:
+                raise ExceptionGroup("releasing mounts failed", failures)
+
     async def land(self) -> list[str]:
         """Land every write a served prefix's server has acknowledged.
 
@@ -1399,14 +1458,18 @@ class MachineMounts:
         ``prefix``, then unmount it: unmounted alone, it stays blocked on
         its dead pipe. The next serve may take the same source, so a failed
         unmount fails loud rather than leaving the old mount to pass for
-        the new one.
+        the new one. Each command is let go after ``UNMOUNT_WAIT_SECONDS``.
 
         Args:
             source (str): the stale mount's source.
             prefix (str): its mountpoint.
         """
-        await self._run(self._kill_line(source))
-        done = await self._run(self._unmount_line(prefix))
+        await asyncio.wait_for(
+            self._run(self._kill_line(source)), UNMOUNT_WAIT_SECONDS
+        )
+        done = await asyncio.wait_for(
+            self._run(self._unmount_line(prefix)), UNMOUNT_WAIT_SECONDS
+        )
         if done.exit_code != 0:
             raise RuntimeError(
                 f"{self._provider}: cannot unmount {prefix}, which this "

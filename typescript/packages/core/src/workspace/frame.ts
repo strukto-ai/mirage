@@ -29,6 +29,17 @@ export interface PipeWriter {
   readonly cwd: string
   placed: boolean
   machine: string | null
+  /**
+   * Whether the config names that machine for the program (`configPins`),
+   * rather than Mirage picking it; asked with `machine`.
+   */
+  pinned: boolean
+  /**
+   * The writer of the pipe the program reads in turn, whose machine its run
+   * prefers, so it is placed as it runs (`gen | filter | sink`); null for a
+   * first stage reading no pipe.
+   */
+  readonly upstream: PipeWriter | null
 }
 
 /** Temporary state of one evaluation; never part of a session record. */
@@ -72,24 +83,40 @@ export class ExecutionFrame {
   // never puts back: it ends with the command, so bash keeps no copy of what
   // they replace.
   ending: number | null = null
+  // The machines holding each folder a command of the line stood in, by
+  // folder, asked once for the whole line and shared by every frame it forks
+  // (`folderHolders`).
+  folderHolders = new Map<string, string[]>()
 
   /**
    * A child evaluation's frame. `stdin` is the input a child shell reads in
    * its parent's place (a subshell, a pipeline's first stage), whose writer
    * the child keeps when it is the pipe this frame's stage reads; null for
-   * one that reads none of it (a substitution, a job).
+   * one that reads none of it (a substitution, a job). It shares the machines
+   * the line found holding its folders.
    */
   fork(stdin: ByteSource | null = null): ExecutionFrame {
     const child = new ExecutionFrame()
-    const given = stdin instanceof SharedInput ? stdin.lines.input : stdin
-    if (this.stdinWriter !== null && given === this.stdinWriter.pipe)
-      child.stdinWriter = this.stdinWriter
+    child.stdinWriter = this.pipeWriterOf(stdin)
     child.abortSignal = this.abortSignal
     child.lineTimeout = this.lineTimeout
     child.shell = this.shell
     child.substitution = this.substitution
     if (this.routing !== undefined) child.routing = this.routing
     if (this.runsOnMachine !== undefined) child.runsOnMachine = this.runsOnMachine
+    child.folderHolders = this.folderHolders
     return child
+  }
+
+  /**
+   * The program writing the pipe this frame's stage reads, while `stdin` is
+   * still that pipe; null once a redirect, a here-document or a closed
+   * descriptor replaced it.
+   *
+   * @param stdin the input a command reads.
+   */
+  pipeWriterOf(stdin: ByteSource | null): PipeWriter | null {
+    const given = stdin instanceof SharedInput ? stdin.lines.input : stdin
+    return this.stdinWriter !== null && given === this.stdinWriter.pipe ? this.stdinWriter : null
   }
 }

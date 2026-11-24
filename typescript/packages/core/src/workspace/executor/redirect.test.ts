@@ -1772,3 +1772,41 @@ describe('a first write across workspaces', () => {
     }
   })
 })
+
+describe('a redirected compound', () => {
+  it.each<[string, string]>([
+    ['{ echo d; sleep 30\n} 2>&1', 'stdout'],
+    ['( echo d; sleep 30 ) 2>/dev/null', 'stdout'],
+    ['for i in 1; do echo d; sleep 30; done 2>&1', 'stdout'],
+    ['while true; do echo d; sleep 30; done 2>&1', 'stdout'],
+    ['if true; then echo d; sleep 30; fi 2>&1', 'stdout'],
+    ['f() { echo d; sleep 30; }; f 2>&1', 'stdout'],
+    ['{ echo d >&3; sleep 30; } 3>&1', 'stdout'],
+    ['true && { echo d; sleep 30; } 2>&1', 'stdout'],
+    ['echo x | { echo d; sleep 30; } 2>&1', 'stdout'],
+    ['{ echo d >&2; sleep 30; } >/dev/null', 'stderr'],
+    ['{ { echo d; sleep 30; } >&3; } 3>&1 2>&1', 'stdout'],
+  ])('streams what it prints: %j', async (line, stream) => {
+    const ws = new Workspace({})
+    try {
+      const execution = await ws.shell(line, { stream: true })
+      try {
+        const first = await Promise.race([
+          execution.events[Symbol.asyncIterator]().next(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => {
+              reject(new Error('no output yet'))
+            }, 5000),
+          ),
+        ])
+        if (first.done === true) throw new Error('no output')
+        const event = first.value
+        expect([event.stream, new TextDecoder().decode(event.data)]).toEqual([stream, 'd\n'])
+      } finally {
+        await execution.close()
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+})

@@ -146,6 +146,22 @@ describe('parseBashArgs', () => {
     expect(parseBashArgs(args).invalid).toBe(invalid)
   })
 
+  it.each<[string[], string]>([
+    [['-o', 'nosuch', '-c', 'echo hi'], 'nosuch'],
+    [['+o', 'nosuch', '-c', 'echo hi'], 'nosuch'],
+    [['-c', '-o', 'nosuch'], 'nosuch'],
+    [['-o', 'nosuch', '-q', '-c', ':'], 'nosuch'],
+    [['-o', 'pipefail', '-o', 'NOUNSET', '-c', ':'], 'NOUNSET'],
+    [['-o', 'nosuch'], 'nosuch'],
+  ])('refuses an unknown option name: %j', (args, name) => {
+    expect(parseBashArgs(args).invalidName).toBe(name)
+  })
+
+  it('refuses an earlier bad option before an unknown name', () => {
+    const parsed = parseBashArgs(['-q', '-o', 'nosuch', '-c', ':'])
+    expect([parsed.invalid, parsed.invalidName]).toEqual(['-q', null])
+  })
+
   // bash 5.2.37 on debian:stable-slim: long options lead, then short.
   it.each([
     [['--version', '--help'], 'help', true],

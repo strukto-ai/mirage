@@ -148,17 +148,63 @@ export function hasHides(path: PathSpec): boolean {
  * @param path the path an op names.
  */
 export async function hiddenMachines(accessor: MachineAccessor, path: PathSpec): Promise<string[]> {
-  const vis = currentCaller().session?.visibility ?? null
-  if (!hiddenUnder(vis, mountPrefix(path))) return []
-  const q = singleQuote(machinePath(accessor, path))
-  const hidden: string[] = []
-  for (const machine of accessor.names()) {
-    const [status, out] = await accessor.run(machine, `readlink -f -- ${q}`)
-    if (status !== 0) continue
-    const real = new TextDecoder().decode(out).replace(/\n$/, '')
-    const seen = virtualPath(accessor, path, real)
-    if (seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen))
-      hidden.push(machine)
+  if (!hasHides(path)) return []
+  const names = accessor.names()
+  const hidden = await Promise.all(names.map((machine) => isHiddenOn(accessor, machine, path)))
+  return names.filter((_, at) => hidden[at])
+}
+
+/**
+ * Where a path leads on a machine through the machine's own links
+ * (`readlink -f`): the deepest folder above it that exists, resolved, with
+ * the names below it that do not exist yet; null where not even `/`
+ * resolves. Mirrors Python's `_real_path`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine asked.
+ * @param target the path on the machine.
+ */
+async function realPath(
+  accessor: MachineAccessor,
+  machine: string,
+  target: string,
+): Promise<string | null> {
+  let missing = ''
+  let at = target
+  for (;;) {
+    const [status, out] = await accessor.run(machine, `readlink -f -- ${singleQuote(at)}`)
+    if (status === 0) {
+      const found = new TextDecoder().decode(out).replace(/\n$/, '')
+      return missing === '' ? found : found.replace(/\/+$/, '') + missing
+    }
+    if (at === '' || at === '/') return null
+    const cut = at.lastIndexOf('/')
+    missing = `/${at.slice(cut + 1)}${missing}`
+    at = cut > 0 ? at.slice(0, cut) : '/'
   }
-  return hidden
+}
+
+/**
+ * Whether `path` resolves on one machine, through that machine's own links,
+ * to a name the running session hides (`hiddenMachines`); no for a session
+ * that hides nothing in the mount, which asks nothing. A name whose folders
+ * do not all exist yet is judged where the deepest one that does leads
+ * (`realPath`), since making the rest follows the same links. Mirrors
+ * Python's `is_hidden_on`.
+ *
+ * @param accessor the mount's machines.
+ * @param machine the machine asked.
+ * @param path the path an op names.
+ */
+export async function isHiddenOn(
+  accessor: MachineAccessor,
+  machine: string,
+  path: PathSpec,
+): Promise<boolean> {
+  if (!hasHides(path)) return false
+  const vis = currentCaller().session?.visibility ?? null
+  const real = await realPath(accessor, machine, machinePath(accessor, path))
+  if (real === null) return false
+  const seen = virtualPath(accessor, path, real)
+  return seen !== null && seen !== norm(path.virtual) && !pathVisible(vis, seen)
 }

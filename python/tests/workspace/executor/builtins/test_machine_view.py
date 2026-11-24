@@ -16,6 +16,11 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.spec.shell import SHELL_SPECS
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.types import MachineName
 from mirage.io import IOResult
@@ -52,6 +57,22 @@ def test_a_name_or_an_id_picks_one():
     processes = table("docker:a", "e2b:b")
     assert machine_scope(processes, "b") == MachineScope(("e2b:b",), True)
     assert machine_scope(processes, "e2b:b") == MachineScope(("e2b:b",), True)
+
+
+def test_a_command_reporting_facts_answers_for_the_machine_it_is_about():
+    processes = table("docker:a", "e2b:b")
+    every = MachineScope(("docker:a", "e2b:b"))
+    assert machine_scope(processes, None, about=True) == every
+    token = bind_caller(current_caller().changed({"preferred_machine": "b"}))
+    try:
+        told = machine_scope(processes, None, about=True)
+        named = machine_scope(processes, "a", about=True)
+        listed = machine_scope(processes, None)
+    finally:
+        reset_caller(token)
+    assert told == MachineScope(("e2b:b",), True)
+    assert named == MachineScope(("docker:a",), True)
+    assert listed == every
 
 
 def test_an_unknown_name_picks_none():

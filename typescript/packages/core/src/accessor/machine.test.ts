@@ -22,6 +22,22 @@ function decoded(answer: [number | null, Uint8Array, Uint8Array]): [number | nul
   return [answer[0], DEC.decode(answer[1]), DEC.decode(answer[2])]
 }
 
+/** A machine whose connection waits until `connected` is called. */
+class Connecting extends ScriptedMachine {
+  private release: () => void = () => undefined
+  private readonly ready = new Promise<void>((resolve) => {
+    this.release = resolve
+  })
+
+  override connect(): Promise<void> {
+    return this.ready
+  }
+
+  connected(): void {
+    this.release()
+  }
+}
+
 describe('MachineAccessor', () => {
   it('answers a line with its status, output and errors', async () => {
     const machine = new ScriptedMachine('box', () => failed('no\n', 2))
@@ -65,5 +81,18 @@ describe('MachineAccessor', () => {
     expect(() => {
       accessor.bindMachines(table, 'a')
     }).toThrow("not one of the mount's machines")
+  })
+
+  it('stops a streamed line waiting for its machine to connect, and keeps the connection', async () => {
+    const machine = new Connecting('box', () => ok('x'))
+    const accessor = new MachineAccessor({})
+    accessor.bindMachines(tableOf(machine), 'box')
+    const stop = new AbortController()
+    const first = accessor.stream('box', 'cat x', () => new Error('failed'), stop.signal).next()
+    stop.abort()
+    await expect(first).rejects.toThrow('execute aborted')
+    machine.connected()
+    expect(decoded(await accessor.run('box', 'true'))).toEqual([0, 'x', ''])
+    expect(machine.lines).toEqual(['true'])
   })
 })

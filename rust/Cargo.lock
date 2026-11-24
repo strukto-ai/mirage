@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "mirage-fuse"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "fuser",
  "libc",
@@ -964,21 +964,21 @@ dependencies = [
 
 [[package]]
 name = "mirage-gh-wasm"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "mirage-rs",
 ]
 
 [[package]]
 name = "mirage-pdf-wasm"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "mirage-rs",
 ]
 
 [[package]]
 name = "mirage-rs"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "blake2",
  "brotli",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "mirage-rs-python"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "mirage-rs",
  "pyo3",
@@ -1019,14 +1019,14 @@ dependencies = [
 
 [[package]]
 name = "mirage-rs-wasm"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "mirage-rs",
 ]
 
 [[package]]
 name = "mirage-shell-wasm"
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 dependencies = [
  "mirage-rs",
 ]

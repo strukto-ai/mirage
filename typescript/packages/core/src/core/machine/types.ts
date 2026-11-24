@@ -42,3 +42,51 @@ export class Holder {
     return this.entry?.mtimeMs ?? 0
   }
 }
+
+/**
+ * Every machine's copy of a name some machine holds, and the copy every look
+ * at it goes to. Mirrors Python's `Copies`.
+ */
+export class Copies {
+  /**
+   * @param held the machines holding the name, in the order `machines:`
+   *   lists them.
+   * @param shown the copy every look goes to (`chosen`).
+   */
+  constructor(
+    readonly held: readonly Holder[],
+    readonly shown: Holder,
+  ) {}
+
+  /** The machines holding the name. */
+  get machines(): string[] {
+    return this.held.map((one) => one.machine)
+  }
+
+  /** The machines holding the name as a folder. */
+  get folders(): string[] {
+    return this.held.filter((one) => one.isFolder).map((one) => one.machine)
+  }
+
+  /** The copies other than the one shown. */
+  get others(): Holder[] {
+    return this.held.filter((one) => one !== this.shown)
+  }
+}
+
+/** Where a write lands on a mount's machines, and how. Mirrors Python's `Landing`. */
+export class Landing {
+  /**
+   * @param machine the machine the bytes land on.
+   * @param origin the bytes come from that machine (a program's `>`, a
+   *   copy), so the write replaces the name across the machines: no other
+   *   machine's copy of it stays.
+   * @param makeParent the name's folder must be made there first, since only
+   *   other machines hold it.
+   */
+  constructor(
+    readonly machine: string,
+    readonly origin = false,
+    readonly makeParent = false,
+  ) {}
+}

@@ -15,7 +15,13 @@
 import asyncio
 import logging
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import (
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
 from importlib import import_module
 from time import monotonic
@@ -23,12 +29,18 @@ from types import ModuleType
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller, missing_program
+from mirage.context.session_context import (
+    DEFAULT_UMASK,
+    current_caller,
+    missing_program,
+    session_umask,
+)
 from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.machine.types import MachineProcess
 from mirage.execution.process.types import ProcessUsage
 from mirage.execution.types import MachineName, MachinePid, MachineResources
 from mirage.io.errors import PipeClosed
+from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
 from mirage.machine.config import MachineConfig, check_mount_type
 from mirage.machine.constants import (
@@ -66,7 +78,7 @@ from mirage.machine.types import MachineMemory, RunStatus, ScanFacts
 from mirage.runtime.binding import WorkspaceBinding, answer_of
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.types import OutputFn, RunAnswer, RunResult
-from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.utils.clock import bound_system_clock
 from mirage.utils.quote import shell_quote
 
@@ -269,6 +281,19 @@ class OutputWatch:
         return 0.0 if self._busy else monotonic() - self._moved
 
 
+def _leans_on_folder(path: str | None) -> bool:
+    """Whether a PATH names a folder by where the run stands: an entry
+    that is empty or not absolute, which a program lookup resolves
+    against the working folder.
+
+    Args:
+        path (str | None): the PATH, None for the machine's own.
+    """
+    return path is not None and any(
+        not entry.startswith("/") for entry in path.split(":")
+    )
+
+
 class MachineHandle:
     """One machine a workspace runs programs on, reached through its
     provider: the live connection, held once per workspace.
@@ -354,7 +379,7 @@ class MachineHandle:
         # started it.
         self._waking: asyncio.Event | None = None
         # Whether the machine has a program, by name, asked once each.
-        self._programs: dict[str, bool] = {}
+        self._programs: dict[tuple[str, str | None, str | None], bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -417,8 +442,41 @@ class MachineHandle:
 
     async def destroy(self) -> None:
         """Remove the machine Mirage started for this handle, as its
-        workspace is deleted, and forget it; one the user brought stays. A
-        provider that starts machines overrides this."""
+        workspace is deleted, and forget it; one the user brought stays,
+        with the mounts the workspace left there released
+        (``_release_mounts``). A provider that starts machines overrides
+        this."""
+        await self._release_mounts()
+
+    async def _release_mounts(self) -> None:
+        """Kill and unmount what the deleted workspace's earlier instances
+        left serving in the machine (``MachineMounts.release``), which
+        nothing else would take back. A connection opened for it is closed
+        again. A failure to connect or release is logged: the workspace is
+        deleted either way."""
+        if self._mounts is None or self._memory is None:
+            return
+        opened = not self._connected
+        try:
+            try:
+                if await self._reach_to_release():
+                    await self._mounts.release(self._memory.workspace_id)
+            finally:
+                if opened and self._connected:
+                    await self.close()
+        except Exception:
+            logger.warning(
+                "%s: releasing the deleted workspace's mounts failed",
+                self.machine,
+                exc_info=True,
+            )
+
+    async def _reach_to_release(self) -> bool:
+        """Reach the machine for ``_release_mounts``, as a line does; False
+        when it holds nothing to release. A provider whose connect starts a
+        stopped machine overrides this."""
+        await self.ensure_connected()
+        return True
 
     def file_effects_dispatched(
         self, binding: WorkspaceBinding | None
@@ -558,11 +616,17 @@ class MachineHandle:
             filters = [out_exit, out_pid, *filters]
             sink = out_exit.write
         watch = OutputWatch()
+        mask = session_umask()
         self._executing += 1
         execution = asyncio.ensure_future(
             self._exec_argv(
                 run_argv(
-                    tag, nonce, run, missing, current_caller().joins_errors
+                    tag,
+                    nonce,
+                    run,
+                    missing,
+                    current_caller().joins_errors,
+                    None if mask == DEFAULT_UMASK else mask,
                 ),
                 ctx.stdin,
                 {**given, **clock},
@@ -600,6 +664,8 @@ class MachineHandle:
             done = RunResult(exit_code=HANGUP_EXIT_CODE)
         finally:
             self._executing -= 1
+        if done.exit_code == NOT_FOUND_STATUS:
+            self._forget_programs(argv)
         if self._mounts is None:
             return done
         if done.exit_code == CANNOT_EXECUTE_STATUS:
@@ -948,6 +1014,70 @@ class MachineHandle:
                 bounded=bounded,
             )
 
+    async def stream_line(
+        self,
+        line: str,
+        env: dict[str, str],
+        cwd: str,
+        failed: Callable[[int | None, bytes], BaseException],
+    ) -> AsyncGenerator[bytes, None]:
+        """Execute one of Mirage's own shell lines on the machine, as
+        ``/bin/sh -c``, and hand its output over as it is read, never
+        held whole: a reader that falls behind holds the line back, and
+        one that stops early stops it. A line that fails, by its status
+        or by what it says on stderr, raises ``failed``'s error once the
+        output before it has been read.
+
+        Args:
+            line (str): the raw shell line.
+            env (dict[str, str]): the merged environment.
+            cwd (str): the working directory, passed through verbatim.
+            failed (Callable[[int | None, bytes], BaseException]): the
+                error of a line that ended with this status and stderr.
+        """
+        pipe = BytePipe()
+        said = bytearray()
+
+        async def complain(data: bytes) -> None:
+            said.extend(data)
+
+        async def execute() -> None:
+            try:
+                async with self._at_work():
+                    done = await self._exec_argv(
+                        ("/bin/sh", "-c", line),
+                        None,
+                        env,
+                        cwd,
+                        pipe.write,
+                        complain,
+                    )
+            except BaseException as exc:
+                pipe.end(exc)
+                raise
+            pipe.end(
+                failed(done.exit_code, bytes(said))
+                if done.exit_code != 0 or said
+                else None
+            )
+
+        task = asyncio.create_task(execute())
+        try:
+            async for chunk in pipe.stream():
+                yield chunk
+        finally:
+            pipe.close_reader()
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+            except Exception as exc:
+                logger.debug("%s: streamed line ended: %s", self.machine, exc)
+
     @asynccontextmanager
     async def _at_work(self) -> AsyncIterator[None]:
         """Count what runs inside as Mirage's work on the machine: the
@@ -995,14 +1125,65 @@ class MachineHandle:
         Args:
             name (str): the program's name.
         """
-        known = self._programs.get(name)
+        known = self._programs.get((name, None, None))
         if known is None:
-            await self.ensure_connected()
-            done = await self._setup(
-                f"command -v {shell_quote(name)} >/dev/null 2>&1"
-            )
-            known = self._programs[name] = done.exit_code == 0
+            return await self._look(name, None, None)
         return known
+
+    async def finds_program(
+        self, name: str, path: str | None = None, cwd: str | None = None
+    ) -> bool:
+        """Whether a run started now would find a program of this name:
+        on the PATH the session exported, which the run gets, and asked
+        again where the last answer was no, since the program may have
+        been installed since. A PATH that names a folder by where the
+        run stands (``venv/bin:/usr/bin``) is looked on from the run's
+        folder, and its answer is kept for that folder alone.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH the session exported; None for
+                the machine's own.
+            cwd (str | None): the folder the run starts in.
+        """
+        at = cwd if _leans_on_folder(path) else None
+        if self._programs.get((name, path, at)):
+            return True
+        return await self._look(name, path, at)
+
+    def _forget_programs(self, words: Sequence[str]) -> None:
+        """Drop what is kept of the programs a run names, once it ended
+        with ``command not found``: one removed from the machine since it
+        was last asked is asked for again, so the next search leaves the
+        machine out.
+
+        Args:
+            words (Sequence[str]): the run's words.
+        """
+        named = set(words)
+        for key in [key for key in self._programs if key[0] in named]:
+            del self._programs[key]
+
+    async def _look(
+        self, name: str, path: str | None, cwd: str | None
+    ) -> bool:
+        """Ask the machine for a program on a PATH, and keep the answer.
+
+        Args:
+            name (str): the program's name.
+            path (str | None): the PATH to look on; None for the
+                machine's own.
+            cwd (str | None): the folder to look from; None for ``/``.
+                A machine without the folder has no such program.
+        """
+        await self.ensure_connected()
+        at = "" if cwd is None else f"cd -- {shell_quote(cwd)} 2>/dev/null && "
+        on = "" if path is None else f"PATH={shell_quote(path)} "
+        done = await self._setup(
+            f"{at}{on}command -v {shell_quote(name)} >/dev/null 2>&1"
+        )
+        found = self._programs[(name, path, cwd)] = done.exit_code == 0
+        return found
 
     async def look_up(self, line: str, env: Mapping[str, str]) -> RunAnswer:
         """Run a lookup the agent typed (``which perl``) as the machine

@@ -23,6 +23,7 @@ from mirage.core.posix.constants import ENTRY_FORMAT
 from mirage.runtime.types import RunAnswer
 from mirage.types import PathSpec
 from mirage.vfs.machine.config import MachineVFSConfig
+from mirage.vfs.machine.machine import MachineVFS
 from tests.fixtures.machine import ScriptedMachine, failed, ok, table_of
 
 ROW = b"f 644 3 1700000000 1700000001 0 50 1 0 \0"
@@ -138,6 +139,10 @@ class FakeFiles:
         )
 
     def _one(self, words: list[str], data: bytes | None) -> RunAnswer:
+        if words[0].startswith("PATH="):
+            words = words[1:]
+        if words[:2] == ["cd", "--"]:
+            return ok() if words[2] in self.dirs else failed(b"")
         if words[:2] == ["command", "-v"]:
             return ok() if words[2] in self.programs else failed(b"")
         if words[:3] == ["readlink", "-f", "--"]:
@@ -288,3 +293,22 @@ async def run(ws: Workspace, line: str) -> tuple[int, str, str]:
         await result.stdout_str(),
         await result.stderr_str(),
     )
+
+
+def shared(*files: FakeFiles) -> MachineVFS:
+    """A mount of /tmp over machines a, b, c, ... holding ``files``.
+
+    Args:
+        files (FakeFiles): each machine's files, in order.
+    """
+    vfs = MachineVFS(MachineVFSConfig(root="/tmp"))
+    vfs.bind_machines(
+        table_of(
+            *(
+                ScriptedMachine(name, one.answer)
+                for name, one in zip("abcdef", files)
+            )
+        ),
+        "a",
+    )
+    return vfs

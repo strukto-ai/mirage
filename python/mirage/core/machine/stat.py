@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
@@ -144,21 +146,67 @@ async def hidden_machines(
         accessor (MachineAccessor): the mount's machines.
         path (PathSpec): the path an op names.
     """
-    vis = current_caller().visibility
-    if not hidden_under(vis, mount_prefix(path)):
+    if not has_hides(path):
         return []
-    q = single_quote(machine_path(accessor, path))
-    hidden: list[str] = []
-    for machine in accessor.names():
-        status, out, _ = await accessor.run(machine, f"readlink -f -- {q}")
-        if status != 0:
-            continue
-        real = out.decode(errors="surrogateescape").rstrip("\n")
-        seen = virtual_path(accessor, path, real)
-        if (
-            seen is not None
-            and seen != norm(path.virtual)
-            and not path_visible(vis, seen)
-        ):
-            hidden.append(machine)
-    return hidden
+    names = accessor.names()
+    hidden = await asyncio.gather(
+        *(is_hidden_on(accessor, machine, path) for machine in names)
+    )
+    return [machine for machine, yes in zip(names, hidden) if yes]
+
+
+async def _real_path(
+    accessor: MachineAccessor, machine: str, target: str
+) -> str | None:
+    """Where a path leads on a machine through the machine's own links
+    (``readlink -f``): the deepest folder above it that exists, resolved,
+    with the names below it that do not exist yet; None where not even
+    ``/`` resolves.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine asked.
+        target (str): the path on the machine.
+    """
+    missing = ""
+    while True:
+        status, out, _ = await accessor.run(
+            machine, f"readlink -f -- {single_quote(target)}"
+        )
+        if status == 0:
+            found = out.decode(errors="surrogateescape").rstrip("\n")
+            return found.rstrip("/") + missing if missing else found
+        if target in ("", "/"):
+            return None
+        target, _, name = target.rpartition("/")
+        missing = f"/{name}{missing}"
+        target = target or "/"
+
+
+async def is_hidden_on(
+    accessor: MachineAccessor, machine: str, path: PathSpec
+) -> bool:
+    """Whether ``path`` resolves on one machine, through that machine's
+    own links, to a name the running session hides (``hidden_machines``);
+    no for a session that hides nothing in the mount, which asks nothing.
+    A name whose folders do not all exist yet is judged where the deepest
+    one that does leads (``_real_path``), since making the rest follows
+    the same links.
+
+    Args:
+        accessor (MachineAccessor): the mount's machines.
+        machine (str): the machine asked.
+        path (PathSpec): the path an op names.
+    """
+    if not has_hides(path):
+        return False
+    vis = current_caller().visibility
+    real = await _real_path(accessor, machine, machine_path(accessor, path))
+    if real is None:
+        return False
+    seen = virtual_path(accessor, path, real)
+    return (
+        seen is not None
+        and seen != norm(path.virtual)
+        and not path_visible(vis, seen)
+    )

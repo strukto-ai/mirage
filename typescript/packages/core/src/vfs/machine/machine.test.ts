@@ -13,14 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import {
-  failed,
-  ok,
-  ScriptedMachine,
-  tableOf,
-  type Answer,
-} from '../../../tests/fixtures/machine.ts'
-import { FakeFiles, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
+import { failed, ok, ScriptedMachine, type Answer } from '../../../tests/fixtures/machine.ts'
+import { FakeFiles, shared, spec, two, run, texts } from '../../../tests/fixtures/machine_files.ts'
+import { OutputStream } from '../../io/stream.ts'
 import type { Action, VfsContext } from '../../policy/types.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -29,16 +24,6 @@ import { MachineVFS } from './machine.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-
-/** A mount of /tmp over machines a, b, c, ... holding `files`. */
-function shared(...files: FakeFiles[]): MachineVFS {
-  const vfs = new MachineVFS({ root: '/tmp' })
-  vfs.bindMachines(
-    tableOf(...files.map((one, at) => new ScriptedMachine('abcdef'.charAt(at), one.answer))),
-    'a',
-  )
-  return vfs
-}
 
 describe('MachineVFS', () => {
   it("lands a heredoc in the machine's own /tmp", async () => {
@@ -252,6 +237,54 @@ describe('MachineVFS', () => {
     await ws.close()
   })
 
+  const copiedIntoHidden =
+    "cp: cannot create regular file '/tmp/public/missing/k': No such file or directory\n"
+  it.each([
+    ['cp /srv/a/k /tmp/public/missing/k', false, copiedIntoHidden],
+    ['cp /srv/a/k /tmp/public/missing/k', true, copiedIntoHidden],
+    [
+      'gen > /tmp/public/missing/k',
+      false,
+      'bash: line 1: /tmp/public/missing/k: No such file or directory\n',
+    ],
+  ])(
+    'never makes a folder through a link to a hidden one: %s (read and write: %s)',
+    async (line, judged, said) => {
+      const a = new FakeFiles({ '/srv/a/k': 'key\n', '/tmp/secret/s': 's' }, ['gen'])
+      a.links.set('/tmp/public', '/tmp/secret')
+      const b = new FakeFiles()
+      b.dirs.add('/tmp/public')
+      b.dirs.add('/tmp/public/missing')
+      const ws = two(
+        a,
+        b,
+        { '/srv/a': '@a' },
+        { profiles: { agent: { paths: { hide: ['/tmp/secret'] } } } },
+      )
+      if (judged) ws.policies.add({ postVfs: (): Action | null => null })
+      const agent = await ws.session('agent', { profile: 'agent' })
+      const done = await agent.shell(line)
+      expect([done.exitCode, new TextDecoder().decode(done.stderr)]).toEqual([1, said])
+      expect(Object.keys(texts(a)).sort()).toEqual(['/srv/a/k', '/tmp/secret/s'])
+      expect([...a.dirs].some((dir) => dir.endsWith('/missing'))).toBe(false)
+      await ws.close()
+    },
+  )
+
+  it("lands a program's output on its machine as a copy does", async () => {
+    const a = new FakeFiles({}, ['gen'])
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.dirs.add('/tmp/only')
+    b.written.set('/tmp/k', 2_000_000_000)
+    const ws = two(a, b)
+    expect(await run(ws, 'gen > /tmp/only/out')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/only/out'], b.files.has('/tmp/only/out')]).toEqual(['ran\n', false])
+    expect(await run(ws, 'gen > /tmp/k')).toEqual([0, '', ''])
+    expect(b.files.has('/tmp/k')).toBe(false)
+    expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'ran\n', ''])
+    await ws.close()
+  })
+
   it('makes a folder only another machine holds for a cp into it', async () => {
     const a = new FakeFiles({ '/tmp/d/kept': 'k' })
     const b = new FakeFiles({ '/tmp/src': 's' })
@@ -308,7 +341,7 @@ describe('MachineVFS', () => {
     )
   })
 
-  it('refuses a machine file past the memory room', async () => {
+  it('streams a machine file past the memory room', async () => {
     const a = new FakeFiles({ '/tmp/big.bin': 'x'.repeat(3_000_000) })
     const ws = new Workspace(
       {},
@@ -321,9 +354,9 @@ describe('MachineVFS', () => {
         },
       },
     )
-    const [, , err] = await run(ws, 'cat /tmp/big.bin | wc -c')
+    expect(await run(ws, 'cat /tmp/big.bin | wc -c')).toEqual([0, '3000000\n', ''])
+    expect(await run(ws, 'wc -c < /tmp/big.bin')).toEqual([0, '3000000\n', ''])
     await ws.close()
-    expect(err).toContain('memory exhausted')
   })
 
   it('still lists and removes machine files at the memory cap', async () => {
@@ -534,5 +567,154 @@ describe('MachineVFS', () => {
     expect([code, err.includes('Not a directory')]).toEqual([1, true])
     expect(Object.keys(texts(a)).sort()).toEqual(['/tmp/k/in'])
     await ws.close()
+  })
+})
+
+const CROSSING = "machine a's bytes do not go to machine b: copy them through a store"
+
+/** Two machines, each with a folder of its own, sharing `/tmp`, and a store at `/ram`. */
+function apart(): [FakeFiles, FakeFiles, Workspace] {
+  const a = new FakeFiles({ '/srv/a/k': 'key\n' }, ['gen', 'cat'])
+  const b = new FakeFiles({}, ['sink', 'cat'])
+  b.dirs.add('/srv/b')
+  const ws = two(a, b, { '/srv/a': '@a', '/srv/b': '@b', '/ram': new RAMVFS() })
+  return [a, b, ws]
+}
+
+describe('bytes between machines', () => {
+  it('refuses a copy from one machine to another', async () => {
+    const [a, b, ws] = apart()
+    for (const verb of ['cp', 'mv']) {
+      const done = await ws.shell(`${verb} /srv/a/k /srv/b/k`)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `${verb}: cannot create regular file '/srv/b/k': Permission denied\n`,
+      )
+      expect(done.decision?.reason).toBe(CROSSING)
+    }
+    expect(b.files.has('/srv/b/k')).toBe(false)
+    expect(texts(a)['/srv/a/k']).toBe('key\n')
+    await ws.close()
+  })
+
+  it('lands a copy into a folder its machine shares with its source', async () => {
+    const [a, b, ws] = apart()
+    expect(await run(ws, 'cp /srv/a/k /tmp/k')).toEqual([0, '', ''])
+    expect(texts(a)['/tmp/k']).toBe('key\n')
+    expect(b.files.has('/tmp/k')).toBe(false)
+    await ws.close()
+  })
+
+  it('takes a machine file to a store and on to another machine', async () => {
+    const [, b, ws] = apart()
+    expect(await run(ws, 'cp /srv/a/k /ram/k')).toEqual([0, '', ''])
+    expect(await run(ws, 'cp /ram/k /srv/b/k')).toEqual([0, '', ''])
+    expect(texts(b)['/srv/b/k']).toBe('key\n')
+    await ws.close()
+  })
+
+  it("never lands a program's output on another machine", async () => {
+    const [a, b, ws] = apart()
+    for (const [line, target] of [
+      ['gen > /srv/b/out', '/srv/b/out'],
+      ['gen 2> /srv/b/err', '/srv/b/err'],
+    ] as const) {
+      const done = await ws.shell(line)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `bash: line 1: ${target}: Permission denied\n`,
+      )
+      expect(done.decision?.reason).toBe(CROSSING)
+    }
+    expect(await run(ws, 'gen > /tmp/out')).toEqual([0, '', ''])
+    expect(a.ran).toEqual(['gen'])
+    expect(texts(a)['/tmp/out']).toBe('ran\n')
+    expect([b.files.has('/srv/b/out'), b.files.has('/tmp/out')]).toEqual([false, false])
+    await ws.close()
+  })
+
+  it('lets no program read a file of another machine', async () => {
+    const [, b, ws] = apart()
+    const done = await ws.shell('sink < /srv/a/k')
+    expect(done.exitCode).toBe(1)
+    expect(new TextDecoder().decode(done.stderr)).toBe(
+      'bash: line 1: /srv/a/k: Permission denied\n',
+    )
+    expect(done.decision?.reason).toBe(CROSSING)
+    expect(b.ran).toEqual([])
+    expect(await run(ws, 'wc -c < /srv/a/k')).toEqual([0, '4\n', ''])
+    await ws.close()
+  })
+
+  it('lands the output of a command handed to a machine there', async () => {
+    const [a, b, ws] = apart()
+    expect(await run(ws, 'cat /srv/a/k > /tmp/cat')).toEqual([0, '', ''])
+    expect(texts(a)['/tmp/cat']).toBe('ran\n')
+    expect(b.files.has('/tmp/cat')).toBe(false)
+    const done = await ws.shell('cat /srv/a/k > /srv/b/cat')
+    expect(done.exitCode).toBe(1)
+    expect(new TextDecoder().decode(done.stderr)).toBe(
+      'bash: line 1: /srv/b/cat: Permission denied\n',
+    )
+    expect(a.ran).toEqual(['cat /srv/a/k'])
+    expect(b.files.has('/srv/b/cat')).toBe(false)
+    await ws.close()
+  })
+
+  it('keeps the bytes of a copy by a read and a write on their machine', async () => {
+    const a = new FakeFiles({ '/srv/a/k': 'key\n' })
+    const b = new FakeFiles()
+    b.dirs.add('/srv/b')
+    const ws = two(a, b, { '/srv/a': '@a', '/srv/b': '@b' })
+    ws.policies.add({ postVfs: (): Action | null => null })
+    for (const verb of ['cp', 'mv']) {
+      const done = await ws.shell(`${verb} /srv/a/k /srv/b/k`)
+      expect(done.exitCode).toBe(1)
+      expect(new TextDecoder().decode(done.stderr)).toBe(
+        `${verb}: cannot create regular file '/srv/b/k': Permission denied\n`,
+      )
+    }
+    expect(b.files.has('/srv/b/k')).toBe(false)
+    expect(await run(ws, 'cp /srv/a/k /tmp/k')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/k'], b.files.has('/tmp/k')]).toEqual(['key\n', false])
+    await ws.close()
+  })
+
+  it('lands a copy by a read and a write as a direct copy does', async () => {
+    const a = new FakeFiles({ '/srv/a/k': 'new\n' })
+    const b = new FakeFiles({ '/tmp/k': 'old\n' })
+    b.dirs.add('/tmp/only')
+    b.written.set('/tmp/k', 2_000_000_000)
+    const ws = two(a, b, { '/srv/a': '@a' })
+    ws.policies.add({ postVfs: (): Action | null => null })
+    expect(await run(ws, 'cp /srv/a/k /tmp/only/k')).toEqual([0, '', ''])
+    expect([texts(a)['/tmp/only/k'], b.files.has('/tmp/only/k')]).toEqual(['new\n', false])
+    expect(await run(ws, 'cp /srv/a/k /tmp/k')).toEqual([0, '', ''])
+    expect(b.files.has('/tmp/k')).toBe(false)
+    expect(await run(ws, 'cat /tmp/k')).toEqual([0, 'new\n', ''])
+    await ws.close()
+  })
+})
+
+/** A source that fails on its first read, for a write that must close it unread. */
+function unread(): AsyncIterator<Uint8Array> {
+  return { next: () => Promise.reject(new Error('the refused write read its bytes')) }
+}
+
+describe('a write refused before it lands', () => {
+  it('closes its bytes', async () => {
+    const vfs = shared(new FakeFiles({ '/tmp/f': 'file' }), new FakeFiles())
+    let closed = 0
+    const close = (): Promise<void> => {
+      closed += 1
+      return Promise.resolve()
+    }
+    await expect(vfs.write(spec('/f/x'), new OutputStream(unread(), close))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
+    await expect(vfs.append(spec('/f/x'), new OutputStream(unread(), close))).rejects.toMatchObject(
+      { code: 'ENOTDIR' },
+    )
+    expect(closed).toBe(2)
   })
 })

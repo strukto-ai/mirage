@@ -85,6 +85,13 @@ export class ProcessHandle {
   // when it ignores it (`trap '' TERM`), null when it leaves it to what the
   // signal does. Mirrors Python's catcher.
   catcher: ((signal: number, pid: number) => boolean | null) | null = null
+  // The shell running a statement in it, which takes a signal it neither
+  // traps nor ignores to run its EXIT action before it ends of it: true when
+  // it took it. Mirrors Python's exit_catcher.
+  exitCatcher: ((signal: number, pid: number) => boolean) | null = null
+  // Its shell took a signal that way, and ends of it on its own once the
+  // action has run, before the group's signal reaches the shell above it.
+  exiting = false
 
   constructor(
     record: Process,

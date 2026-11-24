@@ -148,7 +148,7 @@ async def handle_uptime(
     name = parse.flags.get("machine")
     named = name if isinstance(name, str) else None
     processes = job_table.processes
-    scope = machine_scope(processes, named)
+    scope = machine_scope(processes, named, about=True)
     if scope is None:
         return job_result(cmd_str, f"uptime: {named}: no such machine\n", 1)
     rows, errors = await read_machines(processes, scope, "uptime")

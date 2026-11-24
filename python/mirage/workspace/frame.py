@@ -38,6 +38,13 @@ class PipeWriter:
             once for the pipe.
         machine (str | None): the machine the program runs on; None
             before it is asked, and for a program Mirage runs itself.
+        pinned (bool): whether the config names that machine for the
+            program (``config_pins``), rather than Mirage picking it;
+            asked with ``machine``.
+        upstream (PipeWriter | None): the writer of the pipe the program
+            reads in turn, whose machine its run prefers, so it is placed
+            as it runs (``gen | filter | sink``); None for a first stage
+            reading no pipe.
     """
 
     pipe: ByteSource
@@ -45,6 +52,8 @@ class PipeWriter:
     cwd: str
     placed: bool = False
     machine: str | None = None
+    pinned: bool = False
+    upstream: PipeWriter | None = None
 
 
 @dataclass
@@ -74,6 +83,9 @@ class ExecutionFrame:
     ``ending`` is the id of the command a job runs as a whole, whose
     redirects its shell never puts back: it ends with the command, so
     bash keeps no copy of what they replace.
+    ``folder_holders`` are the machines holding each folder a command of
+    the line stood in, by folder, asked once for the whole line and
+    shared by every frame it forks (``folder_holders``).
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
@@ -92,14 +104,16 @@ class ExecutionFrame:
     stdin: ByteSource | None = None
     stdin_writer: PipeWriter | None = None
     ending: int | None = None
+    folder_holders: dict[str, list[str]] = field(default_factory=dict)
 
     def fork(self, stdin: ByteSource | None = None) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the
         line's routing decision, since nested lines never re-route, its
         time limit, which a job it starts runs under from its own start,
         the process whose shell it is part of, whether that shell is a
-        substitution's, and the writer of the pipe it reads when that is
-        the pipe this frame's stage reads.
+        substitution's, the writer of the pipe it reads when that is
+        the pipe this frame's stage reads, and the machines the line
+        found holding its folders.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
@@ -110,15 +124,24 @@ class ExecutionFrame:
                 stage); None for one that reads none of it (a
                 substitution, a job).
         """
-        given = stdin.lines.input if isinstance(stdin, SharedInput) else stdin
-        writer = self.stdin_writer
         return ExecutionFrame(
             routing=self.routing,
             runs_on_machine=self.runs_on_machine,
             line_timeout=self.line_timeout,
             shell=self.shell,
             substitution=self.substitution,
-            stdin_writer=(
-                writer if writer is not None and given is writer.pipe else None
-            ),
+            stdin_writer=self.pipe_writer_of(stdin),
+            folder_holders=self.folder_holders,
         )
+
+    def pipe_writer_of(self, stdin: ByteSource | None) -> PipeWriter | None:
+        """The program writing the pipe this frame's stage reads, while
+        ``stdin`` is still that pipe; None once a redirect, a here-document
+        or a closed descriptor replaced it.
+
+        Args:
+            stdin (ByteSource | None): the input a command reads.
+        """
+        given = stdin.lines.input if isinstance(stdin, SharedInput) else stdin
+        writer = self.stdin_writer
+        return writer if writer is not None and given is writer.pipe else None

@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { SHELL_SPECS } from '../../../commands/spec/shell.ts'
+import { bindCaller, currentCaller } from '../../../context/session_context.ts'
 import { ProcessTable } from '../../../execution/process/table.ts'
 import { IOResult } from '../../../io/types.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -68,6 +69,35 @@ describe('machine view', () => {
       workspace: false,
       engines: [],
     })
+  })
+
+  it('answers for the machine a command reporting facts is about', async () => {
+    const processes = table('docker:a', 'e2b:b')
+    const every = {
+      ids: ['docker:a', 'e2b:b'],
+      picked: false,
+      several: true,
+      workspace: false,
+      engines: [],
+    }
+    const one = (id: string): unknown => ({
+      ids: [id],
+      picked: true,
+      several: false,
+      workspace: false,
+      engines: [],
+    })
+    expect(machineScope(processes, null, false, true)).toEqual(every)
+    const [told, named, listed] = await bindCaller(
+      { ...currentCaller(), preferredMachine: 'b' },
+      () =>
+        Promise.resolve([
+          machineScope(processes, null, false, true),
+          machineScope(processes, 'a', false, true),
+          machineScope(processes, null),
+        ]),
+    )
+    expect([told, named, listed]).toEqual([one('e2b:b'), one('docker:a'), every])
   })
 
   it('picks none for an unknown name', () => {

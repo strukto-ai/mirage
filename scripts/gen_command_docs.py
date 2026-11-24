@@ -226,6 +226,10 @@ SECTIONS = (
             (("iconv",), "Convert character encodings"),
             (("xxd",), "Create or reverse a hex dump"),
             (("od",), "Dump bytes in a chosen format"),
+            (
+                ("hexdump",),
+                "Dump bytes through display formats or format strings",
+            ),
             (("md5",), "Print an MD5 digest"),
             (
                 (

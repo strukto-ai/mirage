@@ -46,7 +46,7 @@ from mirage.workspace.documentation.render import fenced
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs" / "python"
-AGENTS = ROOT / "python" / "mirage" / "agents"
+ADAPTER_ROOTS = ("agents", "environments")
 SECRET_NOTE = "Fields marked secret are redacted in snapshots."
 PYPROJECT = ROOT / "python" / "pyproject.toml"
 EXTRA_FEATURES: tuple[tuple[str, tuple[str, ...], str], ...] = (
@@ -485,17 +485,17 @@ def _docstring(module: str, name: str, depth: int = 0) -> str | None:
     raise SystemExit(f"{module}: no definition or import of {name}")
 
 
-def adapter_exports(name: str) -> list[tuple[str, str]]:
-    """The public names of one agent adapter, with their summaries.
+def adapter_exports(module: str) -> list[tuple[str, str]]:
+    """The public names of one adapter, with their summaries.
 
     Args:
-        name (str): The adapter package under ``mirage.agents``.
+        module (str): The adapter package, such as
+            ``mirage.agents.langchain``.
 
     Returns:
         list[tuple[str, str]]: ``__all__`` in order, each with the first
             paragraph of its docstring.
     """
-    module = f"mirage.agents.{name}"
     tree = ast.parse(_module_file(module).read_text())
     names: list[str] | None = None
     for node in tree.body:
@@ -517,13 +517,17 @@ def adapter_exports(name: str) -> list[tuple[str, str]]:
     return [(n, summary(_docstring(module, n))) for n in names]
 
 
-def adapters() -> list[str]:
-    """Every agent adapter package, by its directory name."""
-    return sorted(
-        p.parent.name
-        for p in AGENTS.glob("*/__init__.py")
+def adapters() -> dict[str, str]:
+    """Every adapter package under ``mirage.agents`` and
+    ``mirage.environments``, by its directory name, with its module."""
+    return {
+        p.parent.name: f"mirage.{root}.{p.parent.name}"
+        for root in ADAPTER_ROOTS
+        for p in sorted(
+            (ROOT / "python" / "mirage" / root).glob("*/__init__.py")
+        )
         if not p.parent.name.startswith("_")
-    )
+    }
 
 
 def exports_rows(
@@ -555,14 +559,15 @@ def exports_rows(
     return Rendered("\n".join(rows), bare, sorted(omit - known))
 
 
-def exports_table(name: str, omit: frozenset[str] = frozenset()) -> Rendered:
+def exports_table(module: str, omit: frozenset[str] = frozenset()) -> Rendered:
     """Render an adapter's public names as a Markdown table.
 
     Args:
-        name (str): The adapter package under ``mirage.agents``.
+        module (str): The adapter package, such as
+            ``mirage.agents.langchain``.
         omit (frozenset[str]): Names this page leaves out.
     """
-    return exports_rows(adapter_exports(name), omit)
+    return exports_rows(adapter_exports(module), omit)
 
 
 def placeholder(annotation: TypeForm[typing.Any] | None) -> JsonValue:
@@ -782,7 +787,10 @@ def renderers() -> dict[str, dict[str, Renderer]]:
             name: partial(config_table, model)
             for name, model in models.items()
         },
-        "exports": {name: partial(exports_table, name) for name in adapters()},
+        "exports": {
+            name: partial(exports_table, module)
+            for name, module in adapters().items()
+        },
         "extras": {"optional": extras_table},
         "vfs-md": {
             name: partial(vfs_md, name, models.get(name))

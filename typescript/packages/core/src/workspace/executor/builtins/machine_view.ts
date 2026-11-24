@@ -16,7 +16,11 @@ import { renderHelp } from '../../../commands/spec/help.ts'
 import { parseShellOptions, SHELL_SPECS, type ShellParse } from '../../../commands/spec/shell.ts'
 import { SYNOPSES } from '../../../commands/spec/synopsis.ts'
 import { type CommandSpec, UsageStyle } from '../../../commands/spec/types.ts'
-import { getCurrentEvaluation, type RedirectResult } from '../../../context/session_context.ts'
+import {
+  currentCaller,
+  getCurrentEvaluation,
+  type RedirectResult,
+} from '../../../context/session_context.ts'
 import { WORKSPACE_MACHINE } from '../../../execution/process/constants.ts'
 import type { ProcessTable } from '../../../execution/process/table.ts'
 import type { MachineName, MachineResources } from '../../../execution/types.ts'
@@ -111,7 +115,25 @@ function defaultEngine(bindings: Record<string, unknown>, host: string): string 
 }
 
 /**
- * Which machines a command answers for: the one `--machine` names; in a
+ * The machine a command is about without naming it, by id as `ps` shows it:
+ * the one its line names, else the one a command Mirage runs itself prefers
+ * (`Caller.preferredMachine`: the machine whose program writes its pipe, or
+ * the one its folder is on); null when nothing says. Mirrors Python's
+ * `_told_machine`.
+ *
+ * @param named the machine the line names.
+ * @param every every machine in scope.
+ */
+function toldMachine(named: string | undefined, every: readonly string[]): string | null {
+  const told = named ?? currentCaller().preferredMachine ?? null
+  if (told === null) return null
+  return every.find((machine) => namesMachine(machine, told)) ?? null
+}
+
+/**
+ * Which machines a command answers for: the one `--machine` names; for a
+ * command that reports one machine's facts (`about`), the one its line or
+ * its folder says it is about (`toldMachine`); in a
  * command substitution, whose reader is a script, only
  * the default one, an engine's when programs run on it by default, the
  * workspace when there is no machine; otherwise every one. The host counts only while a runtime
@@ -127,6 +149,7 @@ export function machineScope(
   processes: ProcessTable,
   name: string | null,
   workspace = false,
+  about = false,
 ): MachineScope | null {
   const frame = getCurrentEvaluation()?.frame
   const routing = frame?.routing
@@ -152,6 +175,9 @@ export function machineScope(
       ? null
       : { ids: [], picked: true, several: false, workspace: false, engines: [engine] }
   }
+  const told = about ? toldMachine(routing?.machine, every) : null
+  if (told !== null)
+    return { ids: [told], picked: true, several: false, workspace: false, engines: [] }
   const substituted = frame?.substitution === true && routing !== undefined
   const fallback = substituted ? defaultEngine(routing.bindings, host) : null
   if (fallback !== null && engines.includes(fallback))

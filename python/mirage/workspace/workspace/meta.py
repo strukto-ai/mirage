@@ -54,6 +54,10 @@ class WorkspaceMeta:
         self._written = False
 
     @property
+    def workspace_id(self) -> str:
+        return self._workspace_id
+
+    @property
     def written(self) -> bool:
         """Whether the record is settled for this process; it never turns
         off."""

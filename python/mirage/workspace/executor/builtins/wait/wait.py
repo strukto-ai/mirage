@@ -99,7 +99,8 @@ async def handle_wait(
     """Wait for background jobs (``_wait_for``) until they end or the shell
     takes a signal it traps: then it answers 128 plus the signal at once,
     as bash's does, with the operands it already refused, and the action
-    runs as it returns.
+    runs as it returns. A signal it takes to run its EXIT action before it
+    dies of it cuts the wait short the same way.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -107,10 +108,13 @@ async def handle_wait(
         session (SessionState | None): shell session state, for `-p`.
         view (SessionView | None): the gated session view.
     """
-    if session is None or not any(session.signal_traps.values()):
+    if session is None or not (
+        any(session.signal_traps.values())
+        or (session.exit_trap and not session.exit_trap_inherited)
+    ):
         return await _wait_for(job_table, parts, session, view)
     arrived = session.signal_arrived = asyncio.Event()
-    if session.pending_signals:
+    if session.pending_signals or session.fatal_signal is not None:
         arrived.set()
     said: list[str] = []
     waiting = asyncio.ensure_future(
@@ -129,7 +133,11 @@ async def handle_wait(
             await asyncio.wait((waiting,))
     if not waiting.cancelled():
         return waiting.result()
-    code = 128 + min(session.pending_signals)
+    code = 128 + (
+        min(session.pending_signals)
+        if session.pending_signals
+        else session.fatal_signal or 0
+    )
     return (
         None,
         IOResult(exit_code=code, stderr=encode_text("".join(said)) or None),

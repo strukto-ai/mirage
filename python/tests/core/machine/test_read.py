@@ -20,6 +20,7 @@ from mirage.core.machine.read import (
     line_count,
     read,
     read_command,
+    read_stream,
 )
 from tests.fixtures.machine import ScriptedMachine, failed, ok
 from tests.fixtures.machine_files import bound, spec
@@ -80,3 +81,22 @@ async def test_lines_and_counts_run_where_the_file_is():
         "tail -n 4 -- '/tmp/x.txt'",
         "env LC_ALL=C wc -l < '/tmp/x.txt'",
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_hands_the_file_over_in_chunks():
+    box = ScriptedMachine("box", lambda line, data: ok(b"x" * 50_000))
+    stream = read_stream(bound(box, root="/srv"), "box", spec("/x.bin"))
+    chunks = [chunk async for chunk in stream]
+    assert b"".join(chunks) == b"x" * 50_000
+    assert len(chunks) > 1
+    assert box.lines == ["cat -- '/srv/x.bin'"]
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_that_fails_raises_what_the_tool_said():
+    said = b"cat: /tmp/x.txt: No such file or directory\n"
+    box = ScriptedMachine("box", lambda line, data: failed(said))
+    with pytest.raises(FileNotFoundError):
+        async for _ in read_stream(bound(box), "box", spec("/x.txt")):
+            pass

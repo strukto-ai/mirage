@@ -637,6 +637,143 @@ it('a group signal a shell traps still ends its program', async () => {
   ])
 })
 
+// A runner that ends only when its cancel aborts it, as a shell's run does.
+function stoppable(): { cancel: () => void; run: () => Promise<number> } {
+  const abort = new AbortController()
+  return {
+    cancel: () => {
+      abort.abort()
+    },
+    run: () =>
+      new Promise<number>((_, reject) => {
+        abort.signal.addEventListener('abort', () => {
+          reject(new DOMException('stopped', 'AbortError'))
+        })
+      }),
+  }
+}
+
+// A shell with an EXIT action of its own takes a signal it would die of, sent
+// to it alone too: the program it runs stops at once and the shell goes on to
+// its action. One it ignores it never takes, nor KILL.
+it('a shell takes a fatal signal to run its EXIT action', async () => {
+  const processes = new ProcessTable()
+  const took: number[] = []
+  const started = gate()
+  const program = (stop: AbortSignal) =>
+    new Promise<number>((_, reject) => {
+      started.release()
+      stop.addEventListener('abort', () => {
+        reject(stop.reason as Error)
+      })
+    })
+  const exitCatcher = (signal: number): boolean => {
+    took.push(signal)
+    return true
+  }
+  const child = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => undefined,
+    ignores: new Set([3]),
+    run: async () => {
+      const [, stopped] = await child.program(program)
+      return 128 + (stopped ?? 0)
+    },
+  })
+  child.exitCatcher = exitCatcher
+  const killed = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    ...stoppable(),
+  })
+  killed.exitCatcher = exitCatcher
+  await started.promise
+  expect(await processes.signal(child, 3)).toBe(true)
+  expect(await processes.signal(child, 15)).toBe(true)
+  expect((await child.join()).exit).toBe(143)
+  expect(await processes.signal(killed, 9)).toBe(true)
+  expect((await killed.join()).exit).toBe(137)
+  expect(took).toEqual([15])
+  expect([child.exiting, child.signal]).toEqual([true, null])
+})
+
+// A group's signal reaches a shell once a shell under it that took the signal
+// to run its EXIT action has ended, since the shell's stop would stop it too.
+it('a group signal waits for the EXIT action of a shell below', async () => {
+  const processes = new ProcessTable()
+  const order: string[] = []
+  const finish = gate()
+  const above = stoppable()
+  const parent = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      order.push('parent stopped')
+      above.cancel()
+    },
+    run: above.run,
+  })
+  const child = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    parent: parent.record.id.pid,
+    cancel: () => undefined,
+    run: async () => {
+      await finish.promise
+      order.push('child ended')
+      return 143
+    },
+  })
+  child.exitCatcher = () => true
+  expect(await processes.signalGroup(parent.record.group, 15)).toBe(true)
+  expect(order).toEqual([])
+  finish.release()
+  expect((await parent.join()).exit).toBe(143)
+  expect(order).toEqual(['child ended', 'parent stopped'])
+})
+
+// KILL waits for no cleanup: it lands on the shell above at once, and stops
+// the shell below running its EXIT action with it.
+it('a KILL waits for no EXIT action below', async () => {
+  const processes = new ProcessTable()
+  const order: string[] = []
+  const above = stoppable()
+  const below = stoppable()
+  const parent = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      order.push('parent stopped')
+      above.cancel()
+    },
+    run: above.run,
+  })
+  const child = processes.start({
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    parent: parent.record.id.pid,
+    cancel: () => {
+      order.push('child stopped')
+      below.cancel()
+    },
+    run: below.run,
+  })
+  child.exitCatcher = () => true
+  expect(await processes.signalGroup(parent.record.group, 15)).toBe(true)
+  expect(order).toEqual([])
+  expect(await processes.signal(parent, 9)).toBe(true)
+  expect((await child.join()).exit).toBe(137)
+  expect((await parent.join()).exit).toBe(137)
+  expect(order).toEqual(['child stopped', 'parent stopped'])
+})
+
 // A native program a trapping shell started gets the group's signal as sent
 // and answers it itself, so the shell's wait for it goes on.
 it("a group signal leaves a trapping shell's native program", async () => {

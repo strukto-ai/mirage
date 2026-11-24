@@ -122,7 +122,12 @@ async def _piped():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("stdin", "stream"),
-    [(b"input", []), (b"", []), (_piped(), []), (None, ["--stream"])],
+    [
+        (b"input", []),
+        (b"", []),
+        (_piped(), []),
+        (None, ["--stream", "--no-stdin"]),
+    ],
 )
 async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
     monkeypatch.setattr(

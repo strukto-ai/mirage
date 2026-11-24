@@ -30,6 +30,7 @@ from mirage.workspace.dispatcher.reader import NamespaceReader
 from mirage.workspace.lookup.constants import KEYWORDS
 from mirage.workspace.lookup.lookup import lookup_all
 from mirage.workspace.lookup.machine.mounts import machine_holding_all
+from mirage.workspace.lookup.machine.search import searched_machine
 from mirage.workspace.lookup.types import (
     Consumer,
     MachineAnswer,
@@ -221,8 +222,9 @@ async def machine_answers(
 ) -> dict[str, MachineAnswer]:
     """What the machine that runs each name answered the lookup the agent
     typed, for each name a machine runs (``lookup_machine``); a name
-    Mirage answers for, or none runs, has no entry. Every machine is
-    asked at once.
+    Mirage answers for, or none runs, has no entry. A name no machine
+    captures is asked of the machine search order picks for it
+    (``searched_machine``). Every machine is asked at once.
 
     Args:
         command (str): ``which``, ``type`` or ``command``.
@@ -243,7 +245,15 @@ async def machine_answers(
             name, session, registry, routing, past_functions
         )
         if runtime is not None:
-            asked[name] = runtime
+            searched = await searched_machine(
+                name,
+                [],
+                session,
+                registry,
+                routing,
+                past_functions=past_functions,
+            )
+            asked[name] = runtime if searched is None else searched
     found = await asyncio.gather(
         *(
             _answer(

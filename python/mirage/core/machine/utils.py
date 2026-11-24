@@ -18,6 +18,7 @@ from mirage.core.posix.utils import join_root
 from mirage.io.types import ByteSource
 from mirage.types import PathSpec
 from mirage.utils.path import norm, parent
+from mirage.utils.quote import single_quote
 
 
 def machine_path(accessor: MachineAccessor, path: PathSpec) -> str:
@@ -107,3 +108,17 @@ async def run_checked(
     if status != 0 or err:
         raise refusal(path, err)
     return out
+
+
+def in_folder(line: str, target: str, make_parent: bool) -> str:
+    """A line that makes a new name, its folder made first when asked.
+
+    Args:
+        line (str): the line making the name.
+        target (str): the new name's path on the machine.
+        make_parent (bool): make its folder there first.
+    """
+    if not make_parent:
+        return line
+    folder = target.rsplit("/", 1)[0] or "/"
+    return f"mkdir -p -- {single_quote(folder)} && {line}"

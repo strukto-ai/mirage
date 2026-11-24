@@ -6,7 +6,8 @@ icon: route
 
 An agent types into one shell, and a [machine](/home/setup/machine/overview)
 runs its programs. Without a route, each program goes to the first machine
-whose `captures` name it. A route picks by what the line does instead: a
+whose `captures` name it, or, where several machines take every program, to
+one that has it. A route picks by what the line does instead: a
 quick Python snippet stays on Monty inside Mirage, a training job goes to the
 GPU, and each agent gets its own container. The agent types the same
 commands either way.

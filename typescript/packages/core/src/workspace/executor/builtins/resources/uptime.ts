@@ -109,7 +109,7 @@ export async function handleUptime(
   const name = parse.flags.machine
   const named = typeof name === 'string' ? name : null
   const processes = jobTable.processes
-  const scope = machineScope(processes, named)
+  const scope = machineScope(processes, named, false, true)
   if (scope === null) return jobResult(cmdStr, `uptime: ${named ?? ''}: no such machine\n`, 1)
   const [rows, errors] = await readMachines(processes, scope, 'uptime')
   const lines = rows.map((row) => {

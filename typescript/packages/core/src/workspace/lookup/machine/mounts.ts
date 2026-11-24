@@ -217,19 +217,28 @@ export function folderMachines(folder: string, registry: MountRegistry): string[
 }
 
 /**
- * Whether the workspace runs programs on more than one machine, the only
- * case where which machine a command runs on decides where a new file
- * lands. Mirrors Python's `several_machines`.
+ * The machines the workspace runs programs on, by their names under
+ * `machines:`. Mirrors Python's `machine_names`.
  *
  * @param registry the workspace's mounts and machines.
  */
-export function severalMachines(registry: MountRegistry): boolean {
-  const machines = new Set(
+export function machineNames(registry: MountRegistry): Set<string> {
+  return new Set(
     registry.runtimeEntries
       .filter((e): e is RemoteRuntime => e instanceof RemoteRuntime)
       .map((e) => e.defaultMachine),
   )
-  return machines.size > 1
+}
+
+/**
+ * Whether the workspace runs programs on more than one machine, the only
+ * case where which machine a command runs on decides where a new file lands.
+ * Mirrors Python's `several_machines`.
+ *
+ * @param registry the workspace's mounts and machines.
+ */
+export function severalMachines(registry: MountRegistry): boolean {
+  return machineNames(registry).size > 1
 }
 
 /**

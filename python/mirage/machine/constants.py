@@ -504,7 +504,11 @@ FIFO_NAME = "fd"
 
 # Every program runs as a child of this wrapper, which outlives it to say
 # how it ended, since an exec holds on while anything the program started
-# keeps its output open (E2B, msb). ``$1`` is the run's own word, which no
+# keeps its output open (E2B, msb). Its first word is the ``umask`` the
+# session set, empty for a session that set none: the wrapper takes it
+# for itself, so its program starts under it (``umask 077; python3
+# gen.py``), and drops the word. After that ``$1`` is the run's own word,
+# which no
 # program's output can know to forge; ``$2`` to ``$4`` the words a program
 # the machine cannot run is reported in (``PROGRAM_CHECK``); ``$5`` the
 # tag's assignment, exported for the program alone so the wrapper shows in
@@ -524,6 +528,7 @@ FIFO_NAME = "fd"
 # the program gets the real one back. It needs only a POSIX shell at
 # ``/bin/sh``.
 RUN_WRAPPER = (
+    '[ -z "$1" ] || umask "$1"; shift; '
     "exec 6>&2 2>/dev/null; "
     "( /bin/sh -c 'if read -r s </proc/$PPID/stat; then set -- ${s##*)}; "
     "t=${20}; else t=$(" + darwin_start("$PPID") + "); fi; "
@@ -544,9 +549,10 @@ RUN_WRAPPER_JOINED = RUN_WRAPPER.replace(
 )
 
 # Where a run's program starts in what ``run_argv`` builds: past
-# ``/bin/sh -c RUN_WRAPPER sh``, the run's own word, the three words a
-# program it cannot run is reported in, and the tag's assignment.
-RUN_PROGRAM_AT = 9
+# ``/bin/sh -c RUN_WRAPPER sh``, the session's umask, the run's own
+# word, the three words a program it cannot run is reported in, and the
+# tag's assignment.
+RUN_PROGRAM_AT = 10
 
 # The marks ahead of the pid line and the exit line the wrapper writes on
 # stderr, a record separator first so no program's output starts with it.
@@ -804,6 +810,7 @@ def run_argv(
     argv: Sequence[str],
     missing: tuple[str, str, str] = ("", "command not found", ""),
     joined: bool = False,
+    umask: int | None = None,
 ) -> tuple[str, ...]:
     """``argv`` under the wrapper every program runs in (``RUN_WRAPPER``).
 
@@ -816,12 +823,16 @@ def run_argv(
             cannot run is reported in (``PROGRAM_CHECK``).
         joined (bool): the program writes its stderr into its stdout
             (``RUN_WRAPPER_JOINED``).
+        umask (int | None): the mask the session set, which the
+            program starts under; None for a session that set none,
+            which leaves the machine's own.
     """
     return (
         "/bin/sh",
         "-c",
         RUN_WRAPPER_JOINED if joined else RUN_WRAPPER,
         "sh",
+        "" if umask is None else f"{umask:04o}",
         nonce,
         *missing,
         f"{PROCESS}={tag}",

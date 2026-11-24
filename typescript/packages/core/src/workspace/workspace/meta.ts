@@ -44,6 +44,10 @@ export class WorkspaceMeta implements MachineMemory {
     this.sessionIdExplicit = sessionIdExplicit
   }
 
+  get workspaceId(): string {
+    return this.wsId
+  }
+
   /**
    * Write the discovery record once per process. An existing record
    * wins (another process or an earlier run already registered it); a

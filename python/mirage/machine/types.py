@@ -40,6 +40,12 @@ class MachineMemory(Protocol):
     workspace reaches the one it started instead of starting another.
     """
 
+    @property
+    def workspace_id(self) -> str:
+        """The workspace's id, which names the mounts it serves into a
+        machine (``source_name``)."""
+        ...
+
     async def recall(self, name: str) -> str | None:
         """The machine Mirage started for ``name``; None when it started
         none."""

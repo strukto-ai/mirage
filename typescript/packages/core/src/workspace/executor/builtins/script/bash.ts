@@ -52,6 +52,7 @@ function bashArgs(partial: Partial<BashArgs>): BashArgs {
     settings: [],
     invalid: null,
     needsValue: null,
+    invalidName: null,
     help: false,
     version: false,
     ...partial,
@@ -71,7 +72,8 @@ function bashArgs(partial: Partial<BashArgs>): BashArgs {
  * `--` end option parsing. `-c` is a flag: its program is the first word
  * after the options, so `-cx 'echo hi'`, `-c -x 'echo hi'` and
  * `-c -- 'echo hi'` all run `echo hi`. `-O` is refused, where GNU takes a
- * shopt name.
+ * shopt name. An `-o` name `set -o` lacks is refused where it is read,
+ * before a later bad option or a missing program.
  */
 export function parseBashArgs(args: string[]): BashArgs {
   const settings: [string, boolean][] = []
@@ -115,6 +117,9 @@ export function parseBashArgs(args: string[]): BashArgs {
     if (word === null) break
     for (const ch of word.other) {
       if (!BASH_START_FLAGS.has(ch)) return bashArgs({ invalid: tok.charAt(0) + ch })
+    }
+    for (const [option] of word.settings) {
+      if (!SET_OPTION_NAMES.has(option)) return bashArgs({ invalidName: option })
     }
     for (const item of word.settings) settings.push(item)
     readStdin = readStdin || word.other.includes('s')
@@ -186,6 +191,9 @@ export async function handleBash(
   }
   if (parsed.needsValue !== null) {
     return scriptError(name, `${parsed.needsValue}: option requires an argument`, 2)
+  }
+  if (parsed.invalidName !== null) {
+    return scriptError(name, `line 0: ${name}: ${parsed.invalidName}: invalid option name`, 2)
   }
   let script = parsed.script
   let scriptName = script !== null && parsed.argv.length > 0 ? (parsed.argv[0] ?? name) : name
