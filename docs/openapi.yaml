@@ -7224,8 +7224,7 @@ components:
       title: ProfileMount
       description: Optional permissions for a specific mount. A profile can reduce mount permissions but
         cannot increase them. Omitted mounts retain their configured permissions. Use path hiding to prevent
-        access to a mount. The key is a mount's prefix; a key that names a folder inside a mount fails to
-        load.
+        access to a mount.
     ProfilePolicy:
       properties:
         script:
