@@ -226,6 +226,13 @@ checksum() {
   printf '%s' "$1" | cksum | cut -d' ' -f1
 }
 
+pin_context() {
+  [ -n "${MIRAGE_CONTEXT:-}" ] && return 0
+  MIRAGE_CONTEXT=$("$MIRAGE" context list 2>/dev/null | jq -r '[.[] | select(.current)][0].name // empty')
+  [ -n "$MIRAGE_CONTEXT" ] && export MIRAGE_CONTEXT
+  return 0
+}
+
 server_url() {
   "$MIRAGE" daemon status 2>/dev/null | jq -r '.url // empty'
 }
@@ -277,6 +284,7 @@ EOF
 agent() {
   local shell home
   command -v "${MIRAGE_AGENT:-claude}" >/dev/null || die "${MIRAGE_AGENT:-claude} is not on herdr's PATH."
+  pin_context
   case "${MIRAGE_AGENT:-claude}" in
     claude)
       shell=$(command -v mirage-bash) || die "mirage-bash not found. Install mirage-ai 0.1 or later."
@@ -290,6 +298,7 @@ agent() {
 }
 
 shell() {
+  pin_context
   ssh_args "$(server_url)"
   ssh "${SSH_ARGS[@]}" || pause
 }
