@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { Buffer } from 'node:buffer'
+import { timingSafeEqual } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
@@ -76,7 +78,13 @@ import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_TEMPLATE } from './env.ts'
-import { isLifecycleRequest, router as registerE2BRoutes } from './routers/e2b.ts'
+import { CONNECT_STREAM, isProcessStart } from './e2b/process.ts'
+import {
+  connectCode,
+  isDataRequest,
+  isLifecycleRequest,
+  router as registerE2BRoutes,
+} from './routers/e2b.ts'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -215,12 +223,23 @@ function answerMissing(deps: {
  * sent, so `curl -d` reaches a JSON route as sent. An empty body is none.
  * Mirrors Python's `LenientJson`.
  */
-function lenientJson(app: FastifyInstance): void {
+function lenientJson(app: FastifyInstance, e2b: boolean): void {
   const json = app.getDefaultJsonParser('error', 'error')
   app.removeAllContentTypeParsers()
   app.addContentTypeParser(RAW_BODIES, (_req, _payload, done) => {
     done(null)
   })
+  if (e2b) {
+    app.addContentTypeParser(CONNECT_STREAM, { parseAs: 'buffer' }, (req, body, done) => {
+      if (isProcessStart(req.method, req.routeOptions.url ?? '')) {
+        done(null, body)
+      } else if (body.length === 0) {
+        done(null, undefined)
+      } else {
+        void json(req, body.toString(), done)
+      }
+    })
+  }
   app.addContentTypeParser('*', { parseAs: 'string' }, (req, body, done) => {
     if (body.length === 0) done(null, undefined)
     else void json(req, body as string, done)
@@ -229,6 +248,14 @@ function lenientJson(app: FastifyInstance): void {
 
 function noop(): void {
   /* intentional no-op for onIdleExit default */
+}
+
+function matchesAccessToken(expected: string, presented: string): boolean {
+  const expectedBytes = Buffer.from(expected)
+  const presentedBytes = Buffer.from(presented)
+  return (
+    expectedBytes.length === presentedBytes.length && timingSafeEqual(expectedBytes, presentedBytes)
+  )
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -240,10 +267,15 @@ export function buildApp(options: BuildAppOptions = {}) {
   const e2bTemplate = (options.e2bTemplate ?? process.env[ENV_E2B_TEMPLATE] ?? '').trim()
   const sandboxLifecycle = (req: FastifyRequest): boolean =>
     e2bTemplate !== '' && isLifecycleRequest(req.method, req.routeOptions.url ?? '')
+  const sandboxData = (req: FastifyRequest): boolean =>
+    e2bTemplate !== '' && isDataRequest(req.method, req.routeOptions.url ?? '')
   const replyError = (reply: FastifyReply, error: HttpError): FastifyReply => {
-    if (!sandboxLifecycle(reply.request)) return errorResponse(reply, error)
+    const lifecycle = sandboxLifecycle(reply.request)
+    if (!lifecycle && !sandboxData(reply.request)) return errorResponse(reply, error)
     for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
-    return reply.code(error.status).send({ code: error.status, message: error.message })
+    return reply
+      .code(error.status)
+      .send({ code: lifecycle ? error.status : connectCode(error.status), message: error.message })
   }
   const stateRoot = stateRootPath(options.stateRoot)
   const host: ServerHost = {
@@ -298,13 +330,13 @@ export function buildApp(options: BuildAppOptions = {}) {
   })
   const nativeErrors = answerMissing({ registry, host })
   registerErrorHandlers(app, async (err, req, reply) => {
-    if (sandboxLifecycle(req)) {
+    if (sandboxLifecycle(req) || sandboxData(req)) {
       void replyError(reply, errorOf(err))
       return
     }
     await nativeErrors(err, req, reply)
   })
-  lenientJson(app)
+  lenientJson(app, e2bTemplate !== '')
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('preHandler', traceContextMiddleware)
   app.decorateRequest('closed', null as never)
@@ -332,7 +364,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     done()
   })
   registerRateLimits(app, rateLimits, false, replyError)
-  registerAuth(app, authConfig, sandboxLifecycle)
+  registerAuth(app, authConfig, sandboxLifecycle, sandboxData)
   registerRateLimits(app, rateLimits, true, replyError)
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const routes = fastifyRoutes(app)
@@ -354,6 +386,7 @@ export function buildApp(options: BuildAppOptions = {}) {
           resources,
           snapshotStore: options.snapshotStore,
           template: e2bTemplate,
+          matchesAccessToken,
         })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),

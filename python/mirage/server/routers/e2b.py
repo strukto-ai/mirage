@@ -10,6 +10,7 @@ from starlette.routing import Match
 from starlette.types import Scope
 
 from mirage.server.e2b.leases import Sandbox, Sandboxes
+from mirage.server.e2b.process import start_process
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.routers.workspaces import open_workspace, template_config
 from mirage.utils.ids import new_workspace_id
@@ -43,6 +44,10 @@ class LifecycleRoute(APIRoute):
 
 
 router = APIRouter(route_class=LifecycleRoute, include_in_schema=False)
+data_router = APIRouter(include_in_schema=False)
+data_router.add_api_route(
+    "/process.Process/Start", start_process, methods=["POST"]
+)
 
 
 class ConnectSandboxRequest(BaseModel):
@@ -61,6 +66,12 @@ class CreateSandboxRequest(ConnectSandboxRequest):
 def is_lifecycle_request(scope: Scope) -> bool:
     return any(
         route.matches(scope)[0] is Match.FULL for route in router.routes
+    )
+
+
+def is_data_request(scope: Scope) -> bool:
+    return any(
+        route.matches(scope)[0] is Match.FULL for route in data_router.routes
     )
 
 

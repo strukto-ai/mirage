@@ -39,6 +39,9 @@
     "_on_signal": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_start_drain": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal."
+   },
+   "typescript_only": {
+    "matchesAccessToken": "The Node host injects its constant-time token comparator into the portable lease table; the Python routing boundary uses compare_digest."
    }
   },
   "server/metrics": {
@@ -1769,7 +1772,8 @@
     "LifecycleRoute": "FastAPI wraps lifecycle routes to translate the native exception handler and validation response.",
     "create_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
     "connect_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
-    "kill_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline."
+    "kill_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "data_router": "FastAPI groups the data endpoints into their own router for raw body and lease authentication handling."
    },
    "typescript_only": {
     "CONNECT": "The Fastify auth hook and route registration share the matchable route pattern.",
@@ -1777,7 +1781,32 @@
     "KILL": "The Fastify auth hook and route registration share the matchable route pattern.",
     "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
     "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
-    "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory."
+    "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory.",
+    "connectCode": "The Fastify error boundary returns a Connect code from the native HTTP status."
+   }
+  },
+  "server/e2b/connect": {
+   "typescript_only": {
+    "isRecord": "TypeScript narrows decoded JSON without an assertion; Python uses isinstance inline.",
+    "isStringMap": "TypeScript narrows the validated env to Record<string, string>; Python checks its dict inline."
+   }
+  },
+  "server/e2b/process": {
+   "python_only": {
+    "DEADLINE_MESSAGE": "The Python iterator and ASGI boundary share the timeout text; the TypeScript stream emits the terminal frame in one branch.",
+    "ProcessResponse": "The ASGI response observes disconnect separately and drains or closes the generator across the workspace runner loop.",
+    "_deadline": "Python uses an absolute asyncio deadline; JavaScript keeps the remaining timeout in a signal.",
+    "_disconnect": "The ASGI response polls receive explicitly; Fastify supplies the closed signal.",
+    "_error": "FastAPI emits Connect-shaped request errors directly from the handler.",
+    "_process_ids": "The Python process IDs are drawn from an itertools counter; TypeScript generates an ID inside the registered route.",
+    "_read_start": "The ASGI handler bounds request-body reads. The Fastify parser supplies bounded bytes.",
+    "start_process": "FastAPI registers a named handler; RouteApp binds the callback inline."
+   },
+   "typescript_only": {
+    "START": "Fastify's route registration, parser, and authentication predicate share the path constant.",
+    "isProcessStart": "Fastify matches method and registered URL; FastAPI checks its declared route matches.",
+    "registerProcess": "The TypeScript RouteApp registers the route with deps; FastAPI registers the handler on its router.",
+    "requestTimeout": "JavaScript passes a relative delay to its cancellation signal; Python uses an absolute asyncio deadline."
    }
   }
  }

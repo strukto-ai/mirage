@@ -319,15 +319,22 @@ class LenientJson:
 
     Args:
         app (ASGIApp): the app behind.
+        raw_request (Callable[[Scope], bool] | None): routes that consume
+            the request with its original media type.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(
+        self, app: ASGIApp, raw_request: Callable[[Scope], bool] | None = None
+    ) -> None:
         self.app = app
+        self.raw_request = raw_request
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        if scope["type"] == "http":
+        if scope["type"] == "http" and (
+            self.raw_request is None or not self.raw_request(scope)
+        ):
             given = next(
                 (v for k, v in scope["headers"] if k == b"content-type"), b""
             ).lower()
@@ -478,14 +485,15 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     register_error_handlers(app)
     app.add_exception_handler(WorkspaceMissing, answer_missing)
-    app.add_middleware(LenientJson)
+    if e2b_template is None:
+        e2b_template = os.environ.get(ENV_E2B_TEMPLATE)
+    sandbox_request = e2b.is_data_request if e2b_template else None
+    app.add_middleware(LenientJson, raw_request=sandbox_request)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
     limits = resolve_rate_limits(rate_limits)
     app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
     auth = auth_config if auth_config is not None else resolve_auth_config()
-    if e2b_template is None:
-        e2b_template = os.environ.get(ENV_E2B_TEMPLATE)
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
             "daemon starting without bearer auth; anyone who can reach "
@@ -496,6 +504,7 @@ def build_app(
         AuthMiddleware,
         config=auth,
         api_key_request=e2b.is_lifecycle_request if e2b_template else None,
+        sandbox_request=sandbox_request,
     )
     app.add_middleware(RateLimitMiddleware, rate_limits=limits)
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
@@ -533,6 +542,7 @@ def build_app(
     app.state.e2b = Sandboxes(app.state.registry) if e2b_template else None
     if e2b_template:
         app.include_router(e2b.router)
+        app.include_router(e2b.data_router)
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

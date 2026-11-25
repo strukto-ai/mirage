@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,12 +10,14 @@ import { SignJWT } from 'jose'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
 import { AuthMode, type AuthConfig } from '../auth/config.ts'
+import { CONNECT_STREAM } from '../e2b/process.ts'
 import { CONFIGS_PREFIX, OWNERS_PREFIX } from '../registry.ts'
 
 const API_KEY = { 'x-api-key': 'test-key' }
 const BEARER = { authorization: 'Bearer test-key' }
 const RAM = { mounts: { '/home/user': { vfs: 'ram', mode: 'write' } } }
 const CREATE = '/v2/sandboxes'
+const START = '/process.Process/Start'
 
 interface SandboxResponse {
   sandboxID: string
@@ -76,6 +79,74 @@ function connect(app: MirageApp, id: string, timeout: number, headers = API_KEY)
 
 function kill(app: MirageApp, id: string, headers = API_KEY) {
   return app.inject({ method: 'DELETE', url: `/sandboxes/${id}`, headers })
+}
+
+function dataHeaders(sandbox: SandboxResponse): Record<string, string> {
+  return {
+    'e2b-sandbox-id': sandbox.sandboxID,
+    'e2b-sandbox-port': '49983',
+    'x-access-token': sandbox.envdAccessToken,
+    'content-type': CONNECT_STREAM,
+    authorization: 'Basic dXNlcjo=',
+  }
+}
+
+function processBody(
+  line: string,
+  options: { cwd?: string; envs?: Record<string, string> } = {},
+): Buffer<ArrayBuffer> {
+  const payload = Buffer.from(
+    JSON.stringify({ process: { cmd: '/bin/bash', args: ['-l', '-c', line], ...options } }),
+  )
+  const frame = Buffer.alloc(5 + payload.length)
+  frame.writeUInt32BE(payload.length, 1)
+  payload.copy(frame, 5)
+  return frame
+}
+
+interface ProcessFrame {
+  flags: number
+  payload: {
+    event?: {
+      start?: { pid: number }
+      data?: { stdout?: string; stderr?: string }
+      end?: { exitCode: number; exited: boolean; status: string }
+    }
+    error?: { code: string; message: string }
+  }
+}
+
+function processFrames(body: Buffer): ProcessFrame[] {
+  const frames: ProcessFrame[] = []
+  for (let offset = 0; offset < body.length;) {
+    const end = offset + 5 + body.readUInt32BE(offset + 1)
+    frames.push({
+      flags: body.readUInt8(offset),
+      payload: JSON.parse(body.subarray(offset + 5, end).toString()) as ProcessFrame['payload'],
+    })
+    offset = end
+  }
+  return frames
+}
+
+function processOutput(frames: ProcessFrame[], stream: 'stdout' | 'stderr'): string {
+  return Buffer.concat(
+    frames.flatMap(({ payload }) => {
+      const value = payload.event?.data?.[stream]
+      return value === undefined ? [] : [Buffer.from(value, 'base64')]
+    }),
+  ).toString()
+}
+
+async function runCommand(
+  app: MirageApp,
+  headers: Record<string, string>,
+  body: Buffer,
+): Promise<ProcessFrame[]> {
+  const answer = await app.inject({ method: 'POST', url: START, headers, payload: body })
+  expect(answer.statusCode, answer.body).toBe(200)
+  expect(answer.headers['content-type']).toBe(CONNECT_STREAM)
+  return processFrames(answer.rawPayload)
 }
 
 describe('E2B lifecycle', () => {
@@ -233,5 +304,134 @@ describe('E2B lifecycle', () => {
     expect(stopped.statusCode).toBe(200)
     expect((await connect(app, id, 300)).statusCode).toBe(404)
     expect((await kill(app, id)).statusCode).toBe(404)
+  })
+})
+
+describe('E2B commands', () => {
+  it('streams both outputs and the exit status with per-call cwd and env', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app, { envVars: { CHECK: 'lease', OTHER: 'shared' } })
+    const headers = dataHeaders(sandbox)
+    const first = await runCommand(
+      app,
+      headers,
+      processBody(
+        'pwd; printf "%s" "$CHECK:$OTHER"; printf "warning" >&2; cd /; export CHECK=changed; exit 7',
+        { envs: { CHECK: 'request' } },
+      ),
+    )
+    expect(first[0]?.flags).toBe(0)
+    expect(first[0]?.payload.event?.start?.pid).toBeGreaterThan(0)
+    expect(processOutput(first, 'stdout')).toBe('/home/user\nrequest:shared')
+    expect(processOutput(first, 'stderr')).toBe('warning')
+    expect(first.at(-2)).toEqual({
+      flags: 0,
+      payload: { event: { end: { exitCode: 7, exited: true, status: 'exit status 7' } } },
+    })
+    expect(first.at(-1)).toEqual({ flags: 2, payload: {} })
+
+    const second = await runCommand(app, headers, processBody('pwd; printf "%s" "$CHECK"'))
+    expect(second[0]?.payload.event?.start?.pid).not.toBe(first[0]?.payload.event?.start?.pid)
+    expect(processOutput(second, 'stdout')).toBe('/home/user\nlease')
+    const override = await runCommand(app, headers, processBody('pwd', { cwd: '/' }))
+    expect(processOutput(override, 'stdout')).toBe('/\n')
+  })
+
+  it('uses the workspace command policy and preserves the denied exit status', async () => {
+    const { app } = await setup({
+      policies: [
+        {
+          preCommand: ({ command }) =>
+            command === 'touch' ? { kind: 'deny', reason: 'no touch' } : null,
+        },
+      ],
+    })
+    const sandbox = await create(app)
+    const denied = await runCommand(app, dataHeaders(sandbox), processBody('touch denied'))
+    expect(denied.at(-2)?.payload.event?.end?.exitCode).toBe(126)
+    expect(processOutput(denied, 'stderr')).toBe('touch: Permission denied\n')
+  })
+
+  it('requires a live lease token for this sandbox and the envd port', async () => {
+    const { app } = await setup()
+    const first = await create(app)
+    const second = await create(app)
+    const post = (headers: Record<string, string>, payload: Buffer = processBody('pwd')) =>
+      app.inject({ method: 'POST', url: START, headers, payload })
+    const firstHeaders = dataHeaders(first)
+    const wrongPort = await post({ ...firstHeaders, 'e2b-sandbox-port': '49999' })
+    expect(wrongPort.statusCode).toBe(400)
+    expect(wrongPort.json()).toMatchObject({ code: 'invalid_argument' })
+    for (const token of ['', second.envdAccessToken, API_KEY['x-api-key']]) {
+      const refused = await post({ ...firstHeaders, ...BEARER, 'x-access-token': token })
+      expect(refused.statusCode).toBe(401)
+      expect(refused.json()).toMatchObject({ code: 'unauthenticated' })
+    }
+    const malformed = await post(firstHeaders, Buffer.from('not a frame'))
+    expect(malformed.statusCode).toBe(400)
+    const badTimeout = await post({ ...firstHeaders, 'connect-timeout-ms': '1.5' })
+    expect(badTimeout.statusCode).toBe(400)
+    expect(
+      (
+        await app.inject({
+          url: '/v1/workspaces',
+          headers: { authorization: `Bearer ${first.envdAccessToken}` },
+        })
+      ).statusCode,
+    ).toBe(401)
+    expect((await kill(app, first.sandboxID)).statusCode).toBe(204)
+    expect((await post(firstHeaders)).statusCode).toBe(401)
+  })
+
+  it('cancels a command at its Connect deadline before it can write', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const headers = dataHeaders(sandbox)
+    const timedOut = await runCommand(
+      app,
+      { ...headers, 'connect-timeout-ms': '25' },
+      processBody('sleep 0.3; touch late'),
+    )
+    expect(timedOut.at(-1)).toEqual({
+      flags: 2,
+      payload: { error: { code: 'deadline_exceeded', message: 'command deadline exceeded' } },
+    })
+    const after = await runCommand(app, headers, processBody('test ! -e late'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
+  it('streams output before completion and cancels the running line on disconnect', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const headers = dataHeaders(sandbox)
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const stop = new AbortController()
+    const response = await fetch(`${address}${START}`, {
+      method: 'POST',
+      headers,
+      body: processBody('printf started; sleep 0.5; touch disconnected'),
+      signal: stop.signal,
+    })
+    const reader = response.body?.getReader()
+    if (reader === undefined) throw new Error('command response has no body')
+    const decoder = new TextDecoder()
+    let output = ''
+    try {
+      while (!output.includes('c3RhcnRlZA==')) {
+        const received = await reader.read()
+        if (received.done) throw new Error('command did not stream the first data frame')
+        if (!(received.value instanceof Uint8Array)) throw new Error('unexpected response data')
+        output += decoder.decode(received.value, { stream: true })
+      }
+      expect(output).not.toContain('"exited"')
+    } finally {
+      stop.abort()
+      await reader.cancel().catch((error: unknown) => {
+        if (!(error instanceof Error) || error.name !== 'AbortError') throw error
+      })
+    }
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const after = await runCommand(app, headers, processBody('test ! -e disconnected'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
 })

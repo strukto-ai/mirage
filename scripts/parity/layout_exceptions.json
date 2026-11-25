@@ -203,6 +203,11 @@
    "typescript_only": {
     "computations": "The computation table a worker runs and its execute, made once per worker, shared by worker_entry (a thread) and worker's in-thread port (a host with no threads, an edge isolate). Python always starts a subprocess, which resolves importable functions itself."
    }
+  },
+  "server/e2b": {
+   "python_only": {
+    "routing": "The FastAPI boundary resolves and authenticates a sandbox from the request. The TypeScript lease table accepts header values directly."
+   }
   }
  }
 }

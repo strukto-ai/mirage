@@ -2,6 +2,7 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { Sandboxes, type SandboxLease } from '../e2b/leases.ts'
+import { isProcessStart, registerProcess } from '../e2b/process.ts'
 import { HttpError } from '../errors.ts'
 import type { RouteApp } from '../routes.ts'
 import { storeRefusal } from './templates.ts'
@@ -32,6 +33,30 @@ export function isLifecycleRequest(method: string, path: string): boolean {
   )
 }
 
+export function isDataRequest(method: string, path: string): boolean {
+  return isProcessStart(method, path)
+}
+
+export function connectCode(status: number): string {
+  switch (status) {
+    case 400:
+      return 'invalid_argument'
+    case 401:
+      return 'unauthenticated'
+    case 403:
+      return 'permission_denied'
+    case 404:
+      return 'not_found'
+    case 413:
+    case 429:
+      return 'resource_exhausted'
+    case 503:
+      return 'unavailable'
+    default:
+      return 'internal'
+  }
+}
+
 function present(lease: SandboxLease, template: string) {
   return {
     sandboxID: lease.entry.id,
@@ -48,9 +73,13 @@ function missingSandbox(): HttpError {
 
 export function router(
   app: RouteApp,
-  deps: WorkspaceRoutesDeps & { resources: ResourceStore; template: string },
+  deps: WorkspaceRoutesDeps & {
+    resources: ResourceStore
+    template: string
+    matchesAccessToken: (expected: string, presented: string) => boolean
+  },
 ): Sandboxes {
-  const sandboxes = new Sandboxes(deps.registry)
+  const sandboxes = new Sandboxes(deps.registry, deps.matchesAccessToken)
   app.post(CREATE, async (req, reply) => {
     const input = CreateSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
     if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox create request')
@@ -80,5 +109,6 @@ export function router(
     if (!(await sandboxes.kill(req.params.id, req.account))) throw missingSandbox()
     return reply.status(204).send()
   })
+  registerProcess(app, sandboxes, deps.registry)
   return sandboxes
 }

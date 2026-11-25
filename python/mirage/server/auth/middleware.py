@@ -99,6 +99,8 @@ class AuthMiddleware:
         config (AuthConfig): resolved auth configuration.
         api_key_request (Callable[[Scope], bool] | None): select requests
             that must authenticate with ``X-API-Key``.
+        sandbox_request (Callable[[Scope], bool] | None): select requests
+            authenticated by a sandbox route's access token.
     """
 
     def __init__(
@@ -106,10 +108,12 @@ class AuthMiddleware:
         app: ASGIApp,
         config: AuthConfig,
         api_key_request: Callable[[Scope], bool] | None = None,
+        sandbox_request: Callable[[Scope], bool] | None = None,
     ) -> None:
         self.app = app
         self.config = config
         self.api_key_request = api_key_request
+        self.sandbox_request = sandbox_request
         jwks_url = config.jwt.jwks_url if config.jwt is not None else None
         self._jwks = (
             pyjwt.PyJWKClient(jwks_url) if jwks_url is not None else None
@@ -122,6 +126,14 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
         if scope.get("path") in PUBLIC_PATHS:
+            await self.app(scope, receive, send)
+            return
+        if (
+            scope["type"] == "http"
+            and self.sandbox_request is not None
+            and self.sandbox_request(scope)
+        ):
+            _admit(scope, None)
             await self.app(scope, receive, send)
             return
         cfg = self.config

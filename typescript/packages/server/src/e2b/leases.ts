@@ -1,6 +1,8 @@
 import { SYSTEM_IDS } from '@struktoai/mirage-core/utils/ids'
 import { toHex } from '@struktoai/mirage-core/utils/hex'
+import { HttpError } from '../errors.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
+import type { RouteRequest } from '../routes.ts'
 
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 
@@ -20,7 +22,10 @@ export class Sandboxes {
   private readonly leases = new Map<string, TimedLease>()
   private readonly removing = new Set<Promise<WorkspaceEntry>>()
 
-  constructor(private readonly registry: WorkspaceRegistry) {}
+  constructor(
+    private readonly registry: WorkspaceRegistry,
+    private readonly matchesAccessToken: (expected: string, presented: string) => boolean,
+  ) {}
 
   add(
     entry: WorkspaceEntry,
@@ -49,6 +54,23 @@ export class Sandboxes {
     return true
   }
 
+  requireAccess(headers: RouteRequest['headers']): SandboxLease {
+    const id = headers['e2b-sandbox-id']
+    if (typeof id !== 'string' || id === '' || headers['e2b-sandbox-port'] !== '49983') {
+      throw new HttpError('invalid_request', 'invalid sandbox routing headers')
+    }
+    const token = headers['x-access-token']
+    const lease = this.active(id)
+    if (
+      lease === null ||
+      typeof token !== 'string' ||
+      !this.matchesAccessToken(lease.sandbox.accessToken, token)
+    ) {
+      throw new HttpError('unauthorized', 'invalid sandbox access token')
+    }
+    return lease.sandbox
+  }
+
   async close(): Promise<void> {
     for (const lease of this.leases.values()) clearTimeout(lease.timer)
     this.leases.clear()
@@ -56,6 +78,13 @@ export class Sandboxes {
   }
 
   private owned(id: string, account: string | null): TimedLease | null {
+    const lease = this.active(id)
+    return lease !== null && this.registry.visible(id, account) === lease.sandbox.entry
+      ? lease
+      : null
+  }
+
+  private active(id: string): TimedLease | null {
     const lease = this.leases.get(id)
     if (lease === undefined) return null
     if (!this.isRegistered(lease)) {
@@ -66,7 +95,7 @@ export class Sandboxes {
       this.expire(lease)
       return null
     }
-    return this.registry.visible(id, account) === lease.sandbox.entry ? lease : null
+    return lease
   }
 
   private isRegistered(lease: TimedLease): boolean {

@@ -96,6 +96,8 @@ class Sandboxes:
     def _retire(self, lease: Sandbox) -> asyncio.Task[bool]:
         del self._leases[lease.entry.id]
         lease.expiry.cancel()
+        if self._registered(lease):
+            lease.entry.accepting_jobs = False
         task = asyncio.create_task(self._remove(lease))
         self._retiring.add(task)
         task.add_done_callback(self._retiring.discard)

@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import json
 import time
 from contextlib import asynccontextmanager
 
@@ -17,6 +19,7 @@ TEMPLATE = "approved"
 KEY = {"X-API-Key": "server-key"}
 TOKEN = AuthConfig(mode=AuthMode.TOKEN, bearer_token=KEY["X-API-Key"])
 CREATE = "/v2/sandboxes"
+PROCESS = "/process.Process/Start"
 SECRET = "e2b-test-key-with-at-least-32-bytes"
 
 
@@ -218,3 +221,316 @@ async def test_lifecycle_respects_workspace_admission(tmp_path):
             "message": "creation is disabled",
         }
         assert not app.state.registry.list()
+
+
+async def sandbox_headers(client, **options):
+    created = await client.post(CREATE, headers=KEY, json=options)
+    assert created.status_code == 201, created.text
+    body = created.json()
+    return {
+        "e2b-sandbox-id": body["sandboxID"],
+        "e2b-sandbox-port": "49983",
+        "x-access-token": body["envdAccessToken"],
+        "content-type": "application/connect+json",
+        "authorization": "Basic dXNlcjo=",
+    }
+
+
+def start_body(command, **options):
+    payload = json.dumps(
+        {
+            "process": {
+                "cmd": "/bin/bash",
+                "args": ["-l", "-c", command],
+                **options,
+            }
+        }
+    ).encode()
+    return b"\0" + len(payload).to_bytes(4, "big") + payload
+
+
+def envelopes(body):
+    frames = []
+    while body:
+        size = int.from_bytes(body[1:5], "big")
+        frames.append((body[0], json.loads(body[5 : 5 + size])))
+        body = body[5 + size :]
+    return frames
+
+
+def output_of(response, stream):
+    return b"".join(
+        base64.b64decode(frame["event"]["data"][stream])
+        for flags, frame in envelopes(response.content)
+        if flags == 0 and stream in frame["event"].get("data", {})
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_streams_both_outputs_and_uses_per_call_environment(
+    tmp_path,
+):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(
+            client, envVars={"FROM_CREATE": "saved", "BOTH": "old"}
+        )
+        response = await client.post(
+            PROCESS,
+            content=start_body(
+                'pwd; printf "%s/%s" "$FROM_CREATE" "$BOTH"; '
+                "printf warning >&2; export ONLY_CALL=1; exit 7",
+                envs={"BOTH": "new"},
+            ),
+            headers=headers,
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/connect+json"
+        assert output_of(response, "stdout") == b"/home/user\nsaved/new"
+        assert output_of(response, "stderr") == b"warning"
+        frames = envelopes(response.content)
+        assert frames[0][0] == 0 and frames[0][1]["event"]["start"]["pid"] > 0
+        assert frames[-2] == (
+            0,
+            {
+                "event": {
+                    "end": {"exitCode": 7, "exited": True, "status": "exited"}
+                }
+            },
+        )
+        assert frames[-1] == (2, {})
+        response = await client.post(
+            PROCESS,
+            content=start_body(
+                'pwd; printf "%s/%s" "$BOTH" "$ONLY_CALL"', cwd="/"
+            ),
+            headers=headers,
+        )
+        assert output_of(response, "stdout") == b"/\nold/"
+
+
+@pytest.mark.asyncio
+async def test_process_requires_the_addressed_sandbox_token(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        other = await sandbox_headers(client)
+        good = start_body("printf OK")
+        for changed in (
+            {"x-access-token": ""},
+            {"x-access-token": other["x-access-token"]},
+            {"e2b-sandbox-id": "unknown"},
+        ):
+            response = await client.post(
+                PROCESS, content=good, headers={**headers, **changed}
+            )
+            assert response.status_code == 401
+            assert response.json()["code"] == "unauthenticated"
+        response = await client.post(
+            PROCESS,
+            content=good,
+            headers={**headers, "e2b-sandbox-port": "49999"},
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == "invalid_argument"
+        assert (
+            await client.get("/v1/workspaces", headers=headers)
+        ).status_code == 401
+        assert (await client.get(PROCESS, headers=headers)).status_code == 401
+        assert (
+            await client.post(f"{PROCESS}/extra", headers=headers)
+        ).status_code == 401
+        assert (
+            await client.post(PROCESS, content=good, headers=headers)
+        ).status_code == 200
+        sandbox_id = headers["e2b-sandbox-id"]
+        assert (
+            await client.delete(f"/sandboxes/{sandbox_id}", headers=KEY)
+        ).status_code == 204
+        assert (
+            await client.post(PROCESS, content=good, headers=headers)
+        ).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_process_checks_lease_again_after_the_upload(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        path = f"/sandboxes/{headers['e2b-sandbox-id']}"
+        command = start_body("printf ignored")
+
+        async def upload():
+            yield command[:4]
+            assert (await client.delete(path, headers=KEY)).status_code == 204
+            yield command[4:]
+
+        response = await client.post(
+            PROCESS, content=upload(), headers=headers
+        )
+        assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_process_rejects_wrong_media_and_malformed_framing(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        command = start_body("echo yes")
+        response = await client.post(
+            PROCESS,
+            content=command,
+            headers={**headers, "content-type": "application/json"},
+        )
+        assert response.status_code == 415
+        response = await client.post(
+            PROCESS, content=command[:-1], headers=headers
+        )
+        assert response.status_code == 400
+        response = await client.post(
+            PROCESS,
+            content=command,
+            headers={**headers, "connect-timeout-ms": "1.2"},
+        )
+        assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_process_enforces_connect_deadline(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        response = await client.post(
+            PROCESS,
+            content=start_body("printf ready; sleep 0.3; touch late"),
+            headers={**headers, "connect-timeout-ms": "100"},
+        )
+        assert response.status_code == 200
+        assert output_of(response, "stdout") == b"ready"
+        assert envelopes(response.content)[-1] == (
+            2,
+            {
+                "error": {
+                    "code": "deadline_exceeded",
+                    "message": "command deadline exceeded",
+                }
+            },
+        )
+        await asyncio.sleep(0.3)
+        response = await client.post(
+            PROCESS, content=start_body("test ! -e late"), headers=headers
+        )
+        assert (
+            envelopes(response.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_streams_before_completion_and_cancels_on_disconnect(
+    tmp_path,
+):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        app,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        command = start_body("printf ready; sleep 0.3; touch disconnected")
+        ready = asyncio.Event()
+        received = iter(
+            [
+                {
+                    "type": "http.request",
+                    "body": command[:4],
+                    "more_body": True,
+                },
+                {
+                    "type": "http.request",
+                    "body": command[4:],
+                    "more_body": False,
+                },
+            ]
+        )
+
+        async def receive():
+            message = next(received, None)
+            if message is not None:
+                return message
+            await ready.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                assert message["status"] == 200
+                return
+            for flags, payload in envelopes(message["body"]):
+                assert flags == 0
+                data = payload["event"].get("data")
+                if data is not None:
+                    assert base64.b64decode(data["stdout"]) == b"ready"
+                    ready.set()
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "POST",
+            "scheme": "http",
+            "path": PROCESS,
+            "query_string": b"",
+            "headers": [
+                (key.encode(), value.encode())
+                for key, value in {**headers, "host": "test"}.items()
+            ],
+            "client": ("127.0.0.1", 10001),
+            "server": ("test", 80),
+        }
+        async with asyncio.timeout(2):
+            await app(scope, receive, send)
+        assert ready.is_set()
+        await asyncio.sleep(0.3)
+        response = await client.post(
+            PROCESS,
+            content=start_body("test ! -e disconnected"),
+            headers=headers,
+        )
+        assert (
+            envelopes(response.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
+
+
+class DenyTouch(Policy):
+    async def pre_command(self, ctx):
+        if ctx.command == "touch":
+            return Deny("touch is disabled")
+
+
+@pytest.mark.asyncio
+async def test_process_respects_workspace_command_policy(tmp_path):
+    async with server(
+        tmp_path,
+        e2b_template=TEMPLATE,
+        auth_config=TOKEN,
+        policies=[DenyTouch()],
+    ) as (_, client):
+        headers = await sandbox_headers(client)
+        refused = await client.post(
+            PROCESS, content=start_body("touch denied"), headers=headers
+        )
+        assert (
+            envelopes(refused.content)[-2][1]["event"]["end"]["exitCode"] != 0
+        )
+        checked = await client.post(
+            PROCESS, content=start_body("test ! -e denied"), headers=headers
+        )
+        assert (
+            envelopes(checked.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
