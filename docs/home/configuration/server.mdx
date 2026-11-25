@@ -88,27 +88,9 @@ To reach another server, run `mirage login URL`. See [Log in](/home/access/cli#l
 
 ## Outside config.toml
 
-These settings are only environment variables:
+Two settings are only environment variables:
 
 | Variable | Sets | Default |
 | --- | --- | --- |
 | `MIRAGE_AUTH_TOKEN` | The token the server accepts. See [Configure authentication](/home/access/http#configure-authentication). | `~/.mirage/auth_token` |
-| `MIRAGE_E2B_TEMPLATE` | The saved workspace template to use as `base` for the local E2B API. The adapter requires one server worker and configured authentication. | Disabled |
 | `MIRAGE_HOME` | The folder Mirage keeps its files in: `config.toml`, `state/`, `snapshots/` and the daemon's log. It cannot be a key, since `config.toml` lives inside it. | `~/.mirage` |
-
-## Connect the E2B SDK locally
-
-Save a Mirage workspace template with a writable `/home/user`. Set `MIRAGE_E2B_TEMPLATE` to that template's name when starting the server. The E2B compatibility routes share the server's existing HTTP port.
-
-To connect the official E2B 2.x SDK, set these variables in the client environment:
-
-```bash
-export E2B_API_KEY="<same credential as your Mirage server>"
-export E2B_API_URL="http://127.0.0.1:8765"
-export E2B_SANDBOX_URL="http://127.0.0.1:8765"
-export E2B_HTTP_VERSION="1.1"
-```
-
-Each sandbox uses a Mirage workspace. The SDK can run foreground shell commands and use its file operations on the same workspace.
-
-CrewAI Tools 1.15.45 with E2B SDK 2.64.0 can write and read files. Its append action raises a client-side error because the SDK reads bytes into a `bytearray` that its upload method rejects.
