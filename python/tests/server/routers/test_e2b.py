@@ -24,19 +24,20 @@ SECRET = "e2b-test-key-with-at-least-32-bytes"
 
 
 @asynccontextmanager
-async def server(tmp_path, **kwargs):
-    resources = memory_resource_store()
-    await resources.create_template(
-        TemplateInput(
-            name=TEMPLATE,
-            config={
-                "mounts": {"/home/user": {"vfs": "ram", "mode": "WRITE"}},
-                "store": {"type": "disk", "root": str(tmp_path / "named")},
-            },
+async def server(tmp_path, *, resource_store=None, **kwargs):
+    if resource_store is None:
+        resource_store = memory_resource_store()
+        await resource_store.create_template(
+            TemplateInput(
+                name=TEMPLATE,
+                config={
+                    "mounts": {"/home/user": {"vfs": "ram", "mode": "WRITE"}},
+                    "store": {"type": "disk", "root": str(tmp_path / "named")},
+                },
+            )
         )
-    )
     app = build_app(
-        state_root=tmp_path / "daemon", resource_store=resources, **kwargs
+        state_root=tmp_path / "daemon", resource_store=resource_store, **kwargs
     )
     async with (
         app.router.lifespan_context(app),
@@ -56,9 +57,9 @@ def account_key(account):
 
 
 @pytest.mark.asyncio
-async def test_opt_in_and_api_key_scope(tmp_path, monkeypatch):
-    monkeypatch.delenv("MIRAGE_E2B_TEMPLATE", raising=False)
-    async with server(tmp_path) as (_, client):
+async def test_api_key_scope_and_explicit_disable(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", TEMPLATE)
+    async with server(tmp_path, e2b_template="") as (_, client):
         assert (await client.post(CREATE, headers=KEY)).status_code == 404
         assert (await client.get("/health")).status_code == 404
         assert (
@@ -66,7 +67,7 @@ async def test_opt_in_and_api_key_scope(tmp_path, monkeypatch):
                 "/sandboxes/missing/timeout", headers=KEY, json={"timeout": 1}
             )
         ).status_code == 404
-    monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", TEMPLATE)
+    monkeypatch.delenv("MIRAGE_E2B_TEMPLATE")
     async with server(tmp_path) as (_, client):
         for headers in ({}, KEY):
             response = await client.post(CREATE, headers=headers)
@@ -84,6 +85,23 @@ async def test_opt_in_and_api_key_scope(tmp_path, monkeypatch):
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "unauthorized"
         assert (await client.get("/v1/workspaces", headers=bearer)).is_success
+
+
+@pytest.mark.asyncio
+async def test_environment_override_uses_the_saved_template(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", f" {TEMPLATE} ")
+    async with server(tmp_path, auth_config=TOKEN) as (_, client):
+        created = await client.post(CREATE, headers=KEY)
+        assert created.status_code == 201, created.text
+        assert created.json()["templateID"] == TEMPLATE
+    async with server(
+        tmp_path, auth_config=TOKEN, resource_store=memory_resource_store()
+    ) as (_, client):
+        missing = await client.post(CREATE, headers=KEY)
+        assert missing.status_code == 404
+        assert missing.json()["code"] == 404
 
 
 @pytest.mark.asyncio
@@ -239,7 +257,10 @@ async def test_lifecycle_respects_workspace_admission(tmp_path):
 async def sandbox_headers(client, **options):
     created = await client.post(CREATE, headers=KEY, json=options)
     assert created.status_code == 201, created.text
-    body = created.json()
+    return data_headers(created.json())
+
+
+def data_headers(body):
     return {
         "e2b-sandbox-id": body["sandboxID"],
         "e2b-sandbox-port": "49983",
@@ -336,6 +357,70 @@ def output_of(response, stream):
         for flags, frame in envelopes(response.content)
         if flags == 0 and stream in frame["event"].get("data", {})
     )
+
+
+@pytest.mark.parametrize("template_env", [None, "  "])
+@pytest.mark.asyncio
+async def test_builtin_base_has_a_fresh_writable_ram_mount(
+    tmp_path, monkeypatch, template_env
+):
+    resources = memory_resource_store()
+    if template_env is None:
+        monkeypatch.delenv("MIRAGE_E2B_TEMPLATE", raising=False)
+    else:
+        monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", template_env)
+        await resources.create_template(
+            TemplateInput(
+                name="base", config={"mounts": {"/other": {"vfs": "ram"}}}
+            )
+        )
+    async with server(
+        tmp_path, auth_config=TOKEN, resource_store=resources
+    ) as (_, client):
+        created = await client.post(CREATE, headers=KEY)
+        assert created.status_code == 201, created.text
+        first = created.json()
+        assert first["templateID"] == "base"
+        wid = first["sandboxID"]
+        reconnected = await client.post(f"{CREATE}/{wid}/connect", headers=KEY)
+        assert reconnected.status_code == 200
+        assert reconnected.json() == first
+        detail = await client.get(
+            f"/v1/workspaces/{wid}",
+            headers={"Authorization": "Bearer server-key"},
+        )
+        assert detail.status_code == 200, detail.text
+        assert [
+            (mount["prefix"], mount["vfs"], mount["mode"])
+            for mount in detail.json()["mounts"]
+        ] == [("/home/user/", "ram", "write"), ("/", "ram", "read")]
+        headers = data_headers(first)
+        written = await client.post(
+            PROCESS,
+            headers=headers,
+            content=start_body("printf kept > state.txt"),
+        )
+        assert written.status_code == 200, written.text
+        assert (
+            envelopes(written.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
+        path = {"path": "state.txt"}
+        stored = await client.get("/files", headers=headers, params=path)
+        assert stored.status_code == 200
+        assert stored.content == b"kept"
+
+        fresh = await client.post(
+            CREATE, headers=KEY, json={"templateID": "base"}
+        )
+        assert fresh.status_code == 201, fresh.text
+        second = fresh.json()
+        assert second["templateID"] == "base"
+        assert second["sandboxID"] != wid
+        missing = await client.get(
+            "/files", headers=data_headers(second), params=path
+        )
+        assert missing.status_code == 404
+        assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio

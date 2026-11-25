@@ -33,23 +33,26 @@ const stateRoots: string[] = []
 
 afterEach(async () => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
   for (const app of applications.splice(0)) await app.close()
   for (const path of stateRoots.splice(0)) await rm(path, { recursive: true, force: true })
 })
 
-async function setup(options: BuildAppOptions = {}) {
+async function setup(options: BuildAppOptions = {}, useApprovedTemplate = true) {
   const stateRoot = options.stateRoot ?? (await mkdtemp(join(tmpdir(), 'mirage-e2b-')))
   if (options.stateRoot === undefined) stateRoots.push(stateRoot)
   const templateRoot = join(stateRoot, 'template-state')
-  const resourceStore = memoryResourceStore()
-  await resourceStore.createTemplate({
-    name: 'approved',
-    description: null,
-    config: { ...RAM, store: { type: 'disk', root: templateRoot } },
-  })
+  const resourceStore = options.resourceStore ?? memoryResourceStore()
+  if (useApprovedTemplate) {
+    await resourceStore.createTemplate({
+      name: 'approved',
+      description: null,
+      config: { ...RAM, store: { type: 'disk', root: templateRoot } },
+    })
+  }
   const app = buildApp({
     authConfig: { mode: AuthMode.Token, bearerToken: API_KEY['x-api-key'] },
-    e2bTemplate: 'approved',
+    ...(useApprovedTemplate ? { e2bTemplate: 'approved' } : {}),
     rateLimits: [],
     stateRoot,
     resourceStore,
@@ -160,19 +163,21 @@ async function runCommand(
 }
 
 describe('E2B lifecycle', () => {
-  it('requires opt-in and an actual API key, scoped to the lifecycle routes', async () => {
+  it('requires an actual API key and allows explicitly disabling the routes', async () => {
+    vi.stubEnv('MIRAGE_E2B_TEMPLATE', 'approved')
     const { app: disabled } = await setup({ e2bTemplate: '' })
     expect(
       (await disabled.inject({ method: 'POST', url: CREATE, headers: BEARER })).statusCode,
     ).toBe(404)
     expect((await disabled.inject({ url: HEALTH, headers: BEARER })).statusCode).toBe(404)
 
-    const { app: noCredential } = await setup({ authConfig: { mode: AuthMode.Local } })
+    vi.stubEnv('MIRAGE_E2B_TEMPLATE', undefined)
+    const { app: noCredential } = await setup({ authConfig: { mode: AuthMode.Local } }, false)
     const local = await noCredential.inject({ method: 'POST', url: CREATE, headers: API_KEY })
     expect(local.statusCode).toBe(401)
     expect(local.json()).toEqual({ code: 401, message: 'unauthorized' })
 
-    const { app } = await setup()
+    const { app } = await setup({}, false)
     for (const headers of [{}, BEARER, { 'x-api-key': 'incorrect' }]) {
       const refused = await app.inject({ method: 'POST', url: CREATE, headers })
       expect(refused.statusCode).toBe(401)
@@ -181,6 +186,59 @@ describe('E2B lifecycle', () => {
     expect((await app.inject({ url: CREATE, headers: API_KEY })).statusCode).toBe(401)
     expect((await app.inject({ url: '/v1/workspaces', headers: API_KEY })).statusCode).toBe(401)
     expect((await app.inject({ url: '/v1/workspaces', headers: BEARER })).statusCode).toBe(200)
+  })
+
+  it.each([undefined, '  '])(
+    'creates fresh writable base sandboxes with template env %j',
+    async (env) => {
+      vi.stubEnv('MIRAGE_E2B_TEMPLATE', env)
+      const resourceStore = memoryResourceStore()
+      if (env !== undefined) {
+        await resourceStore.createTemplate({
+          name: 'base',
+          description: null,
+          config: { mounts: { '/other': { vfs: 'ram' } } },
+        })
+      }
+      const { app } = await setup({ resourceStore }, false)
+      const first = await create(app)
+      expect(first.templateID).toBe('base')
+      const reconnected = await connect(app, first.sandboxID, 300)
+      expect(reconnected.statusCode).toBe(200)
+      expect(reconnected.json()).toEqual(first)
+      const detail = await app.inject({ url: `/v1/workspaces/${first.sandboxID}`, headers: BEARER })
+      expect(detail.statusCode, detail.body).toBe(200)
+      expect(detail.json()).toMatchObject({
+        mounts: [
+          { prefix: '/home/user/', vfs: 'ram', mode: 'write' },
+          { prefix: '/', vfs: 'ram', mode: 'read' },
+        ],
+      })
+      const headers = dataHeaders(first)
+      const written = await runCommand(app, headers, processBody('printf kept > state.txt'))
+      expect(written.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+      const url = '/files?path=state.txt'
+      const stored = await app.inject({ url, headers })
+      expect(stored.statusCode).toBe(200)
+      expect(stored.body).toBe('kept')
+
+      const second = await create(app, { templateID: 'base' })
+      expect(second.templateID).toBe('base')
+      expect(second.sandboxID).not.toBe(first.sandboxID)
+      expect((await app.inject({ url, headers: dataHeaders(second) })).statusCode).toBe(404)
+    },
+  )
+
+  it('uses the configured saved template and reports it missing when absent', async () => {
+    vi.stubEnv('MIRAGE_E2B_TEMPLATE', ' approved ')
+    const resourceStore = memoryResourceStore()
+    await resourceStore.createTemplate({ name: 'approved', description: null, config: RAM })
+    const { app } = await setup({ resourceStore }, false)
+    expect((await create(app)).templateID).toBe('approved')
+    const { app: empty } = await setup({}, false)
+    const missing = await empty.inject({ method: 'POST', url: CREATE, headers: API_KEY })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.json()).toMatchObject({ code: 404 })
   })
 
   it('maps the approved aliases, validates input, and returns the same lease on connect', async () => {

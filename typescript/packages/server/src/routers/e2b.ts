@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
+import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { FileError, SandboxFiles, fileError } from '../e2b/files.ts'
 import { Sandboxes, SandboxNotRunning, type SandboxLease } from '../e2b/leases.ts'
@@ -23,11 +24,12 @@ const RPC_PREFIX = '/filesystem.Filesystem/'
 const METHODS = ['Stat', 'ListDir', 'MakeDir', 'Remove'] as const
 const RPC_PATHS: ReadonlySet<string> = new Set(METHODS.map((method) => RPC_PREFIX + method))
 
+const BASE_TEMPLATE = 'base'
 const DEFAULT_TIMEOUT = 300
 const ENVD_VERSION = '0.5.6'
 const Timeout = z.number().int().positive().default(DEFAULT_TIMEOUT)
 const CreateSandboxRequest = z.object({
-  templateID: z.string().default('base'),
+  templateID: z.string().default(BASE_TEMPLATE),
   timeout: Timeout,
   envVars: z.record(z.string(), z.string()).default({}),
 })
@@ -169,35 +171,41 @@ export function router(
   app: RouteApp,
   deps: WorkspaceRoutesDeps & {
     resources: ResourceStore
-    template: string
+    template: string | undefined
     matchesAccessToken: (expected: string, presented: string) => boolean
   },
 ): Sandboxes {
   const sandboxes = new Sandboxes(deps.registry, deps.matchesAccessToken)
+  const template = deps.template ?? BASE_TEMPLATE
   app.post(CREATE, async (req, reply) => {
     const input = CreateSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
     if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox create request')
     const { templateID, timeout, envVars } = input.data
-    if (templateID !== 'base' && templateID !== deps.template) {
+    if (templateID !== BASE_TEMPLATE && templateID !== template) {
       throw new HttpError('not_found', 'sandbox template not found')
     }
-    let saved
-    try {
-      saved = await deps.resources.getTemplate(deps.template)
-    } catch (error) {
-      if (error instanceof ResourceError) throw storeRefusal(error)
-      throw error
+    let config: Record<string, JsonValue> = {
+      mode: 'read',
+      mounts: { '/home/user': { vfs: 'ram', mode: 'write' } },
     }
-    const entry = await createEphemeralWorkspace(deps, req, reply, saved.config)
+    if (deps.template !== undefined) {
+      try {
+        config = (await deps.resources.getTemplate(deps.template)).config
+      } catch (error) {
+        if (error instanceof ResourceError) throw storeRefusal(error)
+        throw error
+      }
+    }
+    const entry = await createEphemeralWorkspace(deps, req, reply, config)
     void reply.status(201)
-    return present(sandboxes.add(entry, envVars, timeout), deps.template)
+    return present(sandboxes.add(entry, envVars, timeout), template)
   })
   app.post<{ Params: SandboxParams }>(CONNECT, (req) => {
     const input = ConnectSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
     if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox connect request')
     const lease = sandboxes.reconnect(req.params.id, req.account, input.data.timeout)
     if (lease === null) throw missingSandbox()
-    return present(lease, deps.template)
+    return present(lease, template)
   })
   app.post<{ Params: SandboxParams }>(SET_TIMEOUT, (req, reply) => {
     const input = SetSandboxTimeoutRequest.safeParse(req.body)

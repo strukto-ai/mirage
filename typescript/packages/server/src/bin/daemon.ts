@@ -65,7 +65,7 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
  */
 async function serveWorker(socket: string): Promise<void> {
   const { opts } = buildDaemonOpts(process.env)
-  const app = buildApp({ ...opts, maxWorkspaces: Number.MAX_SAFE_INTEGER })
+  const app = buildApp({ ...opts, maxWorkspaces: Number.MAX_SAFE_INTEGER, e2bTemplate: '' })
   let exiting = false
   const stop = (): void => {
     if (exiting) return

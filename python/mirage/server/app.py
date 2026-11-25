@@ -475,7 +475,9 @@ def build_app(
             ``resource_store`` config key, else files under the mirage
             home.
         e2b_template (str | None): the saved template approved for local
-            sandbox creation. Defaults to ``$MIRAGE_E2B_TEMPLATE``.
+            sandbox creation. Defaults to a nonblank
+            ``$MIRAGE_E2B_TEMPLATE`` or the built-in base. An empty
+            string disables the sandbox routes.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -485,9 +487,12 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     register_error_handlers(app)
     app.add_exception_handler(WorkspaceMissing, answer_missing)
+    if e2b_template is not None:
+        e2b_template = e2b_template.strip()
+    e2b_enabled = e2b_template != ""
     if e2b_template is None:
-        e2b_template = os.environ.get(ENV_E2B_TEMPLATE)
-    sandbox_request = e2b.is_data_request if e2b_template else None
+        e2b_template = os.environ.get(ENV_E2B_TEMPLATE, "").strip()
+    sandbox_request = e2b.is_data_request if e2b_enabled else None
     app.add_middleware(LenientJson, raw_request=sandbox_request)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
@@ -503,7 +508,7 @@ def build_app(
     app.add_middleware(
         AuthMiddleware,
         config=auth,
-        api_key_request=e2b.is_lifecycle_request if e2b_template else None,
+        api_key_request=e2b.is_lifecycle_request if e2b_enabled else None,
         sandbox_request=sandbox_request,
     )
     app.add_middleware(RateLimitMiddleware, rate_limits=limits)
@@ -538,9 +543,9 @@ def build_app(
         else build_resource_store(resolve_resource_store())
     )
     app.state.jobs = app.state.registry.jobs
-    app.state.e2b_template = e2b_template
-    app.state.e2b = Sandboxes(app.state.registry) if e2b_template else None
-    if e2b_template:
+    app.state.e2b_template = e2b_template or None
+    app.state.e2b = Sandboxes(app.state.registry) if e2b_enabled else None
+    if e2b_enabled:
         app.include_router(e2b.router)
         app.include_router(e2b.data_router)
     app.state.pid_file = (

@@ -179,7 +179,11 @@ export interface BuildAppOptions {
    * config key, else files under the mirage home.
    */
   resourceStore?: ResourceStore
-  /** Saved workspace template that enables the local E2B lifecycle API. */
+  /**
+   * Saved workspace template for E2B sandboxes. Defaults to a nonblank
+   * `$MIRAGE_E2B_TEMPLATE` or the built-in base. An empty string disables
+   * the sandbox routes.
+   */
   e2bTemplate?: string
 }
 
@@ -264,11 +268,13 @@ export function buildApp(options: BuildAppOptions = {}) {
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
-  const e2bTemplate = (options.e2bTemplate ?? process.env[ENV_E2B_TEMPLATE] ?? '').trim()
+  const configuredTemplate = options.e2bTemplate?.trim()
+  const e2bEnabled = configuredTemplate !== ''
+  const e2bTemplate = configuredTemplate ?? process.env[ENV_E2B_TEMPLATE]?.trim()
   const sandboxLifecycle = (req: FastifyRequest): boolean =>
-    e2bTemplate !== '' && isLifecycleRequest(req.method, req.routeOptions.url ?? '')
+    e2bEnabled && isLifecycleRequest(req.method, req.routeOptions.url ?? '')
   const sandboxData = (req: FastifyRequest): boolean =>
-    e2bTemplate !== '' && isDataRequest(req.method, req.routeOptions.url ?? '')
+    e2bEnabled && isDataRequest(req.method, req.routeOptions.url ?? '')
   const replyError = (reply: FastifyReply, error: HttpError): FastifyReply => {
     const lifecycle = sandboxLifecycle(reply.request)
     if (!lifecycle && !sandboxData(reply.request)) return errorResponse(reply, error)
@@ -336,7 +342,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     await nativeErrors(err, req, reply)
   })
-  lenientJson(app, e2bTemplate !== '')
+  lenientJson(app, e2bEnabled)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('preHandler', traceContextMiddleware)
   app.decorateRequest('closed', null as never)
@@ -377,17 +383,16 @@ export function buildApp(options: BuildAppOptions = {}) {
     snapshotStore: options.snapshotStore,
     resources,
   })
-  const sandboxes =
-    e2bTemplate === ''
-      ? null
-      : registerE2BRoutes(routes, {
-          registry,
-          host,
-          resources,
-          snapshotStore: options.snapshotStore,
-          template: e2bTemplate,
-          matchesAccessToken,
-        })
+  const sandboxes = e2bEnabled
+    ? registerE2BRoutes(routes, {
+        registry,
+        host,
+        resources,
+        snapshotStore: options.snapshotStore,
+        template: e2bTemplate === '' ? undefined : e2bTemplate,
+        matchesAccessToken,
+      })
+    : null
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,

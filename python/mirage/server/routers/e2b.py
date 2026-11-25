@@ -25,10 +25,12 @@ from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.multipart import PartEvent, part_events
 from mirage.server.routers.vfs import json_body, session_of
 from mirage.server.routers.workspaces import open_workspace, template_config
+from mirage.server.schemas import check_config
 from mirage.utils.ids import new_workspace_id
 
 logger = logging.getLogger(__name__)
 
+BASE_TEMPLATE = "base"
 DEFAULT_TIMEOUT = 300
 ENVD_VERSION = "0.5.6"
 FILES = "/files"
@@ -109,7 +111,7 @@ class ConnectSandboxRequest(BaseModel):
 
 
 class CreateSandboxRequest(ConnectSandboxRequest):
-    template: str = Field(default="base", alias="templateID")
+    template: str = Field(default=BASE_TEMPLATE, alias="templateID")
     env_vars: dict[str, StrictStr] = Field(
         default_factory=dict, alias="envVars"
     )
@@ -147,10 +149,18 @@ async def create_sandbox(
     response: Response,
     req: CreateSandboxRequest = CreateSandboxRequest(),
 ) -> dict[str, str]:
-    template: str = request.app.state.e2b_template
-    if req.template not in ("base", template):
+    override: str | None = request.app.state.e2b_template
+    template = override or BASE_TEMPLATE
+    if req.template not in (BASE_TEMPLATE, template):
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox template not found")
-    config, written = await template_config(request, template)
+    if override is None:
+        written: dict[str, Any] = {
+            "mode": "read",
+            "mounts": {"/home/user": {"vfs": "ram", "mode": "write"}},
+        }
+        config = check_config(written)
+    else:
+        config, written = await template_config(request, override)
     entry = await open_workspace(
         request, response, new_workspace_id(), config, written, ephemeral=True
     )
@@ -168,7 +178,7 @@ async def connect_sandbox(
     lease = sandboxes.reconnect(sandbox_id, request.state.account, req.timeout)
     if lease is None:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox not found")
-    return _present(lease, request.app.state.e2b_template)
+    return _present(lease, request.app.state.e2b_template or BASE_TEMPLATE)
 
 
 @router.post("/sandboxes/{sandbox_id}/timeout", status_code=204)

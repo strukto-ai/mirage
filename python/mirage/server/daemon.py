@@ -85,7 +85,7 @@ def _workers_proxy() -> Any:
     """The daemon's server, sending each workspace's requests to one of
     ``workers`` workers. The daemon's SSH port is one server's, so it is
     not taken with workers yet; each worker counts its own rate limits."""
-    if os.environ.get(ENV_E2B_TEMPLATE):
+    if os.environ.get(ENV_E2B_TEMPLATE, "").strip():
         raise DaemonConfigError("MIRAGE_E2B_TEMPLATE requires one worker")
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
@@ -125,7 +125,7 @@ else:
         # A process worker: as many workspaces as the daemon sends it, the
         # daemon keeping the cap, idle exit and pid file.
         threading.Thread(target=_watch_daemon, daemon=True).start()
-        app = build_app(max_workspaces=sys.maxsize)
+        app = build_app(max_workspaces=sys.maxsize, e2b_template="")
     else:
         app = build_app(
             idle_grace_seconds=_idle_grace,
