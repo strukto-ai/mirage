@@ -159,20 +159,41 @@ export async function runSnapshotTests(): Promise<void> {
     )
 
     // A plan armed while a load waits on the run is armed on the run the
-    // load leaves, not on the state it replaces.
+    // load leaves, not on the state it replaces. The gate holds the run's
+    // queue until the plan's request has reached that queue, or has been
+    // answered without it.
     let open = (): void => undefined
     const gate = new Promise<void>((resolve) => {
       open = resolve
     })
-    void runtime.router.enqueue('e', () => gate)
+    const router = runtime.router
+    void router.enqueue('e', () => gate)
     const loading = runtime.load('e', taken as unknown as JsonValue)
+    const enqueue = router.enqueue.bind(router)
+    let reached = (): void => undefined
+    const queued = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    router.enqueue = <T>(run: string, work: () => Promise<T> | T): Promise<T> => {
+      if (run === 'e') reached()
+      return enqueue(run, work)
+    }
     const arming = send(`/_run/e${FAULTS_PATH}`, 'POST', {
       plans: [{ method: 'GET', route: '/boards/:board/cards', times: 1, status: 503 }],
     })
-    const early = await Promise.race([arming.then(() => true), delay(200).then(() => false)])
-    open()
-    await loading
-    assert.equal(early, false, 'a plan waits for the load ahead of it on the run')
+    let first: string
+    try {
+      first = await Promise.race([
+        queued.then(() => 'queued'),
+        arming.then(() => 'answered'),
+        delay(10_000, 'stalled', { ref: false }),
+      ])
+    } finally {
+      router.enqueue = enqueue
+      open()
+      await loading
+    }
+    assert.equal(first, 'queued', 'a plan waits for the load ahead of it on the run')
     assert.equal((await arming).status, 200)
     assert.equal(
       (await send('/_run/e/boards/brd_1/cards')).status,
