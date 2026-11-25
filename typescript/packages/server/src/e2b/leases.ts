@@ -8,7 +8,7 @@ import type { StartCommand } from './connect.ts'
 
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 
-export class SandboxNotRunning extends HttpError {
+class SandboxNotRunning extends HttpError {
   constructor() {
     super('unauthorized', 'invalid sandbox access token')
   }
