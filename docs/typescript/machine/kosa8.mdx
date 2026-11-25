@@ -1,0 +1,38 @@
+---
+title: kosa8 Machine in TypeScript
+sidebarTitle: kosa8
+icon: /images/kosa8-logo.svg
+description: Run captured programs in a kosa8 sandbox.
+---
+
+Runs programs in a kosa8 sandbox. Settings and notes: [kosa8](/home/setup/machine/kosa8).
+
+## Install
+
+Nothing beyond `@struktoai/mirage-node`. Set `KOSA8_API_KEY`, or the machine's `apiKey`.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```typescript
+import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+
+const ws = new Workspace(
+  { '/data': new RAMVFS() },
+  {
+    mode: MountMode.EXEC,
+    machines: {
+      sandbox: {
+        provider: 'kosa8',
+        image: 'python:3.12-slim',
+        allowedDomains: ['pypi.org', 'files.pythonhosted.org'],
+        captures: ['@python', '@external'],
+      },
+    },
+  },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

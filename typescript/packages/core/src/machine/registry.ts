@@ -29,6 +29,7 @@ const NODE_PROVIDERS: readonly string[] = [
   'boxd',
   'daytona',
   'docker',
+  'kosa8',
   'kubernetes',
   'microsandbox',
   'smolvm',

@@ -166,6 +166,8 @@ const budget: Policy = {
 - A program on a [machine](/home/setup/machine/overview) connects from that
   machine, and no policy sees its connections. A `host` machine would
   connect around the gateway, so it refuses to run while a policy listens.
+  A [kosa8](/home/setup/machine/kosa8#network) machine takes allowed and
+  denied lists of its own, which kosa8 enforces inside the sandbox.
 - In a browser, `fetch` is judged by host name with an empty `address`. A
   request whose size the page cannot know (a form, a stream), a redirect
   and a `WebSocket` are refused while a policy listens.

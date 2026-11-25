@@ -1,0 +1,36 @@
+---
+title: kosa8 Machine in Python
+sidebarTitle: kosa8
+icon: /images/kosa8-logo.svg
+description: Run captured programs in a kosa8 sandbox.
+---
+
+Runs programs in a kosa8 sandbox. Settings and notes: [kosa8](/home/setup/machine/kosa8).
+
+## Install
+
+Nothing beyond `mirage-ai`. Set `KOSA8_API_KEY`, or the machine's `api_key`.
+
+## Usage
+
+`captures` defaults to [`@external`](/home/setup/machine/overview#captures):
+every program Mirage does not have itself. Name `@python` to run
+Python in the sandbox too.
+
+```python
+from mirage import RAMVFS, MountMode, Workspace
+
+ws = Workspace(
+    {"/data": RAMVFS()},
+    mode=MountMode.EXEC,
+    machines={
+        "sandbox": {
+            "provider": "kosa8",
+            "image": "python:3.12-slim",
+            "allowed_domains": ["pypi.org", "files.pythonhosted.org"],
+            "captures": ["@python", "@external"],
+        }
+    },
+)
+await ws.shell("python3 -c 'print(1 + 1)'")
+```

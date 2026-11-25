@@ -416,6 +416,7 @@
                   "home/setup/machine/e2b",
                   "home/setup/machine/daytona",
                   "home/setup/machine/boxd",
+                  "home/setup/machine/kosa8",
                   "home/setup/machine/cloudflare_container"
                 ]
               }
@@ -741,6 +742,7 @@
                   "python/machine/e2b",
                   "python/machine/daytona",
                   "python/machine/boxd",
+                  "python/machine/kosa8",
                   "python/machine/cloudflare_container"
                 ]
               }
@@ -1013,6 +1015,7 @@
                   "typescript/machine/e2b",
                   "typescript/machine/daytona",
                   "typescript/machine/boxd",
+                  "typescript/machine/kosa8",
                   "typescript/machine/cloudflare_container"
                 ]
               }
