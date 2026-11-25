@@ -14,6 +14,11 @@
 
 export const TICK_MS = 1000
 
+export interface ClockState {
+  baseMs: number
+  ticks: number
+}
+
 // Frozen at construction (i.e. per /reset) so `find -mtime` windows relative to
 // "now" behave like a live backend, while the +1s tick per touch keeps ordering
 // deterministic. /reset may pin an explicit epoch instead: mounts that render
@@ -29,6 +34,17 @@ export class Clock {
   setEpoch(epoch?: string): void {
     this.baseMs = epoch === undefined ? Date.now() : Date.parse(epoch)
     this.ticks = 0
+  }
+
+  // What a run's snapshot keeps of the clock, and what loading it puts back:
+  // the next tick after a load is the one the snapshot would have handed out.
+  snapshot(): ClockState {
+    return { baseMs: this.baseMs, ticks: this.ticks }
+  }
+
+  load(state: ClockState): void {
+    this.baseMs = state.baseMs
+    this.ticks = state.ticks
   }
 
   nowMs(): number {

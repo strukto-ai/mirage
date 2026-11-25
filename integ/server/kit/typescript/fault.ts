@@ -100,6 +100,32 @@ export class Faults {
   clear(): void {
     this.armed.length = 0
   }
+
+  // The armed plans as POST /_kit/faults takes them, and how many requests
+  // each has served, for a run's snapshot. A load parses the plans back
+  // through parseFaultBody, so it holds them to the routes the fake declares.
+  snapshot(): { plans: JsonValue[]; served: number[] } {
+    return {
+      plans: this.armed.map(({ plan }) => {
+        const wire: Record<string, JsonValue> = {
+          method: plan.method,
+          route: plan.route,
+          times: plan.times,
+          delay_ms: plan.delayMs,
+        }
+        if (plan.status !== undefined) wire.status = plan.status
+        if (plan.headers !== undefined) wire.headers = { ...plan.headers }
+        if (plan.body !== undefined) wire.body = plan.body
+        return wire
+      }),
+      served: this.armed.map(({ served }) => served),
+    }
+  }
+
+  load(plans: readonly FaultPlan[], served: readonly number[]): void {
+    this.armed.length = 0
+    plans.forEach((plan, i) => this.armed.push({ plan, served: served[i] ?? 0 }))
+  }
 }
 
 function isObject(v: JsonValue | undefined): v is Record<string, JsonValue> {

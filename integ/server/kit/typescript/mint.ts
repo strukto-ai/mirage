@@ -42,4 +42,14 @@ export class Minter {
   reset(): void {
     this.counters.clear()
   }
+
+  // Each counter by its key ('' for a global one), as a run's snapshot keeps
+  // them, so a loaded run mints the id the snapshotted one would have next.
+  snapshot(): Record<string, number> {
+    return Object.fromEntries(this.counters)
+  }
+
+  load(counters: Record<string, number>): void {
+    this.counters = new Map(Object.entries(counters))
+  }
 }

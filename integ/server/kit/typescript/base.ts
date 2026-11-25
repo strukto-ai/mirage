@@ -21,6 +21,7 @@ import type { ClientCtor, MinimalClient } from './db.ts'
 import type { KitConfig } from './config.ts'
 import type { Dmmf } from './seed.ts'
 import type { KitRoute, Router } from './route.ts'
+import type { RunSnapshot } from './snapshot.ts'
 import type { JsonValue, MintSharing, Reply, ResetResponse } from './types.ts'
 
 // What a service implements. Everything else in the kit is machinery around
@@ -151,6 +152,12 @@ export class RunState {
     this.seeded.add(tenant)
   }
 
+  // Every tenant a request or a reset has made state for, as a run's
+  // snapshot keeps them.
+  names(): string[] {
+    return [...this.tenants.keys()].sort()
+  }
+
   isSeeded(tenant: string): boolean {
     return this.seeded.has(tenant)
   }
@@ -164,6 +171,11 @@ export interface Runtime<C extends MinimalClient> {
   state: (run: string) => RunState
   reset: (body: JsonValue) => Promise<ResetResponse>
   drop: (run: string) => Promise<void>
+  // A run's world as one document, a run made from one (replacing it), and a
+  // new run made from another's (snapshot.ts).
+  snapshot: (run: string) => Promise<RunSnapshot>
+  load: (run: string, snapshot: JsonValue) => Promise<JsonValue>
+  clone: (run: string, into: string) => Promise<JsonValue>
   dispose: () => Promise<void>
 }
 

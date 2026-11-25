@@ -18,13 +18,24 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { makePool, makeState } from './base.ts'
 import type { Fake, Runtime, RunState } from './base.ts'
 import type { MinimalClient } from './db.ts'
-import { FaultError, FixtureError, KitError, ResetBodyError, TenantError } from './errors.ts'
+import {
+  FaultError,
+  FixtureError,
+  KitError,
+  NoRunError,
+  ResetBodyError,
+  RunExistsError,
+  SnapshotError,
+  TenantError,
+} from './errors.ts'
 import { FAULTS_PATH, parseFaultBody } from './fault.ts'
 import type { Faults } from './fault.ts'
 import { Router } from './route.ts'
 import type { Ctx } from './route.ts'
 import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT } from './fixture.ts'
 import { applyReset, defaultTenantsOf, parseResetBody, withPathRun } from './reset.ts'
+import { loadState, parseSnapshot, schemaDigest, snapshotOf } from './snapshot.ts'
+import type { LoadedSnapshot, RunSnapshot } from './snapshot.ts'
 import { checkName, DEFAULT_RUN, RUN_PREFIX, resolveIdentity, splitRunPath } from './tenant.ts'
 import type { Headers } from './tenant.ts'
 import { unrouted } from './unrouted.ts'
@@ -32,6 +43,9 @@ import type { JsonValue, Reply } from './types.ts'
 
 export const HEALTH_PATH = '/_kit/health'
 export const RESET_PATH = '/reset'
+// A run's snapshot, load and clone, each with the method it answers.
+const RUN_OP = /^\/_kit\/runs\/([^/]+)\/(snapshot|load|clone)$/
+const RUN_OP_METHOD: Record<string, string> = { snapshot: 'GET', load: 'POST', clone: 'POST' }
 
 // How long an idle keep-alive socket stays open, and the one number in this
 // file that is about the CLIENTS rather than the vendor being imitated. Node's
@@ -63,12 +77,63 @@ export function makeRuntime<C extends MinimalClient>(
     return made
   }
   const fixtures = new Map<string, string>()
+  let digest: string | undefined
+  const schema = (): string => (digest ??= schemaDigest(fake.config.schema))
+  const declares = (method: string, route: string): boolean => router.declares(method, route)
+  const snapshot = (run: string): Promise<RunSnapshot> => {
+    checkName('run', run)
+    return router.enqueue(run, () => {
+      if (!pool.has(run)) throw new NoRunError(`no run ${run}`)
+      return snapshotOf(
+        fake.config.service,
+        schema(),
+        fixtures.get(run) ?? fixture,
+        state(run),
+        pool.snapshot(run),
+      )
+    })
+  }
+  // On the run's queue: the run replaced by the snapshot's file, its tenants'
+  // state and its fixture. The fake forgets what it cached of the old rows,
+  // as after a reset.
+  const loadInto = async (run: string, taken: LoadedSnapshot): Promise<JsonValue> => {
+    const db = await pool.load(run, taken.db)
+    const st = makeState(fake)
+    loadState(st, taken.tenants)
+    states.set(run, st)
+    fixtures.set(run, taken.fixture)
+    const tenants = [...taken.tenants.keys()]
+    try {
+      fake.afterReset?.(db, tenants, pool.sql(run))
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      process.stderr.write(`${fake.config.service} fake: afterReset: ${message}\n`)
+    }
+    return { ok: true, run, tenants }
+  }
   return {
     fake,
     pool,
     router,
     fixtureRoot,
     state,
+    snapshot,
+    load: (run: string, body: JsonValue) => {
+      checkName('run', run)
+      const taken = parseSnapshot(body, fake.config.service, schema(), declares)
+      return router.enqueue(run, () => loadInto(run, taken))
+    },
+    // A snapshot of `run` loaded into `into`, which must not exist yet: the
+    // two then diverge, each on a file of its own.
+    clone: async (run: string, into: string) => {
+      checkName('run', into)
+      if (into === run) throw new RunExistsError(`run ${into} is the run it clones`)
+      const taken = parseSnapshot(await snapshot(run), fake.config.service, schema(), declares)
+      return router.enqueue(into, () => {
+        if (pool.has(into)) throw new RunExistsError(`run ${into} exists`)
+        return loadInto(into, taken)
+      })
+    },
     reset: (body: JsonValue) =>
       router.enqueue(runOfReset(body), async () => {
         const req = parseResetBody(
@@ -134,6 +199,56 @@ function parseFaultRequest(raw: Buffer): JsonValue {
     return parseBody(raw)
   } catch (err: unknown) {
     throw new FaultError(`${FAULTS_PATH} body is not JSON: ${(err as Error).message}`)
+  }
+}
+
+// GET /_kit/runs/<run>/snapshot answers the run's world as one document;
+// POST /_kit/runs/<run>/load makes the run that world, replacing it; POST
+// /_kit/runs/<run>/clone {"run": <new>} makes a new run of it. Under a run
+// prefix the path must name the same run, as DELETE's must.
+async function runOp<C extends MinimalClient>(
+  rt: Runtime<C>,
+  name: string,
+  op: string,
+  pathRun: string | undefined,
+  raw: Buffer,
+): Promise<Reply> {
+  try {
+    const run = checkName('run', name)
+    if (pathRun !== undefined && pathRun !== run) throw new TenantError('contradictory run path')
+    if (op === 'snapshot') return { status: 200, body: await rt.snapshot(run) }
+    if (op === 'load') {
+      let body: JsonValue
+      try {
+        body = parseBody(raw)
+      } catch (err: unknown) {
+        throw new SnapshotError(`a snapshot is not JSON: ${(err as Error).message}`)
+      }
+      return { status: 200, body: await rt.load(run, body) }
+    }
+    let into: JsonValue | undefined
+    try {
+      const body = parseBody(raw)
+      if (typeof body === 'object' && body !== null && !Array.isArray(body)) {
+        if (Object.keys(body).join() === 'run') into = body.run
+      }
+    } catch {
+      into = undefined
+    }
+    if (typeof into !== 'string') throw new TenantError('a clone body is {"run": <the new run>}')
+    return { status: 201, body: await rt.clone(run, into) }
+  } catch (err: unknown) {
+    if (err instanceof TenantError)
+      return { status: 400, body: { error: 'bad_run', message: err.message } }
+    if (err instanceof SnapshotError) {
+      return { status: 400, body: { error: 'bad_snapshot', message: err.message } }
+    }
+    if (err instanceof NoRunError)
+      return { status: 404, body: { error: 'no_run', message: err.message } }
+    if (err instanceof RunExistsError) {
+      return { status: 409, body: { error: 'run_exists', message: err.message } }
+    }
+    throw err
   }
 }
 
@@ -246,6 +361,10 @@ async function answer<C extends MinimalClient>(
   }
   if (path === HEALTH_PATH && (method === 'GET' || method === 'HEAD')) {
     return { status: 200, body: { ok: true, service, runs: rt.pool.runs().length } }
+  }
+  const op = RUN_OP.exec(path)
+  if (op !== null && RUN_OP_METHOD[op[2] ?? ''] === method) {
+    return runOp(rt, op[1] ?? '', op[2] ?? '', pathRun, raw)
   }
   if (path.startsWith('/_kit/runs/') && method === 'DELETE') {
     try {

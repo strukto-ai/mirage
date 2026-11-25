@@ -14,7 +14,15 @@
 
 import { execFile, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -209,11 +217,38 @@ export class ClientPool<C extends MinimalClient> {
   private clientFrom(run: string, template: string): C {
     const live = this.clients.get(run)
     if (live !== undefined) return live
-    const file = this.fileFor(run)
-    copyFileSync(template, file)
-    const made = new this.ctor({ datasourceUrl: `file:${file}` })
+    copyFileSync(template, this.fileFor(run))
+    return this.open(run)
+  }
+
+  // The run's client over the file already at its path.
+  private open(run: string): C {
+    const made = new this.ctor({ datasourceUrl: `file:${this.fileFor(run)}` })
     this.clients.set(run, made)
     return made
+  }
+
+  // The run's database as one consistent file, its latest commits in: a
+  // VACUUM INTO through the run's own connection, which reads every commit
+  // the run's client made, -wal included. The caller holds the run's queue,
+  // so no write is half done.
+  snapshot(run: string): Buffer {
+    const target = join(this.internal, `snapshot-${String(this.builds++)}.db`)
+    try {
+      this.sql(run).prepare('VACUUM INTO ?').run(target)
+      return readFileSync(target)
+    } finally {
+      rmSync(target, { force: true })
+    }
+  }
+
+  // A run whose file is a snapshot's database: the run dropped, the file
+  // written in its place, and its client opened over that file rather than a
+  // copy of the template.
+  async load(run: string, db: Uint8Array): Promise<C> {
+    await this.drop(run)
+    writeFileSync(this.fileFor(run), db)
+    return this.open(run)
   }
 
   // A run whose seed is already on disk costs a file copy instead of a seed.
