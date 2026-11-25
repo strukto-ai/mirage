@@ -395,6 +395,10 @@ async def test_process_rejects_wrong_media_and_malformed_framing(tmp_path):
             PROCESS, content=command[:-1], headers=headers
         )
         assert response.status_code == 400
+        assert response.json() == {
+            "code": "invalid_argument",
+            "message": "invalid Connect start request",
+        }
         response = await client.post(
             PROCESS,
             content=command,
@@ -607,3 +611,41 @@ async def test_files_follow_the_same_live_lease_and_virtual_paths(tmp_path):
             rpc + "Stat", headers=headers, json={"path": path}
         )
         assert response.json()["code"] == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_files_protect_the_mount_a_directory_resolves_to(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        _,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        prepared = await client.post(
+            PROCESS,
+            content=start_body(
+                "touch keep.txt; ln -s /home/user workspace-link"
+            ),
+            headers=headers,
+        )
+        assert (
+            envelopes(prepared.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
+        del headers["content-type"]
+
+        rpc = "/filesystem.Filesystem/"
+        refused = await client.post(
+            rpc + "Remove", headers=headers, json={"path": "workspace-link/"}
+        )
+        assert refused.status_code == 400
+        assert refused.json() == {
+            "code": "failed_precondition",
+            "message": "cannot remove a mount",
+        }
+        removed = await client.post(
+            rpc + "Remove", headers=headers, json={"path": "workspace-link"}
+        )
+        assert removed.status_code == 200
+        kept = await client.post(
+            rpc + "Stat", headers=headers, json={"path": "keep.txt"}
+        )
+        assert kept.status_code == 200

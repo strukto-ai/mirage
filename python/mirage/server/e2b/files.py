@@ -195,9 +195,7 @@ class SandboxFiles:
             if info.type != FileType.DIRECTORY:
                 await self.files.unlink(spec)
                 return
-            target = reader_of(self.files).follow_parent(
-                spec.dotted or spec.virtual
-            )
+            target = reader_of(self.files).follow(spec.dotted or spec.virtual)
             if self.files.is_mount(target) or self.files.submounts(target):
                 raise FileError("failed_precondition", "cannot remove a mount")
             for child in await self._children(spec):

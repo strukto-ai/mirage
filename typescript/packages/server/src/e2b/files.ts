@@ -189,7 +189,7 @@ export class SandboxFiles {
         await this.files.unlink(spec)
         return
       }
-      const target = readerOf(this.files).followParent(spec.dotted ?? spec.virtual)
+      const target = readerOf(this.files).follow(spec.dotted ?? spec.virtual)
       if (this.files.isMount(target) || this.files.submounts(target).length > 0) {
         throw new FileError('failed_precondition', 'cannot remove a mount')
       }

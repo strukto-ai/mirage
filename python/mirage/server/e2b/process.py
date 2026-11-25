@@ -228,8 +228,9 @@ async def start_process(request: Request) -> Response:
             if deadline is not None and deadline <= loop.time():
                 raise TimeoutError
             lease = require_sandbox(request)
-    except InvalidConnectRequest as exc:
-        return _error(400, "invalid_argument", str(exc))
+    except InvalidConnectRequest:
+        logger.debug("invalid Connect start request", exc_info=True)
+        return _error(400, "invalid_argument", "invalid Connect start request")
     except HttpError as exc:
         if exc.code == ErrorCode.UNAUTHORIZED:
             return _error(exc.status, "unauthenticated", exc.message)

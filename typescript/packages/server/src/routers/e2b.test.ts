@@ -453,7 +453,7 @@ describe('E2B files', () => {
 
     const directory = { path: 'nested/dir' }
     expect((await rpc('MakeDir', directory)).statusCode).toBe(200)
-    expect((await rpc('MakeDir', directory)).json().code).toBe('already_exists')
+    expect((await rpc('MakeDir', directory)).json()).toMatchObject({ code: 'already_exists' })
 
     const path = 'nested/dir/fixture.bin'
     const content = Buffer.from([0, 255, 130])
@@ -473,9 +473,11 @@ describe('E2B files', () => {
       payload: multipart,
     })
     expect(uploaded.statusCode, uploaded.body).toBe(200)
-    expect(uploaded.json()[0].path).toBe(`/home/user/${path}`)
+    expect(uploaded.json()).toMatchObject([{ path: `/home/user/${path}` }])
     expect((await app.inject({ method: 'GET', url, headers })).rawPayload).toEqual(content)
-    expect((await rpc('Stat', { path })).json().entry.size).toBe(String(content.length))
+    expect((await rpc('Stat', { path })).json()).toMatchObject({
+      entry: { size: String(content.length) },
+    })
     expect(
       (await rpc('ListDir', { path: 'nested', depth: 2 }))
         .json<{ entries: { name: string }[] }>()
@@ -488,8 +490,46 @@ describe('E2B files', () => {
       headers: { ...headers, 'x-access-token': 'wrong' },
     })
     expect(rejected.statusCode).toBe(401)
-    expect(rejected.json().code).toBe(401)
+    expect(rejected.json()).toMatchObject({ code: 401 })
     expect((await rpc('Remove', { path: 'nested' })).statusCode).toBe(200)
-    expect((await rpc('Stat', { path })).json().code).toBe('not_found')
+    expect((await rpc('Stat', { path })).json()).toMatchObject({ code: 'not_found' })
+  })
+
+  it('protects the mount a directory resolves to', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const prepared = await runCommand(
+      app,
+      headers,
+      processBody('touch keep.txt; ln -s /home/user workspace-link'),
+    )
+    expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+    delete headers['content-type']
+
+    const refused = await app.inject({
+      method: 'POST',
+      url: '/filesystem.Filesystem/Remove',
+      headers,
+      payload: { path: 'workspace-link/' },
+    })
+    expect(refused.statusCode).toBe(400)
+    expect(refused.json()).toEqual({
+      code: 'failed_precondition',
+      message: 'cannot remove a mount',
+    })
+    const removed = await app.inject({
+      method: 'POST',
+      url: '/filesystem.Filesystem/Remove',
+      headers,
+      payload: { path: 'workspace-link' },
+    })
+    expect(removed.statusCode).toBe(200)
+    const kept = await app.inject({
+      method: 'POST',
+      url: '/filesystem.Filesystem/Stat',
+      headers,
+      payload: { path: 'keep.txt' },
+    })
+    expect(kept.statusCode).toBe(200)
   })
 })
