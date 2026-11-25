@@ -228,9 +228,10 @@ checksum() {
 
 pin_context() {
   [ -n "${MIRAGE_CONTEXT:-}" ] && return 0
-  MIRAGE_CONTEXT=$("$MIRAGE" context list 2>/dev/null | jq -r '[.[] | select(.current)][0].name // empty')
-  [ -n "$MIRAGE_CONTEXT" ] && export MIRAGE_CONTEXT
-  return 0
+  MIRAGE_CONTEXT=$("$MIRAGE" context list | jq -r '[.[] | select(.current)][0].name // empty') &&
+    [ -n "$MIRAGE_CONTEXT" ] ||
+    die "Could not read the current Mirage context, so this pane would not stay on one server."
+  export MIRAGE_CONTEXT
 }
 
 server_url() {
