@@ -597,7 +597,8 @@
   },
   "server/auth/middleware": {
    "python_only": {
-    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
+    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline.",
+    "_extract_api_key": "Python's ASGI middleware reads raw header bytes; the Fastify hook reads the parsed header directly."
    },
    "typescript_only": {
     "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
@@ -605,12 +606,15 @@
   },
   "server/routers/workspaces": {
    "python_only": {
-    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
+    "template_config": "FastAPI routes share a helper that resolves the saved template and validates its configuration."
    },
    "typescript_only": {
     "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
     "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both.",
-    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
+    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature.",
+    "createEphemeralWorkspace": "The RouteApp calls an adapter-facing entry point after resolving the saved template; Python calls the existing open_workspace with an ephemeral option.",
+    "requireBuildRoom": "The TypeScript builder shares the existing capacity response with the nested build; Python checks it in the shared admission helper."
    }
   },
   "server/schemas": {
@@ -1748,6 +1752,32 @@
     "Agent": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
     "JsonRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
     "isRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process."
+   }
+  },
+  "server/e2b/leases": {
+   "python_only": {
+    "Sandbox": "The asyncio lease keeps the expiration timer and the sandbox data together."
+   },
+   "typescript_only": {
+    "SandboxLease": "The TypeScript adapter returns a read-only sandbox view without the mutable timer.",
+    "TimedLease": "JavaScript stores the timer and deadline outside the read-only sandbox view.",
+    "MAX_TIMER_DELAY_MS": "Node timers cannot schedule a delay larger than a signed 32-bit integer."
+   }
+  },
+  "server/routers/e2b": {
+   "python_only": {
+    "LifecycleRoute": "FastAPI wraps lifecycle routes to translate the native exception handler and validation response.",
+    "create_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "connect_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "kill_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline."
+   },
+   "typescript_only": {
+    "CONNECT": "The Fastify auth hook and route registration share the matchable route pattern.",
+    "CREATE": "The Fastify auth hook and route registration share the matchable route pattern.",
+    "KILL": "The Fastify auth hook and route registration share the matchable route pattern.",
+    "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
+    "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
+    "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory."
    }
   }
  }

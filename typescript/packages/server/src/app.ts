@@ -66,6 +66,7 @@ import { fastifyRoutes, type ServerHost } from './routes.ts'
 import { loadProfilePolicy } from '@struktoai/mirage-node'
 import {
   answer,
+  errorOf,
   errorResponse,
   HttpError,
   registerErrorHandlers,
@@ -74,6 +75,8 @@ import {
 import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
+import { ENV_E2B_TEMPLATE } from './env.ts'
+import { isLifecycleRequest, router as registerE2BRoutes } from './routers/e2b.ts'
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -168,6 +171,8 @@ export interface BuildAppOptions {
    * config key, else files under the mirage home.
    */
   resourceStore?: ResourceStore
+  /** Saved workspace template that enables the local E2B lifecycle API. */
+  e2bTemplate?: string
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -232,6 +237,14 @@ export function buildApp(options: BuildAppOptions = {}) {
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
+  const e2bTemplate = (options.e2bTemplate ?? process.env[ENV_E2B_TEMPLATE] ?? '').trim()
+  const sandboxLifecycle = (req: FastifyRequest): boolean =>
+    e2bTemplate !== '' && isLifecycleRequest(req.method, req.routeOptions.url ?? '')
+  const replyError = (reply: FastifyReply, error: HttpError): FastifyReply => {
+    if (!sandboxLifecycle(reply.request)) return errorResponse(reply, error)
+    for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
+    return reply.code(error.status).send({ code: error.status, message: error.message })
+  }
   const stateRoot = stateRootPath(options.stateRoot)
   const host: ServerHost = {
     Workspace,
@@ -279,9 +292,18 @@ export function buildApp(options: BuildAppOptions = {}) {
     ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
     trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
     return503OnClosing: false,
-    frameworkErrors: answer,
+    frameworkErrors: (err, _req, reply) => {
+      void replyError(reply, errorOf(err))
+    },
   })
-  registerErrorHandlers(app, answerMissing({ registry, host }))
+  const nativeErrors = answerMissing({ registry, host })
+  registerErrorHandlers(app, async (err, req, reply) => {
+    if (sandboxLifecycle(req)) {
+      void replyError(reply, errorOf(err))
+      return
+    }
+    await nativeErrors(err, req, reply)
+  })
   lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('preHandler', traceContextMiddleware)
@@ -297,23 +319,24 @@ export function buildApp(options: BuildAppOptions = {}) {
       console.warn(
         `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
       )
-      void errorResponse(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
+      void replyError(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
       return
     }
     if (isCrossOrigin(host, origin, fetchSite)) {
       console.warn(
         `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
       )
-      void errorResponse(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
+      void replyError(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
       return
     }
     done()
   })
-  registerRateLimits(app, rateLimits)
-  registerAuth(app, authConfig)
-  registerRateLimits(app, rateLimits, true)
+  registerRateLimits(app, rateLimits, false, replyError)
+  registerAuth(app, authConfig, sandboxLifecycle)
+  registerRateLimits(app, rateLimits, true, replyError)
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
-  const mcp = registerApi(fastifyRoutes(app), {
+  const routes = fastifyRoutes(app)
+  const mcp = registerApi(routes, {
     registry,
     host,
     auth: authConfig,
@@ -322,6 +345,16 @@ export function buildApp(options: BuildAppOptions = {}) {
     snapshotStore: options.snapshotStore,
     resources,
   })
+  const sandboxes =
+    e2bTemplate === ''
+      ? null
+      : registerE2BRoutes(routes, {
+          registry,
+          host,
+          resources,
+          snapshotStore: options.snapshotStore,
+          template: e2bTemplate,
+        })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
@@ -355,6 +388,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addHook('onClose', async () => {
     if (ssh.listener !== null) await ssh.listener.close()
     try {
+      await sandboxes?.close()
       await mcp.close()
       await jobs.close()
     } finally {

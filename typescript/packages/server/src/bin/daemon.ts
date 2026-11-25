@@ -22,7 +22,12 @@ import {
   type MirageApp,
 } from '../app.ts'
 import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
-import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET } from '../env.ts'
+import {
+  ENV_DAEMON_PORT,
+  ENV_E2B_TEMPLATE,
+  ENV_IDLE_GRACE_SECONDS,
+  ENV_WORKER_SOCKET,
+} from '../env.ts'
 import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validation.ts'
 import { pidFilePath, mirageHome } from '../paths.ts'
 import { resolveGracefulTimeout, resolveMaxWorkspaces } from '../registry.ts'
@@ -44,7 +49,11 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
   const configPort = readDaemonTable(mirageHome(env)).port
   const port = Number(env[ENV_DAEMON_PORT] ?? configPort ?? DEFAULT_PORT)
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
-  const opts: Omit<BuildAppOptions, 'onIdleExit'> = { idleGraceSeconds }
+  const e2bTemplate = env[ENV_E2B_TEMPLATE]?.trim() ?? ''
+  const opts: Omit<BuildAppOptions, 'onIdleExit'> = {
+    idleGraceSeconds,
+    ...(e2bTemplate === '' ? {} : { e2bTemplate }),
+  }
   return { port, opts }
 }
 
@@ -154,6 +163,9 @@ async function main(): Promise<void> {
   const { port, opts } = buildDaemonOpts(process.env)
   const workers = resolveWorkers()
   if (workers > 1) {
+    if (opts.e2bTemplate !== undefined) {
+      throw new DaemonConfigError(`${ENV_E2B_TEMPLATE} requires a single daemon worker`)
+    }
     await serveWorkers(port, workers, opts.idleGraceSeconds ?? 30)
     return
   }

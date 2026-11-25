@@ -82,6 +82,7 @@ export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
   readonly owner: string | null
+  readonly ephemeral: boolean
   readonly createdAt: number
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
@@ -92,10 +93,11 @@ export class WorkspaceEntry {
    */
   programs: ScriptPolicy | null = null
 
-  constructor(id: string, runner: WorkspaceRunner, owner: string | null = null) {
+  constructor(id: string, runner: WorkspaceRunner, owner: string | null = null, ephemeral = false) {
     this.id = id
     this.runner = runner
     this.owner = owner
+    this.ephemeral = ephemeral
     this.createdAt = Date.now() / 1000
   }
 }
@@ -674,6 +676,7 @@ export class WorkspaceRegistry {
     id?: string,
     owner: string | null = null,
     restoredWith: readonly Policy[] = [],
+    ephemeral = false,
   ): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
     if (this.entries.has(wid) || this.removals.has(wid) || this.forgets.has(wid))
@@ -684,7 +687,7 @@ export class WorkspaceRegistry {
     // An account reaches only the workspaces it owns, so every method's
     // caller is the owner's account.
     ws.policies.account = owner
-    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
+    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner, ephemeral)
     if (Object.keys(this.programs).length > 0) {
       entry.programs = new ScriptPolicy(new Programs(this.programs))
       ws.policies.add(entry.programs)
@@ -722,8 +725,10 @@ export class WorkspaceRegistry {
   private async drop(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
       await stop(entry, true)
-      if (this.owners !== null) await this.owners.delete([entry.id])
-      if (this.configs !== null) await this.configs.delete([entry.id])
+      if (!entry.ephemeral) {
+        if (this.owners !== null) await this.owners.delete([entry.id])
+        if (this.configs !== null) await this.configs.delete([entry.id])
+      }
     } finally {
       this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
@@ -746,6 +751,7 @@ export class WorkspaceRegistry {
     if (removal === undefined) {
       const entry = this.entries.get(id)
       if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+      if (entry.ephemeral) return this.remove(id)
       entry.acceptingJobs = false
       this.entries.delete(id)
       removal = this.shut(entry)
@@ -773,7 +779,7 @@ export class WorkspaceRegistry {
       this.entries.delete(id)
       if (entry !== undefined) {
         entry.acceptingJobs = false
-        await stop(entry)
+        await stop(entry, entry.ephemeral)
       }
     }
     await this.admissionPrograms.close()

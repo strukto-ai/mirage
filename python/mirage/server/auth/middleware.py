@@ -15,9 +15,11 @@
 import hmac
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import jwt as pyjwt
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.concurrency.limiter import run_blocking
@@ -60,17 +62,28 @@ def _extract_bearer(scope: Scope) -> str | None:
     return value or None
 
 
+def _extract_api_key(scope: Scope) -> str | None:
+    keys = [value for name, value in scope["headers"] if name == b"x-api-key"]
+    if len(keys) != 1:
+        return None
+    return keys[0].decode("latin-1").strip() or None
+
+
 async def _unauthorized(
-    scope: Scope, receive: Receive, send: Send, reason: str
+    scope: Scope, receive: Receive, send: Send, reason: str, *, api_key: bool
 ) -> None:
     client = scope.get("client") or ("?", 0)
     logger.warning(
         "rejecting request from %s:%s: %s", client[0], client[1], reason
     )
-    response = error_response(
-        ErrorCode.UNAUTHORIZED,
-        "unauthorized",
-        headers={"WWW-Authenticate": "Bearer"},
+    response = (
+        JSONResponse({"code": 401, "message": "unauthorized"}, status_code=401)
+        if api_key
+        else error_response(
+            ErrorCode.UNAUTHORIZED,
+            "unauthorized",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     )
     await response(scope, receive, send)
 
@@ -84,11 +97,19 @@ class AuthMiddleware:
     Args:
         app (ASGIApp): downstream ASGI app.
         config (AuthConfig): resolved auth configuration.
+        api_key_request (Callable[[Scope], bool] | None): select requests
+            that must authenticate with ``X-API-Key``.
     """
 
-    def __init__(self, app: ASGIApp, config: AuthConfig) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        config: AuthConfig,
+        api_key_request: Callable[[Scope], bool] | None = None,
+    ) -> None:
         self.app = app
         self.config = config
+        self.api_key_request = api_key_request
         jwks_url = config.jwt.jwks_url if config.jwt is not None else None
         self._jwks = (
             pyjwt.PyJWKClient(jwks_url) if jwks_url is not None else None
@@ -104,25 +125,49 @@ class AuthMiddleware:
             await self.app(scope, receive, send)
             return
         cfg = self.config
-        if cfg.mode == AuthMode.LOCAL and cfg.local_token is None:
+        use_api_key = (
+            scope["type"] == "http"
+            and self.api_key_request is not None
+            and self.api_key_request(scope)
+        )
+        if (
+            not use_api_key
+            and cfg.mode == AuthMode.LOCAL
+            and cfg.local_token is None
+        ):
             _admit(scope, None)
             await self.app(scope, receive, send)
             return
 
-        token = _extract_bearer(scope)
+        token = (
+            _extract_api_key(scope) if use_api_key else _extract_bearer(scope)
+        )
         if token is None:
-            await _unauthorized(scope, receive, send, "missing bearer token")
+            reason = (
+                "missing API key" if use_api_key else "missing bearer token"
+            )
+            await _unauthorized(
+                scope, receive, send, reason, api_key=use_api_key
+            )
             return
 
         if self.config.mode == AuthMode.JWT:
             if self.config.jwt is None:
                 await _unauthorized(
-                    scope, receive, send, "JWT auth is not configured"
+                    scope,
+                    receive,
+                    send,
+                    "JWT auth is not configured",
+                    api_key=use_api_key,
                 )
                 return
             if not _JWT_SHAPE.match(token):
                 await _unauthorized(
-                    scope, receive, send, "token shape is not a JWT"
+                    scope,
+                    receive,
+                    send,
+                    "token shape is not a JWT",
+                    api_key=use_api_key,
                 )
                 return
             try:
@@ -130,7 +175,9 @@ class AuthMiddleware:
                 claims = verify_jwt(token, self.config.jwt, key)
             except JWTVerificationError as e:
                 logger.debug("JWT rejected: %s", e)
-                await _unauthorized(scope, receive, send, str(e))
+                await _unauthorized(
+                    scope, receive, send, str(e), api_key=use_api_key
+                )
                 return
             _admit(scope, claims["sub"])
             await self.app(scope, receive, send)
@@ -141,8 +188,13 @@ class AuthMiddleware:
             if self.config.mode == AuthMode.LOCAL
             else self.config.bearer_token
         )
-        if expected is None or not hmac.compare_digest(token, expected):
-            await _unauthorized(scope, receive, send, "bearer mismatch")
+        if expected is None or not hmac.compare_digest(
+            token.encode(), expected.encode()
+        ):
+            reason = "API key mismatch" if use_api_key else "bearer mismatch"
+            await _unauthorized(
+                scope, receive, send, reason, api_key=use_api_key
+            )
             return
         _admit(scope, None)
         await self.app(scope, receive, send)

@@ -94,6 +94,7 @@ class WorkspaceEntry:
         runner (WorkspaceRunner): the runner driving it.
         owner (str | None): the account that created it; None when it
             was created by a caller with no account.
+        ephemeral (bool): the workspace keeps no state across stops.
     """
 
     def __init__(
@@ -101,10 +102,13 @@ class WorkspaceEntry:
         workspace_id: str,
         runner: WorkspaceRunner,
         owner: str | None = None,
+        *,
+        ephemeral: bool = False,
     ) -> None:
         self.id = workspace_id
         self.runner = runner
         self.owner = owner
+        self.ephemeral = ephemeral
         self.created_at = time.time()
         self.config_digest: str | None = None
         self.accepting_jobs = True
@@ -662,6 +666,19 @@ class WorkspaceRegistry:
             return Claim.HELD
         return Claim.TAKEN
 
+    async def has_saved_workspace(self, workspace_id: str) -> bool:
+        """Whether an id belongs to a saved workspace or a durable claim.
+
+        Args:
+            workspace_id (str): the id to check.
+        """
+        for store in (self._owners, self._configs):
+            if store is not None:
+                record, _ = await store.get(workspace_id)
+                if record is not None:
+                    return True
+        return False
+
     async def save_config(
         self, workspace_id: str, config: dict[str, JsonValue]
     ) -> None:
@@ -830,6 +847,8 @@ class WorkspaceRegistry:
         workspace_id: str | None = None,
         owner: str | None = None,
         restored_with: Sequence[Policy] = (),
+        *,
+        ephemeral: bool = False,
     ) -> WorkspaceEntry:
         """Wrap ``workspace`` in a runner and register it.
 
@@ -841,6 +860,7 @@ class WorkspaceRegistry:
             restored_with (Sequence[Policy]): the policies ``restoring``
                 gave the restore that built it, taken off before the
                 server's own are attached.
+            ephemeral (bool): the workspace keeps no state across stops.
 
         Returns:
             WorkspaceEntry: the registered entry.
@@ -867,7 +887,7 @@ class WorkspaceRegistry:
         ws.policies.account = owner
         if runner is None:
             runner = WorkspaceRunner(ws)
-        entry = WorkspaceEntry(wid, runner, owner)
+        entry = WorkspaceEntry(wid, runner, owner, ephemeral=ephemeral)
         if self._programs:
             entry.programs = ScriptPolicy(_Programs(self._programs))
             ws.policies.add(entry.programs)
@@ -916,10 +936,11 @@ class WorkspaceRegistry:
         """
         try:
             await _stop(entry, self.jobs, delete=True)
-            if self._owners is not None:
-                await self._owners.delete([entry.id])
-            if self._configs is not None:
-                await self._configs.delete([entry.id])
+            if not entry.ephemeral:
+                if self._owners is not None:
+                    await self._owners.delete([entry.id])
+                if self._configs is not None:
+                    await self._configs.delete([entry.id])
         finally:
             self.jobs.discard_workspace(entry.id)
             del self._removals[entry.id]
@@ -947,6 +968,9 @@ class WorkspaceRegistry:
         Raises:
             KeyError: ``workspace_id`` is not registered.
         """
+        entry = self._entries.get(workspace_id)
+        if entry is not None and entry.ephemeral:
+            return await self.remove(workspace_id)
         removal = self._removals.get(workspace_id)
         if removal is None:
             entry = self._entries.pop(workspace_id)

@@ -19,7 +19,12 @@ import sys
 import pytest
 
 from mirage.server import daemon
-from mirage.server.env import ENV_HOME, ENV_IDLE_GRACE_SECONDS
+from mirage.server.daemon_config import DaemonConfigError
+from mirage.server.env import (
+    ENV_E2B_TEMPLATE,
+    ENV_HOME,
+    ENV_IDLE_GRACE_SECONDS,
+)
 
 
 def test_the_daemon_writes_a_pid_file_and_exits_when_idle(
@@ -31,6 +36,12 @@ def test_the_daemon_writes_a_pid_file_and_exits_when_idle(
     assert module.app.state.pid_file == tmp_path / "daemon.pid"
     assert module.app.state.on_idle_exit is module._exit
     assert module.app.state.registry.idle_grace_seconds == 7.0
+
+
+def test_e2b_requires_one_worker(monkeypatch):
+    monkeypatch.setenv(ENV_E2B_TEMPLATE, "approved")
+    with pytest.raises(DaemonConfigError, match="requires one worker"):
+        daemon._workers_proxy()
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
 import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemon_config.ts'
@@ -162,6 +162,7 @@ export function registerRateLimits(
   app: FastifyInstance,
   rateLimits: readonly RateLimit[],
   signedIn = false,
+  replyError: (reply: FastifyReply, error: HttpError) => unknown = errorResponse,
 ): void {
   const counted = rateLimits.filter(
     (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
@@ -186,7 +187,7 @@ export function registerRateLimits(
         const name = typeof limit.key === 'function' ? 'function' : limit.key
         console.warn(`rate-limiting a request past ${name}=${limit.rate}`)
         refused('rate_limit')
-        await errorResponse(reply, new HttpError('rate_limited', 'too many requests'))
+        await replyError(reply, new HttpError('rate_limited', 'too many requests'))
       }
     })
   }

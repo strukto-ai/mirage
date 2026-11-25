@@ -47,6 +47,8 @@ from mirage.server.daemon_config import (
     read_daemon_table,
     validate_daemon_table,
 )
+from mirage.server.e2b.leases import Sandboxes
+from mirage.server.env import ENV_E2B_TEMPLATE
 from mirage.server.errors import WorkspaceMissing, register_error_handlers
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
@@ -83,6 +85,7 @@ from mirage.server.resources.strukto import StruktoSourceConfig, fetch_strukto
 from mirage.server.routers import (
     asks,
     documents,
+    e2b,
     entries,
     health,
     jobs,
@@ -282,6 +285,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
         if app.state.graceful_timeout > 0:
             await app.state.registry.drain(app.state.graceful_timeout)
         try:
+            if app.state.e2b is not None:
+                await app.state.e2b.close()
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:
@@ -363,6 +368,7 @@ def build_app(
     max_line_seconds: float | None = None,
     max_env: str | int | None = None,
     resource_store: ResourceStore | None = None,
+    e2b_template: str | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -461,6 +467,8 @@ def build_app(
             (default) reads ``$MIRAGE_RESOURCE_STORE`` or the
             ``resource_store`` config key, else files under the mirage
             home.
+        e2b_template (str | None): the saved template approved for local
+            sandbox creation. Defaults to ``$MIRAGE_E2B_TEMPLATE``.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -476,13 +484,19 @@ def build_app(
     limits = resolve_rate_limits(rate_limits)
     app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
     auth = auth_config if auth_config is not None else resolve_auth_config()
+    if e2b_template is None:
+        e2b_template = os.environ.get(ENV_E2B_TEMPLATE)
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
             "daemon starting without bearer auth; anyone who can reach "
             "it can drive it. Set MIRAGE_AUTH_TOKEN or use a non-local "
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
-    app.add_middleware(AuthMiddleware, config=auth)
+    app.add_middleware(
+        AuthMiddleware,
+        config=auth,
+        api_key_request=e2b.is_lifecycle_request if e2b_template else None,
+    )
     app.add_middleware(RateLimitMiddleware, rate_limits=limits)
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
@@ -515,6 +529,10 @@ def build_app(
         else build_resource_store(resolve_resource_store())
     )
     app.state.jobs = app.state.registry.jobs
+    app.state.e2b_template = e2b_template
+    app.state.e2b = Sandboxes(app.state.registry) if e2b_template else None
+    if e2b_template:
+        app.include_router(e2b.router)
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { createRemoteJWKSet } from 'jose'
 
 import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
@@ -84,15 +84,23 @@ export function authenticator(
   }
 }
 
-async function unauthorized(reply: FastifyReply, reason: string): Promise<void> {
+async function unauthorized(reply: FastifyReply, reason: string, apiKey = false): Promise<void> {
   console.warn(`rejecting request from ${reply.request.ip}: ${reason}`)
+  if (apiKey) {
+    void reply.code(401).send({ code: 401, message: 'unauthorized' })
+    return
+  }
   await errorResponse(
     reply,
     new HttpError('unauthorized', 'unauthorized', { headers: { 'WWW-Authenticate': 'Bearer' } }),
   )
 }
 
-export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
+export function registerAuth(
+  app: FastifyInstance,
+  config: AuthConfig,
+  usesApiKey?: (request: FastifyRequest) => boolean,
+): void {
   app.decorateRequest('account', null)
   const check = authenticator(config)
   if (check === null) {
@@ -100,13 +108,23 @@ export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
       'daemon starting without bearer auth; anyone who can reach it can drive it. ' +
         'Set MIRAGE_AUTH_TOKEN or use a non-local MIRAGE_AUTH_MODE to enforce authentication.',
     )
-    return
   }
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    const answer = await check(req.headers.authorization)
+    let authorization = req.headers.authorization
+    const apiKey = usesApiKey?.(req) === true
+    if (apiKey) {
+      const key = req.headers['x-api-key']
+      if (typeof key !== 'string' || key.trim() === '' || check === null) {
+        await unauthorized(reply, 'missing or unconfigured API key', true)
+        return
+      }
+      authorization = `${BEARER_PREFIX}${key}`
+    }
+    if (check === null) return
+    const answer = await check(authorization)
     if (typeof answer === 'string') {
-      await unauthorized(reply, answer)
+      await unauthorized(reply, answer, apiKey)
       return
     }
     req.account = answer.account
