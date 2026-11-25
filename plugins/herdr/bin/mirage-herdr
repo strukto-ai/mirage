@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+MIRAGE=${MIRAGE_BIN:-mirage}
+HERDR=${HERDR_BIN_PATH:-herdr}
+PLUGIN=${HERDR_PLUGIN_ID:-mirage}
+STATE=${HERDR_PLUGIN_STATE_DIR:-${TMPDIR:-/tmp}/mirage-herdr}
+mkdir -p "$STATE"
+
+pause() {
+  printf '\nPress Enter to continue. '
+  read -r _
+}
+
+die() {
+  printf '%s\n' "$*" >&2
+  pause
+  exit 1
+}
+
+ask() {
+  local reply
+  if [ -n "${2:-}" ]; then
+    printf '%s [%s]: ' "$1" "$2" >&2
+  else
+    printf '%s: ' "$1" >&2
+  fi
+  read -r reply
+  printf '%s' "${reply:-${2:-}}"
+}
+
+here() {
+  local cwd
+  cwd=$(printf '%s' "${HERDR_PLUGIN_CONTEXT_JSON:-}" | jq -r '.focused_pane_cwd // empty' 2>/dev/null)
+  printf '%s' "${cwd:-${PWD}}"
+}
+
+config_path() {
+  printf '%s/.mirage/workspace.yaml' "$(here)"
+}
+
+seed_config() {
+  local file dir
+  file=$(config_path)
+  dir=$(here)
+  dir=${dir//\'/\'\'}
+  [ -f "$file" ] && return 0
+  mkdir -p "$(dirname "$file")" || return 1
+  cat >"$file" <<EOF
+mounts:
+  '$dir': { vfs: disk, mode: write, config: { root: '$dir' } }
+  /tmp: { vfs: ram, mode: write }
+EOF
+}
+
+open_pane() {
+  local entry=$1 ws=$2
+  shift 2
+  "$HERDR" plugin pane open --plugin "$PLUGIN" --entrypoint "$entry" \
+    --cwd "$(here)" --env "MIRAGE_WORKSPACE=$ws" "$@" >/dev/null ||
+    die "herdr could not open the $entry pane."
+}
+
+list_workspaces() {
+  "$MIRAGE" workspace list | jq -r '.[] | "\(.id)\t\(.status)"'
+}
+
+new_workspace() {
+  local file id
+  seed_config || die "Could not write $(config_path)."
+  file=$(ask "Workspace YAML" "$(config_path)")
+  id=$(ask "Workspace id" "$(basename "$(here)")")
+  "$MIRAGE" workspace create "$file" --id "$id"
+  pause
+}
+
+load_workspace() {
+  local tar id
+  tar=$(ask "Snapshot .tar to load")
+  [ -n "$tar" ] || return 0
+  id=$(ask "New workspace id (empty picks one)")
+  if [ -n "$id" ]; then
+    "$MIRAGE" workspace load "$tar" --id "$id"
+  else
+    "$MIRAGE" workspace load "$tar"
+  fi
+  pause
+}
+
+delete_workspace() {
+  local ws=$1 typed
+  printf 'Deleting removes workspace "%s": its sessions, history and\n' "$ws"
+  printf 'anything in RAM mounts. Files on disk, S3 and other services stay.\n'
+  typed=$(ask "Type the workspace id to delete it")
+  if [ "$typed" = "$ws" ]; then
+    "$MIRAGE" workspace delete "$ws"
+  else
+    printf 'Not deleted.\n'
+  fi
+  pause
+}
+
+workspace_menu() {
+  local ws=$1 status=$2 key toggle out
+  toggle=stop
+  [ "$status" = "stopped" ] && toggle=start
+  while true; do
+    clear
+    printf 'Mirage workspace %s (%s)\n\n' "$ws" "$status"
+    printf '  enter  Claude Code on this workspace\n'
+    printf '  c      Codex on this workspace\n'
+    printf '  s      Mirage shell\n'
+    printf '  l      command log\n'
+    printf '  a      pending asks\n'
+    printf '  x      %s\n' "$toggle"
+    printf '  p      snapshot to a .tar\n'
+    printf '  d      delete\n'
+    printf '  b      back\n'
+    read -rsn1 key
+    case "$key" in
+      "") open_pane agent "$ws" --env MIRAGE_AGENT=claude; exit 0 ;;
+      c) open_pane agent "$ws" --env MIRAGE_AGENT=codex; exit 0 ;;
+      s) open_pane shell "$ws"; exit 0 ;;
+      l) open_pane logs "$ws"; exit 0 ;;
+      a) answer_asks "$ws"; return ;;
+      x) "$MIRAGE" workspace "$toggle" "$ws"; pause; return ;;
+      p)
+        out=$(ask "Save snapshot to" "$(here)/$ws.tar")
+        "$MIRAGE" workspace snapshot "$ws" "$out"
+        pause
+        return
+        ;;
+      d) delete_workspace "$ws"; return ;;
+      b) return ;;
+    esac
+  done
+}
+
+workspaces() {
+  local rows choice row
+  while true; do
+    clear
+    printf 'Mirage workspaces\n\n'
+    if ! rows=$(list_workspaces); then
+      rows=""
+      printf '  could not list workspaces (see the error above)\n'
+    elif [ -z "$rows" ]; then
+      printf '  none yet\n'
+    else
+      printf '%s\n' "$rows" | awk -F'\t' '{ printf "  %2d) %-38s %s\n", NR, $1, $2 }'
+    fi
+    printf '\nnumber: open   n: new   o: load snapshot   e: edit config   q: quit\n> '
+    read -r choice
+    case "$choice" in
+      q | "") exit 0 ;;
+      n) new_workspace ;;
+      o) load_workspace ;;
+      e)
+        seed_config || die "Could not write $(config_path)."
+        open_pane edit ""
+        exit 0
+        ;;
+      *[!0-9]*) ;;
+      *)
+        row=$(printf '%s\n' "$rows" | sed -n "${choice}p")
+        [ -n "$row" ] && workspace_menu "${row%%	*}" "${row#*	}"
+        ;;
+    esac
+  done
+}
+
+list_asks() {
+  local ws
+  for ws in "$@"; do
+    "$MIRAGE" workspace list-asks -w "$ws" |
+      jq -r --arg ws "$ws" '.[] | [$ws, .id, ([.command] + .argv | join(" ")), .reason]
+        | map(tostring | gsub("[[:cntrl:]]"; "?")) | join("\t")' || return 1
+  done
+}
+
+running_workspaces() {
+  list_workspaces | awk -F'\t' '$2 == "running" { print $1 }'
+}
+
+answer_asks() {
+  local rows choice row ws id key
+  while true; do
+    clear
+    printf 'Pending Mirage asks\n\n'
+    if [ $# -gt 0 ]; then
+      rows=$(list_asks "$@")
+    else
+      rows=$(running_workspaces | while read -r ws; do list_asks "$ws" || exit 1; done)
+    fi || {
+      printf '  could not list asks (see the error above)\n'
+      pause
+      return
+    }
+    if [ -z "$rows" ]; then
+      printf '  none\n'
+      pause
+      return
+    fi
+    printf '%s\n' "$rows" | awk -F'\t' '{ printf "  %2d) %s  %s\n      %s\n", NR, $1, $3, $4 }'
+    printf '\nnumber: answer   q: quit\n> '
+    read -r choice
+    case "$choice" in
+      q | "") return ;;
+      *[!0-9]*) continue ;;
+    esac
+    row=$(printf '%s\n' "$rows" | sed -n "${choice}p")
+    [ -n "$row" ] || continue
+    ws=$(printf '%s' "$row" | cut -f1)
+    id=$(printf '%s' "$row" | cut -f2)
+    printf '\na: allow once   s: allow for the session   d: deny   other: back\n'
+    read -rsn1 key
+    case "$key" in
+      a) "$MIRAGE" workspace allow "$ws" "$id" --scope once; pause ;;
+      s) "$MIRAGE" workspace allow "$ws" "$id" --scope session; pause ;;
+      d) "$MIRAGE" workspace deny "$ws" "$id"; pause ;;
+    esac
+  done
+}
+
+codex_home() {
+  local real=${CODEX_HOME:-$HOME/.codex} home=$STATE/codex/$MIRAGE_WORKSPACE entry
+  mkdir -p "$home" || return 1
+  for entry in auth.json config.toml AGENTS.md; do
+    [ -e "$home/$entry" ] && [ ! -L "$home/$entry" ] && continue
+    [ -e "$real/$entry" ] && ln -sfn "$real/$entry" "$home/$entry"
+  done
+  cat >"$home/environments.toml" <<EOF || return 1
+default = "mirage"
+include_local = false
+
+[[environments]]
+id = "mirage"
+program = "ssh"
+args = ["-T", "-o", "ProxyCommand=$MIRAGE ssh-proxy %r", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=$STATE/known_hosts", "$MIRAGE_WORKSPACE@mirage", "-s", "codex-exec"]
+EOF
+  printf '%s' "$home"
+}
+
+agent() {
+  local shell home
+  command -v "${MIRAGE_AGENT:-claude}" >/dev/null || die "${MIRAGE_AGENT:-claude} is not on herdr's PATH."
+  case "${MIRAGE_AGENT:-claude}" in
+    claude)
+      shell=$(command -v mirage-bash) || die "mirage-bash not found. Install mirage-ai 0.1 or later."
+      CLAUDE_CODE_SHELL=$shell claude || pause
+      ;;
+    codex)
+      home=$(codex_home) || die "Could not prepare a Codex home under $STATE."
+      CODEX_HOME=$home codex -C "$PWD" || pause
+      ;;
+  esac
+}
+
+shell() {
+  ssh -o "ProxyCommand=$MIRAGE ssh-proxy %r" \
+    -o StrictHostKeyChecking=accept-new \
+    -o "UserKnownHostsFile=$STATE/known_hosts" \
+    "$MIRAGE_WORKSPACE@mirage" || pause
+}
+
+logs() {
+  local key rows
+  while true; do
+    rows=$(($(tput lines 2>/dev/null || echo 24) - 6))
+    [ "$rows" -lt 1 ] && rows=1
+    clear
+    "$MIRAGE" workspace logs -w "$MIRAGE_WORKSPACE" --limit "$rows"
+    printf '\nq: close (refreshes every 3s)'
+    if read -rsn1 -t 3 key && [ "$key" = q ]; then
+      exit 0
+    fi
+  done
+}
+
+edit() {
+  exec "${EDITOR:-vi}" "$PWD/.mirage/workspace.yaml"
+}
+
+case "${1:-}" in
+  workspaces) workspaces ;;
+  asks) answer_asks; exit 0 ;;
+  agent) agent ;;
+  shell) shell ;;
+  logs) logs ;;
+  edit) edit ;;
+  *) die "usage: mirage-herdr workspaces|asks|agent|shell|logs|edit" ;;
+esac

@@ -22,13 +22,14 @@ Every connection goes to one Mirage server, so they all see the same workspaces 
 ### Coding agents
 
 Run the agent as it is, on a workspace the `mirage` CLI creates. Each way in
-is one of five:
+is one of six:
 
 | Way in | Agents | How they reach the workspace | Machine |
 | --- | --- | --- | :-: |
 | <img noZoom src="/images/claude-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Claude Code](/home/agents/claude-code) | Claude Code | Its shell is `mirage-bash`, or MCP, or FUSE | |
 | <img noZoom src="/images/openai-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[Codex](/home/agents/codex) | Codex | Its SSH exec-server, or MCP, or FUSE | |
 | <img noZoom src="/images/t3code-logo.svg" alt="" style={{ display: 'inline', width: '1em', height: '1em', margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }} />[t3code](/home/agents/t3code) | Every agent t3code runs | A local ACP command, or MCP | |
+| <Icon icon="table-columns" size={14} /> [herdr](/home/agents/herdr) | Claude Code and Codex in herdr panes | A herdr plugin opens the agent with its shell or exec-server on the workspace | |
 | <Icon icon="server" size={14} /> [Editors over SSH](/home/agents/remote-ssh) | Cursor, VS Code, Antigravity | The editor's server on a machine | ✓ |
 | <Icon icon="arrows-left-right" size={14} /> [ACP](/home/agents/acp) | Claude, Codex, Gemini CLI, Grok Build, OpenCode, from Zed or a JetBrains IDE | `mirage acp` between the client and the agent | |
 

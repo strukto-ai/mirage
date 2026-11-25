@@ -1,0 +1,104 @@
+---
+title: herdr
+description: Open Claude Code or Codex on a Mirage workspace from herdr, browse it in a shell pane, and manage workspaces and asks without leaving herdr.
+icon: table-columns
+---
+
+[herdr](https://herdr.dev) runs coding agents in terminal panes. Its Mirage
+plugin opens an agent pane whose commands go to a Mirage workspace, and puts
+the workspace's shell, command log, asks and lifecycle a key away. herdr
+still runs the agent and tracks its state; Mirage holds the files and runs
+the commands.
+
+## Install
+
+Install the Mirage CLI with its SSH extra, which the shell and Codex panes
+use, and herdr 0.9 or later, then the plugin:
+
+<CodeGroup>
+```bash uv
+uv tool install 'mirage-ai[ssh]'
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+```bash
+herdr plugin install strukto-ai/mirage/plugins/herdr
+```
+
+Bind its two actions in `~/.config/herdr/config.toml`:
+
+```toml ~/.config/herdr/config.toml
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "mirage.workspaces"
+description = "Mirage workspaces"
+
+[[keys.command]]
+key = "prefix+a"
+type = "plugin_action"
+command = "mirage.asks"
+description = "Mirage pending asks"
+```
+
+The plugin calls `mirage`, `mirage-bash`, `ssh`, `jq`, `claude` and `codex`
+from herdr's `PATH`.
+Set `MIRAGE_BIN` before starting herdr to use another `mirage`.
+
+## Workspaces
+
+`prefix+m` lists the server's workspaces. Pick one by number:
+
+| Key | Does |
+| --- | --- |
+| `enter` | Opens Claude Code beside the focused pane, with `mirage-bash` as its [shell](/home/agents/claude-code#shell): every command its Bash tool runs goes to the workspace |
+| `c` | Opens Codex beside the focused pane, with the workspace as its [exec-server environment](/home/agents/codex#ssh): every command it runs goes to the workspace |
+| `s` | Opens the workspace's shell in a new tab, over [SSH through the HTTP port](/home/access/ssh#over-https) |
+| `l` | Opens the workspace's command log beside the focused pane, refreshed every 3 seconds |
+| `a` | Lists the workspace's pending asks |
+| `x` | Stops a running workspace, or starts a stopped one |
+| `p` | Writes a snapshot `.tar` |
+| `d` | Deletes the workspace once you type its id |
+
+From the list itself, `n` creates a workspace, `o` loads one from a snapshot
+and `e` edits the config.
+
+The agent pane and the commands start in the focused pane's directory.
+`mirage-bash` runs each command from that directory, so the workspace must
+mount it at the same path. `n` and `e` write a starter config there when it
+has none, `.mirage/workspace.yaml`, that does:
+
+```yaml .mirage/workspace.yaml
+mounts:
+  '/Users/me/project': { vfs: disk, mode: write, config: { root: '/Users/me/project' } }
+  /tmp: { vfs: ram, mode: write }
+```
+
+To mount more, press `e`, add them, then press `n`.
+
+Codex reads its environment from `CODEX_HOME`, so each workspace gets its
+own under herdr's plugin state folder. It links your `auth.json`,
+`config.toml` and `AGENTS.md` from `~/.codex` and keeps its own history.
+
+## Asks
+
+A [command rule](/home/configuration/session#command-rules) with `ask`
+refuses a line and names an ask id. `prefix+a` lists the pending asks of
+every running workspace; pick one and press `a` to allow it once, `s` to
+allow it for the session, or `d` to deny it. The agent's retry then runs, or
+is refused.
+
+## MCP and FUSE
+
+The plugin sends an agent's commands to the workspace. The other two ways
+in need no plugin:
+
+- **MCP.** Install Mirage's plugin for the agent
+  ([Claude Code](/home/agents/claude-code#mcp), [Codex](/home/agents/codex#mcp)),
+  and every pane that runs it gets the workspace's tools.
+- **FUSE.** Mount the workspace as a folder
+  ([Claude Code](/home/agents/claude-code#fuse), [Codex](/home/agents/codex#fuse))
+  and start the agent in it from any herdr pane.

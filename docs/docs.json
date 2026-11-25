@@ -121,6 +121,7 @@
                   "home/agents/claude-code",
                   "home/agents/codex",
                   "home/agents/t3code",
+                  "home/agents/herdr",
                   "home/agents/antigravity",
                   "home/agents/remote-ssh",
                   {
