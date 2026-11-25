@@ -4,8 +4,8 @@ set -uo pipefail
 MIRAGE=${MIRAGE_BIN:-mirage}
 HERDR=${HERDR_BIN_PATH:-herdr}
 PLUGIN=${HERDR_PLUGIN_ID:-mirage}
-STATE=${HERDR_PLUGIN_STATE_DIR:-${TMPDIR:-/tmp}/mirage-herdr}
-mkdir -p "$STATE"
+STATE=${HERDR_PLUGIN_STATE_DIR:-$HOME/.local/state/mirage-herdr}
+mkdir -p "$STATE" && chmod 700 "$STATE"
 
 pause() {
   printf '\nPress Enter to continue. '
@@ -222,13 +222,42 @@ answer_asks() {
   done
 }
 
+checksum() {
+  printf '%s' "$1" | cksum | cut -d' ' -f1
+}
+
+ssh_args() {
+  local url proxy
+  url=$("$MIRAGE" daemon status 2>/dev/null | jq -r '.url // empty')
+  proxy=$(printf '%q ssh-proxy %q' "$MIRAGE" "$MIRAGE_WORKSPACE")
+  SSH_ARGS=(
+    -o "ProxyCommand=${proxy//%/%%}"
+    -o StrictHostKeyChecking=accept-new
+    -o "UserKnownHostsFile=\"${STATE//%/%%}/known_hosts\""
+    -o "HostKeyAlias=mirage-$(checksum "$url")"
+    -l "$MIRAGE_WORKSPACE"
+    mirage
+  )
+}
+
+toml_list() {
+  local item out=""
+  for item in "$@"; do
+    item=${item//\\/\\\\}
+    out="$out${out:+, }\"${item//\"/\\\"}\""
+  done
+  printf '[%s]' "$out"
+}
+
 codex_home() {
-  local real=${CODEX_HOME:-$HOME/.codex} home=$STATE/codex/$MIRAGE_WORKSPACE entry
+  local real=${CODEX_HOME:-$HOME/.codex} home entry
+  home=$STATE/codex/$(checksum "$MIRAGE_WORKSPACE")
   mkdir -p "$home" || return 1
   for entry in auth.json config.toml AGENTS.md; do
     [ -e "$home/$entry" ] && [ ! -L "$home/$entry" ] && continue
     [ -e "$real/$entry" ] && ln -sfn "$real/$entry" "$home/$entry"
   done
+  ssh_args
   cat >"$home/environments.toml" <<EOF || return 1
 default = "mirage"
 include_local = false
@@ -236,7 +265,7 @@ include_local = false
 [[environments]]
 id = "mirage"
 program = "ssh"
-args = ["-T", "-o", "ProxyCommand=$MIRAGE ssh-proxy %r", "-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=$STATE/known_hosts", "$MIRAGE_WORKSPACE@mirage", "-s", "codex-exec"]
+args = $(toml_list -T "${SSH_ARGS[@]}" -s codex-exec)
 EOF
   printf '%s' "$home"
 }
@@ -257,10 +286,8 @@ agent() {
 }
 
 shell() {
-  ssh -o "ProxyCommand=$MIRAGE ssh-proxy %r" \
-    -o StrictHostKeyChecking=accept-new \
-    -o "UserKnownHostsFile=$STATE/known_hosts" \
-    "$MIRAGE_WORKSPACE@mirage" || pause
+  ssh_args
+  ssh "${SSH_ARGS[@]}" || pause
 }
 
 logs() {
@@ -268,6 +295,7 @@ logs() {
   while true; do
     rows=$(($(tput lines 2>/dev/null || echo 24) - 6))
     [ "$rows" -lt 1 ] && rows=1
+    [ "$rows" -gt 200 ] && rows=200
     clear
     "$MIRAGE" workspace logs -w "$MIRAGE_WORKSPACE" --limit "$rows"
     printf '\nq: close (refreshes every 3s)'
@@ -278,7 +306,9 @@ logs() {
 }
 
 edit() {
-  exec "${EDITOR:-vi}" "$PWD/.mirage/workspace.yaml"
+  local editor
+  read -r -a editor <<<"${EDITOR:-vi}"
+  exec "${editor[@]}" "$PWD/.mirage/workspace.yaml"
 }
 
 case "${1:-}" in

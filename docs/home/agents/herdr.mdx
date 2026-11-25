@@ -12,8 +12,10 @@ the commands.
 
 ## Install
 
-Install the Mirage CLI with its SSH extra, which the shell and Codex panes
-use, and herdr 0.9 or later, then the plugin:
+Install the Mirage CLI with its SSH extra and herdr 0.9 or later, then the
+plugin. The shell and Codex panes need the extra where the Mirage server
+runs: the CLI's own install when it starts the local server, the server's
+environment otherwise.
 
 <CodeGroup>
 ```bash uv
@@ -96,9 +98,10 @@ is refused.
 The plugin sends an agent's commands to the workspace. The other two ways
 in need no plugin:
 
-- **MCP.** Install Mirage's plugin for the agent
+- **MCP.** Add `mirage mcp -w <workspace>` to the agent
   ([Claude Code](/home/agents/claude-code#mcp), [Codex](/home/agents/codex#mcp)),
-  and every pane that runs it gets the workspace's tools.
+  and every pane that runs it gets that workspace's tools. Mirage's agent
+  plugins serve their own workspace from `.mirage/workspace.yaml` instead.
 - **FUSE.** Mount the workspace as a folder
   ([Claude Code](/home/agents/claude-code#fuse), [Codex](/home/agents/codex#fuse))
   and start the agent in it from any herdr pane.
