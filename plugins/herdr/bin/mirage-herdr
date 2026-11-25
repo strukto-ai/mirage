@@ -226,9 +226,12 @@ checksum() {
   printf '%s' "$1" | cksum | cut -d' ' -f1
 }
 
+server_url() {
+  "$MIRAGE" daemon status 2>/dev/null | jq -r '.url // empty'
+}
+
 ssh_args() {
-  local url proxy
-  url=$("$MIRAGE" daemon status 2>/dev/null | jq -r '.url // empty')
+  local url=$1 proxy
   proxy=$(printf '%q ssh-proxy %q' "$MIRAGE" "$MIRAGE_WORKSPACE")
   SSH_ARGS=(
     -o "ProxyCommand=${proxy//%/%%}"
@@ -250,14 +253,15 @@ toml_list() {
 }
 
 codex_home() {
-  local real=${CODEX_HOME:-$HOME/.codex} home entry
-  home=$STATE/codex/$(checksum "$MIRAGE_WORKSPACE")
+  local real=${CODEX_HOME:-$HOME/.codex} url home entry
+  url=$(server_url)
+  home=$STATE/codex/$(checksum "$url $MIRAGE_WORKSPACE")
   mkdir -p "$home" || return 1
   for entry in auth.json config.toml AGENTS.md; do
     [ -e "$home/$entry" ] && [ ! -L "$home/$entry" ] && continue
     [ -e "$real/$entry" ] && ln -sfn "$real/$entry" "$home/$entry"
   done
-  ssh_args
+  ssh_args "$url"
   cat >"$home/environments.toml" <<EOF || return 1
 default = "mirage"
 include_local = false
@@ -286,7 +290,7 @@ agent() {
 }
 
 shell() {
-  ssh_args
+  ssh_args "$(server_url)"
   ssh "${SSH_ARGS[@]}" || pause
 }
 
@@ -308,6 +312,7 @@ logs() {
 edit() {
   local editor
   read -r -a editor <<<"${EDITOR:-vi}"
+  command -v "${EDITOR:-vi}" >/dev/null && editor=("${EDITOR:-vi}")
   exec "${editor[@]}" "$PWD/.mirage/workspace.yaml"
 }
 
