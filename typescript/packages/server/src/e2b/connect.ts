@@ -4,9 +4,12 @@ export interface StartCommand {
   readonly line: string
   readonly cwd: string | null
   readonly envs: Readonly<Record<string, string>>
+  readonly stdin: boolean
 }
 
 export class InvalidConnectRequest extends Error {}
+
+export class UnsupportedProcessOption extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -34,24 +37,34 @@ export function decodeStart(body: Uint8Array): StartCommand {
   if (!isRecord(request)) {
     throw new InvalidConnectRequest('expected a process start request')
   }
-  if (request.pty != null || (request.stdin != null && request.stdin !== false)) {
-    throw new InvalidConnectRequest('PTY and streamed stdin are unsupported')
+  if (request.pty != null) throw new UnsupportedProcessOption('PTY commands are unsupported')
+  if (request.tag != null) throw new UnsupportedProcessOption('command tags are unsupported')
+  if (request.stdin != null && typeof request.stdin !== 'boolean') {
+    throw new InvalidConnectRequest('stdin must be a boolean')
   }
 
   const { process } = request
   if (!isRecord(process)) {
     throw new InvalidConnectRequest('expected a process configuration')
   }
-  const { args, cwd } = process
+  const { cmd, args, cwd } = process
   if (
-    process.cmd !== '/bin/bash' ||
+    typeof cmd !== 'string' ||
+    cmd === '' ||
     !Array.isArray(args) ||
-    args.length !== 3 ||
-    args[0] !== '-l' ||
-    args[1] !== '-c' ||
-    typeof args[2] !== 'string'
+    !args.every((arg) => typeof arg === 'string')
   ) {
-    throw new InvalidConnectRequest('expected the SDK Bash command form')
+    throw new InvalidConnectRequest('expected a shell and its arguments')
+  }
+  const [login, option, line] = args
+  if (
+    cmd !== '/bin/bash' ||
+    args.length !== 3 ||
+    login !== '-l' ||
+    option !== '-c' ||
+    line === undefined
+  ) {
+    throw new UnsupportedProcessOption('only the default SDK Bash shell is supported')
   }
   if (cwd != null && typeof cwd !== 'string') {
     throw new InvalidConnectRequest('cwd must be a string')
@@ -60,7 +73,7 @@ export function decodeStart(body: Uint8Array): StartCommand {
   if (!isStringMap(envs)) {
     throw new InvalidConnectRequest('environment values must be strings')
   }
-  return { line: args[2], cwd: cwd ?? null, envs }
+  return { line, cwd: cwd ?? null, envs, stdin: request.stdin === true }
 }
 
 function encode(flags: number, value: Record<string, JsonValue>): Uint8Array {

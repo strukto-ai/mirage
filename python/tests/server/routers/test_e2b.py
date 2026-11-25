@@ -1,59 +1,29 @@
 import asyncio
 import base64
-import json
-import time
-from contextlib import asynccontextmanager
 
-import jwt
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from mirage.policy.base import Policy
 from mirage.policy.types import Deny
 from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
-from mirage.server.app import build_app
 from mirage.server.auth import AuthConfig, AuthMode, JWTConfig
-
-TEMPLATE = "approved"
-KEY = {"X-API-Key": "server-key"}
-TOKEN = AuthConfig(mode=AuthMode.TOKEN, bearer_token=KEY["X-API-Key"])
-CREATE = "/v2/sandboxes"
-PROCESS = "/process.Process/Start"
-SECRET = "e2b-test-key-with-at-least-32-bytes"
-
-
-@asynccontextmanager
-async def server(tmp_path, *, resource_store=None, **kwargs):
-    if resource_store is None:
-        resource_store = memory_resource_store()
-        await resource_store.create_template(
-            TemplateInput(
-                name=TEMPLATE,
-                config={
-                    "mounts": {"/home/user": {"vfs": "ram", "mode": "WRITE"}},
-                    "store": {"type": "disk", "root": str(tmp_path / "named")},
-                },
-            )
-        )
-    app = build_app(
-        state_root=tmp_path / "daemon", resource_store=resource_store, **kwargs
-    )
-    async with (
-        app.router.lifespan_context(app),
-        AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client,
-    ):
-        yield app, client
-
-
-def account_key(account):
-    return jwt.encode(
-        {"sub": account, "exp": int(time.time()) + 60},
-        SECRET,
-        algorithm="HS256",
-    )
+from mirage.server.e2b.files import SandboxFiles
+from tests.server.routers.e2b_test_support import (
+    CREATE,
+    KEY,
+    PROCESS,
+    SECRET,
+    TEMPLATE,
+    TOKEN,
+    account_key,
+    data_headers,
+    envelopes,
+    output_of,
+    sandbox_headers,
+    server,
+    start_body,
+)
 
 
 @pytest.mark.asyncio
@@ -254,20 +224,21 @@ async def test_lifecycle_respects_workspace_admission(tmp_path):
         assert not app.state.registry.list()
 
 
-async def sandbox_headers(client, **options):
-    created = await client.post(CREATE, headers=KEY, json=options)
-    assert created.status_code == 201, created.text
-    return data_headers(created.json())
+@pytest.mark.asyncio
+async def test_native_stop_retires_the_lease_without_another_request(tmp_path):
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
+        created = await client.post(CREATE, headers=KEY, json={"timeout": 600})
+        assert created.status_code == 201, created.text
+        wid = created.json()["sandboxID"]
+        lease = app.state.e2b.live(wid)
+        assert lease is not None and not lease.expiry.cancelled()
 
-
-def data_headers(body):
-    return {
-        "e2b-sandbox-id": body["sandboxID"],
-        "e2b-sandbox-port": "49983",
-        "x-access-token": body["envdAccessToken"],
-        "content-type": "application/connect+json",
-        "authorization": "Basic dXNlcjo=",
-    }
+        stopped = await client.post(
+            f"/v1/workspaces/{wid}/stop",
+            headers={"Authorization": "Bearer server-key"},
+        )
+        assert stopped.status_code == 200, stopped.text
+        assert lease.expiry.cancelled()
 
 
 @pytest.mark.asyncio
@@ -292,7 +263,7 @@ async def test_health_and_timeout_follow_the_same_workspace_lease(tmp_path):
                 await client.get(
                     "/health", headers={**headers, "x-access-token": token}
                 )
-            ).status_code == 401
+            ).status_code == 502
         assert (
             await client.post(timeout, headers=headers, json={"timeout": 10})
         ).status_code == 401
@@ -327,36 +298,6 @@ async def test_health_and_timeout_follow_the_same_workspace_lease(tmp_path):
         async with asyncio.timeout(3):
             while wid in app.state.registry:
                 await asyncio.sleep(0.01)
-
-
-def start_body(command, **options):
-    payload = json.dumps(
-        {
-            "process": {
-                "cmd": "/bin/bash",
-                "args": ["-l", "-c", command],
-                **options,
-            }
-        }
-    ).encode()
-    return b"\0" + len(payload).to_bytes(4, "big") + payload
-
-
-def envelopes(body):
-    frames = []
-    while body:
-        size = int.from_bytes(body[1:5], "big")
-        frames.append((body[0], json.loads(body[5 : 5 + size])))
-        body = body[5 + size :]
-    return frames
-
-
-def output_of(response, stream):
-    return b"".join(
-        base64.b64decode(frame["event"]["data"][stream])
-        for flags, frame in envelopes(response.content)
-        if flags == 0 and stream in frame["event"].get("data", {})
-    )
 
 
 @pytest.mark.parametrize("template_env", [None, "  "])
@@ -514,6 +455,49 @@ async def test_process_requires_the_addressed_sandbox_token(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/files?path=fixture", PROCESS])
+async def test_revocation_replies_while_the_request_body_is_incomplete(
+    tmp_path, path
+):
+    async with server(tmp_path, auth_config=TOKEN) as (_, client):
+        headers = await sandbox_headers(client)
+        sandbox = headers["e2b-sandbox-id"]
+        reading = asyncio.Event()
+        if path == PROCESS:
+            prefix = start_body("touch unexpected")[:4]
+        else:
+            headers["content-type"] = "multipart/form-data; boundary=partial"
+            prefix = b'--partial\r\nContent-Disposition: form-data; name="file"\r\n\r\n'
+
+        async def body():
+            yield prefix
+            reading.set()
+            await asyncio.Event().wait()
+
+        async with asyncio.timeout(2), asyncio.TaskGroup() as tasks:
+            pending = tasks.create_task(
+                client.post(path, content=body(), headers=headers)
+            )
+            await reading.wait()
+            if path == PROCESS:
+                retired = await client.post(
+                    f"/sandboxes/{sandbox}/timeout",
+                    headers=KEY,
+                    json={"timeout": 0},
+                )
+            else:
+                retired = await client.delete(
+                    f"/sandboxes/{sandbox}", headers=KEY
+                )
+            assert retired.status_code == 204, retired.text
+            response = await pending
+        assert response.status_code == 401, response.text
+        assert response.json()["code"] == (
+            "unauthenticated" if path == PROCESS else 401
+        )
+
+
+@pytest.mark.asyncio
 async def test_process_checks_lease_again_after_the_upload(tmp_path):
     async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
         _,
@@ -562,6 +546,40 @@ async def test_process_rejects_wrong_media_and_malformed_framing(tmp_path):
             headers={**headers, "connect-timeout-ms": "1.2"},
         )
         assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_process_refuses_new_commands_while_draining(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        app,
+        client,
+    ):
+        headers = await sandbox_headers(client)
+        command = start_body("touch late")
+
+        async def upload():
+            yield command[:4]
+            app.state.registry.draining = True
+            yield command[4:]
+
+        response = await client.post(
+            PROCESS, content=upload(), headers=headers
+        )
+        assert response.status_code == 503
+        assert response.json() == {
+            "code": "unavailable",
+            "message": "server is shutting down",
+        }
+        response = await client.post(
+            "/filesystem.Filesystem/Stat",
+            headers={
+                key: value
+                for key, value in headers.items()
+                if key != "content-type"
+            },
+            json={"path": "late"},
+        )
+        assert response.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -763,11 +781,119 @@ async def test_files_follow_the_same_live_lease_and_virtual_paths(tmp_path):
         response = await client.post(
             rpc + "Remove", headers=headers, json={"path": "nested"}
         )
+        assert response.json()["code"] == "failed_precondition"
+        assert (
+            await client.get("/files", headers=headers, params={"path": path})
+        ).status_code == 200
+        response = await client.post(
+            rpc + "Remove", headers=headers, json={"path": path}
+        )
         assert response.status_code == 200, response.text
         response = await client.post(
             rpc + "Stat", headers=headers, json={"path": path}
         )
         assert response.json()["code"] == "not_found"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["download", "write", "mkdir"])
+async def test_kill_cancels_file_io_before_stopping_the_runner(
+    tmp_path, monkeypatch, operation
+):
+    loop = asyncio.get_running_loop()
+    active = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def blocked(*_args):
+        try:
+            loop.call_soon_threadsafe(active.set)
+            await asyncio.Event().wait()
+        finally:
+            loop.call_soon_threadsafe(finished.set)
+
+    async def read(_files, _path):
+        async def source():
+            await blocked()
+            yield b"unreachable"
+
+        return source()
+
+    monkeypatch.setattr(
+        SandboxFiles,
+        "read" if operation == "download" else operation,
+        read if operation == "download" else blocked,
+    )
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
+        created = await client.post(CREATE, headers=KEY)
+        assert created.status_code == 201, created.text
+        headers = data_headers(created.json())
+        del headers["content-type"]
+        wid = created.json()["sandboxID"]
+        runner = app.state.e2b.live(wid).entry.runner
+        stop = runner.stop
+
+        async def stop_after_files(*, delete=False):
+            assert finished.is_set()
+            await stop(delete=delete)
+
+        monkeypatch.setattr(runner, "stop", stop_after_files)
+
+        async def download():
+            with pytest.raises(ConnectionError, match="sandbox closed"):
+                await client.get("/files?path=fixture", headers=headers)
+
+        if operation == "download":
+            request = download()
+        elif operation == "write":
+            request = client.post(
+                "/files?path=fixture", headers=headers, files={"file": b"x"}
+            )
+        else:
+            request = client.post(
+                "/filesystem.Filesystem/MakeDir",
+                headers=headers,
+                json={"path": "fixture"},
+            )
+
+        async with asyncio.timeout(3), asyncio.TaskGroup() as tasks:
+            response = tasks.create_task(request)
+            await active.wait()
+            killed = await client.delete(f"/sandboxes/{wid}", headers=KEY)
+            assert killed.status_code == 204, killed.text
+        if operation != "download":
+            assert response.result().status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_file_request_finishing_its_body_after_kill_is_refused(tmp_path):
+    async with server(tmp_path, auth_config=TOKEN) as (_, client):
+        created = await client.post(CREATE, headers=KEY)
+        assert created.status_code == 201, created.text
+        headers = data_headers(created.json())
+        headers["content-type"] = "application/json"
+        wid = created.json()["sandboxID"]
+        reading = asyncio.Event()
+        released = asyncio.Event()
+
+        async def body():
+            reading.set()
+            await released.wait()
+            yield b'{"path":"fixture"}'
+
+        async with asyncio.timeout(3), asyncio.TaskGroup() as tasks:
+            request = tasks.create_task(
+                client.post(
+                    "/filesystem.Filesystem/MakeDir",
+                    headers=headers,
+                    content=body(),
+                )
+            )
+            await reading.wait()
+            killed = await client.delete(f"/sandboxes/{wid}", headers=KEY)
+            assert killed.status_code == 204, killed.text
+            released.set()
+        assert request.result().status_code == 401
+        assert request.result().json()["code"] == "unauthenticated"
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ from limits import (
 from limits.aio.storage import MemoryStorage
 from limits.aio.strategies import FixedWindowRateLimiter
 from starlette.requests import HTTPConnection
+from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from mirage.server.auth.middleware import PUBLIC_PATHS
@@ -39,7 +40,7 @@ from mirage.server.daemon_config import (
     read_daemon_table,
 )
 from mirage.server.env import ENV_RATE_LIMITS, ENV_WORKER_TOKEN
-from mirage.server.errors import ErrorCode, error_response
+from mirage.server.errors import ErrorCode, HttpError
 from mirage.server.metrics import refused
 from mirage.server.paths import mirage_home
 
@@ -193,6 +194,14 @@ def _value(
     return request.headers.get(key.removeprefix(_HEADER))
 
 
+class RateLimitBuckets:
+    """One set of configured limits shared by the pre- and post-auth checks."""
+
+    def __init__(self, rate_limits: Sequence[RateLimit]) -> None:
+        self.limits = tuple(enumerate(rate_limits))
+        self.limiter = FixedWindowRateLimiter(MemoryStorage())
+
+
 class RateLimitMiddleware:
     """ASGI middleware answering 429 past the server's rate limits.
 
@@ -200,31 +209,43 @@ class RateLimitMiddleware:
     on the address, the workspace or a header, so a caller with a bad
     token is counted too, and after it, with ``signed_in``, for those
     keyed on the account or a function, which may read the signed-in
-    account. WebSocket handshakes count too; public paths are not counted,
+    account. A verified workspace uses the same bucket as the native path.
+    WebSocket handshakes count too; public paths are not counted,
     nor, on a worker, a request the daemon already counted, but by its
     workspace.
 
     Args:
         app (ASGIApp): downstream ASGI app.
-        rate_limits (Sequence[RateLimit]): the limits, each counted on
-            its own.
+        buckets (RateLimitBuckets): the shared state for the limits.
         signed_in (bool): count the limits that need the signed-in
             caller, instead of the others.
+        reply_error (Callable[[Scope, HttpError], JSONResponse] | None):
+            format a rate-limit response for the request's protocol.
+        verified_workspace (Callable[[Scope], str | None] | None): resolve
+            an authenticated workspace for the post-auth check.
     """
 
     def __init__(
         self,
         app: ASGIApp,
-        rate_limits: Sequence[RateLimit],
+        buckets: RateLimitBuckets,
         signed_in: bool = False,
+        reply_error: Callable[[Scope, HttpError], JSONResponse] | None = None,
+        verified_workspace: Callable[[Scope], str | None] | None = None,
     ) -> None:
         self.app = app
+        self.reply_error = reply_error
+        self.verified_workspace = verified_workspace if signed_in else None
         self.rate_limits = tuple(
-            limit
-            for limit in rate_limits
+            (at, limit)
+            for at, limit in buckets.limits
             if (callable(limit.key) or limit.key == "account") == signed_in
+            or (
+                limit.key == "workspace"
+                and self.verified_workspace is not None
+            )
         )
-        self._limiter = FixedWindowRateLimiter(MemoryStorage())
+        self._limiter = buckets.limiter
         self._token = os.environ.get(ENV_WORKER_TOKEN)
 
     async def __call__(
@@ -239,12 +260,17 @@ class RateLimitMiddleware:
             return
         counted = self._token is not None and _is_counted(scope, self._token)
         request = HTTPConnection(scope)
-        for at, limit in enumerate(self.rate_limits):
+        for at, limit in self.rate_limits:
             # The daemon's check names no workspace, so those limits still
             # count.
             if counted and limit.key != "workspace":
                 continue
-            value = _value(limit.key, request)
+            value = (
+                self.verified_workspace(scope)
+                if limit.key == "workspace"
+                and self.verified_workspace is not None
+                else _value(limit.key, request)
+            )
             if value is None or await self._limiter.hit(
                 limit.item, str(at), value
             ):
@@ -260,10 +286,15 @@ class RateLimitMiddleware:
                 limit.rate,
             )
             refused("rate_limit")
-            response = error_response(
+            error = HttpError(
                 ErrorCode.RATE_LIMITED,
                 "too many requests",
                 headers={"Retry-After": str(wait)},
+            )
+            response = (
+                error.response()
+                if self.reply_error is None
+                else self.reply_error(scope, error)
             )
             await response(scope, receive, send)
             return

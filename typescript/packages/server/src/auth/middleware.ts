@@ -101,6 +101,7 @@ export function registerAuth(
   config: AuthConfig,
   usesApiKey?: (request: FastifyRequest) => boolean,
   usesSandboxToken?: (request: FastifyRequest) => boolean,
+  sandboxAccount?: (request: FastifyRequest) => string | null,
 ): void {
   app.decorateRequest('account', null)
   const check = authenticator(config)
@@ -112,7 +113,10 @@ export function registerAuth(
   }
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    if (usesSandboxToken?.(req) === true) return
+    if (usesSandboxToken?.(req) === true) {
+      req.account = sandboxAccount?.(req) ?? null
+      return
+    }
     let authorization = req.headers.authorization
     const apiKey = usesApiKey?.(req) === true
     if (apiKey) {

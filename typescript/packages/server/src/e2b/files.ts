@@ -39,6 +39,7 @@ const ERRORS: Partial<Record<FsCondition, [FileCode, string]>> = {
   EISDIR: ['failed_precondition', 'is a directory'],
   ENOTEMPTY: ['failed_precondition', 'directory is not empty'],
   EBUSY: ['failed_precondition', 'path is busy'],
+  EXDEV: ['failed_precondition', 'cannot move across mounts'],
   ELOOP: ['invalid_argument', 'symbolic link loop'],
   EINVAL: ['invalid_argument', 'invalid path'],
   EDQUOT: ['resource_exhausted', 'disk quota exceeded'],
@@ -111,9 +112,15 @@ export class SandboxFiles {
     return this.entry(spec, info)
   }
 
+  async move(source: string, destination: string): Promise<EntryInfo> {
+    const target = filePath(destination)
+    await this.files.rename(filePath(source), target)
+    return this.entry(target, await this.files.stat(target, undefined, { nofollow: true }))
+  }
+
   async listDir(path: string, depth = 1): Promise<EntryInfo[]> {
-    if (depth !== 1 && depth !== 2) {
-      throw new FileError('invalid_argument', 'list depth must be one or two')
+    if (!Number.isInteger(depth) || depth < 1 || depth > 0xffffffff) {
+      throw new FileError('invalid_argument', 'list depth must be a positive uint32')
     }
     const spec = filePath(path)
     if ((await this.files.stat(spec)).type !== FileType.DIRECTORY) {
@@ -133,8 +140,22 @@ export class SandboxFiles {
     }
   }
 
-  remove(path: string): Promise<void> {
-    return this.removeEntry(filePath(path))
+  async remove(path: string): Promise<void> {
+    const spec = filePath(path)
+    try {
+      const info = await this.files.stat(spec, undefined, { nofollow: true })
+      if (info.type !== FileType.DIRECTORY) {
+        await this.files.unlink(spec)
+        return
+      }
+      const target = readerOf(this.files).follow(spec.dotted ?? spec.virtual)
+      if (this.files.isMount(target) || this.files.submounts(target).length > 0) {
+        throw new FileError('failed_precondition', 'cannot remove a mount')
+      }
+      await this.files.rmdir(spec)
+    } catch (error) {
+      if (classify(error) !== 'ENOENT') throw error
+    }
   }
 
   private async entry(spec: PathSpec, info: FileStat): Promise<EntryInfo> {
@@ -166,7 +187,11 @@ export class SandboxFiles {
 
   private async listEntries(spec: PathSpec, depth: number): Promise<EntryInfo[]> {
     const entries: EntryInfo[] = []
-    for (const child of await this.children(spec)) {
+    const pending: [PathSpec, number][] = (await this.children(spec))
+      .reverse()
+      .map((child) => [child, depth])
+    for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+      const [child, left] = next
       let info: FileStat
       try {
         info = await this.files.stat(child, undefined, { nofollow: true })
@@ -175,28 +200,12 @@ export class SandboxFiles {
         throw error
       }
       entries.push(await this.entry(child, info))
-      if (depth > 1 && info.type === FileType.DIRECTORY) {
-        for (const entry of await this.listEntries(child, depth - 1)) entries.push(entry)
+      if (left > 1 && info.type === FileType.DIRECTORY) {
+        for (const nested of (await this.children(child)).reverse()) {
+          pending.push([nested, left - 1])
+        }
       }
     }
     return entries
-  }
-
-  private async removeEntry(spec: PathSpec): Promise<void> {
-    try {
-      const info = await this.files.stat(spec, undefined, { nofollow: true })
-      if (info.type !== FileType.DIRECTORY) {
-        await this.files.unlink(spec)
-        return
-      }
-      const target = readerOf(this.files).follow(spec.dotted ?? spec.virtual)
-      if (this.files.isMount(target) || this.files.submounts(target).length > 0) {
-        throw new FileError('failed_precondition', 'cannot remove a mount')
-      }
-      for (const child of await this.children(spec)) await this.removeEntry(child)
-      await this.files.rmdir(spec)
-    } catch (error) {
-      if (classify(error) !== 'ENOENT') throw error
-    }
   }
 }

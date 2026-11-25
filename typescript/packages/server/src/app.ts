@@ -33,7 +33,12 @@ import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { registerMetrics } from './metrics.ts'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
-import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
+import {
+  type RateLimit,
+  RateLimitBuckets,
+  registerRateLimits,
+  resolveRateLimits,
+} from './rate_limit.ts'
 import { STRUKTO } from '@struktoai/mirage-core/resources/constants'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildResourceStore, resolveResourceStore } from './resources/config.ts'
@@ -78,12 +83,16 @@ import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_TEMPLATE } from './env.ts'
-import { CONNECT_STREAM, isProcessStart } from './e2b/process.ts'
+import { Sandboxes } from './e2b/leases.ts'
+import { CONNECT_STREAM } from './e2b/process.ts'
 import {
+  acceptsRawBody,
   connectCode,
   isDataRequest,
   isLifecycleRequest,
   router as registerE2BRoutes,
+  sandboxAccount,
+  sandboxWorkspace,
 } from './routers/e2b.ts'
 
 export interface BuildAppOptions {
@@ -227,23 +236,12 @@ function answerMissing(deps: {
  * sent, so `curl -d` reaches a JSON route as sent. An empty body is none.
  * Mirrors Python's `LenientJson`.
  */
-function lenientJson(app: FastifyInstance, e2b: boolean): void {
+function lenientJson(app: FastifyInstance): void {
   const json = app.getDefaultJsonParser('error', 'error')
   app.removeAllContentTypeParsers()
   app.addContentTypeParser(RAW_BODIES, (_req, _payload, done) => {
     done(null)
   })
-  if (e2b) {
-    app.addContentTypeParser(CONNECT_STREAM, { parseAs: 'buffer' }, (req, body, done) => {
-      if (isProcessStart(req.method, req.routeOptions.url ?? '')) {
-        done(null, body)
-      } else if (body.length === 0) {
-        done(null, undefined)
-      } else {
-        void json(req, body.toString(), done)
-      }
-    })
-  }
   app.addContentTypeParser('*', { parseAs: 'string' }, (req, body, done) => {
     if (body.length === 0) done(null, undefined)
     else void json(req, body as string, done)
@@ -318,8 +316,9 @@ export function buildApp(options: BuildAppOptions = {}) {
     maxSessions: resolveMaxSessions(options.maxSessions),
     ceilings: resolveCeilings(options),
   })
+  const sandboxes = e2bEnabled ? new Sandboxes(registry, matchesAccessToken) : null
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
-  const rateLimits = resolveRateLimits(options.rateLimits)
+  const rateLimitBuckets = new RateLimitBuckets(resolveRateLimits(options.rateLimits))
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
   const proxies = resolveForwardedAllowIps(options.forwardedAllowIps)
@@ -342,7 +341,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     await nativeErrors(err, req, reply)
   })
-  lenientJson(app, e2bEnabled)
+  lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
   app.addHook('preHandler', traceContextMiddleware)
   app.decorateRequest('closed', null as never)
@@ -369,9 +368,19 @@ export function buildApp(options: BuildAppOptions = {}) {
     }
     done()
   })
-  registerRateLimits(app, rateLimits, false, replyError)
-  registerAuth(app, authConfig, sandboxLifecycle, sandboxData)
-  registerRateLimits(app, rateLimits, true, replyError)
+  registerRateLimits(app, rateLimitBuckets, false, replyError)
+  registerAuth(app, authConfig, sandboxLifecycle, sandboxData, (request) =>
+    sandboxAccount(sandboxes, request.headers),
+  )
+  registerRateLimits(
+    app,
+    rateLimitBuckets,
+    true,
+    replyError,
+    e2bEnabled
+      ? (request) => sandboxWorkspace(sandboxes, request.routeOptions.url ?? '', request)
+      : undefined,
+  )
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const routes = fastifyRoutes(app)
   const mcp = registerApi(routes, {
@@ -383,16 +392,35 @@ export function buildApp(options: BuildAppOptions = {}) {
     snapshotStore: options.snapshotStore,
     resources,
   })
-  const sandboxes = e2bEnabled
-    ? registerE2BRoutes(routes, {
+  if (sandboxes !== null) {
+    void app.register((scope, _opts, done) => {
+      scope.removeContentTypeParser(RAW_BODIES)
+      for (const media of [RAW_BODIES, CONNECT_STREAM]) {
+        scope.addContentTypeParser(media, (request, _payload, parsed) => {
+          const contentType =
+            request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+          if (acceptsRawBody(request.method, request.routeOptions.url ?? '', contentType)) {
+            parsed(null)
+          } else {
+            parsed(
+              new HttpError('invalid_request', 'expected JSON on a unary E2B route', {
+                headers: { connection: 'close' },
+              }),
+            )
+          }
+        })
+      }
+      registerE2BRoutes(fastifyRoutes(scope), {
         registry,
         host,
         resources,
         snapshotStore: options.snapshotStore,
         template: e2bTemplate === '' ? undefined : e2bTemplate,
-        matchesAccessToken,
+        sandboxes,
       })
-    : null
+      done()
+    })
+  }
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,
@@ -422,11 +450,11 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addHook('preClose', async () => {
     registry.draining = true
     if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
+    await sandboxes?.close()
   })
   app.addHook('onClose', async () => {
     if (ssh.listener !== null) await ssh.listener.close()
     try {
-      await sandboxes?.close()
       await mcp.close()
       await jobs.close()
     } finally {

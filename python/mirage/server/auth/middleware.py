@@ -101,6 +101,8 @@ class AuthMiddleware:
             that must authenticate with ``X-API-Key``.
         sandbox_request (Callable[[Scope], bool] | None): select requests
             authenticated by a sandbox route's access token.
+        sandbox_account (Callable[[Scope], str | None] | None): resolve the
+            owning account from an authenticated sandbox request.
     """
 
     def __init__(
@@ -109,11 +111,13 @@ class AuthMiddleware:
         config: AuthConfig,
         api_key_request: Callable[[Scope], bool] | None = None,
         sandbox_request: Callable[[Scope], bool] | None = None,
+        sandbox_account: Callable[[Scope], str | None] | None = None,
     ) -> None:
         self.app = app
         self.config = config
         self.api_key_request = api_key_request
         self.sandbox_request = sandbox_request
+        self.sandbox_account = sandbox_account
         jwks_url = config.jwt.jwks_url if config.jwt is not None else None
         self._jwks = (
             pyjwt.PyJWKClient(jwks_url) if jwks_url is not None else None
@@ -133,7 +137,12 @@ class AuthMiddleware:
             and self.sandbox_request is not None
             and self.sandbox_request(scope)
         ):
-            _admit(scope, None)
+            account = (
+                self.sandbox_account(scope)
+                if self.sandbox_account is not None
+                else None
+            )
+            _admit(scope, account)
             await self.app(scope, receive, send)
             return
         cfg = self.config

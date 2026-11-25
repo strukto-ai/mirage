@@ -5,6 +5,7 @@ import pytest
 from mirage.server.e2b.connect import (
     InvalidConnectRequest,
     StartCommand,
+    UnsupportedProcessOption,
     decode_start,
     encode_message,
     end_stream,
@@ -28,7 +29,7 @@ def test_start_decodes_a_framed_sdk_command() -> None:
         }
     ).encode()
     assert decode_start(envelope(0, payload)) == StartCommand(
-        "pwd", "/home/user", {"TEST": "value"}
+        "pwd", "/home/user", {"TEST": "value"}, False
     )
 
 
@@ -40,6 +41,14 @@ def test_start_rejects_a_malformed_frame(body: bytes) -> None:
         InvalidConnectRequest, match="uncompressed Connect message"
     ):
         decode_start(body)
+
+
+def test_start_rejects_a_custom_shell_as_unsupported() -> None:
+    body = b'{"process":{"cmd":"/bin/sh","args":["-c","pwd"]}}'
+    with pytest.raises(
+        UnsupportedProcessOption, match="default SDK Bash shell"
+    ):
+        decode_start(envelope(0, body))
 
 
 def test_process_end_and_connect_end_are_separate_frames() -> None:

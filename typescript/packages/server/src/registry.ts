@@ -87,6 +87,7 @@ export class WorkspaceEntry {
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
   acceptingJobs = true
+  beforeStop: (() => Promise<void>) | null = null
   /**
    * The server's policy file's programs, as this workspace runs them;
    * null when the file names none past preWorkspace.
@@ -773,15 +774,24 @@ export class WorkspaceRegistry {
 
   async closeAll(): Promise<void> {
     this.cancelIdleTimer()
-    const ids = Array.from(this.entries.keys())
+    const ids = new Set([...this.entries.keys(), ...this.removals.keys()])
     for (const id of ids) {
-      const entry = this.entries.get(id)
-      this.entries.delete(id)
-      if (entry !== undefined) {
+      try {
+        const removal = this.removals.get(id)
+        if (removal !== undefined) {
+          await removal
+          continue
+        }
+        const entry = this.entries.get(id)
+        if (entry === undefined) continue
+        this.entries.delete(id)
         entry.acceptingJobs = false
         await stop(entry, entry.ephemeral)
+      } catch (error) {
+        console.error(`error stopping runner for ${id}:`, error)
       }
     }
+    this.cancelIdleTimer()
     await this.admissionPrograms.close()
   }
 
@@ -848,6 +858,9 @@ async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
 }
 
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
+  const beforeStop = entry.beforeStop
+  entry.beforeStop = null
+  if (beforeStop !== null) await beforeStop()
   if (entry.programs !== null) {
     try {
       await entry.runner.call(entry.programs.close())

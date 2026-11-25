@@ -45,6 +45,7 @@ ERRORS: dict[FsCondition, tuple[FileCode, str]] = {
     FsCondition.EISDIR: ("failed_precondition", "is a directory"),
     FsCondition.ENOTEMPTY: ("failed_precondition", "directory is not empty"),
     FsCondition.EBUSY: ("failed_precondition", "path is busy"),
+    FsCondition.EXDEV: ("failed_precondition", "cannot move across mounts"),
     FsCondition.ELOOP: ("invalid_argument", "symbolic link loop"),
     FsCondition.EINVAL: ("invalid_argument", "invalid path"),
     FsCondition.EDQUOT: ("resource_exhausted", "disk quota exceeded"),
@@ -124,10 +125,17 @@ class SandboxFiles:
         info = await self.files.stat(spec, nofollow=True)
         return await self._entry(spec, info)
 
+    async def move(self, source: str, destination: str) -> EntryInfo:
+        target = _file_path(destination)
+        await self.files.rename(_file_path(source), target)
+        return await self._entry(
+            target, await self.files.stat(target, nofollow=True)
+        )
+
     async def list_dir(self, path: str, depth: int = 1) -> list[EntryInfo]:
-        if depth not in (1, 2):
+        if not 1 <= depth <= 2**32 - 1:
             raise FileError(
-                "invalid_argument", "list depth must be one or two"
+                "invalid_argument", "list depth must be a positive uint32"
             )
         spec = _file_path(path)
         if (await self.files.stat(spec)).type != FileType.DIRECTORY:
@@ -145,7 +153,20 @@ class SandboxFiles:
             await self.files.mkdir(spec)
 
     async def remove(self, path: str) -> None:
-        await self._remove(_file_path(path))
+        spec = _file_path(path)
+        try:
+            info = await self.files.stat(spec, nofollow=True)
+            if info.type != FileType.DIRECTORY:
+                await self.files.unlink(spec)
+                return
+            target = reader_of(self.files).follow(spec.dotted or spec.virtual)
+            if self.files.is_mount(target) or self.files.submounts(target):
+                raise FileError("failed_precondition", "cannot remove a mount")
+            await self.files.rmdir(spec)
+        except Exception as exc:
+            if classify(exc) != FsCondition.ENOENT:
+                raise
+            logger.debug("file already absent during removal: %s", exc)
 
     async def _entry(self, spec: PathSpec, info: FileStat) -> EntryInfo:
         mode = posix_mode(info)
@@ -176,7 +197,11 @@ class SandboxFiles:
 
     async def _list(self, spec: PathSpec, depth: int) -> list[EntryInfo]:
         entries: list[EntryInfo] = []
-        for child in await self._children(spec):
+        pending = [
+            (child, depth) for child in reversed(await self._children(spec))
+        ]
+        while pending:
+            child, left = pending.pop()
             try:
                 info = await self.files.stat(child, nofollow=True)
             except Exception as exc:
@@ -185,23 +210,9 @@ class SandboxFiles:
                 logger.debug("file disappeared during listing: %s", exc)
                 continue
             entries.append(await self._entry(child, info))
-            if depth > 1 and info.type == FileType.DIRECTORY:
-                entries.extend(await self._list(child, depth - 1))
+            if left > 1 and info.type == FileType.DIRECTORY:
+                pending.extend(
+                    (nested, left - 1)
+                    for nested in reversed(await self._children(child))
+                )
         return entries
-
-    async def _remove(self, spec: PathSpec) -> None:
-        try:
-            info = await self.files.stat(spec, nofollow=True)
-            if info.type != FileType.DIRECTORY:
-                await self.files.unlink(spec)
-                return
-            target = reader_of(self.files).follow(spec.dotted or spec.virtual)
-            if self.files.is_mount(target) or self.files.submounts(target):
-                raise FileError("failed_precondition", "cannot remove a mount")
-            for child in await self._children(spec):
-                await self._remove(child)
-            await self.files.rmdir(spec)
-        except Exception as exc:
-            if classify(exc) != FsCondition.ENOENT:
-                raise
-            logger.debug("file already absent during removal: %s", exc)

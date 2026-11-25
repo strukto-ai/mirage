@@ -148,35 +148,53 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
   return typeof header === 'string' ? header : (header?.[0] ?? null)
 }
 
+/** One set of configured limits shared by the pre- and post-auth hooks. */
+export class RateLimitBuckets {
+  readonly limits: readonly { limit: RateLimit; limiter: RateLimiterMemory }[]
+
+  constructor(rateLimits: readonly RateLimit[]) {
+    this.limits = rateLimits.map((limit) => {
+      const [points, duration] = measure(limit)
+      return { limit, limiter: new RateLimiterMemory({ points, duration }) }
+    })
+  }
+}
+
 /**
  * Answer 429 past the server's rate limits, each counted on its own. The
  * server registers it twice: before authentication for the limits keyed on
  * the address, the workspace or a header, so a caller with a bad token is
  * counted too, and after it, with `signedIn`, for those keyed on the account
- * or a function, which may read the signed-in account. WebSocket handshakes
- * count too; public paths are not counted, nor, on a worker, a request the
+ * or a function, which may read the signed-in account. A verified workspace
+ * uses the same bucket as the native path. WebSocket handshakes count too;
+ * public paths are not counted, nor, on a worker, a request the
  * daemon already counted, but by its workspace. Mirrors Python's
  * `RateLimitMiddleware`.
  */
 export function registerRateLimits(
   app: FastifyInstance,
-  rateLimits: readonly RateLimit[],
+  buckets: RateLimitBuckets,
   signedIn = false,
   replyError: (reply: FastifyReply, error: HttpError) => unknown = errorResponse,
+  verifiedWorkspace?: (request: FastifyRequest) => string | null,
 ): void {
-  const counted = rateLimits.filter(
-    (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
+  const workspaceOf = signedIn ? verifiedWorkspace : undefined
+  const counted = buckets.limits.filter(
+    ({ limit }) =>
+      (typeof limit.key === 'function' || limit.key === 'account') === signedIn ||
+      (limit.key === 'workspace' && workspaceOf !== undefined),
   )
   const token = process.env[ENV_WORKER_TOKEN]
-  for (const limit of counted) {
-    const [points, duration] = measure(limit)
-    const limiter = new RateLimiterMemory({ points, duration })
+  for (const { limit, limiter } of counted) {
     app.addHook('onRequest', async (req, reply) => {
       if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
       // The daemon's check names no workspace, so those limits still count.
       const skips = limit.key !== 'workspace' && token !== undefined
       if (skips && isCounted(req.headers[COUNTED_HEADER], token)) return
-      const by = limit.key === 'ip' ? req.ip : value(limit.key, req)
+      const by =
+        limit.key === 'workspace' && workspaceOf !== undefined
+          ? workspaceOf(req)
+          : value(limit.key, req)
       if (by === null) return
       try {
         await limiter.consume(by)

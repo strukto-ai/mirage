@@ -79,6 +79,27 @@ describe('resolvePolicyFile', () => {
 })
 
 describe('WorkspaceRegistry', () => {
+  it('continues shutdown when a workspace fails to close', async () => {
+    const registry = new WorkspaceRegistry()
+    const first = registry.add(new Workspace({ '/': new RAMVFS() }))
+    const second = registry.add(new Workspace({ '/': new RAMVFS() }))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const failure = new Error('workspace cleanup failed')
+    const firstStop = vi.spyOn(first.runner, 'stop').mockRejectedValue(failure)
+    const secondStop = vi.spyOn(second.runner, 'stop')
+    try {
+      await registry.closeAll()
+      expect(log).toHaveBeenCalledWith(`error stopping runner for ${first.id}:`, failure)
+      expect(secondStop).toHaveBeenCalledOnce()
+    } finally {
+      firstStop.mockRestore()
+      secondStop.mockRestore()
+      log.mockRestore()
+      await first.runner.stop()
+      await second.runner.stop()
+    }
+  })
+
   it('add/get/list/remove', async () => {
     const r = new WorkspaceRegistry()
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })

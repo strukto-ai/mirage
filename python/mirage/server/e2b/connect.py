@@ -9,9 +9,14 @@ class StartCommand:
     line: str
     cwd: str | None
     envs: dict[str, str]
+    stdin: bool
 
 
 class InvalidConnectRequest(ValueError):
+    pass
+
+
+class UnsupportedProcessOption(ValueError):
     pass
 
 
@@ -32,23 +37,28 @@ def decode_start(body: bytes) -> StartCommand:
     if not isinstance(request, dict):
         raise InvalidConnectRequest("expected a process start request")
     stdin = request.get("stdin")
-    if request.get("pty") is not None or (
-        stdin is not None and stdin is not False
-    ):
-        raise InvalidConnectRequest("PTY and streamed stdin are unsupported")
+    if request.get("pty") is not None:
+        raise UnsupportedProcessOption("PTY commands are unsupported")
+    if request.get("tag") is not None:
+        raise UnsupportedProcessOption("command tags are unsupported")
+    if stdin is not None and not isinstance(stdin, bool):
+        raise InvalidConnectRequest("stdin must be a boolean")
 
     process = request.get("process")
     if not isinstance(process, dict):
         raise InvalidConnectRequest("expected a process configuration")
-    args = process.get("args")
+    executable, args = process.get("cmd"), process.get("args")
     if (
-        process.get("cmd") != "/bin/bash"
+        not isinstance(executable, str)
+        or not executable
         or not isinstance(args, list)
-        or len(args) != 3
-        or args[:2] != ["-l", "-c"]
-        or not isinstance(args[2], str)
+        or not all(isinstance(arg, str) for arg in args)
     ):
-        raise InvalidConnectRequest("expected the SDK Bash command form")
+        raise InvalidConnectRequest("expected a shell and its arguments")
+    if executable != "/bin/bash" or len(args) != 3 or args[:2] != ["-l", "-c"]:
+        raise UnsupportedProcessOption(
+            "only the default SDK Bash shell is supported"
+        )
 
     cwd = process.get("cwd")
     envs = process.get("envs")
@@ -60,7 +70,7 @@ def decode_start(body: bytes) -> StartCommand:
         isinstance(value, str) for value in envs.values()
     ):
         raise InvalidConnectRequest("environment values must be strings")
-    return StartCommand(args[2], cwd, envs)
+    return StartCommand(args[2], cwd, envs, stdin is True)
 
 
 def _encode(flags: int, value: dict[str, JsonValue]) -> bytes:

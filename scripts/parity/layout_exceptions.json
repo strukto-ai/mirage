@@ -207,6 +207,9 @@
   "server/e2b": {
    "python_only": {
     "routing": "The FastAPI boundary resolves and authenticates a sandbox from the request. The TypeScript lease table accepts header values directly."
+   },
+   "typescript_only": {
+    "body": "Node watches the raw input stream and closes connections with unread data; Python uses ASGI body and disconnect messages."
    }
   }
  }

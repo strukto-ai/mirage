@@ -2,15 +2,8 @@ import hmac
 
 from fastapi import Request
 
-from mirage.server.e2b.leases import Sandbox, Sandboxes
+from mirage.server.e2b.leases import Sandbox, Sandboxes, SandboxNotRunning
 from mirage.server.errors import ErrorCode, HttpError
-
-
-class SandboxNotRunning(HttpError):
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorCode.UNAUTHORIZED, "invalid sandbox access token"
-        )
 
 
 def require_sandbox(request: Request) -> Sandbox:
@@ -34,4 +27,12 @@ def require_sandbox(request: Request) -> Sandbox:
         tokens[0].encode("latin-1"), lease.access_token.encode("ascii")
     ):
         raise HttpError(ErrorCode.UNAUTHORIZED, "invalid sandbox access token")
+    scheme, _, credential = request.headers.get("authorization", "").partition(
+        " "
+    )
+    if scheme.casefold() == "basic" and credential != "dXNlcjo=":
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
+            "only the default sandbox user is supported",
+        )
     return lease

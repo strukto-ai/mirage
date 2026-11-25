@@ -18,7 +18,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from pathlib import Path
@@ -112,6 +112,7 @@ class WorkspaceEntry:
         self.created_at = time.time()
         self.config_digest: str | None = None
         self.accepting_jobs = True
+        self.before_stop: Callable[[], Awaitable[None]] | None = None
         # The server's policy file's programs, as this workspace runs
         # them; None when the file names none past pre_workspace.
         self.programs: ScriptPolicy | None = None
@@ -996,14 +997,18 @@ class WorkspaceRegistry:
     async def close_all(self) -> None:
         """Stop every runner. Used at daemon shutdown."""
         self._cancel_idle_timer()
-        ids = list(self._entries)
+        ids = dict.fromkeys((*self._entries, *self._removals))
         for wid in ids:
-            entry = self._entries.pop(wid)
-            entry.accepting_jobs = False
             try:
-                await _stop(entry, self.jobs)
+                removal = self._removals.get(wid)
+                if removal is not None:
+                    await asyncio.shield(removal)
+                elif (entry := self._entries.pop(wid, None)) is not None:
+                    entry.accepting_jobs = False
+                    await _stop(entry, self.jobs)
             except Exception:
                 logger.exception("error stopping runner for %s", wid)
+        self._cancel_idle_timer()
         await self._admission_programs.close()
 
     def _start_idle_timer(self) -> None:
@@ -1091,6 +1096,10 @@ async def _stop(
             if request.workspace_id == entry.id and request.stdin is not None:
                 request.stdin.close_reader()
 
+    before_stop = entry.before_stop
+    entry.before_stop = None
+    if before_stop is not None:
+        await before_stop()
     try:
         await entry.runner.call(close_stdins())
     except RuntimeError as exc:

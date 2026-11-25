@@ -27,7 +27,7 @@ from types import FrameType
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -49,7 +49,11 @@ from mirage.server.daemon_config import (
 )
 from mirage.server.e2b.leases import Sandboxes
 from mirage.server.env import ENV_E2B_TEMPLATE
-from mirage.server.errors import WorkspaceMissing, register_error_handlers
+from mirage.server.errors import (
+    HttpError,
+    WorkspaceMissing,
+    register_error_handlers,
+)
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
@@ -64,6 +68,7 @@ from mirage.server.paths import (
 )
 from mirage.server.rate_limit import (
     RateLimit,
+    RateLimitBuckets,
     RateLimitMiddleware,
     resolve_rate_limits,
 )
@@ -148,14 +153,12 @@ async def _watch_exit(
 def _drain_on_signals(
     app: FastAPI,
 ) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
-    """Have SIGTERM and SIGINT drain the app before the server's own
-    handlers stop it, when ``graceful_timeout`` is set: running lines get
-    that long to finish while new workspaces are refused and
-    ``/v1/daemon/ready`` answers 503, then the server stops as it would have.
-    Whatever runs the app (uvicorn, a gunicorn worker, hypercorn) has
-    installed its handlers by the time the lifespan starts. A handler is
-    process-wide and only the main thread may set one, so nothing is
-    wrapped without a timeout or off the main thread.
+    """Drain running lines for the configured grace period and revoke
+    sandbox leases before the server starts draining HTTP connections.
+
+    The server installs its handlers before the lifespan starts. Only the
+    main thread may wrap them. With zero grace, leave the interpreter's
+    default SIGINT handler in place for an embedded app.
 
     Args:
         app (FastAPI): the app.
@@ -165,16 +168,18 @@ def _drain_on_signals(
             handlers it wrapped, to put back as the app stops.
     """
     app.state.drain_task = None
-    if (
-        app.state.graceful_timeout <= 0
-        or threading.current_thread() is not threading.main_thread()
+    graceful = app.state.graceful_timeout > 0
+    if threading.current_thread() is not threading.main_thread() or (
+        not graceful and app.state.e2b is None
     ):
         return {}
     loop = asyncio.get_running_loop()
     wrapped = {}
     for signum in (signal.SIGTERM, signal.SIGINT):
         stop = signal.getsignal(signum)
-        if callable(stop):
+        if callable(stop) and (
+            graceful or stop is not signal.default_int_handler
+        ):
             wrapped[signum] = stop
             signal.signal(
                 signum, functools.partial(_on_signal, app, loop, stop)
@@ -231,10 +236,16 @@ async def _drain_then_stop(
             server installed.
         signum (int): the signal.
     """
+    app.state.registry.draining = True
     try:
-        await app.state.registry.drain(app.state.graceful_timeout)
+        if app.state.graceful_timeout > 0:
+            await app.state.registry.drain(app.state.graceful_timeout)
     finally:
-        stop(signum, None)
+        try:
+            if app.state.e2b is not None:
+                await app.state.e2b.close()
+        finally:
+            stop(signum, None)
 
 
 @asynccontextmanager
@@ -496,8 +507,23 @@ def build_app(
     app.add_middleware(LenientJson, raw_request=sandbox_request)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
-    limits = resolve_rate_limits(rate_limits)
-    app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
+    buckets = RateLimitBuckets(resolve_rate_limits(rate_limits))
+
+    def rate_limit_error(scope: Scope, error: HttpError) -> JSONResponse:
+        if scope["type"] == "http" and sandbox_request is not None:
+            if sandbox_request(scope):
+                return e2b.failure(error, connect=True)
+            if e2b.is_lifecycle_request(scope):
+                return e2b.failure(error)
+        return error.response()
+
+    app.add_middleware(
+        RateLimitMiddleware,
+        buckets=buckets,
+        signed_in=True,
+        reply_error=rate_limit_error,
+        verified_workspace=e2b.sandbox_workspace if e2b_enabled else None,
+    )
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
@@ -510,8 +536,11 @@ def build_app(
         config=auth,
         api_key_request=e2b.is_lifecycle_request if e2b_enabled else None,
         sandbox_request=sandbox_request,
+        sandbox_account=e2b.sandbox_account if e2b_enabled else None,
     )
-    app.add_middleware(RateLimitMiddleware, rate_limits=limits)
+    app.add_middleware(
+        RateLimitMiddleware, buckets=buckets, reply_error=rate_limit_error
+    )
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)

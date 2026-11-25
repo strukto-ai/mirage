@@ -1,8 +1,11 @@
 import { Buffer } from 'node:buffer'
 import { generateKeyPairSync } from 'node:crypto'
+import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { Agent, request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { buffer } from 'node:stream/consumers'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { DiskRecordClient, DiskWorkspaceStateStore } from '@struktoai/mirage-node'
@@ -10,6 +13,7 @@ import { SignJWT } from 'jose'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
 import { AuthMode, type AuthConfig } from '../auth/config.ts'
+import { SandboxFiles } from '../e2b/files.ts'
 import { CONNECT_STREAM } from '../e2b/process.ts'
 import { CONFIGS_PREFIX, OWNERS_PREFIX } from '../registry.ts'
 
@@ -32,6 +36,7 @@ const applications: MirageApp[] = []
 const stateRoots: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
   vi.unstubAllEnvs()
   for (const app of applications.splice(0)) await app.close()
@@ -117,6 +122,33 @@ function processBody(
   return frame
 }
 
+function streamingPost(url: string, headers: Record<string, string>, agent?: Agent) {
+  const client = request(url, { method: 'POST', headers, agent })
+  client.setTimeout(3000, () => client.destroy(new Error('streaming request timed out')))
+  const reply = new Promise<{
+    status: number | undefined
+    connection: string | undefined
+    body: Buffer
+  }>((resolve, reject) => {
+    client.once('error', reject)
+    client.once('response', (response) => {
+      void buffer(response).then(
+        (body) => {
+          resolve({
+            status: response.statusCode,
+            connection: response.headers.connection,
+            body,
+          })
+        },
+        (error: unknown) => {
+          reject(error instanceof Error ? error : new Error(String(error)))
+        },
+      )
+    })
+  })
+  return { client, reply }
+}
+
 interface ProcessFrame {
   flags: number
   payload: {
@@ -183,7 +215,7 @@ describe('E2B lifecycle', () => {
       expect(refused.statusCode).toBe(401)
       expect(refused.json()).toEqual({ code: 401, message: 'unauthorized' })
     }
-    expect((await app.inject({ url: CREATE, headers: API_KEY })).statusCode).toBe(401)
+    expect((await app.inject({ url: CREATE, headers: API_KEY })).statusCode).toBe(501)
     expect((await app.inject({ url: '/v1/workspaces', headers: API_KEY })).statusCode).toBe(401)
     expect((await app.inject({ url: '/v1/workspaces', headers: BEARER })).statusCode).toBe(200)
   })
@@ -431,14 +463,20 @@ describe('E2B lifecycle', () => {
   })
 
   it('revokes a lease when its workspace is stopped through the native API', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
     const { app } = await setup()
-    const { sandboxID: id } = await create(app)
+    const timers = vi.spyOn(globalThis, 'setTimeout')
+    const cleared = vi.spyOn(globalThis, 'clearTimeout')
+    const { sandboxID: id } = await create(app, { timeout: 600 })
+    const timer = timers.mock.results[timers.mock.calls.findIndex(([, delay]) => delay === 600_000)]
+    if (timer?.type !== 'return') throw new Error('sandbox expiry was not scheduled')
     const stopped = await app.inject({
       method: 'POST',
       url: `/v1/workspaces/${id}/stop`,
       headers: BEARER,
     })
     expect(stopped.statusCode).toBe(200)
+    expect(cleared).toHaveBeenCalledWith(timer.value)
     expect((await connect(app, id, 300)).statusCode).toBe(404)
     expect((await kill(app, id)).statusCode).toBe(404)
   })
@@ -470,8 +508,7 @@ describe('E2B health', () => {
       { ...headers, 'x-access-token': 'incorrect' },
     ]) {
       const refused = await health(unauthorized)
-      expect(refused.statusCode).toBe(401)
-      expect(refused.json()).toMatchObject({ code: 401 })
+      expect(refused.statusCode).toBe(502)
     }
     const active = await health(headers)
     expect(active.statusCode).toBe(204)
@@ -480,7 +517,7 @@ describe('E2B health', () => {
 
     await vi.advanceTimersByTimeAsync(1000)
     expect((await health(headers)).statusCode).toBe(502)
-    expect((await health(routing)).statusCode).toBe(401)
+    expect((await health(routing)).statusCode).toBe(502)
   })
 })
 
@@ -503,7 +540,7 @@ describe('E2B commands', () => {
     expect(processOutput(first, 'stderr')).toBe('warning')
     expect(first.at(-2)).toEqual({
       flags: 0,
-      payload: { event: { end: { exitCode: 7, exited: true, status: 'exit status 7' } } },
+      payload: { event: { end: { exitCode: 7, exited: true, status: 'exited' } } },
     })
     expect(first.at(-1)).toEqual({ flags: 2, payload: {} })
 
@@ -577,6 +614,69 @@ describe('E2B commands', () => {
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
 
+  it('expires a Connect deadline while the request body is still uploading', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const { client, reply } = streamingPost(address + START, {
+      ...headers,
+      'connect-timeout-ms': '100',
+    })
+    try {
+      client.write(processBody('touch expired').subarray(0, 4))
+      const response = await reply
+      expect(response.status).toBe(200)
+      expect(response.connection).toBe('close')
+      expect(processFrames(response.body)).toEqual([
+        {
+          flags: 2,
+          payload: { error: { code: 'deadline_exceeded', message: 'command deadline exceeded' } },
+        },
+      ])
+    } finally {
+      client.destroy()
+    }
+    const after = await runCommand(app, headers, processBody('test ! -e expired'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
+  it('starts a command after a streamed request without a Connect timeout', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const { client, reply } = streamingPost(address + START, headers)
+    const body = processBody('printf ready')
+    client.write(body.subarray(0, 4))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    client.end(body.subarray(4))
+    const response = await reply
+    expect(response.status).toBe(200)
+    const frames = processFrames(response.body)
+    expect(processOutput(frames, 'stdout')).toBe('ready')
+    expect(frames.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
+  it('uses only the remaining Connect deadline after reading the request', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const { client, reply } = streamingPost(address + START, {
+      ...headers,
+      'connect-timeout-ms': '1000',
+    })
+    const body = processBody('sleep 0.8; touch late')
+    client.write(body.subarray(0, 4))
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    client.end(body.subarray(4))
+    const response = await reply
+    expect(response.status).toBe(200)
+    const frames = processFrames(response.body)
+    expect(frames[0]?.payload.event?.start).toBeDefined()
+    expect(frames.at(-1)?.payload.error?.code).toBe('deadline_exceeded')
+    const after = await runCommand(app, headers, processBody('test ! -e late'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
   it('streams output before completion and cancels the running line on disconnect', async () => {
     const { app } = await setup()
     const sandbox = await create(app)
@@ -614,6 +714,106 @@ describe('E2B commands', () => {
 })
 
 describe('E2B files', () => {
+  it('aborts a download and closes its reader before shutdown stops the workspace', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const entry = app.registry.get(sandbox.sandboxID)
+    const stop = vi.spyOn(entry.runner, 'stop')
+    const signal = AbortSignal.timeout(3_000)
+    let reachedPull = (): void => undefined
+    const pulling = new Promise<void>((resolve) => {
+      reachedPull = resolve
+    })
+    let release = (): void => undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let sourceClosed = false
+    async function* source(): AsyncGenerator<Uint8Array> {
+      try {
+        yield Buffer.from('first')
+        reachedPull()
+        await pending
+        yield Buffer.from('second')
+      } finally {
+        sourceClosed = true
+      }
+    }
+    vi.spyOn(SandboxFiles.prototype, 'read').mockResolvedValue(source())
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    try {
+      const response = await fetch(`${address}/files?path=fixture`, {
+        headers: dataHeaders(sandbox),
+        signal,
+      })
+      const reader = response.body?.getReader()
+      if (reader === undefined) throw new Error('download has no body')
+      expect((await reader.read()).value).toEqual(new TextEncoder().encode('first'))
+      await pulling
+      const result = reader.read().catch((error: unknown) => error)
+      const shutdown = app.close()
+      try {
+        await vi.waitFor(() => {
+          expect(entry.acceptingJobs).toBe(false)
+        })
+        expect(stop).not.toHaveBeenCalled()
+      } finally {
+        release()
+      }
+      await shutdown
+      expect(await result).toBeInstanceOf(Error)
+      expect(sourceClosed).toBe(true)
+      expect(stop).toHaveBeenCalledOnce()
+    } finally {
+      release()
+    }
+  })
+
+  it('settles a running mutation before stopping the workspace', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const id = sandbox.sandboxID
+    const headers = dataHeaders(sandbox)
+    delete headers['content-type']
+    const entry = app.registry.get(id)
+    const stop = vi.spyOn(entry.runner, 'stop')
+    let admit = (): void => undefined
+    const admitted = new Promise<void>((resolve) => {
+      admit = resolve
+    })
+    let release = (): void => undefined
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const mkdir = vi.spyOn(SandboxFiles.prototype, 'mkdir').mockImplementation(async () => {
+      admit()
+      await pending
+    })
+    const mutate = async () =>
+      app.inject({
+        method: 'POST',
+        url: '/filesystem.Filesystem/MakeDir',
+        headers,
+        payload: { path: 'fixture' },
+      })
+    const first = mutate()
+    await admitted
+    const killing = kill(app, id)
+    try {
+      await vi.waitFor(() => {
+        expect(entry.acceptingJobs).toBe(false)
+      })
+      expect(stop).not.toHaveBeenCalled()
+      expect((await mutate()).statusCode).toBe(401)
+      expect(mkdir).toHaveBeenCalledTimes(1)
+    } finally {
+      release()
+    }
+    expect((await first).statusCode).toBe(200)
+    expect((await killing).statusCode).toBe(204)
+    expect(stop).toHaveBeenCalledOnce()
+  })
+
   it('uses the addressed workspace for all six file routes', async () => {
     const { app } = await setup()
     const sandbox = await create(app)
@@ -668,8 +868,92 @@ describe('E2B files', () => {
     })
     expect(rejected.statusCode).toBe(401)
     expect(rejected.json()).toMatchObject({ code: 401 })
-    expect((await rpc('Remove', { path: 'nested' })).statusCode).toBe(200)
+    expect((await rpc('Remove', { path: 'nested' })).json()).toMatchObject({
+      code: 'failed_precondition',
+    })
+    expect((await app.inject({ url, headers })).statusCode).toBe(200)
+    expect((await rpc('Remove', { path })).statusCode).toBe(200)
     expect((await rpc('Stat', { path })).json()).toMatchObject({ code: 'not_found' })
+  })
+
+  it('lists to the requested depth without following symlinks', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const prepared = await runCommand(
+      app,
+      headers,
+      processBody('mkdir -p tree/a/b; touch tree/a/b/leaf; ln -s /home/user/tree tree/a/b/loop'),
+    )
+    expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+    delete headers['content-type']
+    const list = (depth?: unknown) =>
+      app.inject({
+        method: 'POST',
+        url: '/filesystem.Filesystem/ListDir',
+        headers,
+        payload: { path: 'tree', depth },
+      })
+    const deepest = ['a', 'a/b', 'a/b/leaf', 'a/b/loop']
+    for (const [depth, paths] of [
+      [undefined, ['a']],
+      [2, ['a', 'a/b']],
+      [3, deepest],
+      [0xffffffff, deepest],
+    ] as const) {
+      const response = await list(depth)
+      expect(response.statusCode, response.body).toBe(200)
+      const { entries } = response.json<{ entries: { name: string; path: string }[] }>()
+      expect(entries.map((entry) => entry.path).sort()).toEqual(
+        paths.map((path) => '/home/user/tree/' + path),
+      )
+      if (paths === deepest) {
+        expect(entries.find((entry) => entry.name === 'loop')).toMatchObject({
+          type: 'FILE_TYPE_SYMLINK',
+          symlinkTarget: '/home/user/tree',
+        })
+      }
+    }
+    for (const invalid of [0, -1, 0x100000000, 1.5, true, '3']) {
+      const response = await list(invalid)
+      expect(response.statusCode).toBe(400)
+      expect(response.json()).toMatchObject({ code: 'invalid_argument' })
+    }
+  })
+
+  it('returns a multipart error before a malformed or oversized upload ends', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const agent = new Agent({ keepAlive: true })
+    const headers = { ...dataHeaders(sandbox), 'content-type': 'multipart/form-data; boundary=e2b' }
+    const url = address + '/files?path=refused'
+    const head = (name: string): string =>
+      `--e2b\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n`
+    try {
+      const malformed = streamingPost(url, headers, agent)
+      malformed.client.write(head('wrong'))
+      const bad = await malformed.reply
+      expect(bad.status).toBe(400)
+      expect(bad.connection).toBe('close')
+
+      const oversized = streamingPost(url, headers, agent)
+      oversized.client.write(head('file'))
+      const mib = Buffer.alloc(1024 * 1024)
+      for (let i = 0; i < 64; i++) {
+        if (!oversized.client.write(mib)) await once(oversized.client, 'drain')
+      }
+      const large = await oversized.reply
+      expect(large.status).toBe(413)
+      expect(large.connection).toBe('close')
+
+      const valid = streamingPost(url, headers, agent)
+      valid.client.end(head('file') + 'content\r\n--e2b--\r\n')
+      const accepted = await valid.reply
+      expect(accepted.status, accepted.body.toString()).toBe(200)
+      expect(accepted.connection).toBe('keep-alive')
+    } finally {
+      agent.destroy()
+    }
   })
 
   it('protects the mount a directory resolves to', async () => {

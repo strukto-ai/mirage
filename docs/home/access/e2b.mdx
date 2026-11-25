@@ -74,3 +74,48 @@ If you want custom mounts or policies, save a Mirage workspace template
 with a writable `/home/user`. Set `MIRAGE_E2B_TEMPLATE` to that template’s
 name before starting the server. Clients can keep requesting `base` or
 pass the configured name. Mirage uses your saved template for either name.
+
+## Compatibility
+
+| SDK area | Supported operations | Behavioral differences |
+| --- | --- | --- |
+| Sandbox | Create, reconnect to a live sandbox, check health, set its timeout, and kill it. | Each sandbox is an ephemeral Mirage workspace. The timeout controls the workspace's lifetime. |
+| Commands | Run and stream a shell command, list active commands, send stdin, close stdin, and cancel a command with the SDK's `kill` method. | Use the SDK's default Bash command form and opt in to stdin when needed. Command IDs identify live Mirage shell executions. Commands end when the output stream disconnects, the deadline passes, or the sandbox ends. Alternate shells, interactive terminals, detached reattach, process tags, and other signals are unsupported. |
+| Filesystem | Read, upload one file, get file information, check existence, list, make a directory, rename, and remove a file or empty directory. | Relative paths start at `/home/user`. A rename stays within one mount. Upload requests are limited to 64 MiB, including the multipart envelope. Watchers, file metadata on upload, and recursive removal through the file API are unsupported. |
+
+Sandbox listing and info, pause and resume, VM metrics, and Code Interpreter
+are unsupported. E2B's listing and info responses require VM allocations
+that a Mirage workspace does not have. Reconnecting preserves the live
+workspace. Reboot and restore options are rejected.
+
+The SDK can generate signed transfer URLs and port hostnames
+locally. Those URLs require sandbox-specific ingress. Connect to the local
+server through the SDK's normal file methods.
+
+Workspace policy comes from Mirage. Create requests can set the template name,
+timeout, and command environment variables. Requests for custom metadata,
+VM sizing, network overrides, automatic pause, or idempotency keys are
+rejected before creating a workspace. Recognized unsupported requests return
+HTTP `501` or Connect `unimplemented`.
+
+Run commands and file operations as the SDK's default `user`. Requests for
+another Linux user are rejected. Workspace profiles and mounts determine
+what commands and files the sandbox can use. E2B template builds and template
+management are unavailable through this adapter. You can save a Mirage
+template through the native Mirage API and configure it as described above.
+
+### How the adapter works
+
+The E2B routes share the Mirage server's HTTP listener. Lifecycle requests
+use the Mirage token as the E2B API key. When a sandbox opens, the adapter
+gives it a separate access token for its command and file requests. The
+sandbox ID is the workspace ID.
+
+The adapter owns the lease, request deadlines, and E2B response formats.
+Commands use the Mirage shell, and files use the workspace filesystem.
+Stopping the workspace revokes the lease before the server closes the runner.
+Shutdown waits for already-admitted backend file work to settle.
+
+File removal uses the workspace's file and empty-directory operations.
+The adapter refuses to walk a directory and delete its children because the
+directory can change during that walk.

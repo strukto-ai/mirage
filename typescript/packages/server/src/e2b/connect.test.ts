@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { decodeStart, encodeMessage, endStream, InvalidConnectRequest } from './connect.ts'
+import {
+  decodeStart,
+  encodeMessage,
+  endStream,
+  InvalidConnectRequest,
+  UnsupportedProcessOption,
+} from './connect.ts'
 
 function envelope(flags: number, payload: string): Buffer {
   const bytes = Buffer.from(payload)
@@ -25,6 +31,7 @@ describe('E2B Connect frames', () => {
       line: 'pwd',
       cwd: '/home/user',
       envs: { TEST: 'value' },
+      stdin: false,
     })
   })
 
@@ -43,5 +50,10 @@ describe('E2B Connect frames', () => {
     expect(Buffer.from(endStream('deadline_exceeded', 'command deadline exceeded'))).toEqual(
       envelope(2, '{"error":{"code":"deadline_exceeded","message":"command deadline exceeded"}}'),
     )
+  })
+
+  it('rejects a custom shell as unsupported', () => {
+    const body = '{"process":{"cmd":"/bin/sh","args":["-c","pwd"]}}'
+    expect(() => decodeStart(envelope(0, body))).toThrow(UnsupportedProcessOption)
   })
 })
