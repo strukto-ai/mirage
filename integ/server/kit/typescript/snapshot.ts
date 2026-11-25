@@ -13,8 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import type { RunState } from './base.ts'
+import { TICK_MS } from './clock.ts'
 import type { ClockState } from './clock.ts'
 import { FaultError, FixtureError, SnapshotError, TenantError } from './errors.ts'
 import { parseFaultBody } from './fault.ts'
@@ -24,6 +25,8 @@ import { checkName } from './tenant.ts'
 import type { JsonValue } from './types.ts'
 
 const SQLITE = Buffer.from('SQLite format 3\0', 'latin1')
+// The farthest a Date reaches either side of the epoch.
+const DATE_MS = 8.64e15
 const FIELDS = ['db', 'fixture', 'schema', 'service', 'tenants']
 const TENANT_FIELDS = ['clock', 'counters', 'faults', 'seeded']
 
@@ -125,6 +128,13 @@ function tenantOf(
   if (typeof clock.base_ms !== 'number' || !Number.isFinite(clock.base_ms)) {
     throw new SnapshotError(`${what} clock base_ms must be a number`)
   }
+  const ticks = count(clock.ticks, `${what} clock ticks`)
+  // The clock stamps base_ms + ticks * TICK_MS, a tick more at each write, so
+  // the next stamp must still be a Date or the run's next write throws.
+  const next = clock.base_ms + (ticks + 1) * TICK_MS
+  if (Math.abs(clock.base_ms) > DATE_MS || Math.abs(next) > DATE_MS) {
+    throw new SnapshotError(`${what} clock stamps past the Date range`)
+  }
   if (!isObject(t.counters)) throw new SnapshotError(`${what} counters must be a JSON object`)
   const counters = Object.fromEntries(
     Object.entries(t.counters).map(([kind, n]) => [kind, count(n, `${what} counter ${kind}`)]),
@@ -145,7 +155,7 @@ function tenantOf(
   )
   return {
     seeded: t.seeded,
-    clock: { baseMs: clock.base_ms, ticks: count(clock.ticks, `${what} clock ticks`) },
+    clock: { baseMs: clock.base_ms, ticks },
     counters,
     plans,
     served,
@@ -158,6 +168,7 @@ export function parseSnapshot(
   raw: JsonValue,
   service: string,
   schema: string,
+  fixtureRoot: string,
   declares: (method: string, route: string) => boolean,
 ): LoadedSnapshot {
   const s = exactly(raw, FIELDS, 'a snapshot')
@@ -167,14 +178,18 @@ export function parseSnapshot(
   if (s.schema !== schema) {
     throw new SnapshotError(`a snapshot of another ${service} schema`)
   }
-  // Checked now as /reset checks a name, since a bare reset of the loaded run
-  // reseeds from it.
+  // Checked now as /reset checks a name, and found under this fake's
+  // fixtures, since a bare reset of the loaded run reseeds from it.
   if (typeof s.fixture !== 'string') throw new SnapshotError('a snapshot fixture must be a name')
+  let fixture: string
   try {
-    fixturePath(service, s.fixture)
+    fixture = fixturePath(service, s.fixture, fixtureRoot)
   } catch (err: unknown) {
     if (err instanceof FixtureError) throw new SnapshotError(`a snapshot ${err.message}`)
     throw err
+  }
+  if (!existsSync(fixture)) {
+    throw new SnapshotError(`a snapshot fixture this fake has not: ${service}/${s.fixture}.json`)
   }
   if (typeof s.db !== 'string') throw new SnapshotError('a snapshot db must be base64')
   const db = Buffer.from(s.db, 'base64')

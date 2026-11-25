@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { constants } from 'node:buffer'
 import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -46,6 +47,11 @@ export const RESET_PATH = '/reset'
 // A run's snapshot, load and clone, each with the method it answers.
 const RUN_OP = /^\/_kit\/runs\/([^/]+)\/(snapshot|load|clone)$/
 const RUN_OP_METHOD: Record<string, string> = { snapshot: 'GET', load: 'POST', clone: 'POST' }
+// maxBodyBytes bounds one API request, and a snapshot is a run's whole
+// database, which may hold many such requests' bodies: a load takes any
+// document the snapshot can answer, whose JSON is one string at most.
+const LOAD_PATH = new RegExp(`^(?:/${RUN_PREFIX}/[^/]+)?/_kit/runs/[^/]+/load$`)
+const SNAPSHOT_BYTES = constants.MAX_STRING_LENGTH
 
 // How long an idle keep-alive socket stays open, and the one number in this
 // file that is about the CLIENTS rather than the vendor being imitated. Node's
@@ -120,7 +126,7 @@ export function makeRuntime<C extends MinimalClient>(
     snapshot,
     load: (run: string, body: JsonValue) => {
       checkName('run', run)
-      const taken = parseSnapshot(body, fake.config.service, schema(), declares)
+      const taken = parseSnapshot(body, fake.config.service, schema(), fixtureRoot, declares)
       return router.enqueue(run, () => loadInto(run, taken))
     },
     // A snapshot of `run` loaded into `into`, which must not exist yet: the
@@ -128,7 +134,13 @@ export function makeRuntime<C extends MinimalClient>(
     clone: async (run: string, into: string) => {
       checkName('run', into)
       if (into === run) throw new RunExistsError(`run ${into} is the run it clones`)
-      const taken = parseSnapshot(await snapshot(run), fake.config.service, schema(), declares)
+      const taken = parseSnapshot(
+        await snapshot(run),
+        fake.config.service,
+        schema(),
+        fixtureRoot,
+        declares,
+      )
       return router.enqueue(into, () => {
         if (pool.has(into)) throw new RunExistsError(`run ${into} exists`)
         return loadInto(into, taken)
@@ -435,8 +447,13 @@ async function answer<C extends MinimalClient>(
     }
     throw err
   }
-  if (path === FAULTS_PATH)
-    return faultsEndpoint(router, rt.state(run).of(tenant).faults, method, raw)
+  // On the run's queue, so a plan armed after a /reset or a load is armed on
+  // the run they leave, not on the state they are about to replace.
+  if (path === FAULTS_PATH) {
+    return router.run(run, method !== 'GET', () =>
+      faultsEndpoint(router, rt.state(run).of(tenant).faults, method, raw),
+    )
+  }
   const hit = router.match(method, path)
   if (hit === null) return unrouted(service, method, path)
   // Ahead of the run's queue and of the handler: a faulted request touches
@@ -486,12 +503,13 @@ export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server
     const host = req.headers.host ?? '127.0.0.1'
     const url = new URL(req.url ?? '/', `http://${host}`)
     const method = (req.method ?? 'GET').toUpperCase()
+    const limit = method === 'POST' && LOAD_PATH.test(url.pathname) ? SNAPSHOT_BYTES : maxBodyBytes
     const chunks: Buffer[] = []
     let size = 0
     let refused = false
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
-      if (size > maxBodyBytes) {
+      if (size > limit) {
         // Stop buffering, but let the request drain and answer from `end`.
         // Destroying the socket in the same tick as the write means the peer
         // reads ECONNRESET instead of the 413, so an over-large body looked
@@ -504,7 +522,7 @@ export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server
     })
     req.on('end', () => {
       if (refused) {
-        send(res, { status: 413, body: { error: 'body_too_large', limit: maxBodyBytes } }, false)
+        send(res, { status: 413, body: { error: 'body_too_large', limit } }, false)
         return
       }
       void answer(rt, router, method, url, req.headers as Headers, Buffer.concat(chunks))

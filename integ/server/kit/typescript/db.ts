@@ -20,13 +20,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { KitError } from './errors.ts'
+import { KitError, SnapshotError } from './errors.ts'
 import type { SeedReport } from './types.ts'
 import { runId } from './tenant.ts'
 
@@ -242,12 +243,38 @@ export class ClientPool<C extends MinimalClient> {
     }
   }
 
-  // A run whose file is a snapshot's database: the run dropped, the file
-  // written in its place, and its client opened over that file rather than a
-  // copy of the template.
+  // A run whose file is a snapshot's database. The bytes are written to a
+  // file of their own and SQLite's integrity_check run on it first, so a
+  // damaged or truncated snapshot is refused with the run as it was; only
+  // then is the run dropped, the checked file moved to its path, and its
+  // client opened over that file rather than a copy of the template.
   async load(run: string, db: Uint8Array): Promise<C> {
+    const checked = join(this.internal, `load-${String(this.builds++)}.db`)
+    writeFileSync(checked, db)
+    try {
+      const probe = new DatabaseSync(checked)
+      let found: string
+      try {
+        const rows = probe.prepare('PRAGMA integrity_check').all()
+        found = rows.map((row) => String(Object.values(row)[0])).join('; ')
+      } finally {
+        probe.close()
+      }
+      if (found !== 'ok') throw new SnapshotError(`a snapshot db is damaged: ${found}`)
+    } catch (err: unknown) {
+      for (const suffix of ['', '-journal', '-wal', '-shm']) {
+        rmSync(`${checked}${suffix}`, { force: true })
+      }
+      if ((err as { code?: string }).code === 'ERR_SQLITE_ERROR') {
+        throw new SnapshotError(`a snapshot db does not open: ${(err as Error).message}`)
+      }
+      throw err
+    }
+    for (const suffix of ['-journal', '-wal', '-shm']) {
+      rmSync(`${checked}${suffix}`, { force: true })
+    }
     await this.drop(run)
-    writeFileSync(this.fileFor(run), db)
+    renameSync(checked, this.fileFor(run))
     return this.open(run)
   }
 

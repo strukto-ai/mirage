@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import assert from 'node:assert/strict'
+import { setTimeout as delay } from 'node:timers/promises'
 import { FAULTS_PATH } from '../typescript/fault.ts'
 import { start } from '../typescript/serve.ts'
 import type { RunSnapshot } from '../typescript/snapshot.ts'
@@ -26,7 +27,13 @@ interface Card {
 }
 
 export async function runSnapshotTests(): Promise<void> {
-  const started = await start(selftestFake, 0)
+  // A body limit every snapshot here is over, so each load below is a
+  // document larger than any one API request may send.
+  const limit = 4096
+  const started = await start(
+    { ...selftestFake, config: { ...selftestFake.config, maxBodyBytes: limit } },
+    0,
+  )
   const { runtime, endpoint } = started
   const send = (path: string, method = 'GET', body?: JsonValue, tenant = 's1'): Promise<Response> =>
     fetch(`${endpoint}${path}`, {
@@ -61,6 +68,12 @@ export async function runSnapshotTests(): Promise<void> {
     assert.deepEqual(Object.keys(taken.tenants), ['s1', 's2'])
     assert.equal(taken.tenants.s1?.seeded, true)
     assert.equal(taken.fixture, 'v1')
+    assert.ok(JSON.stringify(taken).length > limit, 'a snapshot is larger than the body limit')
+    assert.equal(
+      (await send('/_run/a/boards/brd_1/cards', 'POST', { title: 'x'.repeat(limit) })).status,
+      413,
+      'which still bounds an API request',
+    )
     const at = await titles('a')
     assert.deepEqual(at.slice(-1), ['one'], 'a snapshot holds the write just before it')
 
@@ -99,13 +112,21 @@ export async function runSnapshotTests(): Promise<void> {
     )
 
     const before = await titles('a')
+    const db = Buffer.from(taken.db, 'base64')
+    const clocked = (clock: JsonValue): JsonValue =>
+      ({ ...taken, tenants: { ...taken.tenants, s1: { ...taken.tenants.s1, clock } } }) as JsonValue
     for (const bad of [
       { ...taken, service: 'other' },
       { ...taken, schema: '0'.repeat(64) },
       { ...taken, db: Buffer.from('not a database').toString('base64') },
       { ...taken, extra: 1 },
       { ...taken, fixture: '../../etc/passwd' },
-      { ...taken, tenants: { s1: { ...taken.tenants.s1, clock: { base_ms: 0, ticks: -1 } } } },
+      { ...taken, fixture: 'missing' },
+      { ...taken, db: Buffer.from('SQLite format 3\0').toString('base64') },
+      { ...taken, db: db.subarray(0, db.length / 2).toString('base64') },
+      clocked({ base_ms: 0, ticks: -1 }),
+      clocked({ base_ms: 0, ticks: Number.MAX_SAFE_INTEGER }),
+      clocked({ base_ms: 1e300, ticks: 0 }),
       'garbage',
     ]) {
       const res = await load('a', bad as JsonValue)
@@ -135,6 +156,28 @@ export async function runSnapshotTests(): Promise<void> {
       (await send('/_run/a/boards/brd_1/cards')).status,
       429,
       'the original keeps its own',
+    )
+
+    // A plan armed while a load waits on the run is armed on the run the
+    // load leaves, not on the state it replaces.
+    let open = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    void runtime.router.enqueue('e', () => gate)
+    const loading = runtime.load('e', taken as unknown as JsonValue)
+    const arming = send(`/_run/e${FAULTS_PATH}`, 'POST', {
+      plans: [{ method: 'GET', route: '/boards/:board/cards', times: 1, status: 503 }],
+    })
+    const early = await Promise.race([arming.then(() => true), delay(200).then(() => false)])
+    open()
+    await loading
+    assert.equal(early, false, 'a plan waits for the load ahead of it on the run')
+    assert.equal((await arming).status, 200)
+    assert.equal(
+      (await send('/_run/e/boards/brd_1/cards')).status,
+      503,
+      'and is armed on the loaded run',
     )
 
     assert.equal((await send('/_run/x/_kit/runs/a/snapshot')).status, 400, 'contradictory run')
