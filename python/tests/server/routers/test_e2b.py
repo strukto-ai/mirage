@@ -60,6 +60,12 @@ async def test_opt_in_and_api_key_scope(tmp_path, monkeypatch):
     monkeypatch.delenv("MIRAGE_E2B_TEMPLATE", raising=False)
     async with server(tmp_path) as (_, client):
         assert (await client.post(CREATE, headers=KEY)).status_code == 404
+        assert (await client.get("/health")).status_code == 404
+        assert (
+            await client.post(
+                "/sandboxes/missing/timeout", headers=KEY, json={"timeout": 1}
+            )
+        ).status_code == 404
     monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", TEMPLATE)
     async with server(tmp_path) as (_, client):
         for headers in ({}, KEY):
@@ -119,8 +125,15 @@ async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
         assert (await client.post(CREATE, headers=alice)).status_code == 503
         connect = f"{CREATE}/{wid}/connect"
         kill = f"/sandboxes/{wid}"
+        timeout = f"{kill}/timeout"
         assert (await client.post(connect, headers=bob)).status_code == 404
         assert (await client.delete(kill, headers=bob)).status_code == 404
+        assert (
+            await client.post(timeout, headers=bob, json={"timeout": 0})
+        ).status_code == 404
+        assert (
+            await client.post(timeout, headers=alice, json={"timeout": 60})
+        ).status_code == 204
         response = await client.post(connect, headers=alice)
         assert response.status_code == 200
         assert response.json() == created
@@ -234,6 +247,65 @@ async def sandbox_headers(client, **options):
         "content-type": "application/connect+json",
         "authorization": "Basic dXNlcjo=",
     }
+
+
+@pytest.mark.asyncio
+async def test_health_and_timeout_follow_the_same_workspace_lease(tmp_path):
+    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+        app,
+        client,
+    ):
+        headers = await sandbox_headers(client, timeout=1)
+        wid = headers["e2b-sandbox-id"]
+        timeout = f"/sandboxes/{wid}/timeout"
+        response = await client.get("/health", headers=headers)
+        assert response.status_code == 204
+        assert response.content == b""
+        assert (
+            await client.get(
+                "/health", headers={**headers, "e2b-sandbox-port": "49999"}
+            )
+        ).status_code == 400
+        for token in ("", "wrong"):
+            assert (
+                await client.get(
+                    "/health", headers={**headers, "x-access-token": token}
+                )
+            ).status_code == 401
+        assert (
+            await client.post(timeout, headers=headers, json={"timeout": 10})
+        ).status_code == 401
+        for payload in (
+            {},
+            {"timeout": -1},
+            {"timeout": True},
+            {"timeout": 2**31},
+        ):
+            assert (
+                await client.post(timeout, headers=KEY, json=payload)
+            ).status_code == 400
+
+        assert (
+            await client.post(timeout, headers=KEY, json={"timeout": 10})
+        ).status_code == 204
+        await asyncio.sleep(1.1)
+        assert (
+            await client.get("/health", headers=headers)
+        ).status_code == 204
+        assert wid in app.state.registry
+
+        assert (
+            await client.post(timeout, headers=KEY, json={"timeout": 0})
+        ).status_code == 204
+        assert (
+            await client.get("/health", headers=headers)
+        ).status_code == 502
+        assert (
+            await client.post(timeout, headers=KEY, json={"timeout": 10})
+        ).status_code == 404
+        async with asyncio.timeout(3):
+            while wid in app.state.registry:
+                await asyncio.sleep(0.01)
 
 
 def start_body(command, **options):

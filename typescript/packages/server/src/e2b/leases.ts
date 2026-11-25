@@ -12,6 +12,12 @@ export interface SandboxLease {
   readonly envVars: Readonly<Record<string, string>>
 }
 
+export class SandboxNotRunning extends HttpError {
+  constructor() {
+    super('unauthorized', 'invalid sandbox access token')
+  }
+}
+
 interface TimedLease {
   readonly sandbox: SandboxLease
   expiresAt: number
@@ -47,6 +53,14 @@ export class Sandboxes {
     return lease.sandbox
   }
 
+  setTimeout(id: string, account: string | null, timeout: number): boolean {
+    const lease = this.owned(id, account)
+    if (lease === null) return false
+    lease.expiresAt = performance.now() + timeout * 1000
+    this.schedule(lease)
+    return true
+  }
+
   async kill(id: string, account: string | null): Promise<boolean> {
     const lease = this.owned(id, account)
     if (lease === null) return false
@@ -60,12 +74,12 @@ export class Sandboxes {
       throw new HttpError('invalid_request', 'invalid sandbox routing headers')
     }
     const token = headers['x-access-token']
+    if (typeof token !== 'string' || token === '') {
+      throw new HttpError('unauthorized', 'invalid sandbox access token')
+    }
     const lease = this.active(id)
-    if (
-      lease === null ||
-      typeof token !== 'string' ||
-      !this.matchesAccessToken(lease.sandbox.accessToken, token)
-    ) {
+    if (lease === null) throw new SandboxNotRunning()
+    if (!this.matchesAccessToken(lease.sandbox.accessToken, token)) {
       throw new HttpError('unauthorized', 'invalid sandbox access token')
     }
     return lease.sandbox

@@ -6,6 +6,13 @@ from mirage.server.e2b.leases import Sandbox, Sandboxes
 from mirage.server.errors import ErrorCode, HttpError
 
 
+class SandboxNotRunning(HttpError):
+    def __init__(self) -> None:
+        super().__init__(
+            ErrorCode.UNAUTHORIZED, "invalid sandbox access token"
+        )
+
+
 def require_sandbox(request: Request) -> Sandbox:
     """Resolve the active workspace named by authenticated envd headers.
 
@@ -21,7 +28,9 @@ def require_sandbox(request: Request) -> Sandbox:
         raise HttpError(ErrorCode.UNAUTHORIZED, "invalid sandbox access token")
     sandboxes: Sandboxes = request.app.state.e2b
     lease = sandboxes.live(ids[0])
-    if lease is None or not hmac.compare_digest(
+    if lease is None:
+        raise SandboxNotRunning()
+    if not hmac.compare_digest(
         tokens[0].encode("latin-1"), lease.access_token.encode("ascii")
     ):
         raise HttpError(ErrorCode.UNAUTHORIZED, "invalid sandbox access token")

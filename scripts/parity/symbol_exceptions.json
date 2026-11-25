@@ -1763,6 +1763,7 @@
    },
    "typescript_only": {
     "SandboxLease": "The TypeScript adapter returns a read-only sandbox view without the mutable timer.",
+    "SandboxNotRunning": "TypeScript checks sandbox routing headers in the lease module; Python declares the same error in server/e2b/routing.",
     "TimedLease": "JavaScript stores the timer and deadline outside the read-only sandbox view.",
     "MAX_TIMER_DELAY_MS": "Node timers cannot schedule a delay larger than a signed 32-bit integer."
    }
@@ -1773,12 +1774,16 @@
     "create_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
     "connect_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
     "kill_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "sandbox_health": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "set_sandbox_timeout": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
     "data_router": "FastAPI groups the data endpoints into their own router for raw body and lease authentication handling."
    },
    "typescript_only": {
     "CONNECT": "The Fastify auth hook and route registration share the matchable route pattern.",
     "CREATE": "The Fastify auth hook and route registration share the matchable route pattern.",
     "KILL": "The Fastify auth hook and route registration share the matchable route pattern.",
+    "HEALTH": "The Fastify auth hook and route registration share the matchable route pattern.",
+    "SET_TIMEOUT": "The Fastify auth hook and route registration share the matchable route pattern.",
     "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
     "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
     "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory.",

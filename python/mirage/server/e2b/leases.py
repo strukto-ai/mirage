@@ -57,20 +57,26 @@ class Sandboxes:
     def reconnect(
         self, sandbox_id: str, account: str | None, timeout: int
     ) -> Sandbox | None:
-        lease = self.live(sandbox_id)
-        if lease is None or lease.entry.owner != account:
+        lease = self._owned(sandbox_id, account)
+        if lease is None:
             return None
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
+        deadline = asyncio.get_running_loop().time() + timeout
         if deadline > lease.expires_at:
-            lease.expiry.cancel()
-            lease.expires_at = deadline
-            lease.expiry = loop.call_at(deadline, self._expire, lease)
+            self._set_expiry(lease, deadline)
         return lease
 
+    def set_timeout(
+        self, sandbox_id: str, account: str | None, timeout: int
+    ) -> bool:
+        lease = self._owned(sandbox_id, account)
+        if lease is None:
+            return False
+        self._set_expiry(lease, asyncio.get_running_loop().time() + timeout)
+        return True
+
     async def kill(self, sandbox_id: str, account: str | None) -> bool | None:
-        lease = self.live(sandbox_id)
-        if lease is None or lease.entry.owner != account:
+        lease = self._owned(sandbox_id, account)
+        if lease is None:
             return None
         return await asyncio.shield(self._retire(lease))
 
@@ -79,6 +85,19 @@ class Sandboxes:
             self._retire(lease)
         if self._retiring:
             await asyncio.gather(*self._retiring, return_exceptions=True)
+
+    def _owned(self, sandbox_id: str, account: str | None) -> Sandbox | None:
+        lease = self.live(sandbox_id)
+        if lease is None or lease.entry.owner != account:
+            return None
+        return lease
+
+    def _set_expiry(self, lease: Sandbox, deadline: float) -> None:
+        lease.expiry.cancel()
+        lease.expires_at = deadline
+        lease.expiry = asyncio.get_running_loop().call_at(
+            deadline, self._expire, lease
+        )
 
     def _expire(self, lease: Sandbox) -> None:
         if self._leases.get(lease.entry.id) is not lease:

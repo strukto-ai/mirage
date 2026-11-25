@@ -18,6 +18,7 @@ const BEARER = { authorization: 'Bearer test-key' }
 const RAM = { mounts: { '/home/user': { vfs: 'ram', mode: 'write' } } }
 const CREATE = '/v2/sandboxes'
 const START = '/process.Process/Start'
+const HEALTH = '/health'
 
 interface SandboxResponse {
   sandboxID: string
@@ -72,6 +73,15 @@ function connect(app: MirageApp, id: string, timeout: number, headers = API_KEY)
   return app.inject({
     method: 'POST',
     url: `${CREATE}/${id}/connect`,
+    payload: { timeout },
+    headers,
+  })
+}
+
+function setSandboxTimeout(app: MirageApp, id: string, timeout: number, headers = API_KEY) {
+  return app.inject({
+    method: 'POST',
+    url: `/sandboxes/${id}/timeout`,
     payload: { timeout },
     headers,
   })
@@ -155,6 +165,7 @@ describe('E2B lifecycle', () => {
     expect(
       (await disabled.inject({ method: 'POST', url: CREATE, headers: BEARER })).statusCode,
     ).toBe(404)
+    expect((await disabled.inject({ url: HEALTH, headers: BEARER })).statusCode).toBe(404)
 
     const { app: noCredential } = await setup({ authConfig: { mode: AuthMode.Local } })
     const local = await noCredential.inject({ method: 'POST', url: CREATE, headers: API_KEY })
@@ -249,6 +260,7 @@ describe('E2B lifecycle', () => {
     expect(entry.owner).toBe('owner')
     expect(entry.runner.ws.stateStore).toBeInstanceOf(RAMWorkspaceStateStore)
     expect((await connect(app, id, 300, other)).statusCode).toBe(404)
+    expect((await setSandboxTimeout(app, id, 300, other)).statusCode).toBe(404)
     expect((await kill(app, id, other)).statusCode).toBe(404)
     expect((await connect(app, id, 300, owner)).statusCode).toBe(200)
     for (const prefix of [OWNERS_PREFIX, CONFIGS_PREFIX]) {
@@ -293,6 +305,73 @@ describe('E2B lifecycle', () => {
     expect((await kill(app, id)).statusCode).toBe(404)
   })
 
+  it('authenticates and validates timeout requests', async () => {
+    const { app } = await setup()
+    const { sandboxID: id } = await create(app)
+    const url = `/sandboxes/${id}/timeout`
+    for (const headers of [{}, BEARER, { 'x-api-key': 'incorrect' }]) {
+      const refused = await app.inject({ method: 'POST', url, headers, payload: { timeout: 10 } })
+      expect(refused.statusCode).toBe(401)
+      expect(refused.json()).toMatchObject({ code: 401 })
+    }
+    for (const payload of [
+      {},
+      { timeout: null },
+      { timeout: true },
+      { timeout: '1' },
+      { timeout: 1.5 },
+      { timeout: -1 },
+      { timeout: 2 ** 31 },
+    ]) {
+      const invalid = await app.inject({ method: 'POST', url, payload, headers: API_KEY })
+      expect(invalid.statusCode).toBe(400)
+      expect(invalid.json()).toMatchObject({ code: 400 })
+    }
+    expect((await setSandboxTimeout(app, 'missing', 1)).statusCode).toBe(404)
+    expect((await setSandboxTimeout(app, id, 2 ** 31 - 1)).statusCode).toBe(204)
+  })
+
+  it('resets the deadline later and earlier while keeping the sandbox and its files', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    const { app } = await setup()
+    const sandbox = await create(app, { timeout: 1 })
+    const id = sandbox.sandboxID
+    const headers = dataHeaders(sandbox)
+    const prepared = await runCommand(app, headers, processBody('printf kept > state.txt'))
+    expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+
+    await vi.advanceTimersByTimeAsync(500)
+    const extended = await setSandboxTimeout(app, id, 5)
+    expect(extended.statusCode).toBe(204)
+    expect(extended.body).toBe('')
+    await vi.advanceTimersByTimeAsync(1000)
+    const file = await app.inject({ url: '/files?path=state.txt', headers })
+    expect(file.statusCode).toBe(200)
+    expect(file.body).toBe('kept')
+
+    expect((await setSandboxTimeout(app, id, 2)).statusCode).toBe(204)
+    await vi.advanceTimersByTimeAsync(1999)
+    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(204)
+    await vi.advanceTimersByTimeAsync(1)
+    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(502)
+    expect((await setSandboxTimeout(app, id, 5)).statusCode).toBe(404)
+  })
+
+  it('revokes access immediately on a zero timeout and cleans up the workspace', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const headers = dataHeaders(sandbox)
+    const id = sandbox.sandboxID
+
+    expect((await setSandboxTimeout(app, id, 0)).statusCode).toBe(204)
+    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(502)
+    expect((await app.inject({ url: '/files?path=state.txt', headers })).statusCode).toBe(401)
+    expect((await connect(app, id, 300)).statusCode).toBe(404)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(app.registry.has(id)).toBe(false)
+  })
+
   it('revokes a lease when its workspace is stopped through the native API', async () => {
     const { app } = await setup()
     const { sandboxID: id } = await create(app)
@@ -304,6 +383,46 @@ describe('E2B lifecycle', () => {
     expect(stopped.statusCode).toBe(200)
     expect((await connect(app, id, 300)).statusCode).toBe(404)
     expect((await kill(app, id)).statusCode).toBe(404)
+  })
+})
+
+describe('E2B health', () => {
+  it('requires routing headers and the live sandbox token', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+    const { app } = await setup()
+    const sandbox = await create(app, { timeout: 1 })
+    const routing = {
+      'e2b-sandbox-id': sandbox.sandboxID,
+      'e2b-sandbox-port': '49983',
+    }
+    const headers = { ...routing, 'x-access-token': sandbox.envdAccessToken }
+    const health = (headers: Record<string, string>) => app.inject({ url: HEALTH, headers })
+
+    for (const malformed of [
+      { ...headers, 'e2b-sandbox-id': '' },
+      { ...headers, 'e2b-sandbox-port': '49999' },
+    ]) {
+      const refused = await health(malformed)
+      expect(refused.statusCode).toBe(400)
+      expect(refused.json()).toMatchObject({ code: 400 })
+    }
+    for (const unauthorized of [
+      { ...routing, ...API_KEY },
+      { ...headers, 'x-access-token': '' },
+      { ...headers, 'x-access-token': 'incorrect' },
+    ]) {
+      const refused = await health(unauthorized)
+      expect(refused.statusCode).toBe(401)
+      expect(refused.json()).toMatchObject({ code: 401 })
+    }
+    const active = await health(headers)
+    expect(active.statusCode).toBe(204)
+    expect(active.body).toBe('')
+    expect((await health({ ...headers, 'e2b-sandbox-id': 'missing' })).statusCode).toBe(502)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((await health(headers)).statusCode).toBe(502)
+    expect((await health(routing)).statusCode).toBe(401)
   })
 })
 

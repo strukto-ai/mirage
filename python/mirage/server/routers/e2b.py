@@ -11,7 +11,7 @@ from starlette.types import Scope
 
 from mirage.server.e2b.leases import Sandbox, Sandboxes
 from mirage.server.e2b.process import start_process
-from mirage.server.e2b.routing import require_sandbox
+from mirage.server.e2b.routing import SandboxNotRunning, require_sandbox
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.routers.e2b_files import file_router
 from mirage.server.routers.workspaces import open_workspace, template_config
@@ -53,6 +53,20 @@ data_router.add_api_route(
 data_router.include_router(file_router(require_sandbox))
 
 
+@data_router.get("/health", status_code=204)
+async def sandbox_health(request: Request) -> Response:
+    try:
+        require_sandbox(request)
+    except SandboxNotRunning:
+        return Response(status_code=502)
+    except HttpError as exc:
+        return JSONResponse(
+            {"code": exc.status, "message": exc.message},
+            status_code=exc.status,
+        )
+    return Response(status_code=204)
+
+
 class ConnectSandboxRequest(BaseModel):
     timeout: int = Field(
         default=DEFAULT_TIMEOUT, strict=True, gt=0, le=2**53 - 1
@@ -64,6 +78,10 @@ class CreateSandboxRequest(ConnectSandboxRequest):
     env_vars: dict[str, StrictStr] = Field(
         default_factory=dict, alias="envVars"
     )
+
+
+class SetSandboxTimeoutRequest(BaseModel):
+    timeout: int = Field(strict=True, ge=0, le=2**31 - 1)
 
 
 def is_lifecycle_request(scope: Scope) -> bool:
@@ -116,6 +134,18 @@ async def connect_sandbox(
     if lease is None:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox not found")
     return _present(lease, request.app.state.e2b_template)
+
+
+@router.post("/sandboxes/{sandbox_id}/timeout", status_code=204)
+async def set_sandbox_timeout(
+    sandbox_id: str, request: Request, req: SetSandboxTimeoutRequest
+) -> Response:
+    sandboxes: Sandboxes = request.app.state.e2b
+    if not sandboxes.set_timeout(
+        sandbox_id, request.state.account, req.timeout
+    ):
+        raise HttpError(ErrorCode.NOT_FOUND, "sandbox not found")
+    return Response(status_code=204)
 
 
 @router.delete("/sandboxes/{sandbox_id}", status_code=204)
