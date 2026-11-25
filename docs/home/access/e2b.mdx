@@ -1,0 +1,84 @@
+---
+title: Switch an E2B integration to Mirage
+sidebarTitle: E2B compatibility
+description: Connect an existing E2B SDK client or tool to a self-hosted Mirage server.
+icon: /images/e2b-logo.svg
+---
+
+## Self-hosted Mirage
+
+Use a Mirage server build with E2B compatibility. This guide uses E2B SDK
+2.64.0 to create a sandbox, write a file, and read it from a shell command.
+
+### Configure the server
+
+Set the template name and a server token before starting Mirage. The example
+uses a template named `approved`. If you already have a saved template with a
+writable `/home/user`, set `MIRAGE_E2B_TEMPLATE` to its name.
+
+```bash
+export MIRAGE_E2B_TEMPLATE=approved
+export MIRAGE_AUTH_MODE=token
+export MIRAGE_AUTH_TOKEN="${MIRAGE_AUTH_TOKEN:-$(openssl rand -hex 32)}"
+```
+
+Start one Mirage worker on port 8765 from that shell.
+Use the launch command for your server in the [HTTP setup guide](/home/access/http#launch-a-server).
+
+If you chose the example template, save it on the running server.
+
+```bash
+curl --fail-with-body --silent --show-error \
+	--header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+	--json '{
+		"name": "approved",
+		"config": {
+			"mounts": {"/home/user": {"vfs": "ram", "mode": "write"}}
+		}
+	}' \
+	http://127.0.0.1:8765/v1/templates
+```
+
+Mirage uses your saved template when the SDK requests E2B's `base` template.
+
+### Point your client at Mirage
+
+Set these variables in the environment of the app that runs the SDK or tool.
+Use the same token you set on the server as `E2B_API_KEY`.
+
+```bash
+export E2B_API_URL=http://127.0.0.1:8765
+export E2B_SANDBOX_URL=http://127.0.0.1:8765
+export E2B_HTTP_VERSION=1.1
+export E2B_API_KEY="$MIRAGE_AUTH_TOKEN"
+```
+
+Both URLs use Mirage's HTTP port. Use your server's reachable address if
+the app runs on another host. If the app uses a separate shell, set
+`E2B_API_KEY` to the server token in that shell.
+
+If your local daemon uses its default token file, set the key with
+`export E2B_API_KEY="$(cat ~/.mirage/auth_token)"`.
+
+Keep your SDK calls and tool registration. If the app passes an endpoint or
+key explicitly, update that value to use Mirage. If the app sets a template
+name, use `base` or the name in `MIRAGE_E2B_TEMPLATE`.
+
+### Verify the connection
+
+```python
+from e2b import Sandbox
+
+sandbox = Sandbox.create("base")
+try:
+    sandbox.files.write("hello.txt", "Hello from Mirage\n")
+    print(sandbox.commands.run("cat hello.txt").stdout, end="")
+finally:
+    sandbox.kill()
+```
+
+The script prints `Hello from Mirage`. The upload and command use the same
+Mirage workspace.
+
+Google ADK 2.15.1's `E2BEnvironment` was verified with E2B SDK 2.64.0 on
+both the Python and TypeScript servers.

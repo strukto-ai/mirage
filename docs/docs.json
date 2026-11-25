@@ -147,6 +147,7 @@
                 "pages": [
                   "home/access/overview",
                   "home/access/http",
+                  "home/access/e2b",
                   "home/access/mcp",
                   "home/access/rpc",
                   "home/access/ssh",
