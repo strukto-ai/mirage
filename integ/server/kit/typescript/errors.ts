@@ -19,3 +19,6 @@ export class SeedError extends KitError {}
 export class FixtureError extends KitError {}
 export class RouteError extends KitError {}
 export class FaultError extends KitError {}
+export class SnapshotError extends KitError {}
+export class NoRunError extends KitError {}
+export class RunExistsError extends KitError {}

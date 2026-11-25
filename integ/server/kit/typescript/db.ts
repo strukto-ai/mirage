@@ -14,11 +14,20 @@
 
 import { execFile, execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { KitError } from './errors.ts'
+import { KitError, SnapshotError } from './errors.ts'
 import type { SeedReport } from './types.ts'
 import { runId } from './tenant.ts'
 
@@ -209,11 +218,64 @@ export class ClientPool<C extends MinimalClient> {
   private clientFrom(run: string, template: string): C {
     const live = this.clients.get(run)
     if (live !== undefined) return live
-    const file = this.fileFor(run)
-    copyFileSync(template, file)
-    const made = new this.ctor({ datasourceUrl: `file:${file}` })
+    copyFileSync(template, this.fileFor(run))
+    return this.open(run)
+  }
+
+  // The run's client over the file already at its path.
+  private open(run: string): C {
+    const made = new this.ctor({ datasourceUrl: `file:${this.fileFor(run)}` })
     this.clients.set(run, made)
     return made
+  }
+
+  // The run's database as one consistent file, its latest commits in: a
+  // VACUUM INTO through the run's own connection, which reads every commit
+  // the run's client made, -wal included. The caller holds the run's queue,
+  // so no write is half done.
+  snapshot(run: string): Buffer {
+    const target = join(this.internal, `snapshot-${String(this.builds++)}.db`)
+    try {
+      this.sql(run).prepare('VACUUM INTO ?').run(target)
+      return readFileSync(target)
+    } finally {
+      rmSync(target, { force: true })
+    }
+  }
+
+  // A run whose file is a snapshot's database. The bytes are written to a
+  // file of their own and SQLite's integrity_check run on it first, so a
+  // damaged or truncated snapshot is refused with the run as it was; only
+  // then is the run dropped, the checked file moved to its path, and its
+  // client opened over that file rather than a copy of the template.
+  async load(run: string, db: Uint8Array): Promise<C> {
+    const checked = join(this.internal, `load-${String(this.builds++)}.db`)
+    writeFileSync(checked, db)
+    try {
+      const probe = new DatabaseSync(checked)
+      let found: string
+      try {
+        const rows = probe.prepare('PRAGMA integrity_check').all()
+        found = rows.map((row) => String(Object.values(row)[0])).join('; ')
+      } finally {
+        probe.close()
+      }
+      if (found !== 'ok') throw new SnapshotError(`a snapshot db is damaged: ${found}`)
+    } catch (err: unknown) {
+      for (const suffix of ['', '-journal', '-wal', '-shm']) {
+        rmSync(`${checked}${suffix}`, { force: true })
+      }
+      if ((err as { code?: string }).code === 'ERR_SQLITE_ERROR') {
+        throw new SnapshotError(`a snapshot db does not open: ${(err as Error).message}`)
+      }
+      throw err
+    }
+    for (const suffix of ['-journal', '-wal', '-shm']) {
+      rmSync(`${checked}${suffix}`, { force: true })
+    }
+    await this.drop(run)
+    renameSync(checked, this.fileFor(run))
+    return this.open(run)
   }
 
   // A run whose seed is already on disk costs a file copy instead of a seed.

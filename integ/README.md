@@ -268,6 +268,25 @@ unaffected. A bare reset remembers the last successful fixture **for that
 run**; a new or deleted run starts from the process's `--fixture` choice.
 `GET /_kit/health` reports `runs` as a count, never run identifiers.
 
+`GET /_kit/runs/<run>/snapshot` answers the run's world as one JSON document:
+its SQLite file whole (`db`, base64, taken with `VACUUM INTO` so the latest
+commits are in), each tenant's clock, id counters, armed fault plans and
+whether a reset seeded it, the fixture a bare reset of the run reseeds from,
+and the `service` and `schema` (the digest of the fake's Prisma schema) that
+can load it. `POST /_kit/runs/<run>/load` with that document makes the run
+that world, replacing it or making it: the next id and timestamp it hands out
+are the ones the snapshotted run would have. A document of another fake or
+schema, one that names a fixture the fake has not, one whose clock stamps past
+the `Date` range, one whose database fails SQLite's `integrity_check`, or one
+that does not parse, is refused with 400 and the run left as it was. A load's
+body is bounded by the longest string Node holds, the largest document a
+snapshot can answer, not by `maxBodyBytes`, since a run's database may hold
+many requests' bodies. `POST /_kit/runs/<run>/clone {"run": "<new>"}` loads the
+run's snapshot into a new run (201), which then diverges on a file of its own;
+an existing `<new>` is refused with 409, and an unknown `<run>` with 404. Each
+waits for that run's requests, as a reset does, and a load fires the fake's
+`afterReset`.
+
 `/_kit/faults` arms fault plans on the tenant a request resolves to, under the
 same run prefix and tenant selectors as an API call. `POST {"plans": [...]}`
 appends plans; each names a `method` and a declared `route` (`/drive/v3/files`,
@@ -275,10 +294,12 @@ appends plans; each names a `method` and a declared `route` (`/drive/v3/files`,
 with `status`, optional `headers` and `body`, after `delay_ms`. A plan with no
 `status` never answers: the socket closes after `delay_ms`, which is a hang past
 the client's timeout or a reset connection. `GET` lists the plans with how many
-requests each served; `DELETE` disarms them and returns that list. A reset of
-the tenant disarms them too. A case's `faults` field arms its plans for the
-length of its command and fails the case when one is left unspent; only gws
-targets wire it today (`vfs/google/retry.json`).
+requests each served; `DELETE` disarms them and returns that list. Each waits
+for the run's pending requests, so a plan armed after a reset or a load is armed
+on the run it leaves. A reset of the tenant disarms them too. A case's
+`faults` field arms its plans for the length of its command and fails the case
+when one is left unspent; only gws targets wire it today
+(`vfs/google/retry.json`).
 
 `gridfs_trash.py` and `gridfs_trash.ts` probe what the battery cannot: a
 GridFS `rm` moves the file's revisions to the trash instead of deleting
