@@ -5,6 +5,7 @@ import { Sandboxes, type SandboxLease } from '../e2b/leases.ts'
 import { isProcessStart, registerProcess } from '../e2b/process.ts'
 import { HttpError } from '../errors.ts'
 import type { RouteApp } from '../routes.ts'
+import { isFileRoute, registerFileRoutes } from './e2b_files.ts'
 import { storeRefusal } from './templates.ts'
 import { createEphemeralWorkspace, type WorkspaceRoutesDeps } from './workspaces.ts'
 
@@ -34,7 +35,7 @@ export function isLifecycleRequest(method: string, path: string): boolean {
 }
 
 export function isDataRequest(method: string, path: string): boolean {
-  return isProcessStart(method, path)
+  return isProcessStart(method, path) || isFileRoute(method, path)
 }
 
 export function connectCode(status: number): string {
@@ -110,5 +111,6 @@ export function router(
     return reply.status(204).send()
   })
   registerProcess(app, sandboxes, deps.registry)
+  registerFileRoutes(app, (request) => sandboxes.requireAccess(request.headers))
   return sandboxes
 }

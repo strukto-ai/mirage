@@ -1808,6 +1808,21 @@
     "registerProcess": "The TypeScript RouteApp registers the route with deps; FastAPI registers the handler on its router.",
     "requestTimeout": "JavaScript passes a relative delay to its cancellation signal; Python uses an absolute asyncio deadline."
    }
+  },
+  "server/routers/e2b_files": {
+   "python_only": {
+    "FileMethod": "Python types the loop callback's method from the Literal of supported unary file operations.",
+    "_download": "Python bridges the file stream from the workspace runner to the ASGI response; TypeScript streams inline on its own event loop.",
+    "_rpc_endpoint": "FastAPI requires a callback factory to bind each declared unary method to its wrapped response.",
+    "file_router": "FastAPI returns a configured subrouter that its parent mounts; TypeScript registers against RouteApp."
+   },
+   "typescript_only": {
+    "List": "The Zod request schema types the list path and depth; Python validates them after reading the JSON object.",
+    "Path": "The Zod request schema validates the path field; Python checks its decoded JSON value directly.",
+    "RPC_PATHS": "Fastify's auth hook checks a set of registered paths. FastAPI matches its registered routes.",
+    "isFileRoute": "Fastify's auth hook checks the registered method and URL; FastAPI matches its registered routes.",
+    "registerFileRoutes": "TypeScript mounts handlers through RouteApp. FastAPI returns a configured subrouter."
+   }
   }
  }
 }

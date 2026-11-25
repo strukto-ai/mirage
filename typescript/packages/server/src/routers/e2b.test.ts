@@ -435,3 +435,61 @@ describe('E2B commands', () => {
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
 })
+
+describe('E2B files', () => {
+  it('uses the addressed workspace for all six file routes', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const headers = dataHeaders(sandbox)
+    delete headers['content-type']
+    function rpc(method: string, payload: Record<string, unknown>) {
+      return app.inject({
+        method: 'POST',
+        url: `/filesystem.Filesystem/${method}`,
+        headers,
+        payload,
+      })
+    }
+
+    const directory = { path: 'nested/dir' }
+    expect((await rpc('MakeDir', directory)).statusCode).toBe(200)
+    expect((await rpc('MakeDir', directory)).json().code).toBe('already_exists')
+
+    const path = 'nested/dir/fixture.bin'
+    const content = Buffer.from([0, 255, 130])
+    const multipart = Buffer.concat([
+      Buffer.from(
+        '--stage-test\r\nContent-Disposition: form-data; name="file"; filename="fixture.bin"\r\n' +
+          'Content-Type: application/octet-stream\r\n\r\n',
+      ),
+      content,
+      Buffer.from('\r\n--stage-test--\r\n'),
+    ])
+    const url = `/files?path=${encodeURIComponent(path)}`
+    const uploaded = await app.inject({
+      method: 'POST',
+      url,
+      headers: { ...headers, 'content-type': 'multipart/form-data; boundary=stage-test' },
+      payload: multipart,
+    })
+    expect(uploaded.statusCode, uploaded.body).toBe(200)
+    expect(uploaded.json()[0].path).toBe(`/home/user/${path}`)
+    expect((await app.inject({ method: 'GET', url, headers })).rawPayload).toEqual(content)
+    expect((await rpc('Stat', { path })).json().entry.size).toBe(String(content.length))
+    expect(
+      (await rpc('ListDir', { path: 'nested', depth: 2 }))
+        .json<{ entries: { name: string }[] }>()
+        .entries.map((entry) => entry.name),
+    ).toContain('fixture.bin')
+
+    const rejected = await app.inject({
+      method: 'GET',
+      url,
+      headers: { ...headers, 'x-access-token': 'wrong' },
+    })
+    expect(rejected.statusCode).toBe(401)
+    expect(rejected.json().code).toBe(401)
+    expect((await rpc('Remove', { path: 'nested' })).statusCode).toBe(200)
+    expect((await rpc('Stat', { path })).json().code).toBe('not_found')
+  })
+})

@@ -11,7 +11,9 @@ from starlette.types import Scope
 
 from mirage.server.e2b.leases import Sandbox, Sandboxes
 from mirage.server.e2b.process import start_process
+from mirage.server.e2b.routing import require_sandbox
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
+from mirage.server.routers.e2b_files import file_router
 from mirage.server.routers.workspaces import open_workspace, template_config
 from mirage.utils.ids import new_workspace_id
 
@@ -48,6 +50,7 @@ data_router = APIRouter(include_in_schema=False)
 data_router.add_api_route(
     "/process.Process/Start", start_process, methods=["POST"]
 )
+data_router.include_router(file_router(require_sandbox))
 
 
 class ConnectSandboxRequest(BaseModel):

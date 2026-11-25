@@ -534,3 +534,76 @@ async def test_process_respects_workspace_command_policy(tmp_path):
         assert (
             envelopes(checked.content)[-2][1]["event"]["end"]["exitCode"] == 0
         )
+
+
+@pytest.mark.asyncio
+async def test_files_follow_the_same_live_lease_and_virtual_paths(tmp_path):
+    async with server(tmp_path, auth_config=TOKEN, e2b_template=TEMPLATE) as (
+        _,
+        client,
+    ):
+        headers = {
+            key: value
+            for key, value in (await sandbox_headers(client)).items()
+            if key.lower() != "content-type"
+        }
+        rpc = "/filesystem.Filesystem/"
+        directory = {"path": "nested/dir"}
+        response = await client.post(
+            rpc + "MakeDir", headers=headers, json=directory
+        )
+        assert response.status_code == 200, response.text
+        response = await client.post(
+            rpc + "MakeDir", headers=headers, json=directory
+        )
+        assert response.json()["code"] == "already_exists"
+
+        path = "nested/dir/fixture.bin"
+        payload = b"\x00\xff\x82"
+        response = await client.post(
+            "/files",
+            headers=headers,
+            params={"path": path},
+            files={
+                "file": ("fixture.bin", payload, "application/octet-stream")
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()[0]["path"] == "/home/user/" + path
+        response = await client.get(
+            "/files", headers=headers, params={"path": path}
+        )
+        assert response.content == payload
+
+        response = await client.post(
+            rpc + "Stat", headers=headers, json={"path": path}
+        )
+        assert response.json()["entry"]["size"] == str(len(payload))
+        response = await client.post(
+            rpc + "ListDir",
+            headers=headers,
+            json={"path": "nested", "depth": 2},
+        )
+        assert any(
+            entry["name"] == "fixture.bin"
+            for entry in response.json()["entries"]
+        )
+
+        denied = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() != "x-access-token"
+        }
+        response = await client.get(
+            "/files", headers=denied, params={"path": path}
+        )
+        assert response.status_code == 401
+        assert response.json()["code"] == 401
+        response = await client.post(
+            rpc + "Remove", headers=headers, json={"path": "nested"}
+        )
+        assert response.status_code == 200, response.text
+        response = await client.post(
+            rpc + "Stat", headers=headers, json={"path": path}
+        )
+        assert response.json()["code"] == "not_found"
