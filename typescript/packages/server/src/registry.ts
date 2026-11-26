@@ -82,20 +82,24 @@ export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
   readonly owner: string | null
+  /** Remove on stop without saving state to reopen the workspace. */
+  readonly ephemeral: boolean
   readonly createdAt: number
   /** The fingerprint of the config it was created from, when it was. */
   configDigest: string | null = null
   acceptingJobs = true
+  beforeStop: (() => Promise<void>) | null = null
   /**
    * The server's policy file's programs, as this workspace runs them;
    * null when the file names none past preWorkspace.
    */
   programs: ScriptPolicy | null = null
 
-  constructor(id: string, runner: WorkspaceRunner, owner: string | null = null) {
+  constructor(id: string, runner: WorkspaceRunner, owner: string | null = null, ephemeral = false) {
     this.id = id
     this.runner = runner
     this.owner = owner
+    this.ephemeral = ephemeral
     this.createdAt = Date.now() / 1000
   }
 }
@@ -674,6 +678,7 @@ export class WorkspaceRegistry {
     id?: string,
     owner: string | null = null,
     restoredWith: readonly Policy[] = [],
+    ephemeral = false,
   ): WorkspaceEntry {
     const wid = id ?? newWorkspaceId()
     if (this.entries.has(wid) || this.removals.has(wid) || this.forgets.has(wid))
@@ -684,7 +689,7 @@ export class WorkspaceRegistry {
     // An account reaches only the workspaces it owns, so every method's
     // caller is the owner's account.
     ws.policies.account = owner
-    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner)
+    const entry = new WorkspaceEntry(wid, new WorkspaceRunner(ws), owner, ephemeral)
     if (Object.keys(this.programs).length > 0) {
       entry.programs = new ScriptPolicy(new Programs(this.programs))
       ws.policies.add(entry.programs)
@@ -722,8 +727,10 @@ export class WorkspaceRegistry {
   private async drop(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
       await stop(entry, true)
-      if (this.owners !== null) await this.owners.delete([entry.id])
-      if (this.configs !== null) await this.configs.delete([entry.id])
+      if (!entry.ephemeral) {
+        if (this.owners !== null) await this.owners.delete([entry.id])
+        if (this.configs !== null) await this.configs.delete([entry.id])
+      }
     } finally {
       this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
@@ -746,6 +753,7 @@ export class WorkspaceRegistry {
     if (removal === undefined) {
       const entry = this.entries.get(id)
       if (entry === undefined) throw new Error(`workspace not found: ${id}`)
+      if (entry.ephemeral) return this.remove(id)
       entry.acceptingJobs = false
       this.entries.delete(id)
       removal = this.shut(entry)
@@ -767,15 +775,24 @@ export class WorkspaceRegistry {
 
   async closeAll(): Promise<void> {
     this.cancelIdleTimer()
-    const ids = Array.from(this.entries.keys())
+    const ids = new Set([...this.entries.keys(), ...this.removals.keys()])
     for (const id of ids) {
-      const entry = this.entries.get(id)
-      this.entries.delete(id)
-      if (entry !== undefined) {
+      try {
+        const removal = this.removals.get(id)
+        if (removal !== undefined) {
+          await removal
+          continue
+        }
+        const entry = this.entries.get(id)
+        if (entry === undefined) continue
+        this.entries.delete(id)
         entry.acceptingJobs = false
-        await stop(entry)
+        await stop(entry, entry.ephemeral)
+      } catch (error) {
+        console.error(`error stopping runner for ${id}:`, error)
       }
     }
+    this.cancelIdleTimer()
     await this.admissionPrograms.close()
   }
 
@@ -842,12 +859,18 @@ async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
 }
 
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
-  if (entry.programs !== null) {
-    try {
-      await entry.runner.call(entry.programs.close())
-    } catch (error) {
-      console.error(`closing ${entry.id}'s policy programs: ${String(error)}`)
+  const beforeStop = entry.beforeStop
+  entry.beforeStop = null
+  try {
+    if (beforeStop !== null) await beforeStop()
+  } finally {
+    if (entry.programs !== null) {
+      try {
+        await entry.runner.call(entry.programs.close())
+      } catch (error) {
+        console.error(`closing ${entry.id}'s policy programs: ${String(error)}`)
+      }
     }
+    await entry.runner.stop(drop ? { delete: true } : {})
   }
-  await entry.runner.stop(drop ? { delete: true } : {})
 }

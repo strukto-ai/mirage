@@ -594,6 +594,7 @@ export class MountEntry {
 
   private checkActive(): void {
     if (this.retiring) throw ebusy(this.prefix)
+    currentCaller().fileSignal?.throwIfAborted()
   }
 
   /**
@@ -1209,7 +1210,9 @@ export class MountEntry {
     path: PathSpec,
     signal?: AbortSignal,
   ): Promise<ByteSource> {
-    return vfs.read(path, await this.handedFor('read', path, null, index), 0, null, signal)
+    const handed = await this.handedFor('read', path, null, index)
+    currentCaller().fileSignal?.throwIfAborted()
+    return vfs.read(path, handed, 0, null, signal)
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
@@ -1233,6 +1236,7 @@ export class MountEntry {
     handed?: Handed,
   ): Promise<unknown> {
     if (!this.vfs.refusesTaken) await refuseTaken((p) => this.statAt(index, p), path, parents)
+    currentCaller().fileSignal?.throwIfAborted()
     if (parents && this.wants('mkdir').includes('parent')) return this.mkdirLevels(path, index)
     const made = await this.vfs.mkdir(path, parents, handed)
     // A directory made new holds nothing yet.
@@ -1409,18 +1413,25 @@ export class MountEntry {
     index: IndexCacheStore,
     source: AsyncIterable<Uint8Array>,
   ): AsyncIterable<Uint8Array> {
+    const iterator = source[Symbol.asyncIterator]()
     let observed = false
     try {
-      for await (const chunk of source) {
+      for (;;) {
+        currentCaller().fileSignal?.throwIfAborted()
+        const next = await iterator.next()
+        currentCaller().fileSignal?.throwIfAborted()
+        if (next.done === true) break
+        const chunk = next.value
         if (chunk.byteLength > 0 && !observed) {
           await this.observe(index, [scope])
           observed = true
+          currentCaller().fileSignal?.throwIfAborted()
         }
         yield chunk
       }
       if (!observed) await this.observe(index, [scope])
     } finally {
-      await closeQuietly(source)
+      await closeQuietly(iterator)
     }
   }
 
@@ -1437,7 +1448,9 @@ export class MountEntry {
     }
     const generation = this.cacheManager?.generation
     try {
+      currentCaller().fileSignal?.throwIfAborted()
       const row = await this.vfs.stat(scope, handed)
+      currentCaller().fileSignal?.throwIfAborted()
       if (this.wants('stat').length === 0) await this.observe(index, [scope])
       this.noteLive(scope, index, row, generation)
       return row
@@ -1467,7 +1480,9 @@ export class MountEntry {
     const seeded = await storedListing(index, key, glob)
     if (seeded !== null) return seeded
     const refill = await index.refillToken()
+    currentCaller().fileSignal?.throwIfAborted()
     const listed = await this.vfs.readdir(path, handed)
+    currentCaller().fileSignal?.throwIfAborted()
     return keepListing(index, key, listed, refill, fetched)
   }
 
@@ -1569,6 +1584,7 @@ export class MountEntry {
     // is handed a stat there only where it declares one.
     const dst = args[0] instanceof PathSpec ? args[0] : null
     const handed = found ?? (await this.handedFor(name, scope, dst, index))
+    currentCaller().fileSignal?.throwIfAborted()
     try {
       return await call(scope, args, { ...kwargs, handed })
     } catch (err) {
@@ -1582,6 +1598,7 @@ export class MountEntry {
     }
     await this.forget(scope, dst, index)
     const again = await this.handedFor(name, scope, dst, index)
+    currentCaller().fileSignal?.throwIfAborted()
     return call(scope, args, { ...kwargs, handed: again })
   }
 
@@ -1795,7 +1812,7 @@ export class MountEntry {
    */
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
     const vfs = this.viewFor(access)
-    if (this.retiring) throw ebusy(this.prefix)
+    this.checkActive()
     const caller = this.onMount(currentCaller())
     const signal = callerSignal()
     const stream =

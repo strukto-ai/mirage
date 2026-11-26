@@ -1558,6 +1558,9 @@ async def lifecycle(
         report.check(f"{host} lifecycle.{key}", got.get(key), want)
 
 
+NATIVE_ROUTE_PREFIXES = ("/v1", "/.well-known")
+
+
 def python_routes() -> set[tuple[str, str]]:
     found = set()
     for route in build_app().routes:
@@ -1566,7 +1569,7 @@ def python_routes() -> set[tuple[str, str]]:
         )
         for method in methods:
             if method not in ("HEAD", "OPTIONS") and route.path.startswith(
-                ("/v1", "/.well-known")
+                NATIVE_ROUTE_PREFIXES
             ):
                 found.add((method, re.sub(r"\{[^}]+\}", "{}", route.path)))
     return found
@@ -1594,6 +1597,8 @@ def typescript_routes() -> set[tuple[str, str]]:
         depth = len(match.group(1)) // 4
         stack = stack[:depth] + [re.sub(r":[^/]+", "{}", match.group(2))]
         path = "".join(stack)
+        if not path.startswith(NATIVE_ROUTE_PREFIXES):
+            continue
         for method in match.group(3).split(", "):
             if method not in ("HEAD", "OPTIONS"):
                 found.add((method, path))

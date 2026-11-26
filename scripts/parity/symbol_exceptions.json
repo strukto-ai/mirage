@@ -38,7 +38,17 @@
     "_drain_on_signals": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_on_signal": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_start_drain": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
-    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal."
+    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_build_e2b_app": "FastAPI configures the companion ASGI app separately; Fastify registers its companion inline in buildApp.",
+    "_e2b_http_error": "Starlette needs a handler for HTTPException; Fastify translates failures through e2bError.",
+    "_start_e2b": "Uvicorn starts on a prebound socket within the native lifespan without installing a second signal handler."
+   },
+   "typescript_only": {
+    "matchesAccessToken": "The Node host injects its constant-time token comparator into the portable lease table; the Python routing boundary uses compare_digest.",
+    "ListenCallback": "The Fastify listen overloads use a Node callback; Uvicorn starts the companion inside the native ASGI lifespan.",
+    "listenTogether": "The Fastify listen entry point coordinates the two socket binds and rolls them back on failure.",
+    "requestGuards": "Fastify registers shared origin and host checks plus disconnect tracking as request hooks; ASGI uses middleware.",
+    "e2bError": "Fastify translates companion HTTP, rate-limit, and Connect errors in one reply function."
    }
   },
   "server/metrics": {
@@ -597,20 +607,27 @@
   },
   "server/auth/middleware": {
    "python_only": {
-    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline."
+    "CredentialRejected": "The shared ASGI credential verifier raises a typed refusal; the Fastify check returns the reason.",
+    "CredentialVerifier": "ASGI shares an instance holding the JWT cache; Fastify shares the authenticator closure.",
+    "admit_account": "ASGI records the verified caller in scope state; Fastify writes the account to its decorated request."
    },
    "typescript_only": {
-    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
+    "authenticator": "Fastify and the Cloudflare host share a function of the Authorization header. ASGI shares a CredentialVerifier instance instead.",
+    "registerE2BAuth": "The Fastify companion registers its auth hook here; Python attaches SandboxAuthMiddleware.",
+    "unauthorized": "Fastify sends native credential refusals through a reply helper; ASGI sends them inline in AuthMiddleware."
    }
   },
   "server/routers/workspaces": {
    "python_only": {
-    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy."
+    "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
+    "template_config": "FastAPI routes share a helper that resolves the saved template and validates its configuration."
    },
    "typescript_only": {
     "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
     "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both.",
-    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
+    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature.",
+    "createEphemeralWorkspace": "The RouteApp calls an adapter-facing entry point after resolving the saved template; Python calls the existing open_workspace with an ephemeral option.",
+    "requireBuildRoom": "The TypeScript builder shares the existing capacity response with the nested build; Python checks it in the shared admission helper."
    }
   },
   "server/schemas": {
@@ -1748,6 +1765,107 @@
     "Agent": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
     "JsonRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process.",
     "isRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process."
+   }
+  },
+  "server/e2b/sandbox": {
+   "python_only": {
+    "Sandbox": "The asyncio lease keeps the expiration timer and the sandbox data together."
+   },
+   "typescript_only": {
+    "SandboxLease": "The TypeScript adapter returns a read-only sandbox view without the mutable timer.",
+    "MAX_TIMER_DELAY_MS": "Node timers cannot schedule a delay larger than a signed 32-bit integer."
+   }
+  },
+  "server/e2b/constants": {
+   "python_only": {
+    "FileMethod": "Python types the loop callback's method from the Literal of supported unary file operations."
+   },
+   "typescript_only": {
+    "RPC_PATHS": "Fastify's auth hook checks a set of registered paths. FastAPI matches its registered routes."
+   }
+  },
+  "server/e2b/errors": {
+   "python_only": {
+    "HTTP_CONNECT_CODE": "The Python file error handler looks up Connect codes in a table; TypeScript uses connectCode."
+   },
+   "typescript_only": {
+    "connectCode": "The Fastify error boundary and file handlers share a function that maps native HTTP status to a Connect code."
+   }
+  },
+  "server/routers/e2b": {
+   "python_only": {
+    "_require_unary_body": "FastAPI shares a raw media guard between lifecycle and file routes. Fastify checks their media in its body parser and route handlers.",
+    "LifecycleRoute": "FastAPI wraps lifecycle routes to translate the native exception handler and validation response.",
+    "create_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "connect_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "kill_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "sandbox_health": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "set_sandbox_timeout": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
+    "data_router": "FastAPI groups the data endpoints into their own router for raw body and lease authentication handling.",
+    "download": "FastAPI registers a named route handler; the RouteApp registers the handler inline.",
+    "upload": "FastAPI registers a named route handler; the RouteApp registers the handler inline.",
+    "_rpc_endpoint": "FastAPI requires a callback factory to bind each declared unary method to its wrapped response.",
+    "DownloadResponse": "The ASGI response owns the file reader until the stream closes.",
+    "_files_of": "FastAPI callers build the file adapter inside the lease and runner scopes; the Fastify routes use withFiles.",
+    "reject_lifecycle": "FastAPI registers a named rejection handler for unsupported lifecycle operations.",
+    "reject_rpc": "FastAPI registers a named rejection handler for unsupported Connect methods.",
+    "SandboxAuthMiddleware": "FastAPI authenticates companion requests through ASGI middleware; Fastify registers an onRequest hook.",
+    "rate_limit_error": "The ASGI rate limiter calls the router for the appropriate error envelope; Fastify uses e2bError."
+   },
+   "typescript_only": {
+    "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
+    "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
+    "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory.",
+    "List": "The Zod request schema types the list path and depth; Python validates them after reading the JSON object.",
+    "Path": "The Zod request schema validates the path field; Python checks its decoded JSON value directly.",
+    "FileQuery": "Zod validates file query fields; FastAPI validates declared query parameters.",
+    "InertCreateOptions": "Zod groups accepted SDK defaults into a shared schema; Pydantic validates them on the request model.",
+    "Move": "Zod validates the source and destination paths; Python extracts them from the decoded request.",
+    "acceptsRawBody": "The scoped Fastify parser checks which routes read their own streams; FastAPI declares the body handling per handler.",
+    "downloadOf": "The Fastify adapter wraps the async iterator as a Node stream; Python uses DownloadResponse.",
+    "withFiles": "The Fastify handler binds the request abort signal to a file-operation callback; Python uses an async lease scope and its runner.",
+    "sandboxAccount": "The Fastify auth hook reads the verified sandbox owner through a callback; the ASGI middleware reads the lease inline."
+   }
+  },
+  "server/e2b/connect": {
+   "typescript_only": {
+    "isRecord": "TypeScript narrows decoded JSON without an assertion; Python uses isinstance inline.",
+    "isStringMap": "TypeScript narrows the validated env to Record<string, string>; Python checks its dict inline."
+   }
+  },
+  "server/e2b/process": {
+   "python_only": {
+    "_error": "FastAPI emits Connect-shaped request errors directly from the handler.",
+    "start_process": "FastAPI registers a named handler; RouteApp binds the callback inline.",
+    "_BASE64": "Python checks base64 syntax with a compiled regex; Zod embeds the check in the input schema.",
+    "_input_bytes": "Python decodes the validated input in a named function; TypeScript combines the Zod input check with its existing base64 decoder.",
+    "_process_info": "The Python command list formats each record inside the runner loop; the TypeScript control handler formats records inline.",
+    "_read_body": "The ASGI request stream has one bounded reader for framed starts and unary control requests.",
+    "control_process": "FastAPI registers a named unary handler; the TypeScript routes share an inline request boundary."
+   },
+   "typescript_only": {
+    "isProcessStart": "Fastify matches method and registered URL; FastAPI checks its declared route matches.",
+    "registerProcess": "The TypeScript RouteApp registers the route with deps; FastAPI registers the handler on its router.",
+    "Input": "Zod validates the unary command input and base64 syntax.",
+    "KillSignal": "Zod matches the accepted SIGKILL enum values; Python checks the decoded field.",
+    "List": "Zod checks the command list request is a JSON object; Python checks the decoded body directly.",
+    "PROCESS_PATHS": "The Fastify auth hook checks the registered command paths; FastAPI matches its declared routes.",
+    "Selector": "Zod validates the PID selector; Python checks the decoded field.",
+    "failure": "Fastify replies with a Connect error through the RouteReply response interface.",
+    "isProcessRequest": "Fastify uses the registered command path in its authentication and parser hooks.",
+    "readStart": "The Fastify start route joins and caps raw stream chunks before decoding the frame."
+   }
+  },
+  "server/e2b/stream": {
+   "python_only": {
+    "_disconnect": "The ASGI response polls receive explicitly; Fastify supplies the closed signal.",
+    "_process_ids": "Python uses an itertools counter on the workspace runner; TypeScript keeps a counter in the route registration.",
+    "_close_process": "Python joins closure on the workspace runner loop; Node closes execution on the server loop.",
+    "_open_process": "Python starts the execution on the workspace runner loop before relaying events on the ASGI loop.",
+    "_events": "The ASGI response consumes a separate event generator; the Node generator closes over the stream and abort state."
+   },
+   "typescript_only": {
+    "remainingSeconds": "Node converts an absolute timer deadline to remaining seconds for its abort timer."
    }
   }
  }

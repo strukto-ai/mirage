@@ -31,6 +31,12 @@ describe('RedisIndexCacheStore default keyPrefix', () => {
   })
 })
 
+it('refuses a lookup after the index cache is closed', async () => {
+  const store = new RedisIndexCacheStore({ url: 'redis://127.0.0.1:1/0' })
+  await store.close()
+  await expect(store.get('/file')).rejects.toThrow('Redis index cache is closed')
+})
+
 const REDIS_URL = process.env.REDIS_URL
 const skip = REDIS_URL === undefined
 

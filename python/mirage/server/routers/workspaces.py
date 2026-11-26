@@ -72,7 +72,12 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.paths import load_daemon_id
-from mirage.server.registry import Claim, Forget, WorkspaceEntry
+from mirage.server.registry import (
+    Claim,
+    Forget,
+    WorkspaceEntry,
+    WorkspaceRegistry,
+)
 from mirage.server.resources.policies import with_policies
 from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
@@ -108,6 +113,7 @@ from mirage.workspace.snapshot.utils import is_safe_blob_path
 from mirage.workspace.store import DiskWorkspaceStateStore
 from mirage.workspace.store.base import WorkspaceStateStore
 from mirage.workspace.store.disk import DOT_IDS
+from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +238,9 @@ async def is_stopped(request: Request, workspace_id: str) -> bool:
 
 
 @asynccontextmanager
-async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
+async def _claimed(
+    request: Request, workspace_id: str, *, ephemeral: bool = False
+) -> AsyncIterator[None]:
     """Hold the caller's claim on ``workspace_id`` while it is built.
 
     A server at its ``max_workspaces`` answers 503 before anything is
@@ -246,6 +254,7 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
     Args:
         request (Request): the creating request.
         workspace_id (str): the id being created.
+        ephemeral (bool): reserve only a fresh id without keeping a claim.
     """
     registry = request.app.state.registry
     if registry.draining:
@@ -258,6 +267,15 @@ async def _claimed(request: Request, workspace_id: str) -> AsyncIterator[None]:
             f"server is at max_workspaces ({registry.max_workspaces})",
         )
     account = request.state.account
+    if ephemeral:
+        if await registry.has_saved_workspace(
+            workspace_id
+        ) or await _has_state(request, workspace_id):
+            raise HttpError(
+                ErrorCode.ALREADY_EXISTS, "workspace id already exists"
+            )
+        yield
+        return
     stored = account is not None and await _has_state(request, workspace_id)
     claim = await registry.claim(workspace_id, account, stored)
     if claim is Claim.TAKEN:
@@ -302,9 +320,11 @@ async def _construct(
     rule: NetworkRule | None,
     workspace_id: str,
     state_root: str,
-    daemon_id: str,
+    daemon_id: str | None,
     max_sessions: int | None,
     ceilings: Ceilings,
+    *,
+    ephemeral: bool = False,
 ) -> Workspace:
     """Build a workspace from its config, on the loop that awaits this:
     its secrets are read, its mounts and machines constructed and their
@@ -323,15 +343,18 @@ async def _construct(
         rule (NetworkRule | None): the network the workspace is held to.
         workspace_id (str): the id it is created under.
         state_root (str): where the default disk store keeps its state.
-        daemon_id (str): the server's id, which the workspace's lease
-            names while the server runs its lines.
+        daemon_id (str | None): the server's id, which the workspace's
+            lease names while the server runs its lines.
         max_sessions (int | None): the server's session cap.
         ceilings (Ceilings): the server's ceilings, which hold the
             config's limits.
+        ephemeral (bool): keep every workspace state plane in RAM.
 
     Raises:
         ValueError: the saved sessions are past the cap.
     """
+    if ephemeral:
+        config = config.model_copy(update={"store": None})
     resolved = await run_with_network(rule, resolve_secrets(config))
     kwargs = resolved.to_workspace_kwargs(
         mcp_clis=await run_with_network(rule, build_mcp_clis(resolved))
@@ -339,7 +362,10 @@ async def _construct(
     kwargs["workspace_id"] = workspace_id
     kwargs["daemon_id"] = daemon_id
     kwargs["ceilings"] = ceilings
-    if "store" not in kwargs:
+    if ephemeral:
+        kwargs["store"] = RAMWorkspaceStateStore()
+        kwargs["owns_store"] = True
+    elif "store" not in kwargs:
         kwargs["store"] = DiskWorkspaceStateStore(state_root)
         kwargs["owns_store"] = True
     ws = Workspace(**kwargs)
@@ -495,8 +521,20 @@ async def _config_of(
             ErrorCode.INVALID_REQUEST, "give a template or a config, not both"
         )
     require_one_account(request)
+    return await template_config(request, req.template)
+
+
+async def template_config(
+    request: Request, ref: str
+) -> tuple[WorkspaceConfig, dict[str, Any]]:
+    """Load and check a saved template the caller is authorized to use.
+
+    Args:
+        request (Request): the HTTP request, for the app's store.
+        ref (str): the saved template name.
+    """
     try:
-        template = await request.app.state.resources.get_template(req.template)
+        template = await request.app.state.resources.get_template(ref)
     except ResourceError as e:
         raise store_refusal(e) from e
     try:
@@ -542,13 +580,15 @@ async def _with_saved(
         raise store_refusal(e) from e
 
 
-async def _open_workspace(
+async def open_workspace(
     request: Request,
     response: Response,
     wid: str,
     config: WorkspaceConfig,
     written: dict[str, Any],
-) -> WorkspaceDetail:
+    *,
+    ephemeral: bool = False,
+) -> WorkspaceEntry:
     """Build ``config`` as workspace ``wid``, or answer the live one built
     from it, and keep the config for ``start``.
 
@@ -566,8 +606,10 @@ async def _open_workspace(
         wid (str): the workspace id.
         config (WorkspaceConfig): the checked config.
         written (dict[str, Any]): the config as written.
+        ephemeral (bool): create a new workspace without keeping state,
+            ownership or config across daemon lifetimes.
     """
-    registry = request.app.state.registry
+    registry: WorkspaceRegistry = request.app.state.registry
     digest = config_digest(config)
     async with registry.creating(wid, digest) as admitted:
         if not admitted:
@@ -577,7 +619,8 @@ async def _open_workspace(
         if wid in registry or registry.removing(wid):
             held = registry.visible(wid, request.state.account)
             if (
-                held is None
+                ephemeral
+                or held is None
                 or registry.removing(wid)
                 or held.config_digest != digest
             ):
@@ -585,22 +628,26 @@ async def _open_workspace(
                     ErrorCode.ALREADY_EXISTS, "workspace id already exists"
                 )
             response.status_code = 200
-            return await make_detail(held)
+            return held
         await _admit(request, written)
         built = await _with_saved(request, config, written)
-        async with _claimed(request, wid):
+        async with _claimed(request, wid, ephemeral=ephemeral):
             try:
+                state_root = request.app.state.state_root
                 runner = await WorkspaceRunner.build(
                     _construct(
                         built,
                         registry.rule_for(config.network),
                         wid,
-                        str(request.app.state.state_root),
-                        await run_blocking(
-                            load_daemon_id, request.app.state.state_root
+                        str(state_root),
+                        (
+                            None
+                            if ephemeral
+                            else await run_blocking(load_daemon_id, state_root)
                         ),
                         registry.max_sessions,
                         registry.ceilings,
+                        ephemeral=ephemeral,
                     )
                 )
             except (
@@ -626,11 +673,16 @@ async def _open_workspace(
                         mountpoint,
                         backend=backend,
                     )
-                await registry.save_config(wid, written)
+                if not ephemeral:
+                    await registry.save_config(wid, written)
                 entry = registry.add(
-                    runner, workspace_id=wid, owner=request.state.account
+                    runner,
+                    workspace_id=wid,
+                    owner=request.state.account,
+                    ephemeral=ephemeral,
                 )
-                entry.config_digest = digest
+                if not ephemeral:
+                    entry.config_digest = digest
             except ValueError as e:
                 await runner.stop()
                 raise HttpError(ErrorCode.CONFLICT, str(e))
@@ -639,7 +691,7 @@ async def _open_workspace(
                 # holds it before it is registered.
                 await runner.stop()
                 raise
-        return await make_detail(entry)
+        return entry
 
 
 @router.post("", response_model=WorkspaceDetail, status_code=201)
@@ -684,7 +736,9 @@ async def create_workspace(
         else config.workspace_id or new_workspace_id()
     )
     _refuse_id(wid)
-    return await _open_workspace(request, response, wid, config, written)
+    return await make_detail(
+        await open_workspace(request, response, wid, config, written)
+    )
 
 
 @router.get("", response_model=WorkspaceList)
@@ -873,8 +927,8 @@ async def start_workspace(
         config = check_config(written)
     except ValueError as e:
         raise loader_error(e, ("config",)) from e
-    return await _open_workspace(
-        request, response, workspace_id, config, written
+    return await make_detail(
+        await open_workspace(request, response, workspace_id, config, written)
     )
 
 

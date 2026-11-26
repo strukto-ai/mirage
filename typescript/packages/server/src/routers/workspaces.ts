@@ -34,6 +34,7 @@ import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceConfig } from '@struktoai/mirage-core/config'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import {
   streamOf,
@@ -50,7 +51,7 @@ import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
 import { explanationToDict, decisionToDict } from '../io_serde.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, partEvents } from '../multipart.ts'
-import { Claim, Forget, type WorkspaceRegistry } from '../registry.ts'
+import { Claim, Forget, type WorkspaceEntry, type WorkspaceRegistry } from '../registry.ts'
 import {
   checkConfig,
   CloneWorkspaceRequest,
@@ -386,24 +387,14 @@ function answer<T>(reply: RouteReply, status: number, body: T): T {
  * server sharing the state root may be using. One the account already
  * held stays.
  */
-async function claimed(
+async function claimed<T>(
   deps: WorkspaceRoutesDeps,
   req: RouteRequest,
   reply: RouteReply,
   id: string,
-  build: () => Promise<unknown>,
-): Promise<unknown> {
-  if (deps.registry.draining) {
-    refused('shutting_down')
-    throw new HttpError('shutting_down', 'server is shutting down')
-  }
-  if (!deps.registry.hasRoom()) {
-    refused('max_workspaces')
-    throw new HttpError(
-      'server_full',
-      `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
-    )
-  }
+  build: () => Promise<T>,
+): Promise<T> {
+  requireBuildRoom(deps.registry)
   const stored = req.account !== null && (await hasState(deps.host, id))
   const claim = await deps.registry.claim(id, req.account, stored)
   if (claim === Claim.Taken) {
@@ -418,6 +409,20 @@ async function claimed(
     if (!built && claim === Claim.New && !(await hasState(deps.host, id))) {
       await deps.registry.release(id)
     }
+  }
+}
+
+function requireBuildRoom(registry: WorkspaceRegistry): void {
+  if (registry.draining) {
+    refused('shutting_down')
+    throw new HttpError('shutting_down', 'server is shutting down')
+  }
+  if (!registry.hasRoom()) {
+    refused('max_workspaces')
+    throw new HttpError(
+      'server_full',
+      `server is at max_workspaces (${String(registry.maxWorkspaces)})`,
+    )
   }
 }
 
@@ -524,15 +529,16 @@ async function withSaved(
  * written. The server's policies judge the config as written before any of
  * it is built. Mirrors Python's `_open_workspace`.
  */
-function openWorkspace(
+function openWorkspace<T>(
   deps: WorkspaceRoutesDeps,
   req: RouteRequest,
   reply: RouteReply,
   wid: string,
   cfg: WorkspaceConfig,
   config: Record<string, JsonValue>,
-  status: number,
-): Promise<unknown> {
+  finish: (entry: WorkspaceEntry, created: boolean) => Promise<T>,
+  ephemeral = false,
+): Promise<T> {
   const digest = configDigest(config)
   return deps.registry.creating(wid, digest, async (admitted) => {
     if (!admitted) {
@@ -540,21 +546,27 @@ function openWorkspace(
     }
     if (deps.registry.has(wid) || deps.registry.removing(wid)) {
       const held = deps.registry.visible(wid, req.account)
-      if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
+      if (
+        held === null ||
+        held.ephemeral ||
+        ephemeral ||
+        deps.registry.removing(wid) ||
+        held.configDigest !== digest
+      ) {
         throw new HttpError('already_exists', 'workspace id already exists')
       }
-      return answer(reply, 200, await makeDetail(held))
+      return finish(held, false)
     }
     await admit(deps, req, config)
     const saved = await withSaved(deps, config, cfg)
-    return claimed(deps, req, reply, wid, async () => {
+    const build = async (): Promise<T> => {
       let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
       try {
         // Mounts that answer as they are built, and the secrets the
         // config names, go out under the network the workspace will be
         // held to.
         args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
-          deps.host.workspaceArgs(saved),
+          deps.host.workspaceArgs(ephemeral ? { ...saved, store: null } : saved),
         )
       } catch (e) {
         // A `secrets:` block the host cannot resolve is the caller's
@@ -575,11 +587,13 @@ function openWorkspace(
           workspaceId: wid,
           // The workspace's lease names this daemon while it runs its
           // lines, by the id it keeps across restarts.
-          daemonId: await deps.host.daemonId(),
+          ...(!ephemeral ? { daemonId: await deps.host.daemonId() } : {}),
           // Daemon default is disk (a created workspace survives restart
           // with zero infrastructure, like git init); the library default
           // stays ram. An explicit store always wins.
-          store: args.options.store ?? deps.host.stateStore(),
+          store: ephemeral
+            ? new RAMWorkspaceStateStore()
+            : (args.options.store ?? deps.host.stateStore()),
           ceilings: deps.registry.ceilings,
           // Whichever of the two built it, no sibling workspace shares
           // it, so this workspace is the one that closes it.
@@ -610,16 +624,44 @@ function openWorkspace(
         for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
           await deps.host.mountKernel(ws, prefix, mountpoint, backend)
         }
-        await deps.registry.saveConfig(wid, config)
-        entry = deps.registry.add(ws, wid, req.account)
+        if (!ephemeral) await deps.registry.saveConfig(wid, config)
+        entry = deps.registry.add(ws, wid, req.account, [], ephemeral)
         entry.configDigest = digest
       } catch (e) {
         await ws.close()
         throw new HttpError('conflict', (e as Error).message)
       }
-      return answer(reply, status, await makeDetail(entry))
-    })
+      return finish(entry, true)
+    }
+    if (!ephemeral) return claimed(deps, req, reply, wid, build)
+    requireBuildRoom(deps.registry)
+    return build()
   })
+}
+
+export function createEphemeralWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest,
+  reply: RouteReply,
+  config: Record<string, JsonValue>,
+): Promise<WorkspaceEntry> {
+  let cfg: WorkspaceConfig
+  try {
+    cfg = checkConfig(config)
+  } catch (e) {
+    throw loaderError(e, ['config'], config)
+  }
+  if ((cfg.workspaceId ?? null) !== null) throw new HttpError('invalid_request', NO_WORKSPACE_ID)
+  return openWorkspace(
+    deps,
+    req,
+    reply,
+    newWorkspaceId(),
+    cfg,
+    config,
+    (entry) => Promise.resolve(entry),
+    true,
+  )
 }
 
 async function createWorkspace(
@@ -644,7 +686,9 @@ async function createWorkspace(
   // refused.
   const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
   refuseId(wid, deps.host.reservedIds)
-  return openWorkspace(deps, req, reply, wid, cfg, config, 201)
+  return openWorkspace(deps, req, reply, wid, cfg, config, async (entry, created) =>
+    answer(reply, created ? 201 : 200, await makeDetail(entry)),
+  )
 }
 
 async function listWorkspaces(
@@ -874,7 +918,9 @@ async function startWorkspace(
   } catch (e) {
     throw loaderError(e, ['config'], config)
   }
-  return openWorkspace(deps, req, reply, id, cfg, config, 200)
+  return openWorkspace(deps, req, reply, id, cfg, config, async (entry) =>
+    answer(reply, 200, await makeDetail(entry)),
+  )
 }
 
 async function cancelWorkspaceLines(

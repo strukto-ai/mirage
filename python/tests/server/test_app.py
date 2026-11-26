@@ -13,12 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 import os
 import signal
+import socket
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncssh
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, ConnectError
 
 from mirage.server import app as app_module
 from mirage.server import metrics as metrics_module
@@ -29,9 +34,17 @@ from mirage.server.app import (
     build_app,
 )
 from mirage.server.daemon_config import DaemonConfigError
-from mirage.server.env import ENV_HOME
+from mirage.server.env import ENV_E2B_PORT, ENV_HOME
 from mirage.server.ssh.config import SSHConfig
 from mirage.server.ssh.errors import SSHConfigError
+from tests.server.routers.e2b_test_support import (
+    CREATE,
+    KEY,
+    PROCESS,
+    TOKEN,
+    data_headers,
+    start_body,
+)
 
 
 def test_build_app_pid_file_explicit_wins(tmp_path):
@@ -193,10 +206,14 @@ async def test_the_lifespan_lets_a_running_line_finish_before_it_closes():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [0, 5])
 async def test_a_signal_drains_before_the_servers_handler_stops_it(
     monkeypatch,
+    timeout,
 ):
-    app = build_app(idle_grace_seconds=10.0, graceful_timeout=5)
+    app = build_app(
+        idle_grace_seconds=10.0, graceful_timeout=timeout, e2b_port=8766
+    )
     stopped = []
     installed = {}
     monkeypatch.setattr(
@@ -219,7 +236,7 @@ async def test_a_signal_drains_before_the_servers_handler_stops_it(
 async def test_without_a_graceful_timeout_the_servers_handlers_stay(
     monkeypatch,
 ):
-    app = build_app(idle_grace_seconds=10.0)
+    app = build_app(idle_grace_seconds=10.0, e2b_port=False)
     installed = {}
     monkeypatch.setattr(signal, "signal", installed.__setitem__)
     assert app_module._drain_on_signals(app) == {}
@@ -274,3 +291,170 @@ async def test_a_failed_close_still_stops_reporting_metrics(monkeypatch):
 
 async def _failing_close() -> None:
     raise RuntimeError("close failed")
+
+
+@pytest.mark.parametrize("port", ["", "0", "-1", "65536", "8766.0", "many"])
+def test_e2b_port_rejects_invalid_values(monkeypatch, port):
+    monkeypatch.setenv(ENV_E2B_PORT, port)
+    with pytest.raises(DaemonConfigError, match=ENV_E2B_PORT):
+        build_app()
+
+
+@pytest.mark.asyncio
+async def test_e2b_listener_closes_even_if_draining_fails(monkeypatch):
+    app = build_app(e2b_port=8766, auth_config=TOKEN, graceful_timeout=1)
+    shutdown = AsyncMock()
+    companion = SimpleNamespace(
+        shutdown=shutdown, server_state=SimpleNamespace(tasks=set())
+    )
+    monkeypatch.setattr(
+        app_module, "_start_e2b", AsyncMock(return_value=companion)
+    )
+    monkeypatch.setattr(
+        app.state.registry,
+        "drain",
+        AsyncMock(side_effect=RuntimeError("drain failed")),
+    )
+    with pytest.raises(RuntimeError, match="drain failed"):
+        async with app.router.lifespan_context(app):
+            pass
+    shutdown.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_e2b_bind_failure_keeps_existing_pid_file(tmp_path):
+    pid_file = tmp_path / "daemon.pid"
+    pid_file.write_text("preserved")
+    with socket.socket() as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        app = build_app(
+            auth_config=TOKEN,
+            e2b_port=occupied.getsockname()[1],
+            pid_file=pid_file,
+        )
+        with pytest.raises(OSError) as error:
+            async with app.router.lifespan_context(app):
+                pytest.fail("startup succeeded with an occupied E2B port")
+        assert error.value.errno == errno.EADDRINUSE
+    assert pid_file.read_text() == "preserved"
+    assert app.state.registry not in metrics_module._registries
+
+
+@pytest.mark.asyncio
+async def test_live_e2b_listener_shares_registry_and_releases_http_on_sigterm():
+    loopback = "127.0.0.1"
+    with socket.socket() as native, socket.socket() as companion:
+        native.bind((loopback, 0))
+        companion.bind((loopback, 0))
+        native_port = native.getsockname()[1]
+        e2b_port = companion.getsockname()[1]
+    native_base = f"http://{loopback}:{native_port}"
+    e2b_base = f"http://{loopback}:{e2b_port}"
+    server = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        "import sys, uvicorn; from mirage.server import build_app; "
+        "uvicorn.run(build_app(), host='127.0.0.1', port=int(sys.argv[1]))",
+        str(native_port),
+        env={
+            **os.environ,
+            ENV_E2B_PORT: str(e2b_port),
+            "MIRAGE_AUTH_MODE": "token",
+            "MIRAGE_AUTH_TOKEN": KEY["X-API-Key"],
+        },
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        async with AsyncClient(trust_env=False) as client:
+            async with asyncio.timeout(10):
+                while True:
+                    if server.returncode is not None:
+                        pytest.fail((await server.stdout.read()).decode())
+                    try:
+                        response = await client.get(native_base + "/v1/health")
+                    except ConnectError:
+                        await asyncio.sleep(0.03)
+                    else:
+                        assert response.status_code == 200
+                        break
+
+            bearer = {"Authorization": f"Bearer {KEY['X-API-Key']}"}
+            native_denied = await client.get(
+                native_base + "/v1/workspaces", headers=KEY
+            )
+            assert native_denied.status_code == 401
+            assert native_denied.json()["error"]["code"] == "unauthorized"
+            assert native_denied.headers["WWW-Authenticate"] == "Bearer"
+            sandbox_denied = await client.post(
+                e2b_base + CREATE, headers=bearer
+            )
+            assert sandbox_denied.status_code == 401
+            assert sandbox_denied.json() == {
+                "code": 401,
+                "message": "unauthorized",
+            }
+            assert "WWW-Authenticate" not in sandbox_denied.headers
+            assert (
+                await client.post(native_base + CREATE, headers=bearer)
+            ).status_code == 404
+            assert (
+                await client.get(e2b_base + "/v1/health")
+            ).status_code == 404
+
+            created = await client.post(e2b_base + CREATE, headers=KEY)
+            assert created.status_code == 201, created.text
+            sandbox = created.json()
+            headers = data_headers(sandbox)
+            found = await client.get(
+                f"{native_base}/v1/workspaces/{sandbox['sandboxID']}",
+                headers=bearer,
+            )
+            assert found.status_code == 200, found.text
+            reader, writer = await asyncio.open_connection(loopback, e2b_port)
+            try:
+                request_headers = {
+                    **headers,
+                    "Host": f"{loopback}:{e2b_port}",
+                    "Content-Length": "100",
+                    "Expect": "100-continue",
+                }
+                request = f"POST {PROCESS} HTTP/1.1\r\n" + "".join(
+                    f"{key}: {value}\r\n"
+                    for key, value in request_headers.items()
+                )
+                writer.write((request + "\r\n").encode())
+                await writer.drain()
+                async with asyncio.timeout(5):
+                    assert b"100 Continue" in await reader.readuntil(
+                        b"\r\n\r\n"
+                    )
+                    async with client.stream(
+                        "POST",
+                        e2b_base + PROCESS,
+                        headers=headers,
+                        content=start_body("printf ready; sleep 30"),
+                    ) as stream:
+                        assert stream.status_code == 200
+                        chunks = stream.aiter_bytes()
+                        started = bytearray()
+                        while b"cmVhZHk=" not in started:
+                            started.extend(await anext(chunks))
+                        server.terminate()
+                        assert b"401 Unauthorized" in await reader.readuntil(
+                            b"\r\n\r\n"
+                        )
+                        async for _ in chunks:
+                            pass
+                    await server.wait()
+            finally:
+                writer.close()
+                await writer.wait_closed()
+            for port in (native_port, e2b_port):
+                with pytest.raises(OSError):
+                    await asyncio.open_connection(loopback, port)
+    finally:
+        if server.returncode is None:
+            server.kill()
+            await server.wait()

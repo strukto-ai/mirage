@@ -1413,6 +1413,7 @@ export class Dispatcher {
     try {
       answer = await this.dispatchAdmitted('read', path, args, kwargs, report)
     } catch (err) {
+      currentCaller().fileSignal?.throwIfAborted()
       if (await this.readHitADir(path, err)) throw eisdir(path)
       throw err
     }
@@ -3090,6 +3091,7 @@ export class Dispatcher {
     // The caller's abort (the line's deadline among its reasons) stops the
     // wait for the hold, so a write still queued never runs; a write made
     // after it is the caller's own choice and waits.
+    currentCaller().fileSignal?.throwIfAborted()
     const caller = callerSignal()
     const signal = caller?.aborted === true ? undefined : caller
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
@@ -3720,7 +3722,9 @@ export class Dispatcher {
     const write = POLICY_WRITE_OPS.has(name)
     const mark = CALLS.get(name)
     if (mark === undefined) throw enotsup('namespace', name, path)
+    const signal = this.caller?.fileSignal ?? currentCaller().fileSignal
     await boundary.admit(mark, path, write, { final: name !== 'rename' }, issuer)
+    signal?.throwIfAborted()
     let target: string
     let result: string | FileStat | null = null
     if (name === 'unlink') {
@@ -3742,12 +3746,13 @@ export class Dispatcher {
       // and synthesize the directories above it.
       const refusal = await this.parentRefusal(dst, issuer)
       if (refusal !== null) throw refusal
-      if (!this.namespace.isLink(dst.virtual)) {
-        const kind = await this.entryType(dst.virtual, issuer)
-        if (kind === FileType.DIRECTORY) throw eisdir(dst)
-        if (kind !== null)
-          await this.dispatch('unlink', dst, [], issuer === undefined ? {} : { issuer })
-      }
+      const kind = this.namespace.isLink(dst.virtual)
+        ? null
+        : await this.entryType(dst.virtual, issuer)
+      if (kind === FileType.DIRECTORY) throw eisdir(dst)
+      signal?.throwIfAborted()
+      if (kind !== null)
+        await this.dispatch('unlink', dst, [], issuer === undefined ? {} : { issuer })
       await this.namespace.unlink(dst.virtual)
       await this.namespace.rename(path.virtual, dst.virtual)
       await this.touchFolder(path.virtual)
@@ -3763,6 +3768,7 @@ export class Dispatcher {
       // that invented the directories above it.
       const refusal = await this.symlinkRefusal(path, issuer)
       if (refusal !== null) throw refusal
+      signal?.throwIfAborted()
       await this.namespace.symlink(path.virtual, target, systemNow())
       await this.touchFolder(path.virtual)
     } else if (name === 'stat') {

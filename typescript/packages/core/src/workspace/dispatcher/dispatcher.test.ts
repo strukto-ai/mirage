@@ -63,9 +63,35 @@ import {
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { SessionProfile } from '../../policy/profile.ts'
+import { withCaller } from '../files.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+it('leaves a symlink when a Files call is canceled during policy admission', async () => {
+  const abort = new AbortController()
+  const ws = new Workspace(
+    { '/ram': [new RAMVFS(), MountMode.WRITE] },
+    {
+      policies: [
+        {
+          preVfs(ctx) {
+            if (ctx.call.name === 'unlink') abort.abort()
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.symlink('/ram/link', '/ram/target')
+    const files = withCaller(ws.vfs, { fileSignal: abort.signal })
+    await expect(files.unlink('/ram/link')).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(ws.vfs.readlink('/ram/link')).resolves.toBe('/ram/target')
+  } finally {
+    await ws.close()
+  }
+})
 
 describe('dispatch applies limits on the executing mount', () => {
   it('a mount read entry cuts nothing, through a link either', async () => {

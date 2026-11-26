@@ -196,7 +196,11 @@ class ThreadWorker(Worker):
         # client it served; the daemon keeps the cap. A thread reads the
         # token from the daemon's own environment.
         os.environ[ENV_WORKER_TOKEN] = self._token
-        app = build_app(max_workspaces=sys.maxsize, forwarded_allow_ips=["*"])
+        app = build_app(
+            max_workspaces=sys.maxsize,
+            forwarded_allow_ips=["*"],
+            e2b_port=False,
+        )
         self._server = uvicorn.Server(
             uvicorn.Config(app, uds=self.socket, log_level="warning")
         )

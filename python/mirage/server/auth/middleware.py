@@ -15,7 +15,7 @@
 import hmac
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 import jwt as pyjwt
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -38,7 +38,7 @@ PUBLIC_PATHS: frozenset[str] = frozenset(
 _JWT_SHAPE = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 
-def _admit(scope: Scope, account: str | None) -> None:
+def admit_account(scope: Scope, account: str | None) -> None:
     """Record who the request runs as, read by routes as
     ``request.state.account``.
 
@@ -60,92 +60,41 @@ def _extract_bearer(scope: Scope) -> str | None:
     return value or None
 
 
-async def _unauthorized(
-    scope: Scope, receive: Receive, send: Send, reason: str
-) -> None:
-    client = scope.get("client") or ("?", 0)
-    logger.warning(
-        "rejecting request from %s:%s: %s", client[0], client[1], reason
-    )
-    response = error_response(
-        ErrorCode.UNAUTHORIZED,
-        "unauthorized",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    await response(scope, receive, send)
+class CredentialRejected(ValueError):
+    """The configured server credentials did not admit this token."""
 
 
-class AuthMiddleware:
-    """ASGI middleware enforcing the daemon's auth mode.
+class CredentialVerifier:
+    """Verify server credentials and share the issuer key cache."""
 
-    Every admitted request carries its account in the scope state:
-    the JWT's ``sub`` in jwt mode, None otherwise.
-
-    Args:
-        app (ASGIApp): downstream ASGI app.
-        config (AuthConfig): resolved auth configuration.
-    """
-
-    def __init__(self, app: ASGIApp, config: AuthConfig) -> None:
-        self.app = app
+    def __init__(self, config: AuthConfig) -> None:
         self.config = config
         jwks_url = config.jwt.jwks_url if config.jwt is not None else None
         self._jwks = (
             pyjwt.PyJWKClient(jwks_url) if jwks_url is not None else None
         )
 
-    async def __call__(
-        self, scope: Scope, receive: Receive, send: Send
-    ) -> None:
-        if scope["type"] not in ("http", "websocket"):
-            await self.app(scope, receive, send)
-            return
-        if scope.get("path") in PUBLIC_PATHS:
-            await self.app(scope, receive, send)
-            return
+    async def account(self, token: str) -> str | None:
         cfg = self.config
-        if cfg.mode == AuthMode.LOCAL and cfg.local_token is None:
-            _admit(scope, None)
-            await self.app(scope, receive, send)
-            return
-
-        token = _extract_bearer(scope)
-        if token is None:
-            await _unauthorized(scope, receive, send, "missing bearer token")
-            return
-
-        if self.config.mode == AuthMode.JWT:
-            if self.config.jwt is None:
-                await _unauthorized(
-                    scope, receive, send, "JWT auth is not configured"
-                )
-                return
+        if cfg.mode == AuthMode.JWT:
+            if cfg.jwt is None:
+                raise CredentialRejected("JWT auth is not configured")
             if not _JWT_SHAPE.match(token):
-                await _unauthorized(
-                    scope, receive, send, "token shape is not a JWT"
-                )
-                return
+                raise CredentialRejected("token shape is not a JWT")
             try:
                 key = await self._signing_key(token)
-                claims = verify_jwt(token, self.config.jwt, key)
-            except JWTVerificationError as e:
-                logger.debug("JWT rejected: %s", e)
-                await _unauthorized(scope, receive, send, str(e))
-                return
-            _admit(scope, claims["sub"])
-            await self.app(scope, receive, send)
-            return
+                return cast(str, verify_jwt(token, cfg.jwt, key)["sub"])
+            except JWTVerificationError as exc:
+                raise CredentialRejected(str(exc)) from exc
 
         expected = (
-            self.config.local_token
-            if self.config.mode == AuthMode.LOCAL
-            else self.config.bearer_token
+            cfg.local_token if cfg.mode == AuthMode.LOCAL else cfg.bearer_token
         )
-        if expected is None or not hmac.compare_digest(token, expected):
-            await _unauthorized(scope, receive, send, "bearer mismatch")
-            return
-        _admit(scope, None)
-        await self.app(scope, receive, send)
+        if expected is None or not hmac.compare_digest(
+            token.encode(), expected.encode()
+        ):
+            raise CredentialRejected("credential mismatch")
+        return None
 
     async def _signing_key(self, token: str) -> Any | None:
         """The issuer's key for ``token``, fetched by its ``kid``.
@@ -170,3 +119,49 @@ class AuthMiddleware:
         except (pyjwt.PyJWTError, ValueError) as e:
             raise JWTVerificationError(f"JWT key lookup failed: {e}") from e
         return found.key
+
+
+class AuthMiddleware:
+    """Authenticate native requests and attach the signed-in account."""
+
+    def __init__(
+        self, app: ASGIApp, config: AuthConfig | CredentialVerifier
+    ) -> None:
+        self.app = app
+        self.verifier = (
+            CredentialVerifier(config)
+            if isinstance(config, AuthConfig)
+            else config
+        )
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if (
+            scope["type"] not in ("http", "websocket")
+            or scope.get("path") in PUBLIC_PATHS
+        ):
+            await self.app(scope, receive, send)
+            return
+        cfg = self.verifier.config
+        account = None
+        try:
+            if cfg.mode != AuthMode.LOCAL or cfg.local_token is not None:
+                token = _extract_bearer(scope)
+                if token is None:
+                    raise CredentialRejected("missing bearer token")
+                account = await self.verifier.account(token)
+        except CredentialRejected as exc:
+            client = scope.get("client") or ("?", 0)
+            logger.warning(
+                "rejecting request from %s:%s: %s", client[0], client[1], exc
+            )
+            response = error_response(
+                ErrorCode.UNAUTHORIZED,
+                "unauthorized",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            await response(scope, receive, send)
+            return
+        admit_account(scope, account)
+        await self.app(scope, receive, send)

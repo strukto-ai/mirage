@@ -419,6 +419,8 @@ describe('Workspace dynamic mount index', () => {
               : { type }
           const ws = new Workspace({ [shadow ? '/' : '/data']: new RAMVFS() }, { index: config })
           const index = ws.mount(shadow ? '/' : '/data').indexStore
+          const observer =
+            !shadow && type === IndexType.REDIS ? new RedisIndexCacheStore(config) : index
           const entry = new FileStat({
             name: 'private.txt',
             type: FileType.FILE,
@@ -432,7 +434,7 @@ describe('Workspace dynamic mount index', () => {
             if (!shadow) await ws.unmount('/data')
             const fresh = ws.addMount('/data', new RAMVFS()).indexStore
             if (shadow) expect(await ws.vfs.readdir('/data')).toEqual([])
-            for (const candidate of [index, fresh]) {
+            for (const candidate of [observer, fresh]) {
               for (const path of ['/data', '/data/private.txt', '/data/nested/private.txt']) {
                 expect((await candidate.get(path)).status).toBe(LookupStatus.NOT_FOUND)
               }
@@ -440,10 +442,13 @@ describe('Workspace dynamic mount index', () => {
                 expect((await candidate.listDir(path)).entries ?? []).toEqual([])
               }
             }
-            expect((await index.listDir('/database')).entries).toEqual(['/database/private.txt'])
+            expect((await observer.listDir('/database')).entries).toEqual(['/database/private.txt'])
           } finally {
-            await index.clear()
-            await ws.close()
+            try {
+              await observer.clear()
+            } finally {
+              await Promise.all([ws.close(), observer === index ? undefined : observer.close()])
+            }
           }
         },
       )

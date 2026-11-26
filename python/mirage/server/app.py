@@ -18,16 +18,19 @@ import importlib
 import logging
 import os
 import signal
+import socket
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import FrameType
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -42,12 +45,20 @@ from mirage.server.auth import (
     AuthMode,
     resolve_auth_config,
 )
+from mirage.server.auth.middleware import CredentialVerifier
 from mirage.server.constants import RAW_BODIES
 from mirage.server.daemon_config import (
+    DaemonConfigError,
     read_daemon_table,
     validate_daemon_table,
 )
-from mirage.server.errors import WorkspaceMissing, register_error_handlers
+from mirage.server.e2b.constants import CONNECT_STREAM
+from mirage.server.e2b.sandbox import Sandboxes
+from mirage.server.env import ENV_E2B_PORT
+from mirage.server.errors import (
+    WorkspaceMissing,
+    register_error_handlers,
+)
 from mirage.server.host_validation import (
     HostHeaderMiddleware,
     resolve_allowed_hosts,
@@ -62,6 +73,7 @@ from mirage.server.paths import (
 )
 from mirage.server.rate_limit import (
     RateLimit,
+    RateLimitBuckets,
     RateLimitMiddleware,
     resolve_rate_limits,
 )
@@ -83,6 +95,7 @@ from mirage.server.resources.strukto import StruktoSourceConfig, fetch_strukto
 from mirage.server.routers import (
     asks,
     documents,
+    e2b,
     entries,
     health,
     jobs,
@@ -145,14 +158,12 @@ async def _watch_exit(
 def _drain_on_signals(
     app: FastAPI,
 ) -> dict[signal.Signals, Callable[[int, FrameType | None], Any]]:
-    """Have SIGTERM and SIGINT drain the app before the server's own
-    handlers stop it, when ``graceful_timeout`` is set: running lines get
-    that long to finish while new workspaces are refused and
-    ``/v1/daemon/ready`` answers 503, then the server stops as it would have.
-    Whatever runs the app (uvicorn, a gunicorn worker, hypercorn) has
-    installed its handlers by the time the lifespan starts. A handler is
-    process-wide and only the main thread may set one, so nothing is
-    wrapped without a timeout or off the main thread.
+    """Drain running lines for the configured grace period and revoke
+    sandbox leases before the server starts draining HTTP connections.
+
+    The server installs its handlers before the lifespan starts. Only the
+    main thread may wrap them. With zero grace, leave the interpreter's
+    default SIGINT handler in place for an embedded app.
 
     Args:
         app (FastAPI): the app.
@@ -162,16 +173,18 @@ def _drain_on_signals(
             handlers it wrapped, to put back as the app stops.
     """
     app.state.drain_task = None
-    if (
-        app.state.graceful_timeout <= 0
-        or threading.current_thread() is not threading.main_thread()
+    graceful = app.state.graceful_timeout > 0
+    if threading.current_thread() is not threading.main_thread() or (
+        not graceful and app.state.e2b is None
     ):
         return {}
     loop = asyncio.get_running_loop()
     wrapped = {}
     for signum in (signal.SIGTERM, signal.SIGINT):
         stop = signal.getsignal(signum)
-        if callable(stop):
+        if callable(stop) and (
+            graceful or stop is not signal.default_int_handler
+        ):
             wrapped[signum] = stop
             signal.signal(
                 signum, functools.partial(_on_signal, app, loop, stop)
@@ -228,60 +241,120 @@ async def _drain_then_stop(
             server installed.
         signum (int): the signal.
     """
+    app.state.registry.draining = True
     try:
-        await app.state.registry.drain(app.state.graceful_timeout)
+        if app.state.graceful_timeout > 0:
+            await app.state.registry.drain(app.state.graceful_timeout)
     finally:
-        stop(signum, None)
+        try:
+            if app.state.e2b is not None:
+                await app.state.e2b.close()
+        finally:
+            stop(signum, None)
+
+
+def resolve_e2b_port(port: int | None = None) -> int | None:
+    """Resolve the optional port for the loopback E2B listener."""
+    if port is None:
+        text = os.environ.get(ENV_E2B_PORT)
+        if text is None:
+            return None
+        digits = text.strip().lstrip("0") or "0"
+        if digits.isascii() and digits.isdecimal() and len(digits) <= 5:
+            port = int(digits)
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise DaemonConfigError(
+            f"{ENV_E2B_PORT} must be a port from 1 to 65535"
+        )
+    return port
+
+
+async def _start_e2b(app: FastAPI, port: int) -> uvicorn.Server:
+    config = uvicorn.Config(
+        app,
+        host="127.0.0.1",
+        port=port,
+        lifespan="off",
+        proxy_headers=False,
+        log_config=None,
+        timeout_graceful_shutdown=1,
+    )
+    config.load()
+    server = uvicorn.Server(config)
+    server.lifespan = config.lifespan_class(config)
+    # Binding here lets an occupied port fail the native lifespan without
+    # letting a second server install signals or exit the process.
+    listener = socket.socket()
+    try:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind((config.host, port))
+        listener.setblocking(False)
+        await server.startup(sockets=[listener])
+    except BaseException:
+        listener.close()
+        raise
+    logger.info("E2B HTTP listening on %s:%s", config.host, port)
+    return server
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Open the app's endpoints, and close them as it stops.
-
-    A configured SSH endpoint that cannot open (the port is taken,
-    asyncssh is missing) fails the daemon's start rather than leaving it
-    up without the entry point its config asked for.
-
-    Args:
-        app (FastAPI): the daemon app.
-    """
+    """Open the app's endpoints, and close them as it stops."""
     config: SSHConfig = app.state.ssh_config
     listener: SSHListener | None = None
-    if config.port is not None:
-        module_path, attr = SERVER_MODULE.split(":")
-        try:
-            module = importlib.import_module(module_path)
-        except ModuleNotFoundError as exc:
-            raise SSHConfigError(
-                "ssh_port is set but the SSH server needs asyncssh; install "
-                "the ssh extra (pip install 'mirage-ai[ssh]')"
-            ) from exc
-        listener = await getattr(module, attr)(app.state.registry, config)
-    app.state.ssh = listener
-    if app.state.pid_file is not None:
-        await run_blocking(_write_pid_file, app.state.pid_file)
-    on_exit = app.state.on_idle_exit
-    exit_task = (
-        asyncio.create_task(_watch_exit(app.state.exit_event, on_exit))
-        if on_exit is not None
-        else None
-    )
-    wrapped = _drain_on_signals(app)
+    companion: uvicorn.Server | None = None
+    exit_task: asyncio.Task[None] | None = None
+    wrapped = {}
+    pid_written = False
     forget = register_metrics(app.state.registry)
     try:
+        if config.port is not None:
+            module_path, attr = SERVER_MODULE.split(":")
+            try:
+                module = importlib.import_module(module_path)
+            except ModuleNotFoundError as exc:
+                raise SSHConfigError(
+                    "ssh_port is set but the SSH server needs asyncssh; install "
+                    "the ssh extra (pip install 'mirage-ai[ssh]')"
+                ) from exc
+            listener = await getattr(module, attr)(app.state.registry, config)
+        app.state.ssh = listener
+        if app.state.e2b_app is not None:
+            companion = await _start_e2b(app.state.e2b_app, app.state.e2b_port)
+        if app.state.pid_file is not None:
+            await run_blocking(_write_pid_file, app.state.pid_file)
+            pid_written = True
+        on_exit = app.state.on_idle_exit
+        if on_exit is not None:
+            exit_task = asyncio.create_task(
+                _watch_exit(app.state.exit_event, on_exit)
+            )
+        wrapped = _drain_on_signals(app)
         yield
     finally:
         for signum, stop in wrapped.items():
             signal.signal(signum, stop)
         if exit_task is not None:
             exit_task.cancel()
-        if listener is not None:
-            listener.close()
-            await listener.wait_closed()
         app.state.registry.draining = True
-        if app.state.graceful_timeout > 0:
-            await app.state.registry.drain(app.state.graceful_timeout)
         try:
+            try:
+                if listener is not None:
+                    listener.close()
+                    await listener.wait_closed()
+                if app.state.graceful_timeout > 0:
+                    await app.state.registry.drain(app.state.graceful_timeout)
+            finally:
+                try:
+                    if app.state.e2b is not None:
+                        await app.state.e2b.close()
+                finally:
+                    if companion is not None:
+                        await companion.shutdown()
+                        await asyncio.gather(
+                            *companion.server_state.tasks,
+                            return_exceptions=True,
+                        )
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:
@@ -289,8 +362,8 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await app.state.registry.close_all()
             finally:
                 forget()
-            if app.state.pid_file is not None:
-                await run_blocking(_remove_pid_file, app.state.pid_file)
+                if pid_written:
+                    await run_blocking(_remove_pid_file, app.state.pid_file)
 
 
 async def answer_missing(request: Request, exc: Exception) -> Response:
@@ -314,19 +387,36 @@ class LenientJson:
 
     Args:
         app (ASGIApp): the app behind.
+        raw_request (Callable[[Scope], bool] | None): routes that consume
+            the request with its original media type.
+        raw_content_types (tuple[bytes, ...]): additional media types to
+            pass through as sent.
     """
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        raw_request: Callable[[Scope], bool] | None = None,
+        raw_content_types: tuple[bytes, ...] = (),
+    ) -> None:
         self.app = app
+        self.raw_request = raw_request
+        self.raw_content_types = raw_content_types
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
-        if scope["type"] == "http":
+        if scope["type"] == "http" and (
+            self.raw_request is None or not self.raw_request(scope)
+        ):
             given = next(
                 (v for k, v in scope["headers"] if k == b"content-type"), b""
             ).lower()
-            if not given.startswith(RAW_BODIES):
+            media = given.partition(b";")[0].strip()
+            if (
+                not given.startswith(RAW_BODIES)
+                and media not in self.raw_content_types
+            ):
                 scope = {
                     **scope,
                     "headers": [
@@ -339,6 +429,54 @@ class LenientJson:
                     ],
                 }
         await self.app(scope, receive, send)
+
+
+async def _e2b_http_error(request: Request, exc: Exception) -> JSONResponse:
+    error = cast(StarletteHTTPException, exc)
+    return JSONResponse(
+        {"code": error.status_code, "message": error.detail},
+        status_code=error.status_code,
+        headers=error.headers,
+    )
+
+
+def _build_e2b_app(
+    native: FastAPI,
+    verifier: CredentialVerifier,
+    buckets: RateLimitBuckets,
+    proxies: Sequence[str],
+) -> FastAPI:
+    app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
+    app.state.registry = native.state.registry
+    app.state.state_root = native.state.state_root
+    app.state.resources = native.state.resources
+    app.state.e2b = native.state.e2b
+    app.add_exception_handler(StarletteHTTPException, _e2b_http_error)
+    app.add_middleware(
+        LenientJson,
+        raw_request=e2b.is_data_request,
+        raw_content_types=(CONNECT_STREAM.encode(),),
+    )
+    app.add_middleware(
+        HostHeaderMiddleware, allowed_hosts=native.state.allowed_hosts
+    )
+    app.add_middleware(
+        RateLimitMiddleware,
+        buckets=buckets,
+        signed_in=True,
+        reply_error=e2b.rate_limit_error,
+        verified_workspace=e2b.sandbox_workspace,
+    )
+    app.add_middleware(e2b.SandboxAuthMiddleware, verifier=verifier)
+    app.add_middleware(
+        RateLimitMiddleware, buckets=buckets, reply_error=e2b.rate_limit_error
+    )
+    if proxies:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(proxies))
+    app.add_middleware(TraceContextMiddleware)
+    app.include_router(e2b.router)
+    app.include_router(e2b.data_router)
+    return app
 
 
 def build_app(
@@ -363,6 +501,7 @@ def build_app(
     max_line_seconds: float | None = None,
     max_env: str | int | None = None,
     resource_store: ResourceStore | None = None,
+    e2b_port: int | Literal[False] | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -461,6 +600,10 @@ def build_app(
             (default) reads ``$MIRAGE_RESOURCE_STORE`` or the
             ``resource_store`` config key, else files under the mirage
             home.
+        e2b_port (int | Literal[False] | None): the E2B HTTP port on
+            127.0.0.1. ``None`` (default) reads ``$MIRAGE_E2B_PORT``,
+            enabling the listener when set. ``False`` disables the listener
+            regardless of the environment.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -470,11 +613,12 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     register_error_handlers(app)
     app.add_exception_handler(WorkspaceMissing, answer_missing)
+    port = None if e2b_port is False else resolve_e2b_port(e2b_port)
     app.add_middleware(LenientJson)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
-    limits = resolve_rate_limits(rate_limits)
-    app.add_middleware(RateLimitMiddleware, rate_limits=limits, signed_in=True)
+    buckets = RateLimitBuckets(resolve_rate_limits(rate_limits))
+    app.add_middleware(RateLimitMiddleware, buckets=buckets, signed_in=True)
     auth = auth_config if auth_config is not None else resolve_auth_config()
     if auth.mode == AuthMode.LOCAL and auth.local_token is None:
         logger.warning(
@@ -482,8 +626,9 @@ def build_app(
             "it can drive it. Set MIRAGE_AUTH_TOKEN or use a non-local "
             "MIRAGE_AUTH_MODE to enforce authentication."
         )
-    app.add_middleware(AuthMiddleware, config=auth)
-    app.add_middleware(RateLimitMiddleware, rate_limits=limits)
+    verifier = CredentialVerifier(auth)
+    app.add_middleware(AuthMiddleware, config=verifier)
+    app.add_middleware(RateLimitMiddleware, buckets=buckets)
     proxies = resolve_forwarded_allow_ips(forwarded_allow_ips)
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
@@ -515,6 +660,13 @@ def build_app(
         else build_resource_store(resolve_resource_store())
     )
     app.state.jobs = app.state.registry.jobs
+    app.state.e2b_port = port
+    app.state.e2b = None if port is None else Sandboxes(app.state.registry)
+    app.state.e2b_app = (
+        None
+        if port is None
+        else _build_e2b_app(app, verifier, buckets, proxies)
+    )
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
     )

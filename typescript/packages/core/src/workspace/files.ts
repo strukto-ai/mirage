@@ -407,6 +407,7 @@ export class Files {
       const dispatch =
         bound === null || this.dispatchAs === null ? this.dispatchFn : this.dispatchAs(bound)
       const explicit = this.caller === null ? undefined : { ...currentCaller(), ...this.caller }
+      explicit?.fileSignal?.throwIfAborted()
       return dispatch(op, typed, args, kwargs, report, explicit)
     }
     // `fallback` false hands over what was recorded below and makes no

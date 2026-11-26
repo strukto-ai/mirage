@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { createRemoteJWKSet } from 'jose'
 
 import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
@@ -92,21 +92,50 @@ async function unauthorized(reply: FastifyReply, reason: string): Promise<void> 
   )
 }
 
-export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
+export function registerAuth(
+  app: FastifyInstance,
+  config: AuthConfig,
+  check = authenticator(config),
+): void {
   app.decorateRequest('account', null)
-  const check = authenticator(config)
   if (check === null) {
     console.warn(
       'daemon starting without bearer auth; anyone who can reach it can drive it. ' +
         'Set MIRAGE_AUTH_TOKEN or use a non-local MIRAGE_AUTH_MODE to enforce authentication.',
     )
-    return
   }
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
+    if (check === null) return
     const answer = await check(req.headers.authorization)
     if (typeof answer === 'string') {
       await unauthorized(reply, answer)
+      return
+    }
+    req.account = answer.account
+  })
+}
+
+export function registerE2BAuth(
+  app: FastifyInstance,
+  check: ReturnType<typeof authenticator>,
+  lifecycle: (request: FastifyRequest) => boolean,
+  sandboxAccount: (request: FastifyRequest) => string | null,
+): void {
+  app.decorateRequest('account', null)
+  app.addHook('onRequest', async (req, reply) => {
+    if (!lifecycle(req)) {
+      req.account = sandboxAccount(req)
+      return
+    }
+    const key = req.headers['x-api-key']
+    const answer =
+      check === null || typeof key !== 'string' || key.trim() === ''
+        ? 'missing or unconfigured API key'
+        : await check(`${BEARER_PREFIX}${key}`)
+    if (typeof answer === 'string') {
+      console.warn(`rejecting request from ${req.ip}: ${answer}`)
+      void reply.code(401).send({ code: 401, message: 'unauthorized' })
       return
     }
     req.account = answer.account

@@ -87,6 +87,24 @@ describe('WebRoutes', () => {
     expect(await response.json()).toEqual({ size: 3 })
   })
 
+  it('hands JSON to a raw route unread', async () => {
+    const app = new WebRoutes()
+    app.post('/raw', { rawBody: true }, async (req) => {
+      let size = 0
+      for await (const chunk of req.raw) size += chunk.byteLength
+      return { size }
+    })
+    const response = await app.fetch(
+      new Request('http://cloudflare.test/raw', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{',
+      }),
+      null,
+    )
+    expect([response.status, await response.json()]).toEqual([200, { size: 1 }])
+  })
+
   it('answers a malformed path escape with 400', async () => {
     const response = await routes().fetch(new Request('http://cloudflare.test/items/%ZZ'), null)
     expect([response.status, await response.json()]).toEqual([

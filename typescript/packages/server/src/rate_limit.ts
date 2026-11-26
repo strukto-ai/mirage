@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { RateLimiterMemory, RateLimiterRes } from 'rate-limiter-flexible'
 import { PUBLIC_PATHS } from './auth/middleware.ts'
 import { DEFAULT_RATE_LIMITS, DaemonConfigError, readDaemonTable } from './daemon_config.ts'
@@ -148,34 +148,52 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
   return typeof header === 'string' ? header : (header?.[0] ?? null)
 }
 
+/** Share rate counters across the native and E2B listeners so callers use one budget. */
+export class RateLimitBuckets {
+  readonly limits: readonly { limit: RateLimit; limiter: RateLimiterMemory }[]
+
+  constructor(rateLimits: readonly RateLimit[]) {
+    this.limits = rateLimits.map((limit) => {
+      const [points, duration] = measure(limit)
+      return { limit, limiter: new RateLimiterMemory({ points, duration }) }
+    })
+  }
+}
+
 /**
  * Answer 429 past the server's rate limits, each counted on its own. The
  * server registers it twice: before authentication for the limits keyed on
  * the address, the workspace or a header, so a caller with a bad token is
  * counted too, and after it, with `signedIn`, for those keyed on the account
- * or a function, which may read the signed-in account. WebSocket handshakes
- * count too; public paths are not counted, nor, on a worker, a request the
+ * or a function, which may read the signed-in account. A verified workspace
+ * uses the same bucket as the native path. WebSocket handshakes count too;
+ * public paths are not counted, nor, on a worker, a request the
  * daemon already counted, but by its workspace. Mirrors Python's
  * `RateLimitMiddleware`.
  */
 export function registerRateLimits(
   app: FastifyInstance,
-  rateLimits: readonly RateLimit[],
+  buckets: RateLimitBuckets,
   signedIn = false,
+  replyError: (reply: FastifyReply, error: HttpError) => unknown = errorResponse,
+  verifiedWorkspace?: (request: FastifyRequest) => string | null,
 ): void {
-  const counted = rateLimits.filter(
-    (limit) => (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
+  const counted = buckets.limits.filter(({ limit }) =>
+    limit.key === 'workspace'
+      ? signedIn === (verifiedWorkspace !== undefined)
+      : (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
   )
   const token = process.env[ENV_WORKER_TOKEN]
-  for (const limit of counted) {
-    const [points, duration] = measure(limit)
-    const limiter = new RateLimiterMemory({ points, duration })
+  for (const { limit, limiter } of counted) {
     app.addHook('onRequest', async (req, reply) => {
       if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
       // The daemon's check names no workspace, so those limits still count.
       const skips = limit.key !== 'workspace' && token !== undefined
       if (skips && isCounted(req.headers[COUNTED_HEADER], token)) return
-      const by = limit.key === 'ip' ? req.ip : value(limit.key, req)
+      const by =
+        limit.key === 'workspace' && verifiedWorkspace !== undefined
+          ? verifiedWorkspace(req)
+          : value(limit.key, req)
       if (by === null) return
       try {
         await limiter.consume(by)
@@ -186,7 +204,7 @@ export function registerRateLimits(
         const name = typeof limit.key === 'function' ? 'function' : limit.key
         console.warn(`rate-limiting a request past ${name}=${limit.rate}`)
         refused('rate_limit')
-        await errorResponse(reply, new HttpError('rate_limited', 'too many requests'))
+        await replyError(reply, new HttpError('rate_limited', 'too many requests'))
       }
     })
   }

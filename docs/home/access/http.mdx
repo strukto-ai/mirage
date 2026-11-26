@@ -90,6 +90,55 @@ For workspace creation and command execution, see
 [Run shell command](/api/operations/shell/run-shell-command).
 Replace the example API host with your server's base URL.
 
+## Connect an E2B client
+
+Mirage exposes E2B-compatible endpoints for sandboxes, commands, and files.
+Existing E2B SDK clients and tools can switch to Mirage if they let you change
+both E2B URLs and use the supported operations below.
+
+Set `MIRAGE_E2B_PORT=8766` in the server environment before starting the server.
+Mirage serves the E2B-compatible API on that port. The native HTTP API uses
+the port you configured when you started the server.
+
+In the E2B client environment, set both URLs to the E2B port and use the
+server's `MIRAGE_AUTH_TOKEN` as the API key.
+
+```bash
+export E2B_API_URL=http://127.0.0.1:8766
+export E2B_SANDBOX_URL=http://127.0.0.1:8766
+export E2B_API_KEY='replace-with-your-token'
+```
+
+If the integration passes URLs or a key in code, update those values there.
+Use `base` if it specifies a template. The built-in `base` workspace has a
+writable, in-memory `/home/user`.
+
+To customize an E2B sandbox, save a Mirage workspace template with `name: base`
+using `mirage api /v1/templates --input ./base.yaml`.
+
+Run this example in the same client environment with the Python E2B SDK installed.
+
+```python
+from e2b import Sandbox
+
+sandbox = Sandbox.create()
+try:
+    sandbox.files.write("hello.txt", "Hello from Mirage\n")
+    print(sandbox.commands.run("cat hello.txt").stdout, end="")
+finally:
+    sandbox.kill()
+```
+
+The script prints `Hello from Mirage`.
+
+**Compatibility**
+
+| Area | Supported | Unsupported |
+| --- | --- | --- |
+| Sandbox | Create, reconnect, check health, set timeout, and delete | List or inspect sandboxes, pause or resume, VM settings and metrics, E2B template management, port forwarding, and Code Interpreter |
+| Commands | Run and stream commands with the SDK's default shell, list live commands, send or close stdin, and cancel with `kill` | Interactive terminals, alternate shells, and reattaching to a detached command |
+| Files | Read, upload, get file info, list, make directories, rename within a mount, and remove files or empty directories | Watchers, recursive removal, and signed file URLs |
+
 ## Configure authentication
 
 `MIRAGE_AUTH_MODE` picks what the server accepts on its HTTP, MCP and RPC routes.

@@ -112,6 +112,8 @@ export interface LineAbortFrame {
  */
 export interface Caller {
   readonly lineAbort: LineAbortFrame | null
+  // The signal of a file API call made outside a shell invocation.
+  readonly fileSignal: AbortSignal | null
   readonly session: SessionState | null
   readonly owner: SessionOwner | null
   readonly evaluation: EvaluationContext | null
@@ -221,6 +223,7 @@ const UNBOUND: Caller = {
   writeHeld: false,
   versionReads: true,
   lineAbort: null,
+  fileSignal: null,
   recording: null,
   revisions: null,
   history: null,
@@ -495,11 +498,15 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
  */
 export function callerSignal(evaluation?: EvaluationContext): AbortSignal | undefined {
   if (inLanding()) return undefined
+  const file = asyncContextIsolatesTasks ? currentCaller().fileSignal : null
   const session = evaluation?.session ?? getCurrentSession()
   if (asyncContextIsolatesTasks || session === null) {
     return mergeSignals(
-      getCurrentEvaluation()?.frame.abortSignal,
-      session === null ? undefined : lineSignal(session),
+      file,
+      mergeSignals(
+        getCurrentEvaluation()?.frame.abortSignal,
+        session === null ? undefined : lineSignal(session),
+      ),
     )
   }
   const sameShell = (other: SessionState): boolean => other.sessionId === session.sessionId

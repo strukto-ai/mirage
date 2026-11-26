@@ -76,6 +76,8 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
   private readonly entryBases: readonly string[]
   private maxDrainBytesValue: number | null = null
   private readonly invalidation = new Invalidation()
+  private readonly deletions = new Set<Promise<void>>()
+  private closing: Promise<void> | null = null
 
   constructor(options: RedisFileCacheOptions = {}) {
     super({
@@ -108,7 +110,27 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
   }
 
   cacheClient(): Promise<RedisClientType> {
+    if (this.isClosed || this.closing !== null) {
+      return Promise.reject(new Error('Redis file cache is closed'))
+    }
     return this.store.client()
+  }
+
+  override close(): Promise<void> {
+    this.closing ??= Promise.allSettled(this.deletions).then(() => super.close())
+    return this.closing
+  }
+
+  private async deleteWithClient(work: (client: RedisClientType) => Promise<void>): Promise<void> {
+    const client = await this.cacheClient()
+    if (this.closing !== null) throw new Error('Redis file cache is closed')
+    const deletion = work(client)
+    this.deletions.add(deletion)
+    try {
+      await deletion
+    } finally {
+      this.deletions.delete(deletion)
+    }
   }
 
   private dataKey(key: string): string {
@@ -130,7 +152,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
    * The cache client with every bulk string read as raw bytes: a body is
    * binary, and a key whose name is not UTF-8 keeps its exact bytes.
    */
-  private async bytesView(): Promise<{
+  private async bytesView(client?: RedisClientType): Promise<{
     get: (k: string) => Promise<Buffer | null>
     mGet: (keys: string[]) => Promise<(Buffer | null)[]>
     scan: (
@@ -138,7 +160,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
       options: { MATCH: string; COUNT: number },
     ) => Promise<{ cursor: Buffer | string; keys: Buffer[] }>
   }> {
-    const c = await this.cacheClient()
+    const c = client ?? (await this.cacheClient())
     const mod = await this.module()
     const typed = c as unknown as {
       withTypeMapping: (
@@ -194,16 +216,17 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
     options: { subtree?: boolean; excluded?: readonly string[] } = {},
   ): Promise<void> {
     this.invalidation.invalidate(key)
-    const c = await this.cacheClient()
-    const pipe = c.multi()
-    pipe.del(this.dataKey(key))
-    pipe.del(this.metaKey(key))
-    await pipe.exec()
-    if (options.subtree !== true) return
-    const prefix = rstripSlash(key) + '/'
-    const excluded = options.excluded ?? []
-    this.invalidation.invalidatePrefix(prefix, excluded)
-    await this.dropMatching(prefix, excluded)
+    await this.deleteWithClient(async (client) => {
+      const pipe = client.multi()
+      pipe.del(this.dataKey(key))
+      pipe.del(this.metaKey(key))
+      await pipe.exec()
+      if (options.subtree !== true) return
+      const prefix = rstripSlash(key) + '/'
+      const excluded = options.excluded ?? []
+      this.invalidation.invalidatePrefix(prefix, excluded)
+      await this.dropMatching(client, prefix, excluded)
+    })
   }
 
   async sizes(keys: readonly string[]): Promise<(number | null)[]> {
@@ -297,9 +320,12 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
    * by hand because scanIterator compares the cursor to '0' and never ends
    * once the cursor arrives as bytes too.
    */
-  private async dropMatching(prefix: string, excluded: readonly string[] = []): Promise<void> {
-    const c = await this.cacheClient()
-    const bytes = await this.bytesView()
+  private async dropMatching(
+    client: RedisClientType,
+    prefix: string,
+    excluded: readonly string[] = [],
+  ): Promise<void> {
+    const bytes = await this.bytesView(client)
     const match = `${this.entryPattern}${globEscape(prefix)}*`
     const excludedBytes = excluded.map((root) => RedisFileCacheStore.asBytes(root))
     let cursor = '0'
@@ -308,7 +334,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
       cursor = reply.cursor.toString()
       const doomed = reply.keys.filter((k) => this.owned(k, excludedBytes))
       if (doomed.length === 0) continue
-      const pipe = c.multi()
+      const pipe = client.multi()
       for (let start = 0; start < doomed.length; start += DEL_BATCH)
         pipe.del(doomed.slice(start, start + DEL_BATCH))
       await pipe.execAsPipeline()
@@ -343,7 +369,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
 
   async clear(): Promise<void> {
     this.invalidation.invalidateAll()
-    await this.dropMatching('')
+    await this.deleteWithClient((client) => this.dropMatching(client, ''))
   }
 }
 
