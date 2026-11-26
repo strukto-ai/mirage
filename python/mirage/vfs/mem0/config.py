@@ -16,6 +16,7 @@ from pydantic import (
     ConfigDict,
     PositiveInt,
     SecretStr,
+    field_validator,
     model_validator,
 )
 
@@ -42,6 +43,15 @@ class Mem0Config(TimeoutConfig):
     """Memories fetched per request while listing the scope."""
     default_search_limit: PositiveInt = 10
     """How many results `search` returns unless the line sets `top_k`."""
+
+    @field_validator("api_key")
+    @classmethod
+    def _key_is_set(cls, value: SecretStr) -> SecretStr:
+        """Refuse an empty key, which the mem0 client would replace with
+        ``MEM0_API_KEY`` from the process environment."""
+        if not value.get_secret_value().strip():
+            raise ValueError("Mem0 api_key cannot be empty")
+        return value
 
     @model_validator(mode="after")
     def _exactly_one_entity(self) -> "Mem0Config":

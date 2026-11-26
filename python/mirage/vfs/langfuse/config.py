@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr, ValidationInfo, field_validator
 
 from mirage.core.api.config import TimeoutConfig
+from mirage.vfs.secrets import reveal_secret
 
 
 class LangfuseConfig(TimeoutConfig):
@@ -33,3 +34,15 @@ class LangfuseConfig(TimeoutConfig):
     default_from_timestamp: str | None = None
     """List only traces from this ISO 8601 timestamp on. Unset lists
     whatever the project holds, up to `default_trace_limit`."""
+
+    @field_validator("public_key", "secret_key")
+    @classmethod
+    def _key_is_set(
+        cls, value: str | SecretStr, info: ValidationInfo
+    ) -> str | SecretStr:
+        """Refuse an empty key, which the Langfuse client would replace
+        with ``LANGFUSE_PUBLIC_KEY`` or ``LANGFUSE_SECRET_KEY`` from the
+        process environment."""
+        if not reveal_secret(value).strip():
+            raise ValueError(f"Langfuse {info.field_name} cannot be empty")
+        return value

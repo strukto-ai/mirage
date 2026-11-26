@@ -18,8 +18,13 @@ import { secretStr, z } from '../secrets.ts'
 
 export const LangfuseConfig = z.object({
   ...TimeoutConfig.shape,
-  publicKey: z.string().describe('Langfuse project public key.'),
-  secretKey: secretStr().describe('Langfuse project secret key.'),
+  publicKey: z
+    .string()
+    .refine((value) => value.trim() !== '', 'Langfuse publicKey cannot be empty')
+    .describe('Langfuse project public key.'),
+  secretKey: secretStr()
+    .refine((value) => value.trim() !== '', 'Langfuse secretKey cannot be empty')
+    .describe('Langfuse project secret key.'),
   host: z.string().optional().meta({
     description: 'Langfuse API host; override for a self-hosted or regional instance.',
     default: 'https://cloud.langfuse.com',
