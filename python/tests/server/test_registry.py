@@ -478,3 +478,28 @@ async def test_answered_requests_do_not_put_off_the_idle_exit():
         registry.request_ended()
         await asyncio.sleep(0.05)
     assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("made", [False, True])
+async def test_a_create_still_building_holds_the_idle_exit(made):
+    # A client that went away leaves its create building: the exit waits
+    # for it, and goes unless it made a workspace.
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    entry = registry.add(_ws(), "w")
+    gate = asyncio.Event()
+
+    async def build() -> None:
+        async with registry.creating("v", "config") as admitted:
+            assert admitted
+            await gate.wait()
+            if made:
+                registry.add(_ws(), "v")
+
+    building = asyncio.create_task(build())
+    await asyncio.sleep(0)
+    await registry.remove(entry.id)
+    assert not registry.exit_event.is_set()
+    gate.set()
+    await building
+    assert registry.exit_event.is_set() is not made

@@ -111,11 +111,22 @@ export class DaemonClient {
     try {
       return await this.send(method, path, init)
     } catch (err) {
-      const resendable = init.body === undefined || typeof init.body === 'string'
-      if (!this.maySpawn || !resendable || !DaemonClient.refused(err)) throw err
+      if (!this.maySpawn || !DaemonClient.resendable(init.body) || !DaemonClient.refused(err))
+        throw err
     }
     await this.ensureRunning()
     return this.send(method, path, init)
+  }
+
+  /** Whether a body can be sent again: none, text or bytes, not a stream. */
+  private static resendable(body: RequestInit['body']): boolean {
+    return (
+      body === undefined ||
+      body === null ||
+      typeof body === 'string' ||
+      body instanceof Uint8Array ||
+      body instanceof ArrayBuffer
+    )
   }
 
   /** Whether a fetch failed because nothing accepted its connection. */

@@ -336,8 +336,8 @@ class WorkspaceRegistry:
     Owns the lifecycle for each workspace inside the daemon process:
     register on create, drop on delete, and trip an idle-shutdown
     event when the registry has been empty for ``idle_grace_seconds``.
-    The exit waits for the requests in flight, and a workspace one of
-    them makes cancels it.
+    The exit waits for the requests in flight and the creates still
+    building, and a workspace one of them makes cancels it.
 
     Threading: the underlying ``dict`` is mutated only from the FastAPI
     server loop (the same loop the registry is constructed on), so no
@@ -416,8 +416,8 @@ class WorkspaceRegistry:
         )
         self._idle_task: asyncio.Task[Any] | None = None
         self._requests = 0
-        # The grace ran out with requests in flight: exit once they are
-        # answered, unless one of them made a workspace.
+        # The grace ran out with requests in flight or a create building:
+        # exit once they are done, unless one of them made a workspace.
         self._idle_due = False
 
     def request_began(self) -> None:
@@ -525,6 +525,8 @@ class WorkspaceRegistry:
         finally:
             del self._creates[workspace_id]
             done.set_result(None)
+            if self._idle_due:
+                self._exit_when_idle()
 
     @property
     def draining(self) -> bool:
@@ -1033,7 +1035,7 @@ class WorkspaceRegistry:
         self._idle_due = False
         if self._entries:
             return
-        if self._requests:
+        if self._requests or self._creates:
             self._idle_due = True
             return
         self.exit_event.set()

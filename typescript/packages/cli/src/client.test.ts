@@ -364,6 +364,23 @@ describe('DaemonClient after a daemon exited idle', () => {
     expect(bodies).toEqual(['{}'])
   })
 
+  it('sends a byte body once more', async () => {
+    const { server, port, bodies } = await given()
+    const client = new DaemonClient(settings(port))
+    vi.spyOn(client, 'isReachable').mockResolvedValueOnce(true)
+    await client.ensureRunning()
+    vi.spyOn(client, 'ensureRunning').mockImplementation(async () => {
+      await listen(server, port)
+    })
+    try {
+      const body = new TextEncoder().encode('{}')
+      expect((await client.request('POST', '/v1/workspaces', { body })).status).toBe(201)
+    } finally {
+      await close(server)
+    }
+    expect(bodies).toEqual(['{}'])
+  })
+
   it('passes the refusal on from a client that may not start the daemon', async () => {
     const { port } = await given()
     const client = new DaemonClient(settings(port))

@@ -262,6 +262,27 @@ describe('WorkspaceRegistry', () => {
     expect(seen.exits).toBe(1)
   })
 
+  // A client that went away leaves its create building: the exit waits for
+  // it, and goes unless it made a workspace.
+  it.each([false, true])('waits for a create still building (made: %s)', async (made) => {
+    const { registry: r, seen } = exiting(0)
+    const entry = r.add(ram())
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const building = r.creating('v', 'config', async (admitted) => {
+      expect(admitted).toBe(true)
+      await gate
+      if (made) r.add(ram(), 'v')
+    })
+    await r.remove(entry.id)
+    expect(seen.exits).toBe(0)
+    release()
+    await building
+    expect(seen.exits).toBe(made ? 0 : 1)
+  })
+
   // A client that polls /v1/health while it waits for the daemon to go sees
   // it go: only a request still in flight holds the exit.
   it('does not put off the idle exit for requests already answered', async () => {

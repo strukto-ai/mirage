@@ -292,8 +292,8 @@ export class WorkspaceRegistry {
   private readonly onIdleExit: (() => void) | null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   private requests = 0
-  // The grace ran out with requests in flight: exit once they are answered,
-  // unless one of them made a workspace.
+  // The grace ran out with requests in flight or a create building: exit
+  // once they are done, unless one of them made a workspace.
   private idleDue = false
   accountsRequired: boolean
   private readonly owners: RecordClient | null
@@ -476,6 +476,7 @@ export class WorkspaceRegistry {
     } finally {
       this.creates.delete(id)
       finish()
+      if (this.idleDue) this.exitWhenIdle()
     }
   }
 
@@ -800,7 +801,11 @@ export class WorkspaceRegistry {
     await this.admissionPrograms.close()
   }
 
-  /** Count a request in flight, which an idle exit waits for. */
+  /**
+   * Count a request in flight, which an idle exit waits for. A request
+   * counts until its connection closes; a create it left building is held
+   * by `creates` until it settles.
+   */
   requestBegan(): void {
     this.requests += 1
   }
@@ -814,7 +819,7 @@ export class WorkspaceRegistry {
   private exitWhenIdle(): void {
     this.idleDue = false
     if (this.entries.size > 0 || this.onIdleExit === null) return
-    if (this.requests > 0) {
+    if (this.requests > 0 || this.creates.size > 0) {
       this.idleDue = true
       return
     }
