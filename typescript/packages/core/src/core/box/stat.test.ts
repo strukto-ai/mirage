@@ -12,123 +12,73 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, getFolderInfo: vi.fn(), listFolderItems: vi.fn(), getFileInfo: vi.fn() }
-})
-
-import { BoxAccessor } from '../../accessor/box.ts'
+import { createHash } from 'node:crypto'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { BoxAccessor } from '../../accessor/box.ts'
 import { ListingCheckStore, RAMIndexCacheStore } from '../../cache/index/ram.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { ContentType, DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
+import type { JsonValue } from '../../types.ts'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
-import * as api from './api.ts'
-import { BoxApiError, type BoxTokenManager } from './client.ts'
+import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 
-const STUB_TM = {} as BoxTokenManager
 const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
+const FLAT = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
+const DEEP = new PathSpec({ vfsPath: 'a/b/c.txt', virtual: '/a/b/c.txt', directory: '/a/b' })
+const HELLO = new TextEncoder().encode('hello')
+const SHA_HELLO = sha1(HELLO)
+const SHA_FAST = 'fast'
+const NO_SUCH_ID = '9'
+const FOLDER_ROUTE = '/2.0/folders/:folder_id'
+const ITEMS_ROUTE = '/2.0/folders/:folder_id/items'
+const FILE_ROUTE = '/2.0/files/:file_id'
+const ALL_FILES = { type: 'folder', id: '0', name: 'All Files' }
+const TRASH = { type: 'folder', id: '1', name: 'Trash' }
 
-function makeAccessor(): BoxAccessor {
-  return new BoxAccessor({ tokenManager: STUB_TM })
-}
+let origin: string
+let account: BoxAccount
 
-describe('box stat of the mount root', () => {
-  it('reads a 404 on the configured root folder as absence', async () => {
-    vi.mocked(api.getFolderInfo).mockRejectedValue(
-      new BoxApiError('Box GET /folders/0 -> 404 not_found', 404),
-    )
-    await expect(stat(makeAccessor(), ROOT)).rejects.toMatchObject({ code: 'ENOENT' })
-  })
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('box')
+}, 30_000)
 
-  it('lets a server error on the configured root stay a failure', async () => {
-    vi.mocked(api.getFolderInfo).mockRejectedValue(
-      new BoxApiError('Box GET /folders/0 -> 500 internal', 500),
-    )
-    await expect(stat(makeAccessor(), ROOT)).rejects.toMatchObject({ status: 500 })
-  })
-
-  it('a rooted mount stats its root folder, not All Files', async () => {
-    vi.mocked(api.getFolderInfo).mockResolvedValue({
-      id: 'R',
-      modified_at: '2026-05-01T00:00:00+00:00',
-    } as never)
-    const info = await stat(rooted('R'), ROOT)
-    expect(info.extra.box_id).toBe('R')
-    expect(vi.mocked(api.getFolderInfo).mock.calls.at(-1)?.[1]).toBe('R')
-  })
+beforeEach(() => {
+  account = new BoxAccount(origin)
 })
 
-const SHA_FAST = 'fast'
-const SHA_WALK = 'walk'
-const ALL_FILES = folder('0', 'All Files')
-const TRASH = folder('1', 'Trash')
+afterEach(async () => {
+  await account.run.close()
+})
 
-type Chain = { type: 'folder'; id: string; name: string }[]
-
-function folder(id: string, name: string): { type: 'folder'; id: string; name: string } {
-  return { type: 'folder', id, name }
+function sha1(data: Uint8Array): string {
+  return createHash('sha1').update(data).digest('hex')
 }
 
-function row(id: string, name: string, sha1: string | null): api.BoxItem {
-  return {
-    type: 'file',
-    id,
-    name,
-    size: 5,
-    modified_at: '2026-04-01T00:00:00+00:00',
-    ...(sha1 === null ? {} : { sha1 }),
-  }
+function folder(id: string): string {
+  return `GET /2.0/folders/${id}`
 }
 
-function item(
-  chain: Chain,
-  status = 'active',
-  over: Record<string, unknown> = {},
-): api.BoxFileInfo {
-  return {
-    ...row('F1', 'c.txt', SHA_FAST),
-    item_status: status,
-    path_collection: { total_count: chain.length, entries: chain },
-    ...over,
-  } as api.BoxFileInfo
+function items(id: string): string {
+  return `GET /2.0/folders/${id}/items`
 }
 
-/**
- * Folder listings by id, the one file-info answer, and a ledger. Constructing
- * one installs the API mocks, so a test that needs only the answers can build
- * it without keeping it.
- */
-class FakeBox {
-  readonly log: string[] = []
-  constructor(
-    private readonly folders: Record<string, api.BoxItem[]>,
-    private readonly info: api.BoxFileInfo | Error | null,
-  ) {
-    vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId: string) => {
-      this.log.push(`items:${folderId}`)
-      const kids = this.folders[folderId]
-      if (kids === undefined) return Promise.reject(new BoxApiError('gone', 404))
-      return Promise.resolve(kids)
-    })
-    vi.mocked(api.getFileInfo).mockImplementation((_tm, fileId: string) => {
-      this.log.push(`info:${fileId}`)
-      if (this.info === null) return Promise.reject(new Error(`unexpected info:${fileId}`))
-      if (this.info instanceof Error) return Promise.reject(this.info)
-      return Promise.resolve(this.info)
-    })
-  }
+function file(id: string): string {
+  return `GET /2.0/files/${id}`
 }
 
-function walkTree(root = '0', leaf: api.BoxItem | null = null): Record<string, api.BoxItem[]> {
-  return {
-    [root]: [folder('A', 'a')],
-    A: [folder('B', 'b')],
-    B: leaf === null ? [] : [leaf],
-  }
+async function deep(root = '0'): Promise<[string, string, string]> {
+  const a = await account.mkdir('a', root)
+  const b = await account.mkdir('b', a)
+  return [a, b, await account.put('c.txt', HELLO, b)]
+}
+
+async function listed(accessor: BoxAccessor, path: PathSpec): Promise<FileStat> {
+  return stat(accessor, path, await entryAt(readdir, accessor, path))
 }
 
 async function scratchStat(
@@ -139,195 +89,376 @@ async function scratchStat(
   const src = new RAMIndexCacheStore()
   const parent = virtual.slice(0, virtual.lastIndexOf('/'))
   const name = virtual.slice(virtual.lastIndexOf('/') + 1)
-  const folderRow = (hint.kind ?? 'box/file') === 'box/folder'
   await src.setDir(parent, [
     [
       name,
       new FileStat({
         name,
-        type: folderRow ? FileType.DIRECTORY : FileType.FILE,
-        extra: { box_id: hint.rowId ?? 'F1' },
+        type: hint.kind === 'box/folder' ? FileType.DIRECTORY : FileType.FILE,
+        extra: { box_id: hint.rowId ?? '' },
       }),
     ],
   ])
-  const scratch = new ListingCheckStore({ hints: src })
   return stat(
     accessor,
     new PathSpec({ vfsPath: 'a/b/c.txt', virtual, directory: parent }),
     undefined,
-    scratch,
+    new ListingCheckStore({ hints: src }),
   )
 }
 
-function rooted(root: string): BoxAccessor {
-  return new BoxAccessor({ tokenManager: STUB_TM, rootFolderId: root })
+async function answerInstead(fileId: string, change: Record<string, JsonValue>): Promise<void> {
+  const answer = await account.fileInfo(fileId)
+  await account.run.answerNext('GET', FILE_ROUTE, 200, { ...answer, sha1: SHA_FAST, ...change })
 }
 
-const DEEP = new PathSpec({ vfsPath: 'a/b/c.txt', virtual: '/a/b/c.txt', directory: '/a/b' })
-const FLAT = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
-const WALK_FOUND = ['items:0', 'items:A', 'items:B']
+async function listWithoutSha1(): Promise<string> {
+  await account.put('a.txt', HELLO)
+  const listing = await account.run.call<{
+    entries: (Record<string, JsonValue> & { modified_at: string })[]
+  }>('GET', '/2.0/folders/0/items')
+  for (const row of listing.entries) delete row.sha1
+  await account.run.answerNext('GET', ITEMS_ROUTE, 200, listing)
+  return listing.entries[0]?.modified_at ?? ''
+}
+
+describe('box stat', () => {
+  it('stat root fetches folder info', async () => {
+    await account.run.recordRequests()
+    const info = await stat(account.accessor(), ROOT)
+    expect(await account.run.requests()).toEqual([folder('0')])
+    expect(info.type).toBe(FileType.DIRECTORY)
+    expect(info.name).toBe('/')
+    expect(info.modified).toBe((await account.folderInfo('0')).modified_at)
+  })
+
+  it('stat file carries box metadata', async () => {
+    const fileId = await account.put('a.txt', HELLO)
+    const info = await listed(account.accessor(), FLAT)
+    expect(info.content).toBe(ContentType.TEXT)
+    expect(info.size).toBe(5)
+    expect(info.modified).toBe((await account.fileInfo(fileId)).modified_at)
+    expect(info.fingerprint).toBe(SHA_HELLO)
+    expect(info.extra.box_id).toBe(fileId)
+    expect(info.extra.resource_type).toBe('box/file')
+  })
+
+  it('stat missing raises', async () => {
+    const ghost = new PathSpec({ vfsPath: 'ghost', virtual: '/ghost', directory: '/' })
+    await expect(listed(account.accessor(), ghost)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  // The fskit invariant behind sizes_always_known: the size stat serves from
+  // the listing must equal the byte length a read delivers, 0-byte files
+  // included; weblinks never appear at all.
+  it('stat size matches read for every file', async () => {
+    const docs = await account.mkdir('docs')
+    await account.put('a.txt', HELLO)
+    await account.put('empty.txt', new Uint8Array(0))
+    await account.webLink('homepage')
+    await account.put('b.bin', new TextEncoder().encode('abc'), docs)
+    const accessor = account.accessor()
+    const files: string[] = []
+    const stack = ['/']
+    for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+      const here = PathSpec.fromStrPath(current)
+      const listing = await readdir(accessor, here, await entryAt(readdir, accessor, here))
+      for (const child of listing instanceof DirListing ? listing.entries : listing) {
+        const trimmed = `${current.replace(/\/+$/, '')}/${child.name}`
+        const spec = PathSpec.fromStrPath(trimmed)
+        const entry = await entryAt(readdir, accessor, spec)
+        const info = await stat(accessor, spec, entry)
+        if (info.type === FileType.DIRECTORY) {
+          stack.push(trimmed)
+          continue
+        }
+        expect(info.size, trimmed).not.toBeNull()
+        const body = await read(accessor, spec, undefined, entry)
+        expect(info.size, trimmed).toBe(body.length)
+        files.push(trimmed)
+      }
+    }
+    expect(files.sort()).toEqual(['/a.txt', '/docs/b.bin', '/empty.txt'])
+  })
+
+  // Weblinks are filtered from listings; a check's resolve walk must not
+  // resurface one as a sizeless, unreadable entry.
+  it('stat direct resolve hides weblinks', async () => {
+    await account.webLink('homepage')
+    const homepage = new PathSpec({ vfsPath: 'homepage', virtual: '/homepage', directory: '/' })
+    await expect(
+      stat(account.accessor(), homepage, undefined, new ListingCheckStore()),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('stat root reads a 404 as absence', async () => {
+    await expect(stat(account.accessor(NO_SUCH_ID), ROOT)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('stat root keeps a server error a failure', async () => {
+    await account.run.answerNext('GET', FOLDER_ROUTE, 500)
+    await expect(stat(account.accessor(), ROOT)).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('a rooted mount stats its root folder, not All Files', async () => {
+    const root = await account.mkdir('r')
+    await account.run.recordRequests()
+    const info = await stat(account.accessor(root), ROOT)
+    expect(info.extra.box_id).toBe(root)
+    expect(await account.run.requests()).toEqual([folder(root)])
+  })
+})
 
 describe('box stat token', () => {
   // modified_at is no content token: two same-size edits in one second
   // share it, so a file Box gives no sha1 stats with none.
   it('a sha1-less row stats with no token', async () => {
-    new FakeBox({ '0': [row('200', 'a.txt', null)] }, null)
-    const accessor = makeAccessor()
-    const info = await stat(accessor, FLAT, await entryAt(readdir, accessor, FLAT))
+    const modified = await listWithoutSha1()
+    const info = await listed(account.accessor(), FLAT)
     expect(info.fingerprint).toBeNull()
-    expect(info.modified).toBe('2026-04-01T00:00:00+00:00')
+    expect(info.modified).toBe(modified)
   })
 
   it('a direct resolve of a sha1-less item has no token', async () => {
-    new FakeBox({ '0': [row('200', 'a.txt', null)] }, null)
-    const info = await stat(makeAccessor(), FLAT, undefined, new ListingCheckStore())
+    const modified = await listWithoutSha1()
+    const info = await stat(account.accessor(), FLAT, undefined, new ListingCheckStore())
     expect(info.fingerprint).toBeNull()
-    expect(info.modified).toBe('2026-04-01T00:00:00+00:00')
+    expect(info.modified).toBe(modified)
   })
 
   it('a listed sha1 is the stat token', async () => {
-    new FakeBox({ '0': [row('200', 'a.txt', SHA_FAST)] }, null)
-    const accessor = makeAccessor()
-    const info = await stat(accessor, FLAT, await entryAt(readdir, accessor, FLAT))
-    expect(info.fingerprint).toBe(SHA_FAST)
+    await account.put('a.txt', HELLO)
+    expect((await listed(account.accessor(), FLAT)).fingerprint).toBe(SHA_HELLO)
   })
 })
 
 describe('box stat on a scratch store', () => {
   it('a valid hint is one request and the walk answer', async () => {
-    const chain = [ALL_FILES, folder('A', 'a'), folder('B', 'b')]
-    const box = new FakeBox(walkTree('0', row('F1', 'c.txt', SHA_FAST)), item(chain))
-    const fast = await scratchStat(makeAccessor())
-    expect(box.log).toEqual(['info:F1'])
-    const walkBox = new FakeBox(walkTree('0', row('F1', 'c.txt', SHA_FAST)), null)
-    const walked = await scratchStat(makeAccessor(), '/a/b/c.txt', { rowId: '' })
+    const [a, b, fileId] = await deep()
+    const accessor = account.accessor()
+    await account.run.recordRequests()
+    const fast = await scratchStat(accessor, '/a/b/c.txt', { rowId: fileId })
+    expect(await account.run.requests()).toEqual([file(fileId)])
+    await account.run.recordRequests()
+    const walked = await scratchStat(accessor)
     // The command reuses the probe's stat, so the fast path must build the
     // stat the walk would have: compared with the real walk, not by hand.
-    expect(walkBox.log).toEqual(WALK_FOUND)
+    expect(await account.run.requests()).toEqual([items('0'), items(a), items(b)])
     expect(fast).toEqual(walked)
-    expect(fast.fingerprint).toBe(SHA_FAST)
+    expect(fast.fingerprint).toBe(SHA_HELLO)
   })
 
   it('only a scratch store takes the one-request path', async () => {
-    const box = new FakeBox(walkTree('0', row('F1', 'c.txt', SHA_FAST)), null)
-    const handed = new FileStat({ name: 'c.txt', type: FileType.FILE, extra: { box_id: 'F1' } })
-    expect(await stat(makeAccessor(), DEEP, handed, new RAMIndexCacheStore())).toBe(handed)
-    expect(box.log).toEqual([])
+    const [, , fileId] = await deep()
+    const handed = new FileStat({ name: 'c.txt', type: FileType.FILE, extra: { box_id: fileId } })
+    await account.run.recordRequests()
+    expect(await stat(account.accessor(), DEEP, handed, new RAMIndexCacheStore())).toBe(handed)
+    expect(await account.run.requests()).toEqual([])
   })
 
-  it.each([
-    ['empty-id', '', 'box/file'],
-    ['folder', 'F1', 'box/folder'],
-  ])('an unusable hint walks without asking for it (%s)', async (_id, rowId, kind) => {
-    const box = new FakeBox(walkTree('0', row('F2', 'c.txt', SHA_WALK)), null)
-    const info = await scratchStat(makeAccessor(), '/a/b/c.txt', { rowId, kind })
-    expect(box.log).toEqual(WALK_FOUND)
-    expect(info.fingerprint).toBe(SHA_WALK)
+  it('an unusable hint walks without asking for it', async () => {
+    const [a, b] = await deep()
+    await account.run.recordRequests()
+    const info = await scratchStat(account.accessor())
+    expect(await account.run.requests()).toEqual([items('0'), items(a), items(b)])
+    expect(info.fingerprint).toBe(SHA_HELLO)
+  })
+
+  // A folder is asked for by id as a file is; one gone by id is walked.
+  it('a folder hint is asked by id then walked', async () => {
+    const [a, b] = await deep()
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await account.run.recordRequests()
+      const info = await scratchStat(account.accessor(), '/a/b/c.txt', {
+        rowId: NO_SUCH_ID,
+        kind: 'box/folder',
+      })
+      expect(await account.run.requests()).toEqual([
+        folder(NO_SUCH_ID),
+        items('0'),
+        items(a),
+        items(b),
+      ])
+      expect(info.fingerprint).toBe(SHA_HELLO)
+    } finally {
+      diagnostic.mockRestore()
+    }
   })
 
   it('no hint walks as today', async () => {
-    const box = new FakeBox(walkTree('0', row('F2', 'c.txt', SHA_WALK)), null)
-    const info = await stat(makeAccessor(), DEEP, undefined, new ListingCheckStore())
-    expect(box.log).toEqual(WALK_FOUND)
-    expect(info.fingerprint).toBe(SHA_WALK)
+    const [a, b] = await deep()
+    await account.run.recordRequests()
+    const info = await stat(account.accessor(), DEEP, undefined, new ListingCheckStore())
+    expect(await account.run.requests()).toEqual([items('0'), items(a), items(b)])
+    expect(info.fingerprint).toBe(SHA_HELLO)
   })
 
-  const ORIGINAL = [ALL_FILES, folder('A', 'a'), folder('B', 'b')]
+  // Only the path-name check fails; a case-only rename is one a listing
+  // tells apart.
   it.each([
-    // Only the active-status check fails: trashed, its chain unchanged.
-    ['trashed', item(ORIGINAL, 'trashed'), row('F2', 'c.txt', SHA_WALK), WALK_FOUND],
-    // Only the path-name check fails: moved under a/x.
-    ['moved', item([ALL_FILES, folder('A', 'a'), folder('X', 'x')]), null, WALK_FOUND],
-    // Only the path-name check fails: the parent renamed to b2.
-    ['parent-renamed', item([ALL_FILES, folder('A', 'a'), folder('B', 'b2')]), null, WALK_FOUND],
-    // Only the path-name check fails: a case-only rename, which a listing tells apart.
-    ['case-only', item(ORIGINAL, 'active', { name: 'C.txt' }), null, WALK_FOUND],
-    // Only the is-a-file check fails.
     [
-      'not-a-file',
-      item(ORIGINAL, 'active', { type: 'web_link' }),
-      row('F2', 'c.txt', SHA_WALK),
-      WALK_FOUND,
+      'moved',
+      async (a: string, b: string, fileId: string) => {
+        const x = await account.mkdir('x', a)
+        await account.run.call('PUT', `/2.0/files/${fileId}`, { json: { parent: { id: x } } })
+        return [items('0'), items(a), items(b)]
+      },
     ],
-    ['404', new BoxApiError('purged', 404), row('F2', 'c.txt', SHA_WALK), WALK_FOUND],
-    ['403', new BoxApiError('no access', 403), row('F2', 'c.txt', SHA_WALK), WALK_FOUND],
+    [
+      'parent-renamed',
+      async (a: string, b: string) => {
+        await account.run.call('PUT', `/2.0/folders/${b}`, { json: { name: 'b2' } })
+        return [items('0'), items(a)]
+      },
+    ],
+    [
+      'case-only',
+      async (a: string, b: string, fileId: string) => {
+        await account.run.call('PUT', `/2.0/files/${fileId}`, { json: { name: 'C.txt' } })
+        return [items('0'), items(a), items(b)]
+      },
+    ],
   ] as const)(
-    'a hint that no longer names the path falls back to the walk (%s)',
-    async (_id, info, leaf, ledger) => {
+    'a hinted file that left the path is walked for and gone (%s)',
+    async (_id, change) => {
+      const [a, b, fileId] = await deep()
+      const walk = await change(a, b, fileId)
       const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
       try {
-        const box = new FakeBox(walkTree('0', leaf), info)
-        if (leaf === null) {
-          await expect(scratchStat(makeAccessor())).rejects.toMatchObject({ code: 'ENOENT' })
-        } else {
-          expect((await scratchStat(makeAccessor())).fingerprint).toBe(SHA_WALK)
-        }
-        expect(box.log).toEqual(['info:F1', ...ledger])
-        if (info instanceof BoxApiError)
-          expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining(info.message))
-        else expect(diagnostic).not.toHaveBeenCalled()
+        await account.run.recordRequests()
+        await expect(
+          scratchStat(account.accessor(), '/a/b/c.txt', { rowId: fileId }),
+        ).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(await account.run.requests()).toEqual([file(fileId), ...walk])
+        expect(diagnostic).not.toHaveBeenCalled()
       } finally {
         diagnostic.mockRestore()
       }
     },
   )
 
-  it.each([
-    // The mount root R itself in Trash: the All-Files-root and no-Trash checks both fail.
-    ['root-in-trash', [TRASH, folder('R', 'r'), folder('A', 'a'), folder('B', 'b')]],
-    // Only the no-Trash check fails, should Box render Trash under 0.
-    [
-      'trash-under-all-files',
-      [ALL_FILES, TRASH, folder('R', 'r'), folder('A', 'a'), folder('B', 'b')],
-    ],
-  ])('a file under a trashed mount root is gone (%s)', async (_id, chain) => {
-    const box = new FakeBox({}, item(chain))
-    await expect(scratchStat(rooted('R'), '/m/a/b/c.txt')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
-    expect(box.log).toEqual(['info:F1', 'items:R'])
+  it('a hint to a deleted file walks to the one there now', async () => {
+    const [a, b, old] = await deep()
+    await account.run.call('DELETE', `/2.0/files/${old}`)
+    const other = new TextEncoder().encode('other')
+    await account.put('c.txt', other, b)
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await account.run.recordRequests()
+      const info = await scratchStat(account.accessor(), '/a/b/c.txt', { rowId: old })
+      expect(await account.run.requests()).toEqual([file(old), items('0'), items(a), items(b)])
+      expect(info.fingerprint).toBe(sha1(other))
+      expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('404'))
+    } finally {
+      diagnostic.mockRestore()
+    }
   })
 
-  // R reached from a folder that is not 0. Only the All-Files-root check
-  // rejects it, and the walk then answers.
+  it('a hint Box refuses to answer falls back to the walk', async () => {
+    const [a, b, fileId] = await deep()
+    await account.run.answerNext('GET', FILE_ROUTE, 403)
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await account.run.recordRequests()
+      const info = await scratchStat(account.accessor(), '/a/b/c.txt', { rowId: fileId })
+      expect(await account.run.requests()).toEqual([file(fileId), items('0'), items(a), items(b)])
+      expect(info.fingerprint).toBe(SHA_HELLO)
+      expect(diagnostic).toHaveBeenCalledWith(expect.stringContaining('403'))
+    } finally {
+      diagnostic.mockRestore()
+    }
+  })
+
+  // Box's own answer for the file with one field changed, so only the
+  // active-status check or only the is-a-file check fails.
+  it.each([
+    ['trashed', { item_status: 'trashed' }],
+    ['not-a-file', { type: 'web_link' }],
+  ])('an answer failing one check falls back to the walk (%s)', async (_id, change) => {
+    const [a, b, fileId] = await deep()
+    await answerInstead(fileId, change)
+    const diagnostic = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await account.run.recordRequests()
+      const info = await scratchStat(account.accessor(), '/a/b/c.txt', { rowId: fileId })
+      expect(await account.run.requests()).toEqual([file(fileId), items('0'), items(a), items(b)])
+      expect(info.fingerprint).toBe(SHA_HELLO)
+      expect(diagnostic).not.toHaveBeenCalled()
+    } finally {
+      diagnostic.mockRestore()
+    }
+  })
+
+  it.each([
+    // The mount root itself in Trash: the All-Files-root and no-Trash checks both fail.
+    ['root-in-trash', [TRASH]],
+    // Only the no-Trash check fails, should Box render Trash under 0.
+    ['trash-under-all-files', [ALL_FILES, TRASH]],
+  ])('a file under a trashed mount root is gone (%s)', async (_id, above) => {
+    const root = await account.mkdir('r')
+    const [, , fileId] = await deep(root)
+    const chain = (await account.fileInfo(fileId)).path_collection.entries
+    await answerInstead(fileId, {
+      path_collection: { total_count: above.length + 3, entries: [...above, ...chain.slice(1)] },
+    })
+    await account.run.call('DELETE', `/2.0/folders/${root}?recursive=true`)
+    await account.run.recordRequests()
+    await expect(
+      scratchStat(account.accessor(root), '/m/a/b/c.txt', { rowId: fileId }),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    // The trashed root's listing 404s for the walk.
+    expect(await account.run.requests()).toEqual([file(fileId), items(root)])
+  })
+
+  // The mount root reached from a folder that is not 0. Only the
+  // All-Files-root check rejects it, and the walk then answers.
   it('a chain not rooted at All Files falls back', async () => {
-    const chain = [folder('X', 'x'), folder('R', 'r'), folder('A', 'a'), folder('B', 'b')]
-    const box = new FakeBox(walkTree('R', row('F2', 'c.txt', SHA_WALK)), item(chain))
-    const info = await scratchStat(rooted('R'), '/m/a/b/c.txt')
-    expect(info.fingerprint).toBe(SHA_WALK)
-    expect(box.log).toEqual(['info:F1', 'items:R', 'items:A', 'items:B'])
+    const root = await account.mkdir('r')
+    const [a, b, fileId] = await deep(root)
+    const chain = (await account.fileInfo(fileId)).path_collection.entries
+    await answerInstead(fileId, {
+      path_collection: {
+        total_count: 4,
+        entries: [{ type: 'folder', id: 'X', name: 'x' }, ...chain.slice(1)],
+      },
+    })
+    await account.run.recordRequests()
+    const info = await scratchStat(account.accessor(root), '/m/a/b/c.txt', { rowId: fileId })
+    expect(info.fingerprint).toBe(SHA_HELLO)
+    expect(await account.run.requests()).toEqual([file(fileId), items(root), items(a), items(b)])
   })
 
   it('a mount rooted below All Files takes the one-request path', async () => {
-    const chain = [
-      ALL_FILES,
-      folder('X', 'x'),
-      folder('R', 'r'),
-      folder('A', 'a'),
-      folder('B', 'b'),
-    ]
-    const box = new FakeBox({}, item(chain))
-    const info = await scratchStat(rooted('R'), '/m/a/b/c.txt')
-    expect(box.log).toEqual(['info:F1'])
-    expect(info.fingerprint).toBe(SHA_FAST)
+    const root = await account.mkdir('r', await account.mkdir('x'))
+    const [, , fileId] = await deep(root)
+    await account.run.recordRequests()
+    const info = await scratchStat(account.accessor(root), '/m/a/b/c.txt', { rowId: fileId })
+    expect(await account.run.requests()).toEqual([file(fileId)])
+    expect(info.fingerprint).toBe(SHA_HELLO)
   })
 
   it.each([401, 429, 500])('a failed point lookup propagates (%i)', async (status) => {
-    const box = new FakeBox(
-      walkTree('0', row('F1', 'c.txt', SHA_FAST)),
-      new BoxApiError('x', status),
-    )
-    await expect(scratchStat(makeAccessor())).rejects.toMatchObject({ status })
-    expect(box.log).toEqual(['info:F1'])
+    const [, , fileId] = await deep()
+    await account.run.answerNext('GET', FILE_ROUTE, status)
+    await account.run.recordRequests()
+    await expect(
+      scratchStat(account.accessor(), '/a/b/c.txt', { rowId: fileId }),
+    ).rejects.toMatchObject({ status })
+    expect(await account.run.requests()).toEqual([file(fileId)])
   })
 
   // Box sends item_status when asked; an answer without it proves nothing about
   // the file being active, so the walk decides.
   it('an answer without item_status is not taken as active', async () => {
-    const info = item([ALL_FILES, folder('A', 'a'), folder('B', 'b')])
-    delete (info as { item_status?: string }).item_status
-    const box = new FakeBox(walkTree('0', row('F2', 'c.txt', SHA_WALK)), info)
-    expect((await scratchStat(makeAccessor())).fingerprint).toBe(SHA_WALK)
-    expect(box.log).toEqual(['info:F1', ...WALK_FOUND])
+    const [a, b, fileId] = await deep()
+    const answer: Record<string, JsonValue> = await account.fileInfo(fileId)
+    answer.sha1 = SHA_FAST
+    delete answer.item_status
+    await account.run.answerNext('GET', FILE_ROUTE, 200, answer)
+    await account.run.recordRequests()
+    const info = await scratchStat(account.accessor(), '/a/b/c.txt', { rowId: fileId })
+    expect(info.fingerprint).toBe(SHA_HELLO)
+    expect(await account.run.requests()).toEqual([file(fileId), items('0'), items(a), items(b)])
   })
 })

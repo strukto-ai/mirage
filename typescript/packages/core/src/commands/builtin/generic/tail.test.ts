@@ -210,6 +210,11 @@ describe('tail -n', () => {
     expect(await lastLines(['1\n', '2\n', '3\n', '4\n', '5'], '2')).toEqual(['4\n5'])
   })
 
+  // tail holds every byte it may still print, and nothing downstream sees
+  // those bytes until the input ends, so only tail can count them. lastLines
+  // collects the pieces and checks nothing: materialize checks the budget
+  // itself, refuses the nine bytes below, and passes this test for a tail
+  // that stopped counting.
   it('counts what it keeps against the memory budget', async () => {
     const memory = new MemoryBudget(8, () => 0)
     const parts = ['ab\n', 'cd\n', 'ef\n', 'gh']
@@ -219,6 +224,7 @@ describe('tail -n', () => {
     ).rejects.toThrow(MemoryExhausted)
   })
 
+  // The same for the -c window, collected by lastLines for the same reason.
   it('counts a -c window against the memory budget', async () => {
     const memory = new MemoryBudget(8, () => 0)
     await expect(

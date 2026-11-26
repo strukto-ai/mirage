@@ -110,6 +110,11 @@ async def test_tail_writes_the_last_lines_in_one_piece():
 
 @pytest.mark.asyncio
 async def test_tail_counts_what_it_keeps_against_the_memory_budget():
+    # tail holds every byte it may still print, and nothing downstream sees
+    # those bytes until the input ends, so only tail can count them. _drain
+    # joins the output and checks nothing: materialize checks the budget
+    # itself, refuses the nine bytes below, and passes this test for a tail
+    # that stopped counting.
     memory = MemoryBudget(8, lambda: 0)
     parts = [b"ab\n", b"cd\n", b"ef\n", b"gh"]
     out = await run_with_memory(memory, _drain(tail(_stream(parts), n=1)))
@@ -122,6 +127,7 @@ async def test_tail_counts_what_it_keeps_against_the_memory_budget():
 
 @pytest.mark.asyncio
 async def test_tail_c_counts_its_window_against_the_memory_budget():
+    # The same for the -c window, drained by _drain for the same reason.
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(

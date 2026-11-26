@@ -246,11 +246,12 @@ def test_cross_pipeline(multi_ws):
 
 def test_cross_for_loop(multi_ws):
     """for loop across mounts."""
-    _run(
+    io = _run(
         multi_ws.shell(
             "for f in /ram/ram_file.txt /disk/disk_file.txt; do cat $f; done"
         )
     )
+    assert _stdout(io) == b"from ram\nfrom disk\n"
 
 
 def test_cross_redirect(multi_ws):

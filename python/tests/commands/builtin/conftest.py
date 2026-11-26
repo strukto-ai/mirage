@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, AsyncIterator
 
 import pytest
 
@@ -98,6 +98,20 @@ def stderr_text(io: IOResult) -> str:
     if err is None:
         return ""
     return err.decode() if isinstance(err, bytes) else str(err)
+
+
+async def split_source(data: bytes, *cuts: int) -> AsyncIterator[bytes]:
+    """``data`` as a stream cut at each offset, in order.
+
+    A cut at either end, or two at one offset, yields an empty piece.
+
+    Args:
+        data (bytes): the whole input.
+        *cuts (int): ascending offsets into ``data``.
+    """
+    edges = (0, *cuts, len(data))
+    for start, end in zip(edges, edges[1:]):
+        yield data[start:end]
 
 
 class TrackedSource:

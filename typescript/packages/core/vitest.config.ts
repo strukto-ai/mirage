@@ -24,6 +24,8 @@ export default defineConfig({
     // never tiers up. It is a V8 flag, so NODE_OPTIONS refuses it; execArgv
     // sets it for the whole fork, worker threads included.
     execArgv: ['--wasm-wrapper-tiering-budget=1000000000'],
+    // Where a test file finds the run's kit fakes; it starts none itself.
+    globalSetup: ['tests/fixtures/kit_fake_setup.ts'],
     // vitest's default leaves one CPU to its main process, which only
     // transforms and reports, so on a 4-core runner a quarter of this, the
     // longest test leg, sat idle.

@@ -171,7 +171,7 @@ async function fileInfo(ctx: Ctx<C>): Promise<Reply> {
               representation: 'extracted_text',
               status: { state: 'success' },
               content: {
-                url_template: `${ctx.url.origin}/rep/${item.id}/extracted_text{+asset_path}`,
+                url_template: `${ctx.url.origin}${ctx.runPrefix}/rep/${item.id}/extracted_text{+asset_path}`,
               },
             },
           ]
@@ -188,7 +188,7 @@ async function download(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const item = await typedItem(ctx.sql, ctx.tenant, ctx.params.file_id ?? '', 'file')
   if (item === null) return notFound('file')
-  return { status: 302, headers: { Location: `${ctx.url.origin}/dl/${item.id}` } }
+  return { status: 302, headers: { Location: `${ctx.url.origin}${ctx.runPrefix}/dl/${item.id}` } }
 }
 
 // The redirect target. Unauthenticated, like the vendor's signed download

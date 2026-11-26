@@ -329,6 +329,10 @@ async def test_head_v_keeps_one_failure_when_the_reader_stops_at_the_header(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kwargs", [{"n": -100}, {"c": -100}])
 async def test_head_minus_counts_its_window_against_the_memory_budget(kwargs):
+    # head -n -N and -c -N hold back a window that may never be printed, so
+    # only head can count it. _drain joins the output and checks nothing,
+    # where materialize checks the budget itself; the refusal must be
+    # head's.
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
