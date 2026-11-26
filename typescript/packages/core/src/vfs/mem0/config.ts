@@ -6,7 +6,9 @@ import { secretStr } from '../secrets.ts'
 export const Mem0Config = z
   .object({
     timeout: defaultRequestTimeout,
-    apiKey: secretStr().describe('Mem0 Platform API key.'),
+    apiKey: secretStr()
+      .refine((value) => value.trim() !== '', 'Mem0 apiKey cannot be empty')
+      .describe('Mem0 Platform API key.'),
     host: z
       .string()
       .default('https://api.mem0.ai')
