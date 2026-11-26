@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-"""How many turns of its workspace's event loop each shell request took.
+"""How many turns of its workspace's event loop a quiet line took.
 
 ``serve.py`` counts them when ``ACCESS_LOOP_TURNS`` names a file and
 writes them there as the server stops, for ``run.py`` to check; the
@@ -20,26 +20,43 @@ of a busy workspace waits a yield of the busy line per turn, so turns
 are what a line costs its neighbours. TypeScript runs every workspace on
 its one loop, where an await that is already settled takes no turn, so
 it has none to count.
+
+Only the workspaces ``run.py`` runs its quiet lines in are counted,
+those named from ``QUIET``, and each of their requests runs with the
+GIL switch interval at ``UNHURRIED`` seconds. A line that outlives its
+yield interval yields, three turns of its loop each time, and that
+interval is two switch intervals, read as the line starts
+(``mirage.io.yield_budget``): at the deployment's 1 ms a count would
+say how fast the runner was that minute, and a line the code made two
+turns longer would pass on a quiet runner and fail on a loaded one.
+With no yield falling due, a count is what the line's code takes.
+Nothing else runs on the server while a quiet line does, so nothing
+waits on the GIL behind it.
 """
 
 import asyncio
 import re
+import sys
 from collections.abc import Callable
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 LOOP_TURNS_ENV = "ACCESS_LOOP_TURNS"
-SHELL = re.compile(r"^/v1/workspaces/([^/]+)/shell$")
+QUIET = "loop-turns"
+UNHURRIED = 30.0
+SHELL = re.compile(rf"^/v1/workspaces/({QUIET}[^/]*)/shell$")
 
 
 class LoopTurns:
-    """ASGI middleware counting a workspace loop's turns per shell request.
+    """ASGI middleware counting a quiet workspace's loop turns per shell
+    request.
 
     A workspace's loop is counted from the first shell request that names
     it, by wrapping ``_run_once``, which an asyncio loop calls once a
     turn. A request's count is the turns its workspace's loop took
     between the request arriving and its answer going out, so it is one
-    line's whole cost only while nothing else runs on that loop.
+    line's whole cost only while nothing else runs on that loop. The
+    line runs unhurried, as the module says.
 
     Args:
         app (ASGIApp): the server app.
@@ -61,7 +78,12 @@ class LoopTurns:
             await self.app(scope, receive, send)
             return
         before = turns[0]
-        await self.app(scope, receive, send)
+        hurried = sys.getswitchinterval()
+        sys.setswitchinterval(UNHURRIED)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            sys.setswitchinterval(hurried)
         self.counts.setdefault(shell.group(1), []).append(turns[0] - before)
 
     def _counter(self, scope: Scope, workspace_id: str) -> list[int] | None:

@@ -71,6 +71,12 @@
       "tag_timezone"
     ]
   },
+  "python/mirage/concurrency/limiter.py": {
+    "reason": "asyncio's future protocol: a task reads it off what it awaits to tell a future it must wait for from a bare yield.",
+    "names": [
+      "_asyncio_future_blocking"
+    ]
+  },
   "python/mirage/fuse/fs.py": {
     "reason": "fusepy reads use_ns off its Operations to pass times in nanoseconds.",
     "names": [

@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine, Generator, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from concurrent.futures import Future
-from contextvars import Context
 from dataclasses import replace
 from threading import RLock
 from typing import Any, Protocol, TypeVar, cast
 
-from mirage.concurrency.limiter import owned_task
+from mirage.concurrency.limiter import FirstDone, owned_task
 from mirage.execution.process.types import (
     Process,
     ProcessRunner,
@@ -34,81 +33,6 @@ class ExecutionBind(Protocol):
         run: ProcessRunner,
         process: ProcessHandle,
     ) -> int: ...
-
-
-class _Shielded:
-    """A wait for ``task`` that a cancel of the waiter ends and the task
-    outlives, as ``asyncio.shield`` gives, at no turn of the loop.
-
-    ``shield`` wakes a future of its own as the task ends and the waiter
-    a turn after it. Here the task's end wakes the waiter itself, as
-    awaiting the task does, so a shell waiting for the one it forked
-    costs its loop no turn for the shield, at each level of a line. A
-    cancelled waiter still wakes on the loop's next turn, by when the
-    signal that stopped it has reached the task's own shell.
-
-    Args:
-        task (asyncio.Task[int]): the task waited for.
-    """
-
-    _asyncio_future_blocking = False
-
-    def __init__(self, task: asyncio.Task[int]) -> None:
-        self._task = task
-        self._wake: Callable[[_Shielded], None] | None = None
-        self._context: Context | None = None
-        self._left = False
-
-    def get_loop(self) -> asyncio.AbstractEventLoop:
-        return self._task.get_loop()
-
-    def add_done_callback(
-        self,
-        wake: Callable[[_Shielded], None],
-        *,
-        context: Context | None = None,
-    ) -> None:
-        """Wake the waiter as the task ends, as the task's own callback.
-
-        Args:
-            wake (Callable[[_Shielded], None]): the waiter's wake-up.
-            context (Context | None): the context it runs in.
-        """
-        self._wake = wake
-        self._context = context
-        self._task.add_done_callback(self._ended, context=context)
-
-    def _ended(self, task: asyncio.Task[int]) -> None:
-        if self._wake is not None:
-            self._wake(self)
-
-    def cancel(self, msg: str | None = None) -> bool:
-        """Leave the wait: the waiter wakes cancelled on the next turn and
-        the task runs on.
-
-        Args:
-            msg (str | None): the cancellation's message, unused.
-
-        Returns:
-            bool: False once the task has ended or the wait was left.
-        """
-        if self._left or self._wake is None or self._task.done():
-            return False
-        self._left = True
-        self._task.remove_done_callback(self._ended)
-        self.get_loop().call_soon(self._wake, self, context=self._context)
-        return True
-
-    def result(self) -> int:
-        if self._left:
-            raise asyncio.CancelledError
-        return self._task.result()
-
-    def __await__(self) -> Generator[_Shielded, None, int]:
-        if not self._task.done():
-            self._asyncio_future_blocking = True
-            yield self
-        return self.result()
 
 
 class ProcessHandle:
@@ -669,7 +593,8 @@ class ProcessHandle:
             int: the status.
         """
         try:
-            return await _Shielded(self.task)
+            await FirstDone([self.task])
+            return self.task.result()
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if self.revoked or (current is not None and current.cancelling()):

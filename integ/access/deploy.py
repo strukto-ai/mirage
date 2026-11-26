@@ -398,7 +398,9 @@ async def deployed(
     to answer), so they run on a thread: the hosts share the caller's
     loop, and a loop held that long leaves the other host's suites with
     kept-alive connections older than the server's five second
-    keep-alive, which it closes as their next request arrives.
+    keep-alive, which it closes as their next request arrives. A thread
+    cannot be stopped, so a caller cancelled as the server starts waits
+    for the start to end before it stops what that started.
 
     Args:
         name (str): ``dev``, ``token`` or ``jwt``.
@@ -413,8 +415,10 @@ async def deployed(
     """
     root.mkdir(parents=True, exist_ok=True)
     d = Deployment(name, host, root, free_port(), free_port(), issuer, store)
+    start = asyncio.ensure_future(asyncio.to_thread(_start, d))
     try:
-        await asyncio.to_thread(_start, d)
+        await asyncio.shield(start)
         yield d
     finally:
+        await asyncio.wait({start})
         await asyncio.to_thread(_stop, d)

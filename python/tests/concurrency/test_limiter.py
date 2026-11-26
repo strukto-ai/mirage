@@ -24,6 +24,7 @@ from opentelemetry import trace
 
 from mirage.concurrency import ConcurrencyLimiter
 from mirage.concurrency.limiter import (
+    FirstDone,
     bounded_map,
     bounded_map_stream,
     on_loop,
@@ -340,3 +341,94 @@ async def test_on_loop_carries_the_callers_trace_context():
         other.call_soon_threadsafe(other.stop)
         await asyncio.to_thread(thread.join, 5)
         other.close()
+
+
+def _turns(counted: dict[str, int], waits: int) -> list[int]:
+    """A count the running loop adds one to each turn, until ``waits``
+    waiters have written into ``counted``."""
+    loop = asyncio.get_running_loop()
+    turns = [0]
+
+    def turn() -> None:
+        turns[0] += 1
+        if len(counted) < waits:
+            loop.call_soon(turn)
+
+    turn()
+    return turns
+
+
+# A wait on a line or on a forked child is made on every line, so a turn
+# of the loop it costs is a slice of whatever else runs there. The wait
+# wakes on the turn a plain await of the future wakes on: both are woken
+# by the future's own callbacks, one after the other.
+@pytest.mark.asyncio
+async def test_first_done_wakes_on_the_turn_an_await_of_the_future_does():
+    release = asyncio.Event()
+    woke: dict[str, int] = {}
+    work = asyncio.ensure_future(release.wait())
+
+    async def first() -> None:
+        await FirstDone([work])
+        woke["first"] = turns[0]
+
+    async def plain() -> None:
+        await work
+        woke["plain"] = turns[0]
+
+    waiters = [asyncio.create_task(first()), asyncio.create_task(plain())]
+    turns = _turns(woke, 2)
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(*waiters)
+    assert woke["first"] == woke["plain"]
+    assert work.result() is True
+
+
+@pytest.mark.asyncio
+async def test_first_done_wakes_for_the_first_and_leaves_the_rest_running():
+    events = [asyncio.Event() for _ in range(3)]
+    waits = [asyncio.ensure_future(event.wait()) for event in events]
+    waiter = asyncio.ensure_future(_first_done(waits))
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    events[1].set()
+    await waiter
+    assert [wait.done() for wait in waits] == [False, True, False]
+    assert await _first_done(waits) is None
+    for wait in waits:
+        wait.cancel()
+
+
+async def _first_done(futures: list[asyncio.Future[Any]]) -> None:
+    await FirstDone(futures)
+
+
+# A cancelled waiter leaves the wait on the loop's next turn and what it
+# waited for runs on, as behind asyncio.shield; a second cancel changes
+# nothing. One cancelled as a future ends is woken by that end, and
+# cancelled there, with the future's own result untouched.
+@pytest.mark.asyncio
+async def test_a_cancelled_first_done_leaves_its_futures_running():
+    release = asyncio.Event()
+    work = asyncio.ensure_future(release.wait())
+    waiter = asyncio.ensure_future(_first_done([work]))
+    other = asyncio.ensure_future(_first_done([work]))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    waiter.cancel()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert waiter.cancelled()
+    assert not work.done() and not other.done()
+    ending = asyncio.ensure_future(release.wait())
+    await asyncio.sleep(0)
+    ending.add_done_callback(lambda _future: late.cancel())
+    late = asyncio.ensure_future(_first_done([ending]))
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await late
+    assert ending.result() is True
+    await other
+    assert work.result() is True

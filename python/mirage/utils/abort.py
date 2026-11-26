@@ -17,7 +17,7 @@ import logging
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
-from mirage.concurrency.limiter import owned_task
+from mirage.concurrency.limiter import FirstDone, owned_task
 
 logger = logging.getLogger(__name__)
 
@@ -143,9 +143,7 @@ async def run_cancellable(
     )
     try:
         if waiters:
-            await asyncio.wait(
-                {task, *waiters}, return_when=asyncio.FIRST_COMPLETED
-            )
+            await FirstDone([task, *waiters])
         if any(e.is_set() for e in events):
             await _cancel_and_join(task)
             raise MirageAbortError()

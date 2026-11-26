@@ -21,9 +21,11 @@ from collections.abc import (
     Awaitable,
     Callable,
     Coroutine,
+    Generator,
     Sequence,
 )
 from contextlib import AbstractAsyncContextManager
+from contextvars import Context
 from typing import Any, ParamSpec, TypeVar, cast
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,91 @@ def owned_task(coro: Coroutine[Any, Any, _R]) -> asyncio.Task[_R]:
     return asyncio.Task(
         coro, loop=asyncio.get_running_loop(), eager_start=True
     )
+
+
+class FirstDone:
+    """A wait for the first of ``futures`` to end, at no turn of the loop.
+
+    ``asyncio.wait`` and ``asyncio.shield`` wake a future of their own
+    as one of theirs ends, and the waiter a turn after it. Here the end
+    wakes the waiter itself, as awaiting a single future does, so a line
+    waiting on itself and its cancel event, or a shell on the child it
+    forked, costs its loop no turn for the wait, each a slice of
+    whatever else runs on that loop. As behind those two, a cancel of
+    the waiter ends the wait and leaves every future running, and the
+    waiter wakes on the loop's next turn, by when a signal that stopped
+    it has reached whoever else it was sent to.
+
+    Args:
+        futures (Sequence[asyncio.Future[Any]]): what is waited for, on
+            the waiter's loop, at least one.
+    """
+
+    _asyncio_future_blocking = False
+
+    def __init__(self, futures: Sequence[asyncio.Future[Any]]) -> None:
+        self._futures = futures
+        self._wake: Callable[[FirstDone], None] | None = None
+        self._context: Context | None = None
+        self._left = False
+
+    def get_loop(self) -> asyncio.AbstractEventLoop:
+        return self._futures[0].get_loop()
+
+    def add_done_callback(
+        self,
+        wake: Callable[["FirstDone"], None],
+        *,
+        context: Context | None = None,
+    ) -> None:
+        """Wake the waiter as the first future ends, as that future's
+        own callback.
+
+        Args:
+            wake (Callable[[FirstDone], None]): the waiter's wake-up.
+            context (Context | None): the context it runs in.
+        """
+        self._wake = wake
+        self._context = context
+        for future in self._futures:
+            future.add_done_callback(self._ended, context=context)
+
+    def _ended(self, future: asyncio.Future[Any]) -> None:
+        wake, self._wake = self._wake, None
+        if wake is None:
+            return
+        for other in self._futures:
+            other.remove_done_callback(self._ended)
+        wake(self)
+
+    def cancel(self, msg: str | None = None) -> bool:
+        """Leave the wait: the waiter wakes cancelled on the next turn
+        and every future runs on.
+
+        Args:
+            msg (str | None): the cancellation's message, unused.
+
+        Returns:
+            bool: False once a future has ended or the wait was left,
+                when the waiter's wake-up is already on its way.
+        """
+        if self._wake is None or any(f.done() for f in self._futures):
+            return False
+        wake, self._wake = self._wake, None
+        self._left = True
+        for future in self._futures:
+            future.remove_done_callback(self._ended)
+        self.get_loop().call_soon(wake, self, context=self._context)
+        return True
+
+    def result(self) -> None:
+        if self._left:
+            raise asyncio.CancelledError
+
+    def __await__(self) -> Generator["FirstDone", None, None]:
+        if not any(future.done() for future in self._futures):
+            self._asyncio_future_blocking = True
+            yield self
 
 
 async def shallow(work: Coroutine[Any, Any, _R]) -> _R:
