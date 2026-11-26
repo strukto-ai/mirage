@@ -429,6 +429,88 @@ async def test_a_stopped_waiter_leaves_an_exiting_runner_to_its_end():
     assert (await exiting.join()).exit == 143
 
 
+# A shell reaps every child it forks, so a turn of the loop a reap costs is
+# one for each level of a line. A reap wakes on the turn its runner's end
+# wakes a plain wait on, where asyncio.shield wakes a future of its own
+# first and the waiter a turn later. The counter runs once a turn.
+@pytest.mark.asyncio
+async def test_a_reap_wakes_on_the_turn_a_wait_on_its_runner_does():
+    loop = asyncio.get_running_loop()
+    finish = asyncio.Event()
+    turns = [0]
+    woke: dict[str, int] = {}
+
+    def turn() -> None:
+        turns[0] += 1
+        if len(woke) < 2:
+            loop.call_soon(turn)
+
+    async def run() -> int:
+        await finish.wait()
+        return 3
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.start()
+
+    async def reaps() -> None:
+        assert await handle.reap() == 3
+        woke["reap"] = turns[0]
+
+    async def waits() -> None:
+        assert await handle.task == 3
+        woke["wait"] = turns[0]
+
+    waiters = [asyncio.create_task(reaps()), asyncio.create_task(waits())]
+    turn()
+    await asyncio.sleep(0)
+    finish.set()
+    await asyncio.gather(*waiters)
+    assert woke["reap"] == woke["wait"]
+
+
+# A reap left by a cancel wakes on the loop's next turn and leaves the
+# runner running; one cancelled as its runner ends still reads the end.
+@pytest.mark.asyncio
+async def test_a_cancelled_reap_wakes_at_once_and_the_runner_runs_on():
+    finish = asyncio.Event()
+
+    async def action() -> int:
+        await finish.wait()
+        return 3
+
+    exiting = ProcessHandle(_info(), action, lambda _pid: None)
+    exiting.exiting = True
+    exiting.start()
+    first = asyncio.create_task(exiting.reap())
+    second = asyncio.create_task(exiting.reap())
+    await asyncio.sleep(0)
+    first.cancel()
+    first.cancel()
+    await asyncio.sleep(0)
+    assert not exiting.task.done()
+    assert not second.done()
+    finish.set()
+    assert await second == 3
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    over = asyncio.Event()
+
+    async def ends() -> int:
+        await over.wait()
+        return 3
+
+    ended = ProcessHandle(_info(), ends, lambda _pid: None)
+    ended.start()
+    await asyncio.sleep(0)
+    ended.task.add_done_callback(lambda _task: late.cancel())
+    late = asyncio.create_task(ended.reap())
+    await asyncio.sleep(0)
+    over.set()
+    with pytest.raises(asyncio.CancelledError):
+        await late
+    assert (await ended.join()).exit == 3
+
+
 def test_a_deadline_names_term_and_lets_a_stopped_process_go():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
     gate: Future[None] = Future()

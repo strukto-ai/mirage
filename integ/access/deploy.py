@@ -25,6 +25,7 @@ three keys: a plain one, one bound to the ``guarded`` profile, and one
 never authorized.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -32,8 +33,8 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -387,11 +388,17 @@ def snapshot_store() -> Iterator[SnapshotStore]:
         server.stop()
 
 
-@contextmanager
-def deployed(
+@asynccontextmanager
+async def deployed(
     name: str, host: str, root: Path, issuer: Issuer, store: SnapshotStore
-) -> Iterator[Deployment]:
+) -> AsyncIterator[Deployment]:
     """Run one deployment for the length of the block.
+
+    Its start and stop block for seconds (a TypeScript server takes five
+    to answer), so they run on a thread: the hosts share the caller's
+    loop, and a loop held that long leaves the other host's suites with
+    kept-alive connections older than the server's five second
+    keep-alive, which it closes as their next request arrives.
 
     Args:
         name (str): ``dev``, ``token`` or ``jwt``.
@@ -407,7 +414,7 @@ def deployed(
     root.mkdir(parents=True, exist_ok=True)
     d = Deployment(name, host, root, free_port(), free_port(), issuer, store)
     try:
-        _start(d)
+        await asyncio.to_thread(_start, d)
         yield d
     finally:
-        _stop(d)
+        await asyncio.to_thread(_stop, d)

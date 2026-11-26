@@ -1660,6 +1660,9 @@
    }
   },
   "execution/process/handle": {
+   "python_only": {
+    "_Shielded": "asyncio cancels a task as its cancelled waiter awaits it, so a shell waiting for its child shields the wait, and asyncio.shield costs the loop a turn each time; this wait costs none. A JavaScript promise carries no cancellation, and awaiting one takes no turn."
+   },
    "typescript_only": {
     "PauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them.",
     "newPauseGate": "Python holds a paused process on an asyncio.Future; a Promise has no resolve of its own, so TypeScript pairs them."

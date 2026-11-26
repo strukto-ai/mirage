@@ -1783,11 +1783,14 @@ def loop_turns(key: str, path: Path, report: Report) -> None:
     the line and its process start eagerly: the rest is the hand-off
     between the server's loop and the workspace's. The pipeline also
     closes output and activity streams, which a plain ``echo`` never
-    opens: it took 30, then 15, takes 14, 23 with its output streams'
-    close started a turn late again and 24 with no close started
-    eagerly. A line that outlives the yield interval
-    (2 ms here) also yields, so a loaded runner adds a few turns, up to
-    17 for the pipeline: the budgets leave room for them. A streamed
+    opens: it took 30, then 15, then 14, and takes 15; 17 with each
+    wait for a forked child behind ``asyncio.shield``, 23 with its
+    output streams' close started a turn late again and 24 with no
+    close started eagerly. A line that outlives the yield interval
+    (2 ms here) also yields, three turns each time, so a loaded runner
+    reads 18 for the pipeline. The budgets leave room for one yield and
+    no more: a line that takes two turns more in the code still passes
+    on a quiet runner and fails on a loaded one. A streamed
     request is left out, since its output crosses to
     the server's own loop and its turns follow that hand-off more than
     the line.
@@ -1870,7 +1873,9 @@ async def main(args: argparse.Namespace) -> int:
             if wanted == {"inapp"}:
                 return
             for name in deployments:
-                with deployed(name, host, scratch / name, issuer, store) as d:
+                async with deployed(
+                    name, host, scratch / name, issuer, store
+                ) as d:
                     server = Server(d, recorder)
                     keys.append(server.key)
                     await through_accesses(
