@@ -42,7 +42,7 @@ import {
   ENV_WORKER_TYPE,
   ENV_WORKERS,
 } from '@struktoai/mirage-server/env'
-import { DEFAULT_ALLOWED_HOSTS } from '@struktoai/mirage-server/host_validation_constants'
+import { LOOPBACK_HOSTS } from '@struktoai/mirage-server/host_validation_constants'
 import { mirageHome } from '@struktoai/mirage-server/paths'
 import { defaultSSHDir } from '@struktoai/mirage-server/ssh/config'
 import {
@@ -128,7 +128,7 @@ export function isLocalUrl(url: string): boolean {
   } catch {
     return false
   }
-  return DEFAULT_ALLOWED_HOSTS.includes(host.replace(/^\[(.*)\]$/, '$1'))
+  return LOOPBACK_HOSTS.includes(host.replace(/^\[(.*)\]$/, '$1'))
 }
 
 export interface DaemonSettings {
@@ -227,7 +227,7 @@ const ENV_FOR_KEY: Record<string, string> = {
 function defaultForKey(key: string, home: string): string {
   const defaults: Record<string, string> = {
     url: DEFAULT_DAEMON_URL,
-    allowed_hosts: DEFAULT_ALLOWED_HOSTS.join(','),
+    allowed_hosts: '',
     forwarded_allow_ips: '',
     auth_mode: 'local',
     jwt_alg: '',

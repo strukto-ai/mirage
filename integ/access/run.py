@@ -1391,7 +1391,7 @@ async def lifecycle(
     await cli(*daemon_config, "set", "allowed_hosts", "127.0.0.1", use=plain)
     hosts = {
         **plain,
-        "MIRAGE_ALLOWED_HOSTS": "127.0.0.1,localhost,evil.example",
+        "MIRAGE_ALLOWED_HOSTS": "evil.example",
     }
     await cli("workspace", "create", str(config), "--id", "f", use=hosts)
     got["config_port_moves"] = (

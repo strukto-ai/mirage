@@ -18,23 +18,27 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import { ENV_ALLOWED_HOSTS } from './env.ts'
-import { DEFAULT_ALLOWED_HOSTS } from './host_validation_constants.ts'
+import { LOOPBACK_HOSTS } from './host_validation_constants.ts'
 import {
   isCrossOrigin,
   isHostAllowed,
   parseAllowedHosts,
+  refusal,
   resolveAllowedHosts,
   stripPort,
 } from './host_validation.ts'
 
+const LOOPBACK = [...LOOPBACK_HOSTS]
+
 describe('parseAllowedHosts', () => {
-  it('falls back to defaults when value is undefined', () => {
-    expect(parseAllowedHosts(undefined)).toEqual([...DEFAULT_ALLOWED_HOSTS])
+  it('lists none when value is undefined', () => {
+    expect(parseAllowedHosts(undefined)).toEqual([])
   })
 
-  it('falls back to defaults when value is empty or whitespace', () => {
-    expect(parseAllowedHosts('')).toEqual([...DEFAULT_ALLOWED_HOSTS])
-    expect(parseAllowedHosts('   ')).toEqual([...DEFAULT_ALLOWED_HOSTS])
+  it('lists none when value is empty or whitespace', () => {
+    expect(parseAllowedHosts('')).toEqual([])
+    expect(parseAllowedHosts('   ')).toEqual([])
+    expect(parseAllowedHosts(' , ')).toEqual([])
   })
 
   it('parses csv values', () => {
@@ -82,15 +86,51 @@ describe('stripPort', () => {
 
 describe('isHostAllowed: malformed Host headers fail closed', () => {
   it('rejects bracketed IPv6 hosts with trailing junk after "]"', () => {
-    expect(isHostAllowed('[::1]evil', DEFAULT_ALLOWED_HOSTS)).toBe(false)
-    expect(isHostAllowed('[::1]:8765x', DEFAULT_ALLOWED_HOSTS)).toBe(false)
-    expect(isHostAllowed('[::1].attacker.tld', DEFAULT_ALLOWED_HOSTS)).toBe(false)
+    expect(isHostAllowed('[::1]evil', LOOPBACK)).toBe(false)
+    expect(isHostAllowed('[::1]:8765x', LOOPBACK)).toBe(false)
+    expect(isHostAllowed('[::1].attacker.tld', LOOPBACK)).toBe(false)
   })
 
   it('still accepts well-formed loopback hosts', () => {
-    expect(isHostAllowed('[::1]', DEFAULT_ALLOWED_HOSTS)).toBe(true)
-    expect(isHostAllowed('[::1]:8765', DEFAULT_ALLOWED_HOSTS)).toBe(true)
-    expect(isHostAllowed('127.0.0.1:8765', DEFAULT_ALLOWED_HOSTS)).toBe(true)
+    expect(isHostAllowed('[::1]', LOOPBACK)).toBe(true)
+    expect(isHostAllowed('[::1]:8765', LOOPBACK)).toBe(true)
+    expect(isHostAllowed('127.0.0.1:8765', LOOPBACK)).toBe(true)
+  })
+
+  it('compares the host in any case', () => {
+    expect(isHostAllowed('LOCALHOST:8765', LOOPBACK)).toBe(true)
+    expect(isHostAllowed('Localhost', LOOPBACK)).toBe(true)
+  })
+
+  it('refuses a missing host unless "*" is listed', () => {
+    expect(isHostAllowed('', LOOPBACK)).toBe(false)
+    expect(isHostAllowed(undefined, LOOPBACK)).toBe(false)
+    expect(isHostAllowed(undefined, ['*'])).toBe(true)
+  })
+})
+
+describe('refusal', () => {
+  it('names the setting, not the host', () => {
+    const refused = refusal('attacker.example', undefined, undefined, LOOPBACK)
+    expect(refused?.code).toBe('host_not_allowed')
+    expect(refused?.message).toBe('host is not allowed; add it to MIRAGE_ALLOWED_HOSTS')
+  })
+
+  it('checks the host before the origin', () => {
+    expect(refusal('attacker.example', 'https://evil.example', 'cross-site', LOOPBACK)?.code).toBe(
+      'host_not_allowed',
+    )
+  })
+
+  it('refuses another origin', () => {
+    const refused = refusal('127.0.0.1:8765', 'https://evil.example', undefined, LOOPBACK)
+    expect(refused?.code).toBe('origin_not_allowed')
+    expect(refused?.message).toBe('cross-origin request refused')
+  })
+
+  it('lets its own requests on', () => {
+    expect(refusal('127.0.0.1:8765', undefined, undefined, LOOPBACK)).toBeUndefined()
+    expect(refusal('localhost:8765', 'http://localhost:8765', undefined, LOOPBACK)).toBeUndefined()
   })
 })
 
@@ -138,19 +178,33 @@ describe('resolveAllowedHosts', () => {
     else process.env[ENV_ALLOWED_HOSTS] = originalEnv
   })
 
-  it('returns the explicit list when provided', () => {
+  it('adds the explicit list when provided', () => {
     process.env[ENV_ALLOWED_HOSTS] = 'elsewhere'
-    expect(resolveAllowedHosts(['override.example'])).toEqual(['override.example'])
+    expect(resolveAllowedHosts(['override.example'])).toEqual([...LOOPBACK, 'override.example'])
   })
 
-  it('reads the env var when no explicit list is given', () => {
+  it('adds the env var when no explicit list is given', () => {
     process.env[ENV_ALLOWED_HOSTS] = 'foo,bar'
-    expect(resolveAllowedHosts()).toEqual(['foo', 'bar'])
+    expect(resolveAllowedHosts()).toEqual([...LOOPBACK, 'foo', 'bar'])
   })
 
-  it('returns defaults when env is unset', () => {
-    Reflect.deleteProperty(process.env, ENV_ALLOWED_HOSTS)
-    expect(resolveAllowedHosts()).toEqual([...DEFAULT_ALLOWED_HOSTS])
+  it('answers only the loopback names when nothing is added', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mir-hosts-'))
+    expect(resolveAllowedHosts(undefined, { MIRAGE_HOME: home })).toEqual(LOOPBACK)
+    expect(resolveAllowedHosts([])).toEqual(LOOPBACK)
+  })
+
+  it('keeps each name once, without its port and in lower case', () => {
+    expect(
+      resolveAllowedHosts([
+        'Mirage.Example.com:8443',
+        'mirage.example.com',
+        '[::1]',
+        'LOCALHOST',
+        '[fd00::1]:8765',
+        '*',
+      ]),
+    ).toEqual([...LOOPBACK, 'mirage.example.com', 'fd00::1', '*'])
   })
 })
 
@@ -210,22 +264,40 @@ describe('buildApp host header enforcement', () => {
     }
   })
 
-  it('extends allowlist via env var', async () => {
-    process.env[ENV_ALLOWED_HOSTS] = '127.0.0.1,localhost,daemon.mirage.local'
+  it('adds the env var to the loopback names', async () => {
+    process.env[ENV_ALLOWED_HOSTS] = 'Daemon.Mirage.Local'
     const app = buildApp({})
     try {
-      const ok = await app.inject({
-        method: 'GET',
-        url: '/v1/workspaces',
-        headers: { host: 'daemon.mirage.local' },
-      })
-      expect(ok.statusCode).toBe(200)
+      for (const host of ['daemon.mirage.local', '127.0.0.1:8765', 'localhost']) {
+        const ok = await app.inject({ method: 'GET', url: '/v1/workspaces', headers: { host } })
+        expect(ok.statusCode, host).toBe(200)
+      }
       const bad = await app.inject({
         method: 'GET',
         url: '/v1/workspaces',
         headers: { host: 'attacker.example' },
       })
       expect(bad.statusCode).toBe(403)
+      expect(bad.json()).toEqual({
+        error: {
+          code: 'host_not_allowed',
+          message: 'host is not allowed; add it to MIRAGE_ALLOWED_HOSTS',
+        },
+      })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('matches the host in any case', async () => {
+    const app = buildApp({})
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/v1/workspaces',
+        headers: { host: 'LOCALHOST:8765' },
+      })
+      expect(res.statusCode).toBe(200)
     } finally {
       await app.close()
     }
@@ -336,6 +408,7 @@ describe('resolveAllowedHosts config layer', () => {
       '[daemon]\nallowed_hosts = "example.com,api.example.com"\n',
     )
     expect(resolveAllowedHosts(undefined, { MIRAGE_HOME: home })).toEqual([
+      ...LOOPBACK,
       'example.com',
       'api.example.com',
     ])
@@ -349,6 +422,6 @@ describe('resolveAllowedHosts config layer', () => {
         MIRAGE_HOME: home,
         MIRAGE_ALLOWED_HOSTS: 'env.example.com',
       }),
-    ).toEqual(['env.example.com'])
+    ).toEqual([...LOOPBACK, 'env.example.com'])
   })
 })

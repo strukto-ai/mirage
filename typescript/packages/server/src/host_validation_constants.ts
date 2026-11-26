@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const DEFAULT_ALLOWED_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '::1']
+export const LOOPBACK_HOSTS: readonly string[] = ['127.0.0.1', 'localhost', '::1']
 
 export const HOST_PATTERN = /^(?:\[([^\]]+)\]|([^:]+))(?::\d+)?$/
 

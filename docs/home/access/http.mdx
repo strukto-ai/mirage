@@ -17,26 +17,26 @@ export MIRAGE_AUTH_MODE=token
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 ```
 
-The server accepts only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
-`localhost` and `::1` by default. A list you set replaces them, so keep them
-for clients on this machine, such as the `mirage` CLI, and add the name in
-your clients' URL. Set it before the server starts, restarting a running one,
-or as the `allowed_hosts` [key](/home/configuration/server#set-a-value) for
-`mirage daemon`:
+The server answers the host names `127.0.0.1`, `localhost` and `::1`, plus
+those in `MIRAGE_ALLOWED_HOSTS`. Add the name in the clients' URL before the
+server starts, or set it as the `allowed_hosts`
+[key](/home/configuration/server#set-a-value) for `mirage daemon`:
 
 ```bash
-export MIRAGE_ALLOWED_HOSTS=127.0.0.1,localhost,::1,mirage.example.com
+export MIRAGE_ALLOWED_HOSTS=mirage.example.com
 ```
 
-Any other `Host` gets 403 `host_not_allowed`. The servers below, like
-`mirage daemon`, listen on `127.0.0.1` only, so other machines reach them
-through a reverse proxy or tunnel on this one that passes `Host` on as the
-client sent it, port included, since a browser's `Origin` is checked against
-it. The server also
-refuses a browser page served from any other origin, a page on another port of
-`localhost` included, even when the list is `*`. Other options
-are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
-server pages.
+Names are comma-separated and match without the port, in any case. Any other
+`Host` gets 403 `host_not_allowed`. `*` turns the check off, safe only behind a
+trusted proxy.
+
+The servers below, like `mirage daemon`, listen on `127.0.0.1` only, so other
+machines reach them through a reverse proxy or tunnel on this one. The proxy
+passes `Host` on as the client sent it, port included, since the server
+compares a browser's `Origin` with it. The server refuses a browser page served
+from any other origin, a page on another port of `localhost` included, even
+when the list is `*`. Other options are on the [Python](/python/access/server)
+and [TypeScript](/typescript/access/server) server pages.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

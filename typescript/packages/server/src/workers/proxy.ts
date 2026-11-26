@@ -24,7 +24,7 @@ import {
 import { connect, type Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
 import proxyaddr from '@fastify/proxy-addr'
-import { isCrossOrigin, isHostAllowed } from '../host_validation.ts'
+import { refusal, refusalLine } from '../host_validation.ts'
 import { MAX_REQUEST_PART } from '../multipart.ts'
 import { COUNTED_HEADER } from '../rate_limit.ts'
 import { AUTH_PROBE, UNAVAILABLE } from './constants.ts'
@@ -373,15 +373,12 @@ export class WorkerProxy {
    */
   private refusedHere(req: IncomingMessage, res: ServerResponse): boolean {
     const { host, origin, 'sec-fetch-site': fetchSite } = req.headers
-    if (!isHostAllowed(host, this.options.allowedHosts)) {
-      sendError(res, new HttpError('host_not_allowed', 'host header is not allowed'))
-      return true
-    }
-    if (isCrossOrigin(host, origin, fetchSite)) {
-      sendError(res, new HttpError('origin_not_allowed', 'cross-origin request refused'))
-      return true
-    }
-    return false
+    const { allowedHosts } = this.options
+    const refused = refusal(host, origin, fetchSite, allowedHosts)
+    if (refused === undefined) return false
+    console.warn(refusalLine(this.client(req), refused, host, origin, fetchSite, allowedHosts))
+    sendError(res, refused)
+    return true
   }
 
   /**

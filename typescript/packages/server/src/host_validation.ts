@@ -14,32 +14,52 @@
 
 import { readDaemonTable } from './daemon_config.ts'
 import { ENV_ALLOWED_HOSTS, ENV_FORWARDED_ALLOW_IPS } from './env.ts'
+import { HttpError } from './errors.ts'
 import {
-  DEFAULT_ALLOWED_HOSTS,
   HOST_PATTERN,
+  LOOPBACK_HOSTS,
   SAME_ORIGIN_FETCH_SITES,
 } from './host_validation_constants.ts'
 import { mirageHome } from './paths.ts'
 
+/**
+ * Parse a comma-separated host list, as `MIRAGE_ALLOWED_HOSTS` and the
+ * `allowed_hosts` key hold it; undefined or blank lists none.
+ */
 export function parseAllowedHosts(value: string | undefined): string[] {
-  if (value === undefined) return [...DEFAULT_ALLOWED_HOSTS]
-  const items = value
+  return (value ?? '')
     .split(',')
     .map((h) => h.trim())
     .filter((h) => h.length > 0)
-  return items.length > 0 ? items : [...DEFAULT_ALLOWED_HOSTS]
 }
 
+/**
+ * The host names the server answers: the loopback names, then the names
+ * added to them, each once. An added entry is kept without its port or IPv6
+ * brackets and in lower case, as a Host is compared. Undefined adds
+ * `$MIRAGE_ALLOWED_HOSTS`, else the `allowed_hosts` key in config.toml's
+ * `[daemon]` (both comma-separated); `*` turns the Host check off. Mirrors
+ * Python's `resolve_allowed_hosts`.
+ */
 export function resolveAllowedHosts(
   allowedHosts?: readonly string[],
   env: Record<string, string | undefined> = process.env,
 ): string[] {
-  if (allowedHosts !== undefined) return [...allowedHosts]
-  const raw = env[ENV_ALLOWED_HOSTS]
-  if (raw !== undefined && raw !== '') return parseAllowedHosts(raw)
-  const fromConfig = readDaemonTable(mirageHome(env)).allowed_hosts
-  if (fromConfig !== undefined && fromConfig !== '') return parseAllowedHosts(fromConfig)
-  return parseAllowedHosts(undefined)
+  let entries = allowedHosts
+  if (entries === undefined) {
+    const fromEnv = env[ENV_ALLOWED_HOSTS]
+    entries = parseAllowedHosts(
+      fromEnv !== undefined && fromEnv !== ''
+        ? fromEnv
+        : readDaemonTable(mirageHome(env)).allowed_hosts,
+    )
+  }
+  const hosts = [...LOOPBACK_HOSTS]
+  for (const entry of entries) {
+    const name = stripPort(entry).toLowerCase()
+    if (!hosts.includes(name)) hosts.push(name)
+  }
+  return hosts
 }
 
 /**
@@ -73,11 +93,15 @@ export function stripPort(rawHost: string): string {
   return match[1] ?? match[2] ?? rawHost
 }
 
+/**
+ * Whether a Host header value is allowed: `allowed` holds the names from
+ * `resolveAllowedHosts`, and the host is compared without its port and in
+ * lower case. `*` accepts any host.
+ */
 export function isHostAllowed(rawHost: string | undefined, allowed: readonly string[]): boolean {
   if (allowed.includes('*')) return true
   if (rawHost === undefined || rawHost === '') return false
-  const host = stripPort(rawHost)
-  return allowed.includes(host)
+  return allowed.includes(stripPort(rawHost).toLowerCase())
 }
 
 /**
@@ -94,4 +118,40 @@ export function isCrossOrigin(
   if (origin === undefined) return false
   const sep = origin.indexOf('://')
   return sep < 0 || origin.slice(sep + 3).toLowerCase() !== (rawHost ?? '').toLowerCase()
+}
+
+/**
+ * The 403 for a request the server answers before any route: a Host it does
+ * not serve, or a browser page from another origin. The message names no
+ * header value. Undefined lets the request on. Mirrors Python's `refusal`.
+ */
+export function refusal(
+  rawHost: string | undefined,
+  origin: string | undefined,
+  fetchSite: string | undefined,
+  allowed: readonly string[],
+): HttpError | undefined {
+  if (!isHostAllowed(rawHost, allowed)) {
+    return new HttpError('host_not_allowed', `host is not allowed; add it to ${ENV_ALLOWED_HOSTS}`)
+  }
+  if (isCrossOrigin(rawHost, origin, fetchSite)) {
+    return new HttpError('origin_not_allowed', 'cross-origin request refused')
+  }
+  return undefined
+}
+
+/** The warning logged for a `refusal`, with the headers it was decided on. */
+export function refusalLine(
+  client: string,
+  refused: HttpError,
+  rawHost: string | undefined,
+  origin: string | undefined,
+  fetchSite: string | undefined,
+  allowed: readonly string[],
+): string {
+  return (
+    `rejecting request from ${client}: ${refused.code}: Host=${JSON.stringify(rawHost)} ` +
+    `Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)}, ` +
+    `allowed ${JSON.stringify(allowed)}`
+  )
 }

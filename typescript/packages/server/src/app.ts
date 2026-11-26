@@ -62,8 +62,8 @@ import type { AuthConfig } from './auth/index.ts'
 import { AuthMode, resolveAuthConfig } from './auth/index.ts'
 import { authenticator, registerAuth, registerE2BAuth } from './auth/middleware.ts'
 import {
-  isCrossOrigin,
-  isHostAllowed,
+  refusal,
+  refusalLine,
   resolveAllowedHosts,
   resolveForwardedAllowIps,
 } from './host_validation.ts'
@@ -104,6 +104,13 @@ import {
 export interface BuildAppOptions {
   idleGraceSeconds?: number
   onIdleExit?: () => void
+  /**
+   * `Host` names the app answers besides the loopback names (`127.0.0.1`,
+   * `localhost`, `::1`), which it always answers. Undefined reads
+   * `$MIRAGE_ALLOWED_HOSTS`, else the `allowed_hosts` key in config.toml's
+   * `[daemon]`. `['*']` skips the Host comparison, safe only behind a trusted
+   * proxy; a browser request from another origin is refused either way.
+   */
   allowedHosts?: readonly string[]
   authConfig?: AuthConfig
   /**
@@ -334,21 +341,13 @@ function requestGuards(
     })
     request.closed = gone.signal
     const { host, origin, 'sec-fetch-site': fetchSite } = request.headers
-    if (!isHostAllowed(host, allowedHosts)) {
-      console.warn(
-        `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
-      )
-      void replyError(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
+    const refused = refusal(host, origin, fetchSite, allowedHosts)
+    if (refused === undefined) {
+      done()
       return
     }
-    if (isCrossOrigin(host, origin, fetchSite)) {
-      console.warn(
-        `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
-      )
-      void replyError(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
-      return
-    }
-    done()
+    console.warn(refusalLine(request.ip, refused, host, origin, fetchSite, allowedHosts))
+    void replyError(reply, refused)
   })
 }
 

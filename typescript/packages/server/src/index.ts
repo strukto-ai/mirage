@@ -54,7 +54,7 @@ export {
   type JWTConfig,
 } from './auth/index.ts'
 export { ENV_ALLOWED_HOSTS, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-export { DEFAULT_ALLOWED_HOSTS } from './host_validation_constants.ts'
+export { LOOPBACK_HOSTS } from './host_validation_constants.ts'
 export {
   ALLOWED_KEYS,
   DaemonConfigError,
