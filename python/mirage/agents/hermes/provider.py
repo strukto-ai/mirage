@@ -76,6 +76,9 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         self._ask_for = ask_for or _no_ask
         self._lock = threading.Lock()
         self._workspaces: dict[Path, Workspace] = {}
+        # 一条终端后端共用一个 MirageEnvironment：mount_type mirage 的机器只认一个会话的视图，
+        # Hermes 的 prompt 探测和真正的回合却是两个 task id，各自建环境会互相顶掉。
+        self._environments: dict[Path, MirageEnvironment] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._closed = False
@@ -109,9 +112,21 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         task_id: str = "default",
         **kwargs: Any,
     ) -> MirageEnvironment:
-        return MirageEnvironment(
-            self._workspace(), cwd=cwd, timeout=timeout, task_id=task_id
-        )
+        workspace = self._workspace()
+        path = self._path()
+        with self._lock:
+            environment = self._environments.get(path) if path else None
+            if environment is None:
+                environment = MirageEnvironment(
+                    workspace, cwd=cwd, timeout=timeout, task_id=task_id
+                )
+                # 会话要活到进程退出，不能因为 Hermes 结束某一次回合就被关掉；
+                # 真正的关闭在 provider.close()。
+                environment._original_cleanup = environment.cleanup  # type: ignore[attr-defined]
+                environment.cleanup = _noop  # type: ignore[method-assign]
+                if path:
+                    self._environments[path] = environment
+        return environment
 
     def _owner(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
@@ -155,6 +170,12 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             loop, thread = self._loop, self._thread
             if loop is None or thread is None:
                 return
+            for environment in self._environments.values():
+                try:
+                    environment._original_cleanup()  # type: ignore[attr-defined]
+                except Exception as exc:
+                    logger.warning("closing a mirage environment failed: %r", exc)
+            self._environments.clear()
             for workspace in self._workspaces.values():
                 try:
                     asyncio.run_coroutine_threadsafe(
@@ -174,6 +195,11 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
 
 
 def _no_ask() -> None:
+    return None
+
+
+def _noop() -> None:
+    """占位：共用环境的 cleanup 由 provider.close() 调用原文那次。"""
     return None
 
 

@@ -24,6 +24,8 @@ from mirage.agents.hermes.ask import HttpAsk, make_ask
 from mirage.policy import Decision, Outcome, Scope
 from mirage.policy.types import CommandRule
 
+pytestmark = pytest.mark.asyncio
+
 
 def decision(**changes) -> Decision:
     fields = dict(

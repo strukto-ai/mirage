@@ -94,6 +94,17 @@ def test_register_wires_the_ask_setting(config):
     assert provider.skip_container_guards is True
 
 
+def test_every_task_shares_one_environment(config):
+    """mount_type mirage 的机器只认一个会话视图，所有 task id 必须拿到同一个环境。"""
+    provider = MirageTerminalProvider(lambda: str(config))
+    first = provider.create_environment(cwd="/", timeout=30, task_id="prompt-backend-probe")
+    second = provider.create_environment(cwd="/", timeout=30, task_id="real-turn")
+    try:
+        assert first is second
+    finally:
+        provider.close()
+
+
 def test_tasks_share_one_workspace(config):
     provider = MirageTerminalProvider(lambda: str(config))
     first = provider.create_environment(cwd="/", timeout=30, task_id="a")
