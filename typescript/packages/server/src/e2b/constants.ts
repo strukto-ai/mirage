@@ -41,9 +41,7 @@ export const RPC_PATHS: ReadonlySet<string> = new Set([
   ...UNSUPPORTED_RPC_PATHS,
 ])
 
-// Map the SDK default to an optional saved Mirage workspace template.
 export const BASE_TEMPLATE = 'base'
-export const BASE_WORKSPACE_TEMPLATE = 'e2b-base'
 export const DEFAULT_TIMEOUT = 300
 export const ENVD_VERSION = '0.5.6'
 

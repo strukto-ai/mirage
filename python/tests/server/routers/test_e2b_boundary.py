@@ -197,7 +197,7 @@ async def test_move_reuses_workspace_rename(tmp_path):
     resources = memory_resource_store()
     await resources.create_template(
         TemplateInput(
-            name="e2b-base",
+            name="base",
             config={
                 "mounts": {
                     "/home/user": {"vfs": "ram", "mode": "write"},

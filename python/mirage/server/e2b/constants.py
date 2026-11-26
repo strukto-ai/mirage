@@ -18,9 +18,7 @@ CONNECT = "/v2/sandboxes/{sandbox_id}/connect"
 KILL = "/sandboxes/{sandbox_id}"
 SET_TIMEOUT = "/sandboxes/{sandbox_id}/timeout"
 HEALTH = "/health"
-# Map the SDK default to an optional saved Mirage workspace template.
 BASE_TEMPLATE = "base"
-BASE_WORKSPACE_TEMPLATE = "e2b-base"
 DEFAULT_TIMEOUT = 300
 ENVD_VERSION = "0.5.6"
 FILES = "/files"

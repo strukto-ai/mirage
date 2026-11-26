@@ -53,7 +53,7 @@ async function setup(options: BuildAppOptions = {}, useSavedBase = true) {
   const resourceStore = options.resourceStore ?? memoryResourceStore()
   if (useSavedBase) {
     await resourceStore.createTemplate({
-      name: 'e2b-base',
+      name: 'base',
       description: null,
       config: { ...RAM, store: { type: 'disk', root: templateRoot } },
     })
@@ -327,10 +327,10 @@ describe('E2B lifecycle', () => {
     expect((await app.inject({ url: '/v1/workspaces', headers: BEARER })).statusCode).toBe(200)
   })
 
-  it('creates fresh writable base sandboxes when the reserved template is absent', async () => {
+  it('creates fresh writable base sandboxes when the saved base template is absent', async () => {
     const resourceStore = memoryResourceStore()
     await resourceStore.createTemplate({
-      name: 'base',
+      name: 'e2b-base',
       description: null,
       config: { mounts: { '/other': { vfs: 'ram' } } },
     })
@@ -369,7 +369,7 @@ describe('E2B lifecycle', () => {
     )
   })
 
-  it('reads the reserved YAML template from the default store for each create', async () => {
+  it('reads the base YAML template from the default store for each create', async () => {
     const home = await mkdtemp(join(tmpdir(), 'mirage-e2b-home-'))
     stateRoots.push(home)
     vi.stubEnv('MIRAGE_HOME', home)
@@ -382,11 +382,12 @@ describe('E2B lifecycle', () => {
     applications.push(app)
 
     const templateRoot = join(home, 'resources', 'template')
-    const templatePath = join(templateRoot, 'e2b-base.yaml')
+    const templatePath = join(templateRoot, 'base.yaml')
     await mkdir(templateRoot, { recursive: true })
     await writeFile(
       templatePath,
       [
+        'name: base',
         'description: Saved sandbox base',
         'config:',
         '  mode: read',
@@ -396,7 +397,7 @@ describe('E2B lifecycle', () => {
         '      mode: write',
       ].join('\n'),
     )
-    const created = await create(app)
+    const created = await create(app, { templateID: 'base' })
     expect(created.templateID).toBe('base')
     const detail = await app.inject({ url: `/v1/workspaces/${created.sandboxID}`, headers: BEARER })
     expect(detail.statusCode, detail.body).toBe(200)
@@ -423,7 +424,7 @@ describe('E2B lifecycle', () => {
     expect(reconnected.json()).toEqual(created)
   })
 
-  it('only accepts the public base template, validates input, and returns the same lease on connect', async () => {
+  it('only accepts the base template, validates input, and returns the same lease on connect', async () => {
     const { app } = await setup({ maxWorkspaces: 1 })
     for (const templateID of ['unknown', 'e2b-base']) {
       const unknown = await e2bListener(app).inject({

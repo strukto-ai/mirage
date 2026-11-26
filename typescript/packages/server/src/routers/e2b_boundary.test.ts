@@ -186,7 +186,7 @@ it('shares the native workspace limit with verified sandbox routes', async () =>
 it('moves entries through the workspace filesystem', async () => {
   const resourceStore = memoryResourceStore()
   await resourceStore.createTemplate({
-    name: 'e2b-base',
+    name: 'base',
     description: null,
     config: {
       mounts: {

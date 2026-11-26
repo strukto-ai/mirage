@@ -78,11 +78,11 @@ async def test_base_uses_the_default_saved_template_file(
 ):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.delenv("MIRAGE_RESOURCE_STORE", raising=False)
-    path = tmp_path / "resources" / "template" / "e2b-base.yaml"
+    path = tmp_path / "resources" / "template" / "base.yaml"
     path.parent.mkdir(parents=True)
     async with server(tmp_path, auth_config=TOKEN) as (_, client):
         path.write_text(
-            "name: e2b-base\n"
+            "name: base\n"
             "config:\n"
             "  mounts:\n"
             "    /home/user:\n"
@@ -91,13 +91,15 @@ async def test_base_uses_the_default_saved_template_file(
             "    /saved:\n"
             "      vfs: ram\n"
         )
-        reserved = await client.post(
+        unsupported = await client.post(
             CREATE, headers=KEY, json={"templateID": "e2b-base"}
         )
-        assert reserved.status_code == 404
-        assert reserved.json()["code"] == 404
+        assert unsupported.status_code == 404
+        assert unsupported.json()["code"] == 404
 
-        created = await client.post(CREATE, headers=KEY)
+        created = await client.post(
+            CREATE, headers=KEY, json={"templateID": "base"}
+        )
         assert created.status_code == 201, created.text
         sandbox = created.json()
         assert sandbox["templateID"] == "base"
@@ -120,8 +122,8 @@ async def test_base_uses_the_default_saved_template_file(
 @pytest.mark.parametrize(
     "content",
     [
-        "name: e2b-base\nconfig: [\n",
-        "name: e2b-base\nconfig:\n  mounts: 123\n",
+        "name: base\nconfig: [\n",
+        "name: base\nconfig:\n  mounts: 123\n",
     ],
     ids=["malformed-record", "invalid-config"],
 )
@@ -131,7 +133,7 @@ async def test_invalid_saved_base_refuses_creation(
 ):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.delenv("MIRAGE_RESOURCE_STORE", raising=False)
-    path = tmp_path / "resources" / "template" / "e2b-base.yaml"
+    path = tmp_path / "resources" / "template" / "base.yaml"
     path.parent.mkdir(parents=True)
     path.write_text(content)
 
@@ -274,7 +276,7 @@ async def test_builtin_base_has_a_fresh_writable_ram_mount(tmp_path):
     resources = memory_resource_store()
     await resources.create_template(
         TemplateInput(
-            name="base", config={"mounts": {"/other": {"vfs": "ram"}}}
+            name="e2b-base", config={"mounts": {"/other": {"vfs": "ram"}}}
         )
     )
     async with server(

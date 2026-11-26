@@ -269,7 +269,7 @@ async def create_sandbox(
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox template not found")
     try:
         config, written = await template_config(
-            request, constants.BASE_WORKSPACE_TEMPLATE
+            request, constants.BASE_TEMPLATE
         )
     except HttpError as exc:
         if exc.code != ErrorCode.NOT_FOUND:

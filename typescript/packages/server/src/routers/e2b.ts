@@ -308,7 +308,7 @@ export function router(
     }
     let config: Record<string, JsonValue>
     try {
-      config = (await deps.resources.getTemplate(constants.BASE_WORKSPACE_TEMPLATE)).config
+      config = (await deps.resources.getTemplate(constants.BASE_TEMPLATE)).config
     } catch (error) {
       if (!(error instanceof ResourceError)) throw error
       if (error.code !== 'not_found') throw storeRefusal(error)
