@@ -46,6 +46,8 @@ from loop_turns import LOOP_TURNS_ENV
 from moto.server import ThreadedMotoServer
 from spans import SPANS_ENV
 
+from mirage.concurrency.limiter import settle
+
 ROOT = Path(__file__).resolve().parents[2]
 INTEG = ROOT / "integ"
 HOSTS = ("python", "typescript")
@@ -388,6 +390,17 @@ def snapshot_store() -> Iterator[SnapshotStore]:
         server.stop()
 
 
+async def _stopped(start: asyncio.Future[None], d: Deployment) -> None:
+    """Stop a deployment once its start has ended, however it ended.
+
+    Args:
+        start (asyncio.Future[None]): the start, on its thread.
+        d (Deployment): the deployment.
+    """
+    await asyncio.wait({start})
+    await asyncio.to_thread(_stop, d)
+
+
 @asynccontextmanager
 async def deployed(
     name: str, host: str, root: Path, issuer: Issuer, store: SnapshotStore
@@ -400,7 +413,8 @@ async def deployed(
     kept-alive connections older than the server's five second
     keep-alive, which it closes as their next request arrives. A thread
     cannot be stopped, so a caller cancelled as the server starts waits
-    for the start to end before it stops what that started.
+    for the start to end before it stops what that started, and one
+    cancelled again meanwhile still waits for the stop.
 
     Args:
         name (str): ``dev``, ``token`` or ``jwt``.
@@ -420,5 +434,9 @@ async def deployed(
         await asyncio.shield(start)
         yield d
     finally:
-        await asyncio.wait({start})
-        await asyncio.to_thread(_stop, d)
+        stop = asyncio.ensure_future(_stopped(start, d))
+        try:
+            await asyncio.shield(stop)
+        except asyncio.CancelledError:
+            await settle(stop)
+            raise
