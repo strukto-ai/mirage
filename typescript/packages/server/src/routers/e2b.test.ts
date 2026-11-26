@@ -167,7 +167,9 @@ interface ProcessFrame {
 function processFrames(body: Buffer): ProcessFrame[] {
   const frames: ProcessFrame[] = []
   for (let offset = 0; offset < body.length;) {
+    if (body.length - offset < 5) throw new Error('incomplete Connect frame header')
     const end = offset + 5 + body.readUInt32BE(offset + 1)
+    if (end > body.length) throw new Error('incomplete Connect frame payload')
     frames.push({
       flags: body.readUInt8(offset),
       payload: JSON.parse(body.subarray(offset + 5, end).toString()) as ProcessFrame['payload'],
@@ -756,6 +758,12 @@ describe('E2B commands', () => {
     }
     const malformed = await post(firstHeaders, Buffer.from('not a frame'))
     expect(malformed.statusCode).toBe(400)
+    const unary = await post(
+      { ...firstHeaders, 'content-type': 'application/json' },
+      Buffer.from('{}'),
+    )
+    expect(unary.statusCode).toBe(415)
+    expect(unary.json()).toMatchObject({ code: 'invalid_argument' })
     const badTimeout = await post({ ...firstHeaders, 'connect-timeout-ms': '1.5' })
     expect(badTimeout.statusCode).toBe(400)
     expect(
@@ -783,6 +791,7 @@ describe('E2B commands', () => {
       flags: 2,
       payload: { error: { code: 'deadline_exceeded', message: 'command deadline exceeded' } },
     })
+    await new Promise((resolve) => setTimeout(resolve, 350))
     const after = await runCommand(app, headers, processBody('test ! -e late'))
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
@@ -846,6 +855,7 @@ describe('E2B commands', () => {
     const frames = processFrames(response.body)
     expect(frames[0]?.payload.event?.start).toBeDefined()
     expect(frames.at(-1)?.payload.error?.code).toBe('deadline_exceeded')
+    await new Promise((resolve) => setTimeout(resolve, 850))
     const after = await runCommand(app, headers, processBody('test ! -e late'))
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
@@ -1117,10 +1127,17 @@ describe('E2B files', () => {
       const oversized = streamingPost(url, headers, agent)
       oversized.client.write(head('file'))
       const mib = Buffer.alloc(1024 * 1024)
-      for (let i = 0; i < 64; i++) {
-        if (!oversized.client.write(mib)) await once(oversized.client, 'drain')
+      const completed = new AbortController()
+      const largeReply = oversized.reply.finally(() => completed.abort())
+      for (let i = 0; i < 64 && !completed.signal.aborted; i++) {
+        if (oversized.client.write(mib)) continue
+        try {
+          await once(oversized.client, 'drain', { signal: completed.signal })
+        } catch (error) {
+          if (!completed.signal.aborted) throw error
+        }
       }
-      const large = await oversized.reply
+      const large = await largeReply
       expect(large.status).toBe(413)
       expect(large.connection).toBe('close')
 

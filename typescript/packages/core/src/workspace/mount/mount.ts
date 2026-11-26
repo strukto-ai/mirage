@@ -1413,20 +1413,25 @@ export class MountEntry {
     index: IndexCacheStore,
     source: AsyncIterable<Uint8Array>,
   ): AsyncIterable<Uint8Array> {
+    const iterator = source[Symbol.asyncIterator]()
     let observed = false
     try {
-      for await (const chunk of source) {
+      for (;;) {
         currentCaller().fileSignal?.throwIfAborted()
+        const next = await iterator.next()
+        currentCaller().fileSignal?.throwIfAborted()
+        if (next.done === true) break
+        const chunk = next.value
         if (chunk.byteLength > 0 && !observed) {
           await this.observe(index, [scope])
           observed = true
+          currentCaller().fileSignal?.throwIfAborted()
         }
         yield chunk
       }
-      currentCaller().fileSignal?.throwIfAborted()
       if (!observed) await this.observe(index, [scope])
     } finally {
-      await closeQuietly(source)
+      await closeQuietly(iterator)
     }
   }
 

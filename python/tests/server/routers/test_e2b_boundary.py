@@ -306,6 +306,19 @@ async def test_checks_lifecycle_bounds_and_data_options(tmp_path):
         )
         assert via_base.status_code == 501, via_base.text
         headers = data_headers(sandbox)
+        mislabelled = await client.post(
+            "/filesystem.Filesystem/MakeDir",
+            headers=headers,
+            json={"path": "mislabelled"},
+        )
+        assert mislabelled.status_code == 400
+        assert mislabelled.json()["code"] == "invalid_argument"
+        missing = await client.post(
+            "/filesystem.Filesystem/Stat",
+            headers={**headers, "content-type": "application/json"},
+            json={"path": "mislabelled"},
+        )
+        assert missing.status_code == 404
         wrong = {**headers, "x-access-token": "forged-token"}
         assert (await client.get("/health", headers=wrong)).status_code == 502
         assert (

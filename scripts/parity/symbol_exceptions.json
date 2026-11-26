@@ -1778,6 +1778,7 @@
   },
   "server/routers/e2b": {
    "python_only": {
+    "_require_unary_body": "FastAPI shares a raw media guard between lifecycle and file routes. Fastify checks their media in its body parser and route handlers.",
     "LifecycleRoute": "FastAPI wraps lifecycle routes to translate the native exception handler and validation response.",
     "create_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",
     "connect_sandbox": "FastAPI decorators register named route handlers; the RouteApp registers the handler inline.",

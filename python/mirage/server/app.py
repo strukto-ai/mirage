@@ -338,20 +338,23 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             exit_task.cancel()
         app.state.registry.draining = True
         try:
-            if listener is not None:
-                listener.close()
-                await listener.wait_closed()
-            if app.state.graceful_timeout > 0:
-                await app.state.registry.drain(app.state.graceful_timeout)
             try:
-                if app.state.e2b is not None:
-                    await app.state.e2b.close()
+                if listener is not None:
+                    listener.close()
+                    await listener.wait_closed()
+                if app.state.graceful_timeout > 0:
+                    await app.state.registry.drain(app.state.graceful_timeout)
             finally:
-                if companion is not None:
-                    await companion.shutdown()
-                    await asyncio.gather(
-                        *companion.server_state.tasks, return_exceptions=True
-                    )
+                try:
+                    if app.state.e2b is not None:
+                        await app.state.e2b.close()
+                finally:
+                    if companion is not None:
+                        await companion.shutdown()
+                        await asyncio.gather(
+                            *companion.server_state.tasks,
+                            return_exceptions=True,
+                        )
             await app.state.mcp.close()
             await app.state.jobs.close()
         finally:

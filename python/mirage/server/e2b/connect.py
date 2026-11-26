@@ -17,7 +17,9 @@ class InvalidConnectRequest(ValueError):
 
 
 class UnsupportedProcessOption(ValueError):
-    pass
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
 
 
 def decode_start(body: bytes) -> StartCommand:

@@ -9,6 +9,7 @@ from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
 from mirage.server.auth import AuthConfig, AuthMode, JWTConfig
 from mirage.server.e2b.files import SandboxFiles
+from mirage.server.e2b.leases import Sandbox
 from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,
@@ -462,24 +463,28 @@ async def test_revocation_replies_while_the_request_body_is_incomplete(
 
 
 @pytest.mark.asyncio
-async def test_process_checks_lease_again_after_the_upload(tmp_path):
+async def test_process_checks_lease_again_after_the_upload(
+    tmp_path, monkeypatch
+):
     async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
         headers = await sandbox_headers(client)
         path = f"/sandboxes/{headers['e2b-sandbox-id']}"
-        command = start_body("printf ignored")
+        read_body = Sandbox.read_body
 
-        async def upload():
-            yield command[:4]
+        async def retire_after_read(self, read, *args, **kwargs):
+            body = await read_body(self, read, *args, **kwargs)
             assert (await client.delete(path, headers=KEY)).status_code == 204
-            yield command[4:]
+            return body
 
+        monkeypatch.setattr(Sandbox, "read_body", retire_after_read)
         response = await client.post(
-            PROCESS, content=upload(), headers=headers
+            PROCESS, content=start_body("printf ignored"), headers=headers
         )
         assert response.status_code == 401
+        assert response.json()["code"] == "unauthenticated"
 
 
 @pytest.mark.asyncio

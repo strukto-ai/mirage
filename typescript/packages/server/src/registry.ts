@@ -860,13 +860,16 @@ async function settle(entry: WorkspaceEntry, seconds: number): Promise<void> {
 async function stop(entry: WorkspaceEntry, drop = false): Promise<void> {
   const beforeStop = entry.beforeStop
   entry.beforeStop = null
-  if (beforeStop !== null) await beforeStop()
-  if (entry.programs !== null) {
-    try {
-      await entry.runner.call(entry.programs.close())
-    } catch (error) {
-      console.error(`closing ${entry.id}'s policy programs: ${String(error)}`)
+  try {
+    if (beforeStop !== null) await beforeStop()
+  } finally {
+    if (entry.programs !== null) {
+      try {
+        await entry.runner.call(entry.programs.close())
+      } catch (error) {
+        console.error(`closing ${entry.id}'s policy programs: ${String(error)}`)
+      }
     }
+    await entry.runner.stop(drop ? { delete: true } : {})
   }
-  await entry.runner.stop(drop ? { delete: true } : {})
 }

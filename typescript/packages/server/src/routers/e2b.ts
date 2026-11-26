@@ -382,6 +382,10 @@ export function router(
       }
     }
     const entry = await createEphemeralWorkspace(deps, req, reply, config)
+    if (deps.registry.draining) {
+      await deps.registry.remove(entry.id)
+      throw new HttpError('shutting_down', 'server is shutting down')
+    }
     void reply.status(201)
     return present(sandboxes.add(entry, envVars, timeout))
   })

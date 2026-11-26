@@ -1098,15 +1098,19 @@ async def _stop(
 
     before_stop = entry.before_stop
     entry.before_stop = None
-    if before_stop is not None:
-        await before_stop()
     try:
-        await entry.runner.call(close_stdins())
-    except RuntimeError as exc:
-        logger.debug("%s already stopped: %s", entry.id, exc)
-    if entry.programs is not None:
+        if before_stop is not None:
+            await before_stop()
+    finally:
         try:
-            await entry.runner.call(entry.programs.close())
-        except Exception:
-            logger.exception("closing %s's policy programs", entry.id)
-    await entry.runner.stop(delete=delete)
+            try:
+                await entry.runner.call(close_stdins())
+            except RuntimeError as exc:
+                logger.debug("%s already stopped: %s", entry.id, exc)
+            if entry.programs is not None:
+                try:
+                    await entry.runner.call(entry.programs.close())
+                except Exception:
+                    logger.exception("closing %s's policy programs", entry.id)
+        finally:
+            await entry.runner.stop(delete=delete)

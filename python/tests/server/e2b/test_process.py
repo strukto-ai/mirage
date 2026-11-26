@@ -111,6 +111,13 @@ async def test_live_process_controls(tmp_path):
             assert info["pid"] == pid
             assert info["config"]["args"] == ["-l", "-c", "cat"]
             selector = {"process": {"pid": pid}}
+            expired = await control(
+                "CloseStdin",
+                selector,
+                addressed={**headers, "connect-timeout-ms": "0"},
+            )
+            assert expired.status_code == 504
+            assert expired.json()["code"] == "deadline_exceeded"
             missing = await control(
                 "SendSignal",
                 {**selector, "signal": "SIGNAL_SIGKILL"},

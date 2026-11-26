@@ -293,7 +293,7 @@ async def start_process(request: Request) -> Response:
         logger.debug("invalid Connect start request", exc_info=True)
         return _error(400, "invalid_argument", "invalid Connect start request")
     except UnsupportedProcessOption as exc:
-        return _error(501, "unimplemented", str(exc))
+        return _error(501, "unimplemented", exc.message)
     except HttpError as exc:
         if exc.code == ErrorCode.UNAUTHORIZED:
             return _error(exc.status, "unauthenticated", exc.message)
@@ -340,11 +340,15 @@ def _process_info(pid: int, command: StartCommand) -> dict[str, JsonValue]:
 
 
 async def _control(
-    lease: Sandbox, method: str, request: dict[str, JsonValue]
+    lease: Sandbox,
+    method: str,
+    request: dict[str, JsonValue],
+    deadline: float | None,
 ) -> Response:
-    if not lease.entry.accepting_jobs or (
-        lease.expires_at <= asyncio.get_running_loop().time()
-    ):
+    now = asyncio.get_running_loop().time()
+    if deadline is not None and deadline <= now:
+        return _error(504, "deadline_exceeded", DEADLINE_MESSAGE)
+    if not lease.entry.accepting_jobs or lease.expires_at <= now:
         raise SandboxNotRunning()
     if method == "List":
         return JSONResponse(
@@ -403,16 +407,38 @@ async def control_process(request: Request) -> Response:
         media = request.headers.get("content-type", "").partition(";")[0]
         if media.strip().lower() != "application/json":
             return _error(415, "invalid_argument", "expected Connect JSON")
-        body = json.loads(
-            (
-                await lease.read_body(_read_body, request, MAX_CONTROL_BODY)
-            ).decode()
-        )
-        if not isinstance(body, dict):
-            raise InvalidConnectRequest("expected a command request")
-        lease = require_sandbox(request)
-        method = request.url.path.rsplit("/", 1)[-1]
-        return await lease.entry.runner.call(_control(lease, method, body))
+        deadline = _request_deadline(request)
+        timeout = asyncio.timeout_at(deadline)
+        try:
+            async with timeout:
+                if (
+                    deadline is not None
+                    and deadline <= asyncio.get_running_loop().time()
+                ):
+                    raise TimeoutError
+                body = json.loads(
+                    (
+                        await lease.read_body(
+                            _read_body, request, MAX_CONTROL_BODY
+                        )
+                    ).decode()
+                )
+                if not isinstance(body, dict):
+                    raise InvalidConnectRequest("expected a command request")
+                lease = require_sandbox(request)
+                method = request.url.path.rsplit("/", 1)[-1]
+                return await lease.entry.runner.call(
+                    _control(lease, method, body, deadline)
+                )
+        except TimeoutError:
+            if not timeout.expired() and (
+                deadline is None
+                or deadline > asyncio.get_running_loop().time()
+            ):
+                raise
+            response = _error(504, "deadline_exceeded", DEADLINE_MESSAGE)
+            response.headers["Connection"] = "close"
+            return response
     except HttpError as exc:
         code = {
             ErrorCode.UNAUTHORIZED: "unauthenticated",

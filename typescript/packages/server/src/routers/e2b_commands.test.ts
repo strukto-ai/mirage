@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
+import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app.ts'
@@ -30,6 +31,7 @@ test('controls live commands within a sandbox', async () => {
     stateRoot,
     e2bPort: 8766,
     authConfig: { mode: AuthMode.Token, bearerToken: 'server-key' },
+    resourceStore: memoryResourceStore(),
   })
   try {
     const origin = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
@@ -51,7 +53,11 @@ test('controls live commands within a sandbox', async () => {
     const headers = await sandbox()
     const other = await sandbox()
 
-    function control(method: string, payload: unknown, addressed = headers) {
+    function control(
+      method: string,
+      payload: unknown,
+      addressed: Record<string, string> = headers,
+    ) {
       return e2bListener(app).inject({
         method: 'POST',
         url: PREFIX + method,
@@ -74,6 +80,7 @@ test('controls live commands within a sandbox', async () => {
       expect(response.status).toBe(200)
       if (response.body === null) throw new Error('missing command stream')
       const frames: unknown[] = []
+      const flags: number[] = []
       let buffered = Buffer.alloc(0)
       for await (const chunk of response.body) {
         buffered = Buffer.concat([buffered, chunk])
@@ -81,6 +88,7 @@ test('controls live commands within a sandbox', async () => {
           const end = 5 + buffered.readUInt32BE(1)
           if (end > buffered.length) break
           const frame: unknown = JSON.parse(buffered.subarray(5, end).toString())
+          flags.push(buffered.readUInt8(0))
           buffered = buffered.subarray(end)
           frames.push(frame)
           const start = StartEvent.safeParse(frame)
@@ -88,6 +96,8 @@ test('controls live commands within a sandbox', async () => {
         }
       }
       expect(buffered.length).toBe(0)
+      expect(flags.at(-1)).toBe(2)
+      expect(flags.slice(0, -1).every((flag) => flag === 0)).toBe(true)
       return frames
     }
 
@@ -97,6 +107,13 @@ test('controls live commands within a sandbox', async () => {
         processes: [{ pid, config: { args: ['-l', '-c', 'cat'] } }],
       })
       const process = { pid }
+      const expired = await control(
+        'CloseStdin',
+        { process },
+        { ...headers, 'connect-timeout-ms': '0' },
+      )
+      expect(expired.statusCode).toBe(504)
+      expect(expired.json()).toMatchObject({ code: 'deadline_exceeded' })
       const missing = await control('SendSignal', { process, signal: 'SIGNAL_SIGKILL' }, other)
       expect(missing.statusCode).toBe(404)
       const wrongSignal = await control('SendSignal', { process, signal: 15 })

@@ -18,6 +18,8 @@ import os
 import signal
 import socket
 import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncssh
 import pytest
@@ -296,6 +298,27 @@ def test_e2b_port_rejects_invalid_values(monkeypatch, port):
     monkeypatch.setenv(ENV_E2B_PORT, port)
     with pytest.raises(DaemonConfigError, match=ENV_E2B_PORT):
         build_app()
+
+
+@pytest.mark.asyncio
+async def test_e2b_listener_closes_even_if_draining_fails(monkeypatch):
+    app = build_app(e2b_port=8766, auth_config=TOKEN, graceful_timeout=1)
+    shutdown = AsyncMock()
+    companion = SimpleNamespace(
+        shutdown=shutdown, server_state=SimpleNamespace(tasks=set())
+    )
+    monkeypatch.setattr(
+        app_module, "_start_e2b", AsyncMock(return_value=companion)
+    )
+    monkeypatch.setattr(
+        app.state.registry,
+        "drain",
+        AsyncMock(side_effect=RuntimeError("drain failed")),
+    )
+    with pytest.raises(RuntimeError, match="drain failed"):
+        async with app.router.lifespan_context(app):
+            pass
+    shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio

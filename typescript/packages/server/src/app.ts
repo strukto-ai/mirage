@@ -519,9 +519,15 @@ export function buildApp(options: BuildAppOptions = {}) {
   })
   app.addHook('preClose', async () => {
     registry.draining = true
-    if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
-    await companion?.sandboxes.close()
-    await companion?.app.close()
+    try {
+      if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
+    } finally {
+      try {
+        await companion?.sandboxes.close()
+      } finally {
+        await companion?.app.close()
+      }
+    }
   })
   app.addHook('onClose', async () => {
     if (ssh.listener !== null) await ssh.listener.close()

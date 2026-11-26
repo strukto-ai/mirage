@@ -33,6 +33,7 @@ class FileError(ValueError):
     def __init__(self, code: FileCode, message: str) -> None:
         super().__init__(message)
         self.code = code
+        self.message = message
 
 
 ERRORS: dict[FsCondition, tuple[FileCode, str]] = {

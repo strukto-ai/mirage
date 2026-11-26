@@ -95,6 +95,17 @@ HTTP_CONNECT_CODE = {
 }
 
 
+def _require_unary_body(request: Request) -> None:
+    media = request.headers.get("content-type", "").partition(";")[0]
+    media = media.strip().lower()
+    if media == CONNECT_STREAM or media.encode().startswith(RAW_BODIES):
+        raise HttpError(
+            ErrorCode.INVALID_REQUEST,
+            "expected JSON on a unary E2B route",
+            headers={"Connection": "close"},
+        )
+
+
 class LifecycleRoute(APIRoute):
     def get_route_handler(
         self,
@@ -116,20 +127,7 @@ class LifecycleRoute(APIRoute):
                 return message
 
             try:
-                media = (
-                    request.headers.get("content-type", "")
-                    .partition(";")[0]
-                    .strip()
-                    .lower()
-                )
-                if media == CONNECT_STREAM or media.encode().startswith(
-                    RAW_BODIES
-                ):
-                    raise HttpError(
-                        ErrorCode.INVALID_REQUEST,
-                        "expected JSON on a unary E2B route",
-                        headers={"Connection": "close"},
-                    )
+                _require_unary_body(request)
                 return await handle(Request(request.scope, receive))
             except HttpError as exc:
                 return JSONResponse(
@@ -406,7 +404,10 @@ def failure(exc: Exception, *, connect: bool = False) -> JSONResponse:
     if not connect and failure.code == "resource_exhausted":
         status = 507
     return JSONResponse(
-        {"code": failure.code if connect else status, "message": str(failure)},
+        {
+            "code": failure.code if connect else status,
+            "message": failure.message,
+        },
         status_code=status,
     )
 
@@ -552,6 +553,7 @@ def _rpc_endpoint(
     async def endpoint(request: Request) -> Response:
         try:
             lease = require_sandbox(request)
+            _require_unary_body(request)
             body = await lease.read_body(json_body, request)
             lease = require_sandbox(request)
             async with lease.file_access():
