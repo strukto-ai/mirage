@@ -546,7 +546,7 @@ describe('an op log past its cap', () => {
     ]
     const log = new OpLog(4)
     for (const rec of records) log.add([rec])
-    expect(log.records.length).toBeLessThan(Math.floor(records.length / 2))
+    expect(log.records.length).toBeLessThanOrEqual(8 + 4)
     const pins = captureFingerprints(log.records, registry)
     expect(pins).toEqual(captureFingerprints(records, registry))
     expect(pins.map((entry) => entry.path)).toEqual(['/s3/a', '/s3/d', '/s3/e'])

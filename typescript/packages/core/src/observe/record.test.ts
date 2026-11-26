@@ -232,21 +232,25 @@ describe('OpLog', () => {
         durationMs: 0,
         fingerprint,
       })
-    // It trims once it took more than half of what its last trim kept.
     const log = new OpLog(4)
+    const holds = (held: OpRecord[]): void => {
+      expect(log.records).toHaveLength(held.length)
+      log.records.forEach((r, i) => {
+        expect(r).toBe(held[i])
+      })
+    }
     const [stamp, gone, kept] = [rec('read', 's3', 'etag'), rec('unlink'), rec('read')]
     log.add([rec('read'), stamp, rec('stat', 'ram'), gone, kept])
     expect(log.records).toHaveLength(5)
-    const newest = [rec('read'), rec('readdir'), rec('stat')]
-    log.add(newest.slice(0, 2))
-    expect(log.records).toHaveLength(7)
-    log.add(newest.slice(2))
-    const held = [stamp, gone, ...newest]
-    expect(log.records).toHaveLength(held.length)
-    log.records.forEach((r, i) => {
-      expect(r).toBe(held[i])
-    })
-    expect([log.networkBytes, log.cacheBytes]).toEqual([70, 10])
+    const newest = [rec('read'), rec('readdir')]
+    log.add(newest)
+    holds([stamp, gone, kept, ...newest])
+    expect([log.networkBytes, log.cacheBytes]).toEqual([60, 10])
+    // A later trim reads on from the oldest it kept, past the pins.
+    const more = [rec('stat'), rec('stat'), rec('stat')]
+    log.add(more)
+    holds([stamp, gone, ...more])
+    expect([log.networkBytes, log.cacheBytes]).toEqual([90, 10])
   })
 
   // A later stamp of a path overrules the earlier ones of the same mount, a
@@ -296,5 +300,24 @@ describe('OpLog', () => {
     log.add([resweep, ...others])
     holds([replaced, again, removed, resweep, ...others])
     expect([log.networkBytes, log.cacheBytes]).toEqual([120, 0])
+  })
+
+  // The cap on the rest holds at every add, however many pins the op log
+  // keeps: a pass over the pins waits for half as many more, and the rest is
+  // trimmed without it.
+  it('holds its cap of the rest beside many pins', () => {
+    const rec = (op: string, path: string, fingerprint: string | null = null): OpRecord =>
+      new OpRecord({ op, path, source: 's3', bytes: 1, timestamp: 0, durationMs: 0, fingerprint })
+    const log = new OpLog(4)
+    const pins = Array.from({ length: 200 }, (_, i) => rec('read', `/s3/${String(i)}`, 'v'))
+    log.add(pins)
+    for (let i = 0; i < 20; i++) {
+      log.add([rec('stat', `/s3/${String(i)}`)])
+      expect(log.records.filter((r) => r.fingerprint === null).length).toBeLessThanOrEqual(4)
+    }
+    log.records.slice(0, 200).forEach((r, i) => {
+      expect(r).toBe(pins[i])
+    })
+    expect(log.networkBytes).toBe(220)
   })
 })

@@ -203,19 +203,23 @@ def test_the_op_log_drops_the_oldest_records_that_change_no_pin():
             fingerprint=fingerprint,
         )
 
-    # It trims once it took more than half of what its last trim kept.
     log = OpLog(max_records=4)
     stamp, gone, kept = rec("read", "s3", "etag"), rec("unlink"), rec("read")
     log.add([rec("read"), stamp, rec("stat", "ram"), gone, kept])
     assert len(log.records) == 5
-    newest = [rec("read"), rec("readdir"), rec("stat")]
-    log.add(newest[:2])
-    assert len(log.records) == 7
-    log.add(newest[2:])
+    newest = [rec("read"), rec("readdir")]
+    log.add(newest)
     assert [id(r) for r in log.records] == [
-        id(r) for r in (stamp, gone, *newest)
+        id(r) for r in (stamp, gone, kept, *newest)
     ]
-    assert (log.network_bytes, log.cache_bytes) == (70, 10)
+    assert (log.network_bytes, log.cache_bytes) == (60, 10)
+    # A later trim reads on from the oldest it kept, past the pins.
+    more = [rec("stat"), rec("stat"), rec("stat")]
+    log.add(more)
+    assert [id(r) for r in log.records] == [
+        id(r) for r in (stamp, gone, *more)
+    ]
+    assert (log.network_bytes, log.cache_bytes) == (90, 10)
 
 
 # A later stamp of a path overrules the earlier ones of the same mount, a
@@ -265,3 +269,28 @@ def test_the_op_log_drops_a_record_a_later_one_overrules():
         id(r) for r in (replaced, again, removed, resweep, *others)
     ]
     assert (log.network_bytes, log.cache_bytes) == (120, 0)
+
+
+# The cap on the rest holds at every add, however many pins the op log
+# keeps: a pass over the pins waits for half as many more, and the rest
+# is trimmed without it.
+def test_the_op_log_holds_its_cap_of_the_rest_beside_many_pins():
+    def rec(op: str, path: str, fingerprint: str | None = None) -> OpRecord:
+        return OpRecord(
+            op=op,
+            path=path,
+            source="s3",
+            bytes=1,
+            timestamp=0,
+            duration_ms=0,
+            fingerprint=fingerprint,
+        )
+
+    log = OpLog(max_records=4)
+    pins = [rec("read", f"/s3/{i}", "v") for i in range(200)]
+    log.add(pins)
+    for i in range(20):
+        log.add([rec("stat", f"/s3/{i}")])
+        assert sum(r.fingerprint is None for r in log.records) <= 4
+    assert [id(r) for r in log.records[:200]] == [id(r) for r in pins]
+    assert log.network_bytes == 220

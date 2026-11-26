@@ -235,68 +235,101 @@ function settles(rec: OpRecord): string[] {
  * A workspace's op log: every record that has the last word on a pin a
  * snapshot takes, and the newest of the rest, which only account for an op.
  *
- * It trims itself each time it took a quarter of `maxRecords` more, or half
- * of what its last trim kept where that is more, so the work of a trim stays
- * in step with what arrived. A trim lets go of every record a later one
- * overrules (`settles`), so reading a file again adds no record for good, and
- * of the oldest of the rest once more than `maxRecords` of them are held,
- * down to three quarters of it. The bytes a dropped record moved stay in the
- * totals. A snapshot takes the same pins from what is left, in an order that
- * can differ. Mirrors Python's `OpLog`.
+ * It holds at most `maxRecords` of the rest: past it the oldest go first,
+ * down to three quarters of it. A record a later one overrules (`settles`)
+ * goes once a quarter of `maxRecords` more that change a pin arrived, or half
+ * as many as the last such pass kept where that is more, so reading a file
+ * again adds no record for good and a pass over the pins costs in step with
+ * what arrived. The bytes a dropped record moved stay in the totals. A
+ * snapshot takes the same pins from what is left, in an order that can
+ * differ. Mirrors Python's `OpLog`.
  */
 export class OpLog {
   readonly records: OpRecord[] = []
   readonly maxRecords: number
-  private taken = 0
-  private kept = 0
+  private unpinned = 0
+  private oldest = 0
+  private settling = 0
+  private settled = 0
   private droppedNetworkBytes = 0
   private droppedCacheBytes = 0
 
-  /** @param maxRecords the most records it keeps that change no pin. */
+  /** @param maxRecords the most records it holds that change no pin. */
   constructor(maxRecords: number = OP_LOG_RECORDS) {
     this.maxRecords = maxRecords
   }
 
   /** Take the records of an op or a line that ended, oldest first. */
   add(records: Iterable<OpRecord>): void {
-    const taken = [...records]
-    this.records.push(...taken)
-    this.taken += taken.length
-    if (this.taken <= Math.max(Math.floor(this.maxRecords / 4), Math.floor(this.kept / 2))) return
+    for (const rec of [...records]) {
+      this.records.push(rec)
+      if (changesPin(rec)) this.settling += 1
+      else this.unpinned += 1
+    }
+    if (this.settling > Math.max(Math.floor(this.maxRecords / 4), Math.floor(this.settled / 2))) {
+      this.fold()
+    }
+    if (this.unpinned > this.maxRecords) this.trim()
+  }
+
+  /** Let go of every record a later one overrules. */
+  private fold(): void {
     const settled = this.records.map(settles)
     const last = new Map<string, OpRecord>()
-    let unpinned = 0
     this.records.forEach((rec, at) => {
-      const pins = settled[at] ?? []
-      if (pins.length === 0) unpinned += 1
-      for (const pin of pins) {
+      for (const pin of settled[at] ?? []) {
         const held = last.get(pin)
         if (held === undefined || held.timestamp <= rec.timestamp) last.set(pin, rec)
       }
     })
-    let excess = unpinned > this.maxRecords ? unpinned - Math.floor((this.maxRecords * 3) / 4) : 0
     let kept = 0
-    this.records.forEach((rec, at) => {
+    let oldest: number | null = null
+    for (const [at, rec] of this.records.entries()) {
       const judged = settled[at]?.[0]
-      let dropped = false
-      if (judged !== undefined) {
-        dropped = last.get(judged) !== rec
-      } else if (excess > 0) {
-        dropped = true
-        excess -= 1
+      if (judged !== undefined && last.get(judged) !== rec) {
+        this.dropped(rec)
+        continue
       }
-      if (!dropped) {
+      if (judged === undefined) oldest ??= kept
+      this.records[kept] = rec
+      kept += 1
+    }
+    this.records.length = kept
+    this.oldest = oldest ?? kept
+    this.settling = 0
+    this.settled = kept - this.unpinned
+  }
+
+  /**
+   * Let go of the oldest records that change no pin, down to three quarters
+   * of `maxRecords`. It reads on from the oldest of them, so the pins held
+   * before it are not read again.
+   */
+  private trim(): void {
+    let excess = this.unpinned - Math.floor((this.maxRecords * 3) / 4)
+    this.unpinned -= excess
+    let kept = this.oldest
+    let at = this.oldest
+    while (excess > 0) {
+      const rec = this.records[at]
+      at += 1
+      if (rec === undefined) break
+      if (changesPin(rec)) {
         this.records[kept] = rec
         kept += 1
-      } else if (rec.isCache) {
-        this.droppedCacheBytes += rec.bytes
       } else {
-        this.droppedNetworkBytes += rec.bytes
+        excess -= 1
+        this.dropped(rec)
       }
-    })
-    this.records.length = kept
-    this.taken = 0
-    this.kept = kept
+    }
+    this.records.copyWithin(kept, at)
+    this.records.length -= at - kept
+    this.oldest = kept
+  }
+
+  private dropped(rec: OpRecord): void {
+    if (rec.isCache) this.droppedCacheBytes += rec.bytes
+    else this.droppedNetworkBytes += rec.bytes
   }
 
   /** Bytes every record it took moved over the network. */
