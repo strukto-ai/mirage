@@ -17,6 +17,25 @@ export MIRAGE_AUTH_MODE=token
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
 ```
 
+The server accepts only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
+`localhost` and `::1` by default. A list you set replaces them, so keep them
+for clients on this machine, such as the `mirage` CLI, and add the name in
+your clients' URL. Set it before the server starts, restarting a running one,
+or as the `allowed_hosts` [key](/home/configuration/server#set-a-value) for
+`mirage daemon`:
+
+```bash
+export MIRAGE_ALLOWED_HOSTS=127.0.0.1,localhost,::1,mirage.example.com
+```
+
+Any other `Host` gets 403 `host_not_allowed`. The servers below, like
+`mirage daemon`, listen on `127.0.0.1` only, so other machines reach them
+through a reverse proxy or tunnel on this one. The server also
+refuses a browser page served from any other origin, a page on another port of
+`localhost` included, even when the list is `*`. Other options
+are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
+server pages.
+
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     In an activated Python environment, install the server:
@@ -65,24 +84,6 @@ export MIRAGE_AUTH_TOKEN='replace-with-your-token'
     ```
   </Tab>
 </Tabs>
-
-The server accepts only the host names in `MIRAGE_ALLOWED_HOSTS`: `127.0.0.1`,
-`localhost` and `::1` by default. A list you set replaces them, so keep them
-for clients on this machine, such as the `mirage` CLI, and add the name in
-your clients' URL. Set it before the server starts, or as the `allowed_hosts`
-[key](/home/configuration/server#set-a-value) for `mirage daemon`:
-
-```bash
-export MIRAGE_ALLOWED_HOSTS=127.0.0.1,localhost,::1,mirage.example.com
-```
-
-Any other `Host` gets 403 `host_not_allowed`. The servers above, like
-`mirage daemon`, listen on `127.0.0.1` only, so other machines reach them
-through a reverse proxy or tunnel on this one. The server also
-refuses a browser page served from any other origin, a page on another port of
-`localhost` included, even when the list is `*`. Other options
-are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
-server pages.
 
 ## Verify the connection
 
