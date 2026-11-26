@@ -93,6 +93,46 @@ describe.skipIf(skip)('RedisFileCacheStore', () => {
     expect(await cache.get('/data/sub/nested2')).toBeNull()
   })
 
+  it('finishes an admitted subtree removal before closing its Redis client', async () => {
+    const writer = new RedisFileCacheStore({
+      ...(REDIS_URL === undefined ? {} : { url: REDIS_URL }),
+      keyPrefix: prefix,
+    })
+    let rootDeleted = (): void => undefined
+    let resume = (): void => undefined
+    const deleted = new Promise<void>((resolve) => {
+      rootDeleted = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    try {
+      const value = new Uint8Array([1])
+      await cache.set('/tree', value)
+      await cache.set('/tree/child', value)
+      const client = await writer.cacheClient()
+      const batch = client.multi()
+      const exec = batch.exec.bind(batch)
+      vi.spyOn(batch, 'exec').mockImplementationOnce(async () => {
+        const result = await exec()
+        rootDeleted()
+        await release
+        return result
+      })
+      vi.spyOn(client, 'multi').mockReturnValueOnce(batch)
+      const deleting = writer.remove('/tree', { subtree: true })
+      await Promise.race([deleted, deleting])
+      const closing = writer.close()
+      resume()
+      await Promise.all([deleting, closing])
+      expect(await cache.get('/tree')).toBeNull()
+      expect(await cache.get('/tree/child')).toBeNull()
+    } finally {
+      resume()
+      await writer.close()
+    }
+  })
+
   it.each(['set', 'keepFingerprints'] as const)(
     '%s discards a fill invalidated while it awaited the client',
     async (method) => {

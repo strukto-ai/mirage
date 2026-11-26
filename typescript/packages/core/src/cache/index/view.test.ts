@@ -50,6 +50,18 @@ async function vacated(ws: Workspace, prefix: string): Promise<void> {
   }
 }
 
+async function closeLifecycleWorkspace(
+  ws: Workspace,
+  index: IndexCacheStore,
+  observer: IndexCacheStore,
+): Promise<void> {
+  try {
+    await observer.clear()
+  } finally {
+    await Promise.all([ws.close(), observer === index ? undefined : observer.close()])
+  }
+}
+
 const cases = ['backend', 'store'].flatMap((phase) =>
   ['setDir', 'setPartialDir'].flatMap((method) =>
     [false, true].map((shadow) => ({ phase, method, shadow })),
@@ -76,6 +88,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const backend: BaseVFS = vfs
         const ws = new Workspace({ '/data': vfs }, { index: config, mode: MountMode.WRITE })
         const index = ws.mount('/data').indexStore
+        const observer = type === IndexType.REDIS ? new RedisIndexCacheStore(config) : index
         let enter = (): void => undefined
         let resume = (): void => undefined
         const entered = new Promise<void>((resolve) => {
@@ -126,15 +139,14 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           resume()
           expect(await reading).toBe(op === 'rename' ? 'EACCES' : 'EINVAL')
           await removing
-          for (const candidate of [index, fresh]) {
+          for (const candidate of [observer, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
           }
           expect((await fresh.get('/data/fresh')).entry?.fingerprint).toBe('new')
         } finally {
           resume()
           await Promise.allSettled([reading, removing])
-          await index.clear()
-          await ws.close()
+          await closeLifecycleWorkspace(ws, index, observer)
         }
       },
     )
@@ -156,6 +168,8 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         const prefix = shadow ? '/' : '/data'
         const ws = new Workspace({ [prefix]: vfs }, { index: config })
         const index = ws.mount(prefix).indexStore
+        const observer =
+          !shadow && type === IndexType.REDIS ? new RedisIndexCacheStore(config) : index
         const entry = new FileStat({ name: 'stale', type: FileType.FILE, fingerprint: 'old' })
         let enter = (): void => undefined
         let resume = (): void => undefined
@@ -217,7 +231,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
           resume()
           await reading
           await changing
-          for (const candidate of [index, fresh]) {
+          for (const candidate of [observer, fresh]) {
             expect((await candidate.get('/data/stale')).status).toBe(LookupStatus.NOT_FOUND)
             expect((await candidate.listDir('/data')).entries ?? []).not.toContain('/data/stale')
             const listing = await candidate.listDir('/data')
@@ -231,8 +245,7 @@ for (const type of [IndexType.RAM, IndexType.REDIS]) {
         } finally {
           resume()
           await Promise.allSettled([reading, changing])
-          await index.clear()
-          await ws.close()
+          await closeLifecycleWorkspace(ws, index, observer)
         }
       },
     )
