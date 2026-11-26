@@ -5,9 +5,10 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { withCaller } from '@struktoai/mirage-core/workspace/files'
 import { FileError, SandboxFiles, fileError } from '../e2b/files.ts'
 import type { Sandboxes, SandboxLease } from '../e2b/leases.ts'
-import { bodyChunks, closeUnreadBody } from '../e2b/body.ts'
+import { bodyChunks, closeUnreadBody, readJsonBody, unaryContentType } from '../e2b/body.ts'
 import {
   CONNECT_STREAM,
   isProcessRequest,
@@ -272,12 +273,14 @@ async function multipartFile(request: RouteRequest, signal: AbortSignal): Promis
 
 function withFiles<T>(
   lease: SandboxLease,
-  operation: (files: SandboxFiles) => Promise<T>,
+  closed: AbortSignal,
+  operation: (files: SandboxFiles, signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  return lease.runFile(async () => {
+  return lease.runFile(closed, async (signal) => {
     const session = await sessionOf(lease.entry.runner.ws, undefined)
+    signal.throwIfAborted()
     lease.checkFiles()
-    return operation(new SandboxFiles(session.vfs))
+    return operation(new SandboxFiles(withCaller(session.vfs, { fileSignal: signal })), signal)
   })
 }
 
@@ -286,9 +289,10 @@ function downloadOf(
   path: string,
   closed: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
-  const signal = AbortSignal.any([lease.revoked, closed])
+  const canceled = new AbortController()
+  const connection = AbortSignal.any([closed, canceled.signal])
   return new Promise((resolve, reject) => {
-    const running = withFiles(lease, async (files) => {
+    const running = withFiles(lease, connection, async (files, signal) => {
       const source = await files.read(path)
       const cursor = source[Symbol.asyncIterator]()
       let finish = (): void => undefined
@@ -328,7 +332,8 @@ function downloadOf(
                 pulling = undefined
               }
             },
-            cancel() {
+            cancel(reason) {
+              canceled.abort(reason)
               finish()
             },
           }),
@@ -371,6 +376,7 @@ export function router(
     let config: Record<string, JsonValue> = {
       mode: 'read',
       mounts: { '/home/user': { vfs: 'ram', mode: 'write' } },
+      env: { HOME: '/home/user' },
     }
     if (deps.template !== undefined) {
       try {
@@ -441,7 +447,9 @@ export function router(
       }
       const path = queryPath(request)
       const data = await multipartFile(request, AbortSignal.any([lease.revoked, request.closed]))
-      return await withFiles(lease, async (files) => [await files.write(path, data)])
+      return await withFiles(lease, request.closed, async (files) => [
+        await files.write(path, data),
+      ])
     } catch (error) {
       closeUnreadBody(request, reply)
       return failure(reply, error)
@@ -449,48 +457,49 @@ export function router(
   })
 
   for (const method of METHODS) {
-    app.post(
-      RPC_PREFIX + method,
-      {
-        bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE,
-        invalidJson: { code: 'invalid_argument', message: 'body must be JSON' },
-      },
-      async (request, reply) => {
-        try {
-          const lease = sandboxes.requireAccess(request.headers)
-          if (method === 'Move') {
-            const parsed = Move.safeParse(request.body)
-            if (!parsed.success) {
-              throw new FileError('invalid_argument', 'expected source and destination paths')
-            }
-            const { source, destination } = parsed.data
-            return await withFiles(lease, async (files) => ({
-              entry: await files.move(source, destination),
-            }))
+    app.post(RPC_PREFIX + method, { rawBody: true }, async (request, reply) => {
+      try {
+        const lease = sandboxes.requireAccess(request.headers)
+        unaryContentType(request, CONNECT_STREAM)
+        const body = await readJsonBody(
+          request,
+          AbortSignal.any([lease.revoked, request.closed]),
+          DEFAULT_MAX_REQUEST_BODY_SIZE,
+        )
+        lease.checkFiles()
+        if (method === 'Move') {
+          const parsed = Move.safeParse(body)
+          if (!parsed.success) {
+            throw new FileError('invalid_argument', 'expected source and destination paths')
           }
-          if (method === 'ListDir') {
-            const parsed = List.safeParse(request.body)
-            if (!parsed.success) {
-              throw new FileError('invalid_argument', 'expected a file path and list depth')
-            }
-            return await withFiles(lease, async (files) => ({
-              entries: await files.listDir(parsed.data.path, parsed.data.depth),
-            }))
-          }
-          const parsed = Path.safeParse(request.body)
-          if (!parsed.success) throw new FileError('invalid_argument', 'expected a file path')
-          return await withFiles(lease, async (files) => {
-            const { path } = parsed.data
-            if (method === 'Stat') return { entry: await files.stat(path) }
-            if (method === 'MakeDir') await files.mkdir(path)
-            else await files.remove(path)
-            return {}
-          })
-        } catch (error) {
-          return failure(reply, error, true)
+          const { source, destination } = parsed.data
+          return await withFiles(lease, request.closed, async (files) => ({
+            entry: await files.move(source, destination),
+          }))
         }
-      },
-    )
+        if (method === 'ListDir') {
+          const parsed = List.safeParse(body)
+          if (!parsed.success) {
+            throw new FileError('invalid_argument', 'expected a file path and list depth')
+          }
+          return await withFiles(lease, request.closed, async (files) => ({
+            entries: await files.listDir(parsed.data.path, parsed.data.depth),
+          }))
+        }
+        const parsed = Path.safeParse(body)
+        if (!parsed.success) throw new FileError('invalid_argument', 'expected a file path')
+        return await withFiles(lease, request.closed, async (files) => {
+          const { path } = parsed.data
+          if (method === 'Stat') return { entry: await files.stat(path) }
+          if (method === 'MakeDir') await files.mkdir(path)
+          else await files.remove(path)
+          return {}
+        })
+      } catch (error) {
+        closeUnreadBody(request, reply)
+        return failure(reply, error, true)
+      }
+    })
   }
 
   for (const [method, url] of UNSUPPORTED_LIFECYCLE_ROUTES) {

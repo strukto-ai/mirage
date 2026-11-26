@@ -162,7 +162,7 @@ class SandboxFiles:
             target = reader_of(self.files).follow(spec.dotted or spec.virtual)
             if self.files.is_mount(target) or self.files.submounts(target):
                 raise FileError("failed_precondition", "cannot remove a mount")
-            await self.files.rm_r(spec)
+            await self.files.rmdir(spec)
         except Exception as exc:
             if classify(exc) != FsCondition.ENOENT:
                 raise

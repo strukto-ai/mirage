@@ -13,29 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.dest import lookup_error, touch_parent
-from mirage.errors.fs import ebusy, enotdir
+from mirage.core.ram.dest import touch_parent
 from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
-async def rm_r(
-    accessor: RAMAccessor,
-    path_spec: PathSpec,
-    *,
-    directory_only: bool = False,
-    expected_modified: str | None = None,
-) -> None:
+async def rm_r(accessor: RAMAccessor, path_spec: PathSpec) -> None:
     path = path_spec.mount_path
     store = accessor.store
     p = norm(path)
-    if directory_only:
-        if p not in store.dirs:
-            if p in store.files:
-                raise enotdir(path_spec)
-            raise lookup_error(store, path_spec, p)
-        if store.modified.get(p, store.made) != expected_modified:
-            raise ebusy(path_spec)
     prefix = p.rstrip("/") + "/"
     if p in store.files or p in store.dirs:
         touch_parent(store, p)

@@ -108,6 +108,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCacheMixin {
   }
 
   cacheClient(): Promise<RedisClientType> {
+    if (this.isClosed) return Promise.reject(new Error('Redis file cache is closed'))
     return this.store.client()
   }
 

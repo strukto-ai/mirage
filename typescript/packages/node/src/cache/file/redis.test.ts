@@ -36,6 +36,12 @@ describe('RedisFileCacheStore configuration', () => {
       'maxDrainBytes cannot exceed cacheLimit',
     )
   })
+
+  it('refuses a lookup after the file cache is closed', async () => {
+    const cache = new RedisFileCacheStore({ url: 'redis://127.0.0.1:1/0' })
+    await cache.close()
+    await expect(cache.get('/file')).rejects.toThrow('Redis file cache is closed')
+  })
 })
 
 describe.skipIf(skip)('RedisFileCacheStore', () => {

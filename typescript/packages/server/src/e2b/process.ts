@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import { PipeClosed } from '@struktoai/mirage-core/io/errors'
 import { BytePipe, CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { atDeadline, hasAborted, runWithDeadline } from '@struktoai/mirage-core/utils/abort'
@@ -9,7 +8,7 @@ import { HttpError } from '../errors.ts'
 import { MAX_REQUEST_PART } from '../multipart.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { streamOf, type RouteApp, type RouteReply, type RouteRequest } from '../routes.ts'
-import { bodyChunks, closeUnreadBody } from './body.ts'
+import { closeUnreadBody, readBody, readJsonBody, unaryContentType } from './body.ts'
 import {
   decodeStart,
   encodeMessage,
@@ -61,16 +60,7 @@ function timeLeft(deadline: number | null): number | null {
 }
 
 async function readStart(request: RouteRequest, signal: AbortSignal): Promise<StartCommand> {
-  const chunks: Uint8Array[] = []
-  let length = 0
-  for await (const chunk of bodyChunks(request, signal)) {
-    length += chunk.byteLength
-    if (length > MAX_REQUEST_PART) {
-      throw new HttpError('too_large', 'command request too large')
-    }
-    chunks.push(chunk)
-  }
-  return decodeStart(Buffer.concat(chunks, length))
+  return decodeStart(await readBody(request, signal, MAX_REQUEST_PART, 'command request too large'))
 }
 
 function events(
@@ -294,14 +284,24 @@ export function registerProcess(
     }
   })
   for (const method of CONTROL_METHODS) {
-    app.post(PROCESS_PREFIX + method, { bodyLimit: MAX_CONTROL_BODY }, async (req, reply) => {
-      const lease = sandboxes.requireAccess(req.headers)
-      const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
-      if (contentType !== 'application/json') {
+    app.post(PROCESS_PREFIX + method, { rawBody: true }, async (req, reply) => {
+      try {
+        const lease = sandboxes.requireAccess(req.headers)
+        if (unaryContentType(req, CONNECT_STREAM) !== 'application/json') {
+          closeUnreadBody(req, reply)
+          return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
+        }
+        const body = await readJsonBody(
+          req,
+          AbortSignal.any([lease.revoked, req.closed]),
+          MAX_CONTROL_BODY,
+        )
+        lease.checkFiles()
+        return await control(lease, method, body, reply)
+      } catch (error) {
         closeUnreadBody(req, reply)
-        return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
+        throw error
       }
-      return control(lease, method, req.body, reply)
     })
   }
 }

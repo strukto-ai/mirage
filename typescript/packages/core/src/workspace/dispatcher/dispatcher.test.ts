@@ -63,9 +63,35 @@ import {
 import { SessionState } from '../session/session.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { SessionProfile } from '../../policy/profile.ts'
+import { withCaller } from '../files.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+it('leaves a symlink when a Files call is canceled during policy admission', async () => {
+  const abort = new AbortController()
+  const ws = new Workspace(
+    { '/ram': [new RAMVFS(), MountMode.WRITE] },
+    {
+      policies: [
+        {
+          preVfs(ctx) {
+            if (ctx.call.name === 'unlink') abort.abort()
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.symlink('/ram/link', '/ram/target')
+    const files = withCaller(ws.vfs, { fileSignal: abort.signal })
+    await expect(files.unlink('/ram/link')).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(ws.vfs.readlink('/ram/link')).resolves.toBe('/ram/target')
+  } finally {
+    await ws.close()
+  }
+})
 
 describe('dispatch applies limits on the executing mount', () => {
   it('a mount read entry cuts nothing, through a link either', async () => {
@@ -3820,100 +3846,6 @@ it.each(['/data/file', '/unmounted'])(
     }
   },
 )
-
-describe('guarded directory removal', () => {
-  it('refuses a subtree covering a mount the session cannot see', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
-    try {
-      await ws.shell('mkdir -p /ram/tree/nested; echo kept > /ram/tree/nested/file')
-      const nested = ws.addMount('/ram/tree/nested', new RAMVFS(), MountMode.WRITE)
-      nested.visible = () => false
-      expect(ws.vfs.submounts('/ram/tree')).toEqual([])
-      await expect(ws.vfs.rmR('/ram/tree')).rejects.toMatchObject({ code: 'EBUSY' })
-      expect(DEC.decode(await ws.vfs.read('/ram/tree/nested/file'))).toBe('kept\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('does not fall through a hidden ancestor mount to the less specific store', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
-    try {
-      await ws.shell('mkdir -p /ram/hidden/tree; echo kept > /ram/hidden/tree/file')
-      const hidden = ws.addMount('/ram/hidden', new RAMVFS(), MountMode.WRITE)
-      hidden.visible = () => false
-      await expect(ws.vfs.rmR('/ram/hidden/tree')).rejects.toMatchObject({ code: 'EBUSY' })
-      expect(DEC.decode(await ws.vfs.read('/ram/hidden/tree/file'))).toBe('kept\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses a subtree with a read-only descendant', async () => {
-    const ws = new Workspace({ '/ram': new RAMVFS() }, { mode: MountMode.WRITE })
-    try {
-      await ws.shell('mkdir -p /ram/tree; touch /ram/tree/file')
-      ws.createSession('restricted', {
-        profile: SessionProfile({ paths: { show: { '/ram/tree/file': 'r' } } }),
-      })
-      await expect(ws.vfs.rmR('/ram/tree', 'restricted')).rejects.toMatchObject({ code: 'EROFS' })
-      expect(await ws.vfs.exists('/ram/tree/file')).toBe(true)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses a replacement file at the backend boundary', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({}, { mode: MountMode.WRITE })
-    const mount = ws.addMount('/ram', ram, MountMode.WRITE)
-    const callKeyed = mount.callKeyed.bind(mount)
-    const call = vi.spyOn(mount, 'callKeyed').mockImplementation((name, ...args) => {
-      if (name === 'rm_r') {
-        ram.store.dirs.delete('/tree')
-        ram.store.files.set('/tree', ENC.encode('replacement'))
-      }
-      return callKeyed(name, ...args)
-    })
-    try {
-      await ws.vfs.mkdir('/ram/tree')
-      await expect(ws.vfs.rmR('/ram/tree')).rejects.toMatchObject({ code: 'ENOTDIR' })
-      expect(DEC.decode(await ws.vfs.read('/ram/tree'))).toBe('replacement')
-    } finally {
-      call.mockRestore()
-      await ws.close()
-    }
-  })
-
-  it('preserves new links, including at paths that reuse an overlay', async () => {
-    const ws = new Workspace({}, { mode: MountMode.WRITE })
-    const mount = ws.addMount('/ram', new RAMVFS(), MountMode.WRITE)
-    const callKeyed = mount.callKeyed.bind(mount)
-    const call = vi.spyOn(mount, 'callKeyed').mockImplementation(async (name, ...args) => {
-      const result = await callKeyed(name, ...args)
-      if (name === 'rm_r') {
-        await ws.vfs.mkdir('/ram/tree')
-        await ws.vfs.symlink('/ram/tree/keep', '/ram/keep')
-        await ws.vfs.symlink('/ram/tree/converted', '/ram/keep')
-      }
-      return result
-    })
-    try {
-      await ws.vfs.mkdir('/ram/tree')
-      await ws.vfs.write('/ram/keep', 'kept')
-      await ws.vfs.write('/ram/tree/converted', 'original')
-      await ws.vfs.setxattr('/ram/tree/converted', 'user.before', ENC.encode('value'))
-      await ws.vfs.rmR('/ram/tree')
-      expect(DEC.decode(await ws.vfs.read('/ram/tree/keep'))).toBe('kept')
-      expect(DEC.decode(await ws.vfs.read('/ram/tree/converted'))).toBe('kept')
-    } finally {
-      call.mockRestore()
-      await ws.close()
-    }
-  })
-})
 
 class CountedRemoval extends RAMVFS {
   removals = 0

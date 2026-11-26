@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Literal, cast, overload
 
@@ -26,11 +25,7 @@ from mirage.context import (
     session_visibility,
 )
 from mirage.context.session_context import calls_as, effective_path_mode
-from mirage.errors.types import (
-    NoMountError,
-    OperationNotSupportedError,
-    WalkDeclinedError,
-)
+from mirage.errors.types import NoMountError
 from mirage.io import IOResult, OpReport
 from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
@@ -47,8 +42,6 @@ from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.path import owner_prefix
 from mirage.view.types import FollowOperands, SessionBind
 from mirage.workspace.dispatcher.reader import NamespaceReader
-
-logger = logging.getLogger(__name__)
 
 
 def _payload_bytes(result: Any, kwargs: dict[str, Any]) -> int:
@@ -814,25 +807,6 @@ class Files:
         self, path: str | PathSpec, *, session_id: str | None = None
     ) -> None:
         await self._call("rmdir", path, session_id)
-
-    async def rm_r(
-        self, path: str | PathSpec, *, session_id: str | None = None
-    ) -> None:
-        """Remove a directory tree on a mount that can do so safely.
-
-        A backend without safe recursive removal can remove an empty directory.
-
-        Args:
-            path (str | PathSpec): Virtual directory path.
-            session_id (str | None): Session to run as outside a line.
-        """
-        try:
-            await self._call("rm_r", path, session_id, guarded=True)
-        except WalkDeclinedError:
-            raise
-        except OperationNotSupportedError as exc:
-            logger.debug("recursive removal unsupported: %s", exc)
-            await self._call("rmdir", path, session_id, guarded=True)
 
     async def rename(
         self,

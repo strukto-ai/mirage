@@ -17,8 +17,6 @@ import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { FileStat, Limit, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
 
-export const BEFORE_DIRECTORY_REMOVE = Symbol('before directory remove')
-
 /**
  * The keywords an op carries through the dispatcher: the mount's index, the
  * filetype a read resolves by (null asks for the stored bytes), and the
@@ -27,7 +25,6 @@ export const BEFORE_DIRECTORY_REMOVE = Symbol('before directory remove')
 export interface OpKwargs {
   index?: IndexCacheStore
   filetype?: string | null
-  [BEFORE_DIRECTORY_REMOVE]?: () => void
   [k: string]: unknown
 }
 

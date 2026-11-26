@@ -774,6 +774,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   }
 
   private client(): Promise<RedisClientLike> {
+    if (this.closed) return Promise.reject(new Error('Redis index cache is closed'))
     if (this.providedClient !== null) return Promise.resolve(this.providedClient)
     this.clientPromise ??= (async () => {
       const spec = 'redis'

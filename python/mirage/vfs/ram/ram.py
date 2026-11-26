@@ -118,19 +118,8 @@ class RAMVFS(BaseVFS):
     async def rmdir(self, path: PathSpec) -> None:
         await _rmdir(self.accessor, path)
 
-    async def rm_r(
-        self,
-        path: PathSpec,
-        *,
-        directory_only: bool = False,
-        expected_modified: str | None = None,
-    ) -> None:
-        await _rm_r(
-            self.accessor,
-            path,
-            directory_only=directory_only,
-            expected_modified=expected_modified,
-        )
+    async def rm_r(self, path: PathSpec) -> Any:
+        return await _rm_r(self.accessor, path)
 
     async def rename(self, src: PathSpec, dst: PathSpec) -> None:
         await _rename(self.accessor, src, dst)

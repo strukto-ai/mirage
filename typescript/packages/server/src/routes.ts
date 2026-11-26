@@ -53,7 +53,7 @@ export interface RouteRequest<S extends RouteShape = RouteShape> {
   readonly host: string
   /** Who the request runs as; null when the auth mode names no account. */
   account: string | null
-  /** The body as it arrives, for a route that reads it unparsed (multipart). */
+  /** The body as it arrives, for a route that reads it unparsed. */
   readonly raw: AsyncIterable<Uint8Array>
   /** Aborted when the client goes away before its answer has finished. */
   readonly closed: AbortSignal
@@ -90,6 +90,8 @@ export interface BodySchema {
  * the answer to a JSON body that does not parse, in place of the host's own.
  */
 export interface RouteConfig {
+  /** Leave the body unread, so the handler can apply its own lifetime and size limit. */
+  rawBody?: boolean
   bodyLimit?: number
   schema?: { body?: BodySchema }
   invalidJson?: unknown
@@ -193,8 +195,8 @@ export function streamOf(
  */
 export function fastifyRoutes(app: FastifyInstance): RouteApp {
   const register = (options: RouteOptions): void => {
-    const { invalidJson, ...rest } = options
-    app.route({
+    const { invalidJson, rawBody, ...rest } = options
+    const route = {
       ...rest,
       method: options.method as string | string[],
       handler: options.handler as unknown as RouteHandlerMethod,
@@ -209,6 +211,18 @@ export function fastifyRoutes(app: FastifyInstance): RouteApp {
               void reply.code(400).send(invalidJson)
             },
           }),
+    }
+    if (rawBody !== true) {
+      app.route(route)
+      return
+    }
+    void app.register((scope, _opts, done) => {
+      scope.removeAllContentTypeParsers()
+      scope.addContentTypeParser('*', (_req, _payload, parse) => {
+        parse(null)
+      })
+      scope.route(route)
+      done()
     })
   }
   const method =

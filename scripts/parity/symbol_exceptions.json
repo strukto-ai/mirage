@@ -655,8 +655,7 @@
   "workspace/dispatcher/dispatcher": {
    "typescript_only": {
     "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable.",
-    "globScope": "The TypeScript dispatcher builds the scope a backend is called with; in Python MountEntry._scope does, the glob's pattern included.",
-    "DirectoryRemovalGuard": "The dispatcher batches the TypeScript pre-mutation check and namespace cleanup callbacks in a typed value."
+    "globScope": "The TypeScript dispatcher builds the scope a backend is called with; in Python MountEntry._scope does, the glob's pattern included."
    }
   },
   "cli/ssh": {
@@ -1854,11 +1853,6 @@
     "isProcessRequest": "Fastify uses the registered command path in its authentication and parser hooks.",
     "readStart": "The Fastify start route joins and caps raw stream chunks before decoding the frame.",
     "timeLeft": "Node converts an absolute timer deadline to remaining seconds for its abort timer."
-   }
-  },
-  "view/types": {
-   "typescript_only": {
-    "BEFORE_DIRECTORY_REMOVE": "TypeScript passes the final guard through mount keyword validation using a symbol. Python runs its guard from the dispatcher and RAM operation."
    }
   }
  }

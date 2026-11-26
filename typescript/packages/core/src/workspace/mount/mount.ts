@@ -112,7 +112,7 @@ import { DevVFS } from '../../vfs/dev/dev.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
-import { BEFORE_DIRECTORY_REMOVE, type OpKwargs, type SessionAccess } from '../../view/types.ts'
+import type { OpKwargs, SessionAccess } from '../../view/types.ts'
 import {
   answered,
   cliVoice,
@@ -594,6 +594,7 @@ export class MountEntry {
 
   private checkActive(): void {
     if (this.retiring) throw ebusy(this.prefix)
+    currentCaller().fileSignal?.throwIfAborted()
   }
 
   /**
@@ -990,12 +991,7 @@ export class MountEntry {
       case 'unlink':
         return [(scope, _args, kw) => vfs.unlink(scope, handedOf(kw))]
       case 'rmdir':
-        return [
-          (scope, _args, kw) => {
-            kw[BEFORE_DIRECTORY_REMOVE]?.()
-            return vfs.rmdir(scope, handedOf(kw))
-          },
-        ]
+        return [(scope, _args, kw) => vfs.rmdir(scope, handedOf(kw))]
       case 'rename':
         return [(scope, args, kw) => vfs.rename(scope, dstArg(args[0]), handedOf(kw))]
       case 'copy':
@@ -1003,12 +999,7 @@ export class MountEntry {
       case 'dir_copy':
         return [(scope, args, kw) => vfs.dirCopy(scope, dstArg(args[0]), handedOf(kw))]
       case 'rm_r':
-        return [
-          (scope, _args, kw) => {
-            kw[BEFORE_DIRECTORY_REMOVE]?.()
-            return vfs.rmR(scope, handedOf(kw))
-          },
-        ]
+        return [(scope, _args, kw) => vfs.rmR(scope, handedOf(kw))]
       case 'first_lines':
         return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, handedOf(kw))]
       case 'last_lines':
@@ -1219,7 +1210,9 @@ export class MountEntry {
     path: PathSpec,
     signal?: AbortSignal,
   ): Promise<ByteSource> {
-    return vfs.read(path, await this.handedFor('read', path, null, index), 0, null, signal)
+    const handed = await this.handedFor('read', path, null, index)
+    currentCaller().fileSignal?.throwIfAborted()
+    return vfs.read(path, handed, 0, null, signal)
   }
 
   /** The VFS's write of a whole file, handed what is at its path and the directory it goes in. */
@@ -1243,6 +1236,7 @@ export class MountEntry {
     handed?: Handed,
   ): Promise<unknown> {
     if (!this.vfs.refusesTaken) await refuseTaken((p) => this.statAt(index, p), path, parents)
+    currentCaller().fileSignal?.throwIfAborted()
     if (parents && this.wants('mkdir').includes('parent')) return this.mkdirLevels(path, index)
     const made = await this.vfs.mkdir(path, parents, handed)
     // A directory made new holds nothing yet.
@@ -1422,12 +1416,14 @@ export class MountEntry {
     let observed = false
     try {
       for await (const chunk of source) {
+        currentCaller().fileSignal?.throwIfAborted()
         if (chunk.byteLength > 0 && !observed) {
           await this.observe(index, [scope])
           observed = true
         }
         yield chunk
       }
+      currentCaller().fileSignal?.throwIfAborted()
       if (!observed) await this.observe(index, [scope])
     } finally {
       await closeQuietly(source)
@@ -1447,7 +1443,9 @@ export class MountEntry {
     }
     const generation = this.cacheManager?.generation
     try {
+      currentCaller().fileSignal?.throwIfAborted()
       const row = await this.vfs.stat(scope, handed)
+      currentCaller().fileSignal?.throwIfAborted()
       if (this.wants('stat').length === 0) await this.observe(index, [scope])
       this.noteLive(scope, index, row, generation)
       return row
@@ -1477,7 +1475,9 @@ export class MountEntry {
     const seeded = await storedListing(index, key, glob)
     if (seeded !== null) return seeded
     const refill = await index.refillToken()
+    currentCaller().fileSignal?.throwIfAborted()
     const listed = await this.vfs.readdir(path, handed)
+    currentCaller().fileSignal?.throwIfAborted()
     return keepListing(index, key, listed, refill, fetched)
   }
 
@@ -1579,6 +1579,7 @@ export class MountEntry {
     // is handed a stat there only where it declares one.
     const dst = args[0] instanceof PathSpec ? args[0] : null
     const handed = found ?? (await this.handedFor(name, scope, dst, index))
+    currentCaller().fileSignal?.throwIfAborted()
     try {
       return await call(scope, args, { ...kwargs, handed })
     } catch (err) {
@@ -1592,6 +1593,7 @@ export class MountEntry {
     }
     await this.forget(scope, dst, index)
     const again = await this.handedFor(name, scope, dst, index)
+    currentCaller().fileSignal?.throwIfAborted()
     return call(scope, args, { ...kwargs, handed: again })
   }
 
@@ -1805,7 +1807,7 @@ export class MountEntry {
    */
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
     const vfs = this.viewFor(access)
-    if (this.retiring) throw ebusy(this.prefix)
+    this.checkActive()
     const caller = this.onMount(currentCaller())
     const signal = callerSignal()
     const stream =

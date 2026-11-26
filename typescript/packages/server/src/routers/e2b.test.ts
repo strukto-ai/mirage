@@ -1,13 +1,14 @@
 import { Buffer } from 'node:buffer'
 import { generateKeyPairSync } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { Agent, request } from 'node:http'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
+import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { DiskRecordClient, DiskWorkspaceStateStore } from '@struktoai/mirage-node'
 import { SignJWT } from 'jose'
@@ -346,8 +347,13 @@ describe('E2B lifecycle', () => {
         ],
       })
       const headers = dataHeaders(first)
-      const written = await runCommand(app, headers, processBody('printf kept > state.txt'))
+      const written = await runCommand(
+        app,
+        headers,
+        processBody('pwd; cd / && cd && pwd && printf kept > ~/state.txt'),
+      )
       expect(written.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+      expect(processOutput(written, 'stdout')).toBe('/home/user\n/home/user\n')
       const url = '/files?path=state.txt'
       const stored = await e2bListener(app).inject({ url, headers })
       expect(stored.statusCode).toBe(200)
@@ -842,60 +848,63 @@ describe('E2B commands', () => {
 })
 
 describe('E2B files', () => {
-  it('aborts a download and closes its reader before shutdown stops the workspace', async () => {
-    const { app } = await setup()
-    const sandbox = await create(app)
-    const entry = app.registry.get(sandbox.sandboxID)
-    const stop = vi.spyOn(entry.runner, 'stop')
-    const signal = AbortSignal.timeout(3_000)
-    let reachedPull = (): void => undefined
-    const pulling = new Promise<void>((resolve) => {
-      reachedPull = resolve
-    })
-    let release = (): void => undefined
-    const pending = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    let sourceClosed = false
-    async function* source(): AsyncGenerator<Uint8Array> {
-      try {
-        yield Buffer.from('first')
-        reachedPull()
-        await pending
-        yield Buffer.from('second')
-      } finally {
-        sourceClosed = true
-      }
-    }
-    vi.spyOn(SandboxFiles.prototype, 'read').mockResolvedValue(source())
-    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
-    try {
-      const response = await fetch(`${address}/files?path=fixture`, {
-        headers: dataHeaders(sandbox),
-        signal,
+  it.each([true, false])(
+    'shuts down with a stalled download (cooperative: %s)',
+    async (cooperative) => {
+      const { app } = await setup()
+      const sandbox = await create(app)
+      const entry = app.registry.get(sandbox.sandboxID)
+      const stop = vi.spyOn(entry.runner, 'stop')
+      const signal = AbortSignal.timeout(3_000)
+      let entered = (): void => undefined
+      const pulling = new Promise<void>((resolve) => {
+        entered = resolve
       })
-      const reader = response.body?.getReader()
-      if (reader === undefined) throw new Error('download has no body')
-      expect((await reader.read()).value).toEqual(new TextEncoder().encode('first'))
-      await pulling
-      const result = reader.read().catch((error: unknown) => error)
-      const shutdown = app.close()
+      let release = (): void => undefined
+      const pending = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let close = (): void => undefined
+      let sourceClosed = false
+      const closed = new Promise<void>((resolve) => {
+        close = resolve
+      })
+      const vfs = entry.runner.ws.mount('/home/user').vfs
+      vi.spyOn(vfs, 'read').mockImplementation(
+        async function* (_path, _handed, _offset, _size, backendSignal) {
+          try {
+            yield Buffer.from('first')
+            entered()
+            await abortable(pending, cooperative ? backendSignal : undefined)
+            yield Buffer.from('second')
+          } finally {
+            sourceClosed = true
+            close()
+          }
+        },
+      )
+      const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
       try {
-        await vi.waitFor(() => {
-          expect(entry.acceptingJobs).toBe(false)
+        const response = await fetch(`${address}/files?path=fixture`, {
+          headers: dataHeaders(sandbox),
+          signal,
         })
-        expect(stop).not.toHaveBeenCalled()
+        const reader = response.body?.getReader()
+        if (reader === undefined) throw new Error('download has no body')
+        expect((await reader.read()).value).toEqual(new TextEncoder().encode('first'))
+        await pulling
+        const result = reader.read().catch((error: unknown) => error)
+        await abortable(app.close(), signal)
+        expect(await result).toBeInstanceOf(Error)
+        expect(stop).toHaveBeenCalledOnce()
+        expect(sourceClosed).toBe(cooperative)
+        release()
+        await closed
       } finally {
         release()
       }
-      await shutdown
-      expect(await result).toBeInstanceOf(Error)
-      expect(sourceClosed).toBe(true)
-      expect(stop).toHaveBeenCalledOnce()
-    } finally {
-      release()
-    }
-  })
+    },
+  )
 
   it('settles a running mutation before stopping the workspace', async () => {
     const { app } = await setup()
@@ -937,7 +946,7 @@ describe('E2B files', () => {
     } finally {
       release()
     }
-    expect((await first).statusCode).toBe(200)
+    expect((await first).statusCode).toBe(401)
     expect((await killing).statusCode).toBe(204)
     expect(stop).toHaveBeenCalledOnce()
   })
@@ -998,103 +1007,12 @@ describe('E2B files', () => {
     })
     expect(rejected.statusCode).toBe(401)
     expect(rejected.json()).toMatchObject({ code: 401 })
-    const second = await create(app)
-    const isolated = dataHeaders(second)
-    expect(
-      (
-        await runCommand(
-          app,
-          isolated,
-          processBody('mkdir -p nested/dir; touch nested/dir/fixture.bin'),
-        )
-      ).at(-2)?.payload.event?.end?.exitCode,
-    ).toBe(0)
-    expect((await rpc('Remove', { path: 'nested' })).json()).toEqual({})
+    expect((await rpc('Remove', { path: 'nested' })).json()).toMatchObject({
+      code: 'failed_precondition',
+    })
+    expect((await e2bListener(app).inject({ url, headers })).statusCode).toBe(200)
+    expect((await rpc('Remove', { path })).statusCode).toBe(200)
     expect((await rpc('Stat', { path })).json()).toMatchObject({ code: 'not_found' })
-    expect((await e2bListener(app).inject({ url, headers: isolated })).statusCode).toBe(200)
-    expect((await rpc('Remove', { path })).json()).toEqual({})
-  })
-
-  it('removes child links without entering their targets and refuses mount crossings', async () => {
-    const resourceStore = memoryResourceStore()
-    await resourceStore.createTemplate({
-      name: 'protected',
-      description: null,
-      config: {
-        mounts: {
-          ...RAM.mounts,
-          '/home/user/parent/mounted': { vfs: 'ram', mode: 'write' },
-        },
-      },
-    })
-    const { app } = await setup({ e2bTemplate: 'protected', resourceStore }, false)
-    const headers = dataHeaders(await create(app))
-    const prepared = await runCommand(
-      app,
-      headers,
-      processBody(
-        'mkdir tree; printf outside > keep; ln -s /home/user/keep tree/link; ' +
-          'ln -s /home/user/tree alias; printf covered > parent/mounted/keep',
-      ),
-    )
-    expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
-    delete headers['content-type']
-    const remove = (path: string) =>
-      e2bListener(app).inject({
-        method: 'POST',
-        url: '/filesystem.Filesystem/Remove',
-        headers,
-        payload: { path },
-      })
-    for (const path of ['alias/', 'parent', 'parent/mounted']) {
-      const refused = await remove(path)
-      expect(refused.statusCode, refused.body).toBe(400)
-      expect(refused.json()).toMatchObject({ code: 'failed_precondition' })
-    }
-    expect((await remove('tree')).statusCode).toBe(200)
-    expect(
-      (await e2bListener(app).inject({ url: '/files?path=tree/link', headers })).statusCode,
-    ).toBe(404)
-    for (const [path, expected] of [
-      ['keep', 'outside'],
-      ['parent/mounted/keep', 'covered'],
-    ] as const) {
-      expect((await e2bListener(app).inject({ url: '/files?path=' + path, headers })).body).toBe(
-        expected,
-      )
-    }
-  })
-
-  it('keeps empty-directory removal on a disk mount', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'mirage-e2b-disk-'))
-    stateRoots.push(root)
-    await mkdir(join(root, 'empty'))
-    await mkdir(join(root, 'nonempty'))
-    await writeFile(join(root, 'nonempty', 'kept'), 'disk content')
-    const resourceStore = memoryResourceStore()
-    await resourceStore.createTemplate({
-      name: 'disk',
-      description: null,
-      config: {
-        mounts: { '/home/user': { vfs: 'disk', mode: 'write', config: { root } } },
-      },
-    })
-    const { app } = await setup({ e2bTemplate: 'disk', resourceStore }, false)
-    const headers = dataHeaders(await create(app))
-    delete headers['content-type']
-    const remove = (path: string) =>
-      e2bListener(app).inject({
-        method: 'POST',
-        url: '/filesystem.Filesystem/Remove',
-        headers,
-        payload: { path },
-      })
-    expect((await remove('empty')).json()).toEqual({})
-    await expect(stat(join(root, 'empty'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await remove('nonempty')).json()).toMatchObject({ code: 'failed_precondition' })
-    expect(
-      (await e2bListener(app).inject({ url: '/files?path=nonempty/kept', headers })).body,
-    ).toBe('disk content')
   })
 
   it('lists to the requested depth without following symlinks', async () => {

@@ -9,8 +9,6 @@ from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
 from mirage.server.auth import AuthConfig, AuthMode, JWTConfig
 from mirage.server.e2b.files import SandboxFiles
-from mirage.workspace.dispatcher.dispatcher import Dispatcher
-from mirage.workspace.files import Files
 from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,
@@ -257,9 +255,12 @@ async def test_builtin_base_has_a_fresh_writable_ram_mount(
         written = await client.post(
             PROCESS,
             headers=headers,
-            content=start_body("printf kept > state.txt"),
+            content=start_body(
+                "pwd; cd / && cd && pwd && printf kept > ~/state.txt"
+            ),
         )
         assert written.status_code == 200, written.text
+        assert output_of(written, "stdout") == b"/home/user\n/home/user\n"
         assert (
             envelopes(written.content)[-2][1]["event"]["end"]["exitCode"] == 0
         )
@@ -696,27 +697,19 @@ async def test_files_follow_the_same_live_lease_and_virtual_paths(tmp_path):
         )
         assert response.status_code == 401
         assert response.json()["code"] == 401
-        other = await sandbox_headers(client)
-        del other["content-type"]
-        response = await client.post(
-            "/files",
-            headers=other,
-            params={"path": path},
-            files={
-                "file": ("fixture.bin", payload, "application/octet-stream")
-            },
-        )
-        assert response.status_code == 200, response.text
         response = await client.post(
             rpc + "Remove", headers=headers, json={"path": "nested"}
         )
-        assert response.status_code == 200, response.text
-        assert response.json() == {}
+        assert response.json()["code"] == "failed_precondition"
         assert (
-            await client.get("/files", headers=other, params={"path": path})
-        ).content == payload
+            await client.get("/files", headers=headers, params={"path": path})
+        ).status_code == 200
         response = await client.post(
-            rpc + "Stat", headers=headers, json={"path": "nested"}
+            rpc + "Remove", headers=headers, json={"path": path}
+        )
+        assert response.status_code == 200, response.text
+        response = await client.post(
+            rpc + "Stat", headers=headers, json={"path": path}
         )
         assert response.json()["code"] == "not_found"
 
@@ -858,230 +851,3 @@ async def test_files_protect_the_mount_a_directory_resolves_to(tmp_path):
             rpc + "Stat", headers=headers, json={"path": "keep.txt"}
         )
         assert kept.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_recursive_remove_preserves_symlink_targets(tmp_path):
-    async with server(tmp_path, auth_config=TOKEN) as (_, client):
-        headers = await sandbox_headers(client)
-        prepared = await client.post(
-            PROCESS,
-            content=start_body(
-                "mkdir -p tree/nested outside; touch outside/keep; "
-                "ln -s /home/user/outside tree/alias; "
-                "ln -s /home/user outside-parent"
-            ),
-            headers=headers,
-        )
-        assert (
-            envelopes(prepared.content)[-2][1]["event"]["end"]["exitCode"] == 0
-        )
-        del headers["content-type"]
-        rpc = "/filesystem.Filesystem/"
-        for path in ("tree/alias/", "outside-parent/outside"):
-            refused = await client.post(
-                rpc + "Remove", headers=headers, json={"path": path}
-            )
-            assert refused.status_code == 400, refused.text
-            assert refused.json()["code"] == "failed_precondition"
-        removed = await client.post(
-            rpc + "Remove", headers=headers, json={"path": "tree"}
-        )
-        assert removed.status_code == 200, removed.text
-        kept = await client.post(
-            rpc + "Stat", headers=headers, json={"path": "outside/keep"}
-        )
-        assert kept.status_code == 200, kept.text
-
-
-@pytest.mark.asyncio
-async def test_recursive_remove_refuses_nested_mounts_and_other_backends(
-    tmp_path,
-):
-    disk = tmp_path / "mounted"
-    disk.mkdir()
-    (disk / "tree").mkdir()
-    (disk / "empty").mkdir()
-    (disk / "tree" / "keep").write_text("kept")
-    resources = memory_resource_store()
-    await resources.create_template(
-        TemplateInput(
-            name=TEMPLATE,
-            config={
-                "mounts": {
-                    "/home/user": {"vfs": "ram", "mode": "write"},
-                    "/home/user/outer/nested": {
-                        "vfs": "disk",
-                        "mode": "write",
-                        "config": {"root": str(disk)},
-                    },
-                }
-            },
-        )
-    )
-    async with server(
-        tmp_path,
-        auth_config=TOKEN,
-        e2b_template=TEMPLATE,
-        resource_store=resources,
-    ) as (_, client):
-        headers = await sandbox_headers(client)
-        prepared = await client.post(
-            PROCESS,
-            content=start_body("mkdir -p outer; touch outer/keep"),
-            headers=headers,
-        )
-        assert (
-            envelopes(prepared.content)[-2][1]["event"]["end"]["exitCode"] == 0
-        )
-        del headers["content-type"]
-        rpc = "/filesystem.Filesystem/"
-        for path, code in (
-            ("outer", "failed_precondition"),
-            ("outer/nested", "failed_precondition"),
-            ("outer/nested/tree", "failed_precondition"),
-        ):
-            refused = await client.post(
-                rpc + "Remove", headers=headers, json={"path": path}
-            )
-            assert refused.json()["code"] == code, refused.text
-        kept = await client.post(
-            rpc + "Stat", headers=headers, json={"path": "outer/keep"}
-        )
-        assert kept.status_code == 200, kept.text
-        assert (disk / "tree" / "keep").read_text() == "kept"
-        empty = await client.post(
-            rpc + "Remove",
-            headers=headers,
-            json={"path": "outer/nested/empty"},
-        )
-        assert empty.status_code == 200, empty.text
-        assert not (disk / "empty").exists()
-
-
-@pytest.mark.asyncio
-async def test_recursive_remove_refuses_a_replacement_file(
-    tmp_path, monkeypatch
-):
-    rm_r = Files.rm_r
-
-    async def replace_directory(files, path):
-        await files.rmdir(path)
-        await files.write(path, b"replacement")
-        await rm_r(files, path)
-
-    monkeypatch.setattr(Files, "rm_r", replace_directory)
-    async with server(tmp_path, auth_config=TOKEN) as (_, client):
-        headers = await sandbox_headers(client)
-        del headers["content-type"]
-        rpc = "/filesystem.Filesystem/"
-        created = await client.post(
-            rpc + "MakeDir", headers=headers, json={"path": "tree"}
-        )
-        assert created.status_code == 200, created.text
-        refused = await client.post(
-            rpc + "Remove", headers=headers, json={"path": "tree"}
-        )
-        assert refused.status_code == 400, refused.text
-        assert refused.json()["code"] == "failed_precondition"
-        kept = await client.get(
-            "/files", headers=headers, params={"path": "tree"}
-        )
-        assert kept.content == b"replacement"
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("recreate", [False, True])
-async def test_recursive_remove_rechecks_the_directory_after_admission(
-    tmp_path, monkeypatch, recreate
-):
-    admit = Dispatcher._admit
-
-    async def change_directory(dispatcher, call, mount, mark, **kwargs):
-        if call.name == "rm_r" and call.guarded_remove:
-            await mount.call("rmdir", call.path.virtual)
-            if recreate:
-                await asyncio.sleep(0.001)
-                await mount.call("mkdir", call.path.virtual)
-                await mount.call("write", call.path.child("new"), data=b"keep")
-        return await admit(dispatcher, call, mount, mark, **kwargs)
-
-    monkeypatch.setattr(Dispatcher, "_admit", change_directory)
-    async with server(tmp_path, auth_config=TOKEN) as (_, client):
-        headers = await sandbox_headers(client)
-        del headers["content-type"]
-        rpc = "/filesystem.Filesystem/"
-        response = await client.post(
-            rpc + "MakeDir", headers=headers, json={"path": "tree"}
-        )
-        assert response.status_code == 200, response.text
-        response = await client.post(
-            rpc + "Remove", headers=headers, json={"path": "tree"}
-        )
-        if recreate:
-            assert response.status_code == 400, response.text
-            assert response.json()["code"] == "failed_precondition"
-            kept = await client.get(
-                "/files", headers=headers, params={"path": "tree/new"}
-            )
-            assert kept.content == b"keep"
-        else:
-            assert response.status_code == 200, response.text
-
-
-@pytest.mark.asyncio
-async def test_recursive_remove_keeps_namespace_entries_added_after_deletion(
-    tmp_path, monkeypatch
-):
-    settle_write = Dispatcher._settle_write
-
-    async def recreate_after_delete(
-        dispatcher, mount, name, path, *args, **kwargs
-    ):
-        if name == "rm_r" and kwargs.get("removed_nodes") is not None:
-            await mount.call("mkdir", path.virtual)
-            namespace = dispatcher._namespace
-            await namespace.unlink(path.child("replaced"))
-            await namespace.symlink(
-                path.child("replaced"), "/home/user/new", 0
-            )
-            await namespace.symlink(path.child("arrived"), "/home/user/new", 0)
-            await namespace.symlink(
-                path.child("converted"), "/home/user/new", 0
-            )
-        return await settle_write(
-            dispatcher, mount, name, path, *args, **kwargs
-        )
-
-    monkeypatch.setattr(Dispatcher, "_settle_write", recreate_after_delete)
-    async with server(tmp_path, auth_config=TOKEN) as (_, client):
-        headers = await sandbox_headers(client)
-        prepared = await client.post(
-            PROCESS,
-            content=start_body(
-                "mkdir tree; ln -s /home/user/original tree/replaced; "
-                "ln -s /home/user/original tree/old; "
-                "touch tree/converted; setfattr -n user.before -v value tree/converted"
-            ),
-            headers=headers,
-        )
-        assert (
-            envelopes(prepared.content)[-2][1]["event"]["end"]["exitCode"] == 0
-        )
-        del headers["content-type"]
-        rpc = "/filesystem.Filesystem/"
-        response = await client.post(
-            rpc + "Remove", headers=headers, json={"path": "tree"}
-        )
-        assert response.status_code == 200, response.text
-        response = await client.post(
-            rpc + "ListDir", headers=headers, json={"path": "tree"}
-        )
-        assert {
-            entry["name"]: entry["symlinkTarget"]
-            for entry in response.json()["entries"]
-        } == {
-            "arrived": "/home/user/new",
-            "converted": "/home/user/new",
-            "replaced": "/home/user/new",
-        }

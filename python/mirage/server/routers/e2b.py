@@ -311,6 +311,7 @@ async def create_sandbox(
         written: dict[str, Any] = {
             "mode": "read",
             "mounts": {"/home/user": {"vfs": "ram", "mode": "write"}},
+            "env": {"HOME": "/home/user"},
         }
         config = check_config(written)
     else:

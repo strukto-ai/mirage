@@ -1,3 +1,4 @@
+import { ABORT_JOIN_MS, abortable, settledWithin } from '@struktoai/mirage-core/utils/abort'
 import { SYSTEM_IDS } from '@struktoai/mirage-core/utils/ids'
 import { toHex } from '@struktoai/mirage-core/utils/hex'
 import type { BytePipe } from '@struktoai/mirage-core/io/pipe'
@@ -44,20 +45,37 @@ export class SandboxLease {
     }
   }
 
-  async runFile<T>(run: () => Promise<T>): Promise<T> {
+  async runFile<T>(closed: AbortSignal, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
     this.checkFiles()
-    const operation = run()
+    const signal = AbortSignal.any([this.revoked, closed])
+    signal.throwIfAborted()
+    const operation = run(signal)
+    // The request can leave early, while teardown still owns the backend operation.
     this.files.add(operation)
+    void operation
+      .finally(() => {
+        this.files.delete(operation)
+      })
+      .catch((error: unknown) => {
+        if (signal.aborted && error !== signal.reason) {
+          console.debug('sandbox file operation ended after cancellation:', error)
+        }
+      })
     try {
-      return await operation
-    } finally {
-      this.files.delete(operation)
+      const result = await abortable(operation, signal)
+      signal.throwIfAborted()
+      return result
+    } catch (error) {
+      signal.throwIfAborted()
+      throw error
     }
   }
 
   async stopFiles(): Promise<void> {
     this.revocation.abort(new SandboxNotRunning())
-    await Promise.allSettled(this.files)
+    if (!(await settledWithin(Promise.allSettled(this.files), ABORT_JOIN_MS / 1000))) {
+      console.debug(`sandbox ${this.entry.id} still has file operations after cancellation`)
+    }
   }
 }
 

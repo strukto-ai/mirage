@@ -5,6 +5,8 @@ import { request, type IncomingMessage } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
+import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
+import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { SignJWT } from 'jose'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -17,6 +19,7 @@ const KEY = { 'x-api-key': 'local-key' }
 const CREATE = '/v2/sandboxes'
 const START = '/process.Process/Start'
 const MOVE = '/filesystem.Filesystem/Move'
+const CONTROL = '/process.Process/List'
 
 let running: { app: MirageApp; root: string } | undefined
 afterEach(async () => {
@@ -313,6 +316,8 @@ describe('E2B body reads', () => {
     ['kill', '/files?path=fixture'],
     ['expiry', START],
     ['shutdown', START],
+    ['kill', MOVE],
+    ['expiry', CONTROL],
   ] as const)('returns a refusal on %s before the incoming body ends', async (event, path) => {
     const { app } = await setup()
     let begin = (): void => undefined
@@ -324,14 +329,20 @@ describe('E2B body reads', () => {
       done()
     })
     const sandbox = await create(app)
-    const isCommand = path === START
-    const headers = {
-      ...dataHeaders(sandbox),
-      'content-type': isCommand ? CONNECT_STREAM : 'multipart/form-data; boundary=partial',
-    }
-    const prefix = isCommand
-      ? Buffer.alloc(4)
-      : Buffer.from('--partial\r\nContent-Disposition: form-data; name="file"\r\n\r\n')
+    const upload = path.startsWith('/files?')
+    const contentType =
+      path === START
+        ? CONNECT_STREAM
+        : upload
+          ? 'multipart/form-data; boundary=partial'
+          : 'application/json'
+    const headers = { ...dataHeaders(sandbox), 'content-type': contentType }
+    const prefix =
+      path === START
+        ? Buffer.alloc(4)
+        : upload
+          ? Buffer.from('--partial\r\nContent-Disposition: form-data; name="file"\r\n\r\n')
+          : Buffer.from('{"source":"fixture",')
     const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const client = request(address + path, { method: 'POST', headers })
     client.setTimeout(3000, () => client.destroy(new Error('streaming request timed out')))
@@ -343,7 +354,15 @@ describe('E2B body reads', () => {
     let shutdown: Promise<void> | undefined
     try {
       client.write(prefix)
-      await reading
+      await Promise.race([
+        reading,
+        reply.then((response) => {
+          response.resume()
+          throw new Error(
+            `received status ${String(response.statusCode)} before entering the handler`,
+          )
+        }),
+      ])
       if (event === 'kill') {
         const killed = await e2bListener(app).inject({
           method: 'DELETE',
@@ -366,11 +385,31 @@ describe('E2B body reads', () => {
       expect(response.statusCode).toBe(401)
       expect(response.headers.connection).toBe('close')
       expect(JSON.parse((await buffer(response)).toString())).toMatchObject({
-        code: isCommand ? 'unauthenticated' : 401,
+        code: upload ? 401 : 'unauthenticated',
       })
     } finally {
       client.destroy()
       await shutdown
     }
+  })
+})
+
+it.each([
+  [MOVE, DEFAULT_MAX_REQUEST_BODY_SIZE],
+  [CONTROL, 2 * CAPACITY],
+] as const)('enforces the JSON body format and byte limit on %s', async (path, limit) => {
+  const { app } = await setup()
+  const sandbox = await create(app)
+  const headers = { ...dataHeaders(sandbox), 'content-type': 'application/json' }
+  const post = (payload: string) =>
+    e2bListener(app).inject({ method: 'POST', url: path, headers, payload })
+  const invalid = await post('{')
+  expect(invalid.statusCode).toBe(400)
+  expect(invalid.json()).toEqual({ code: 'invalid_argument', message: 'body must be JSON' })
+  const oversized = await post(' '.repeat(limit + 1))
+  expect(oversized.statusCode).toBe(413)
+  expect(oversized.json()).toEqual({
+    code: 'resource_exhausted',
+    message: 'request body too large',
   })
 })

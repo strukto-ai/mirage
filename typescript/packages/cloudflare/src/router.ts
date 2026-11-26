@@ -161,7 +161,9 @@ async function readBody(request: Request, limit: number): Promise<string> {
  * Mirrors the Node server's `lenientJson`.
  */
 async function parseBody(request: Request, config: RouteConfig): Promise<unknown> {
-  if (!BODY_METHODS.has(request.method) || request.body === null) return undefined
+  if (config.rawBody === true || !BODY_METHODS.has(request.method) || request.body === null) {
+    return undefined
+  }
   const contentType = (request.headers.get('content-type') ?? '').toLowerCase()
   if (RAW_BODIES.some((raw) => contentType.startsWith(raw))) return undefined
   const text = await readBody(request, config.bodyLimit ?? BODY_LIMIT)
