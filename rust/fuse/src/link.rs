@@ -147,12 +147,23 @@ impl Link {
     /// once. Writes sent meanwhile through the same handle, by another
     /// descriptor of it, are not waited for, so they cannot hold it off.
     pub fn settle(&self, fh: u64) -> Result<(), Failure> {
-        let before: Vec<u64> = locked(&self.ahead)
+        let before = self.unanswered(fh);
+        self.settle_after(fh, &before)
+    }
+
+    /// The ids of host handle `fh`'s requests sent ahead with no reply yet.
+    fn unanswered(&self, fh: u64) -> Vec<u64> {
+        locked(&self.ahead)
             .sent
             .iter()
             .filter(|(_, (handle, _))| *handle == fh)
             .map(|(&id, _)| id)
-            .collect();
+            .collect()
+    }
+
+    /// `settle` past the requests `before` names: wait for their replies,
+    /// then hand over the first refusal the handle met, once.
+    fn settle_after(&self, fh: u64, before: &[u64]) -> Result<(), Failure> {
         let mut ahead = self.await_ahead(|a| before.iter().all(|id| !a.sent.contains_key(id)))?;
         let Some(handle) = ahead.handles.get_mut(&fh) else {
             return Ok(());
@@ -416,6 +427,9 @@ mod tests {
         );
     }
 
+    /// How long a test waits for a thread it expects to return.
+    const BOUND: Duration = Duration::from_secs(5);
+
     /// The host's end of a pipe `link` serves on a thread of its own,
     /// open until the test drops it.
     fn served(link: &Arc<Link>) -> std::os::unix::net::UnixStream {
@@ -453,7 +467,7 @@ mod tests {
         assert!(settling.1.is_none());
         let input = frame(json!({"id": 1}), b"");
         link.serve(&mut input.as_slice(), |_| {}).unwrap();
-        assert!(settling.0.recv().unwrap().is_ok());
+        assert!(settling.0.recv_timeout(BOUND).unwrap().is_ok());
         assert!(locked(&link.ahead).handles.is_empty());
     }
 
@@ -461,15 +475,18 @@ mod tests {
     fn a_settle_waits_only_for_the_writes_sent_before_it() {
         let link = Arc::new(Link::new(Box::new(io::sink())));
         link.send_ahead(7, "write", json!({}), b"a").unwrap();
+        let before = link.unanswered(7);
+        link.send_ahead(7, "write", json!({}), b"b").unwrap();
         let settling = {
             let link = link.clone();
-            returns_within(Duration::from_millis(50), move || link.settle(7))
+            returns_within(Duration::from_millis(50), move || {
+                link.settle_after(7, &before)
+            })
         };
         assert!(settling.1.is_none());
-        link.send_ahead(7, "write", json!({}), b"b").unwrap();
         let mut replies = served(&link);
         replies.write_all(&frame(json!({"id": 1}), b"")).unwrap();
-        assert!(settling.0.recv().unwrap().is_ok());
+        assert!(settling.0.recv_timeout(BOUND).unwrap().is_ok());
         assert_eq!(locked(&link.ahead).handles[&7].unanswered, 1);
     }
 
@@ -507,7 +524,7 @@ mod tests {
         assert!(next.1.is_none());
         let mut replies = served(&link);
         replies.write_all(&frame(json!({"id": 1}), b"")).unwrap();
-        assert!(next.0.recv().unwrap().is_ok());
+        assert!(next.0.recv_timeout(BOUND).unwrap().is_ok());
     }
 
     #[test]
