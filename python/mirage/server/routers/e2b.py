@@ -17,6 +17,7 @@ from mirage.server.auth.middleware import (
     CredentialVerifier,
     admit_account,
 )
+from mirage.server.constants import RAW_BODIES
 from mirage.server.e2b.files import (
     FileCode,
     FileError,
@@ -25,6 +26,7 @@ from mirage.server.e2b.files import (
 )
 from mirage.server.e2b.leases import Sandbox, Sandboxes, SandboxNotRunning
 from mirage.server.e2b.process import (
+    CONNECT_STREAM,
     CONTROL_METHODS,
     PROCESS_PREFIX,
     control_process,
@@ -114,6 +116,20 @@ class LifecycleRoute(APIRoute):
                 return message
 
             try:
+                media = (
+                    request.headers.get("content-type", "")
+                    .partition(";")[0]
+                    .strip()
+                    .lower()
+                )
+                if media == CONNECT_STREAM or media.encode().startswith(
+                    RAW_BODIES
+                ):
+                    raise HttpError(
+                        ErrorCode.INVALID_REQUEST,
+                        "expected JSON on a unary E2B route",
+                        headers={"Connection": "close"},
+                    )
                 return await handle(Request(request.scope, receive))
             except HttpError as exc:
                 return JSONResponse(

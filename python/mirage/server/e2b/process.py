@@ -29,7 +29,7 @@ from mirage.server.e2b.routing import require_sandbox
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.multipart import MAX_REQUEST_PART
 from mirage.types import JsonValue
-from mirage.utils.abort import MirageAbortError
+from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ async def _disconnect(receive: Receive) -> None:
 
 
 class ProcessResponse(Response):
-    """Stream one command and settle its execution on hang-up or timeout."""
+    """Stream one command until it finishes or its client or lease leaves."""
 
     def __init__(
         self, lease: Sandbox, command: StartCommand, deadline: float | None
@@ -237,19 +237,28 @@ class ProcessResponse(Response):
 
         sender = asyncio.create_task(self._send(connected))
         disconnected = asyncio.create_task(_disconnect(receive))
+        revoked = asyncio.create_task(self._lease.revoked.wait())
+        connection = {sender, disconnected}
+        tasks = (*connection, revoked)
         try:
             done, _ = await asyncio.wait(
-                {sender, disconnected}, return_when=asyncio.FIRST_COMPLETED
+                tasks, return_when=asyncio.FIRST_COMPLETED
             )
+            if done == {revoked}:
+                done, _ = await asyncio.wait(
+                    connection,
+                    timeout=ABORT_JOIN_SECONDS,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
             for task in done:
                 await task
         except ClientDisconnect:
             logger.debug("sandbox command connection closed", exc_info=True)
         finally:
-            sender.cancel()
-            disconnected.cancel()
+            for task in tasks:
+                task.cancel()
             for result in await settle(
-                asyncio.gather(sender, disconnected, return_exceptions=True)
+                asyncio.gather(*tasks, return_exceptions=True)
             ):
                 if isinstance(result, Exception):
                     logger.debug(

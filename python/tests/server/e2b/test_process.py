@@ -5,7 +5,14 @@ import json
 import pytest
 
 from mirage.io.pipe import CAPACITY
-from tests.server.routers.e2b_test_support import TOKEN, server
+from tests.server.routers.e2b_test_support import (
+    KEY,
+    PROCESS,
+    TOKEN,
+    sandbox_headers,
+    server,
+    start_body,
+)
 
 PREFIX = "/process.Process/"
 
@@ -166,3 +173,56 @@ async def test_live_process_controls(tmp_path):
         frames = await run("cat", revoke)
         assert frames[-1]["error"]["code"] == "canceled"
         assert (await control("List", {})).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retirement", ["delete", "expire"])
+async def test_retiring_a_lease_releases_a_stalled_command_response(
+    tmp_path, retirement
+):
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
+        headers = await sandbox_headers(client)
+        path = f"/sandboxes/{headers['e2b-sandbox-id']}"
+        stalled = asyncio.Event()
+        resume = asyncio.Event()
+        messages = iter(
+            [{"type": "http.request", "body": start_body("sleep 30")}]
+        )
+
+        async def receive():
+            message = next(messages, None)
+            if message is not None:
+                return message
+            await resume.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                assert message["status"] == 200
+            else:
+                stalled.set()
+                await resume.wait()
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "scheme": "http",
+            "path": PROCESS,
+            "query_string": b"",
+            "headers": [
+                (key.encode(), value.encode())
+                for key, value in {**headers, "host": "test"}.items()
+            ],
+            "client": ("127.0.0.1", 10001),
+            "server": ("test", 80),
+        }
+        async with asyncio.timeout(3), asyncio.TaskGroup() as tasks:
+            tasks.create_task(app.state.e2b_app(scope, receive, send))
+            await stalled.wait()
+            if retirement == "delete":
+                retired = await client.delete(path, headers=KEY)
+            else:
+                retired = await client.post(
+                    f"{path}/timeout", headers=KEY, json={"timeout": 0}
+                )
+            assert retired.status_code == 204, retired.text

@@ -53,6 +53,7 @@ from mirage.server.daemon_config import (
     validate_daemon_table,
 )
 from mirage.server.e2b.leases import Sandboxes
+from mirage.server.e2b.process import CONNECT_STREAM
 from mirage.server.env import ENV_E2B_PORT
 from mirage.server.errors import (
     WorkspaceMissing,
@@ -385,13 +386,19 @@ class LenientJson:
         app (ASGIApp): the app behind.
         raw_request (Callable[[Scope], bool] | None): routes that consume
             the request with its original media type.
+        raw_content_types (tuple[bytes, ...]): additional media types to
+            pass through as sent.
     """
 
     def __init__(
-        self, app: ASGIApp, raw_request: Callable[[Scope], bool] | None = None
+        self,
+        app: ASGIApp,
+        raw_request: Callable[[Scope], bool] | None = None,
+        raw_content_types: tuple[bytes, ...] = (),
     ) -> None:
         self.app = app
         self.raw_request = raw_request
+        self.raw_content_types = raw_content_types
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
@@ -402,7 +409,11 @@ class LenientJson:
             given = next(
                 (v for k, v in scope["headers"] if k == b"content-type"), b""
             ).lower()
-            if not given.startswith(RAW_BODIES):
+            media = given.partition(b";")[0].strip()
+            if (
+                not given.startswith(RAW_BODIES)
+                and media not in self.raw_content_types
+            ):
                 scope = {
                     **scope,
                     "headers": [
@@ -438,7 +449,11 @@ def _build_e2b_app(
     app.state.resources = native.state.resources
     app.state.e2b = native.state.e2b
     app.add_exception_handler(StarletteHTTPException, _e2b_http_error)
-    app.add_middleware(LenientJson, raw_request=e2b.is_data_request)
+    app.add_middleware(
+        LenientJson,
+        raw_request=e2b.is_data_request,
+        raw_content_types=(CONNECT_STREAM.encode(),),
+    )
     app.add_middleware(
         HostHeaderMiddleware, allowed_hosts=native.state.allowed_hosts
     )

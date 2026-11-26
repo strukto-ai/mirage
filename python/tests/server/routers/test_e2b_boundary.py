@@ -254,6 +254,21 @@ async def test_rejects_unsupported_requests_without_creating_a_workspace(
             )
             assert response.status_code == 501
             assert field in response.json()["message"]
+        for media in (
+            "Application/Connect+JSON; charset=utf-8",
+            "application/octet-stream",
+            "multipart/form-data; boundary=test",
+        ):
+            response = await client.post(
+                CREATE,
+                headers={**KEY, "Content-Type": media},
+                content=b"{}",
+            )
+            assert response.status_code == 400, response.text
+            assert response.json() == {
+                "code": 400,
+                "message": "expected JSON on a unary E2B route",
+            }
         response = await client.post(
             CREATE, headers={**KEY, "Idempotency-Key": "test"}
         )

@@ -42,6 +42,9 @@ class Sandbox:
     env_vars: dict[str, str] = field(repr=False)
     expires_at: float
     expiry: asyncio.TimerHandle = field(init=False, repr=False)
+    revoked: asyncio.Event = field(
+        default_factory=asyncio.Event, init=False, repr=False
+    )
     processes: dict[int, LiveProcess] = field(
         default_factory=dict, init=False, repr=False
     )
@@ -228,6 +231,7 @@ class Sandboxes:
         if self._leases.get(lease.entry.id) is lease:
             del self._leases[lease.entry.id]
         lease.expiry.cancel()
+        lease.revoked.set()
 
     async def _before_stop(self, lease: Sandbox) -> None:
         self._forget(lease)
