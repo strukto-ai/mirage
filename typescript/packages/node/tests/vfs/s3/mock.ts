@@ -223,7 +223,7 @@ export interface S3Mock {
   ): number
   resetCalls(): void
   /** Every request in order with the condition parameters it sent. */
-  ledger: [string, Record<string, string>][]
+  requests: [string, Record<string, string>][]
   /** Run `hook` once, just before the next `op` request lands. */
   before(op: string, hook: () => void | Promise<void>): void
   /** Drop every hook not yet run, so one a test left queued fires in no other. */
@@ -259,12 +259,12 @@ export function installS3Mock(
     calls.set(name, (calls.get(name) ?? 0) + 1)
   }
   const etag = (data: Uint8Array): string => `"${md5Hex(data)}${suffix}"`
-  const ledger: [string, Record<string, string>][] = []
+  const requests: [string, Record<string, string>][] = []
   const hooks = new Map<string, (() => void | Promise<void>)[]>()
   const state: { tripwire: boolean; pageSize: number | null } = { tripwire: false, pageSize: null }
   const undeletable = new Set<string>()
   const enter = async (op: string, key: string, sent: Record<string, string>): Promise<void> => {
-    ledger.push([op, sent])
+    requests.push([op, sent])
     const hook = hooks.get(op)?.shift()
     if (hook !== undefined) await hook()
     if (
@@ -447,7 +447,7 @@ export function installS3Mock(
   return {
     store,
     calls,
-    ledger,
+    requests,
     before: (op, hook) => {
       const queue = hooks.get(op) ?? []
       queue.push(hook)
@@ -471,7 +471,7 @@ export function installS3Mock(
     },
     reset: () => {
       calls.clear()
-      ledger.length = 0
+      requests.length = 0
       mock.reset()
     },
     restore: () => {

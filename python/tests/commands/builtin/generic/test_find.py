@@ -429,7 +429,7 @@ def _files(stat_path) -> Files | None:
                 return found, IOResult()
         raise FileNotFoundError(path.virtual)
 
-    return Files(dispatch, ledger=False)
+    return Files(dispatch, log_ops=False)
 
 
 def _stat_path(stat: FileStat | None):

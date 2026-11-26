@@ -122,8 +122,8 @@ async def execute_program(
 
     The value's ``dispatch`` is threaded so an active ``exec`` redirect
     can send each statement's output to its file. Its ``handed`` and
-    its registry's ``decisions`` are the line's hand-off and its ledger,
-    for a background job to borrow. Its ``sink`` takes each statement's
+    its registry's ``decisions`` are the line's hand-off and what holds
+    it, for a background job to borrow. Its ``sink`` takes each statement's
     output as it finishes, in the order it was written, instead of the
     result.
     The outermost program of a session's line routes what a statement

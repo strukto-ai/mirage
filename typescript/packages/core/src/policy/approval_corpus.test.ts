@@ -161,7 +161,7 @@ describe('approval behavior recorded from main', () => {
           : { ...value, outcome: outcomes[answer.outcome], scope: scopes[answer.scope] },
       )
     }
-    const ledger = new Decisions(sessions, row.answers === undefined ? undefined : onAsk)
+    const decisions = new Decisions(sessions, row.answers === undefined ? undefined : onAsk)
     const rules: CommandRule[] = row.rules.map((reason) => ({
       reason,
       commands: ['git push'],
@@ -218,34 +218,34 @@ describe('approval behavior recorded from main', () => {
                 }
           const action =
             step.op === 'resolve'
-              ? await ledger.resolve(ctx, ask, undefined, claimant)
-              : await ledger.held(ctx, ask, claimant)
+              ? await decisions.resolve(ctx, ask, undefined, claimant)
+              : await decisions.held(ctx, ask, claimant)
           result = action ?? { kind: 'allow' }
           break
         }
         case 'answer': {
-          const value = ledger.list('s')[step.record]
+          const value = decisions.list('s')[step.record]
           if (value === undefined) throw new Error('corpus answer must name a record')
-          await ledger.answer(value.id, outcomes[step.outcome], scopes[step.scope])
+          await decisions.answer(value.id, outcomes[step.outcome], scopes[step.scope])
           break
         }
         case 'split':
           holders.set(
             step.target,
-            ledger.split('s', required(holders, step.holder), required(occurrences, step.at)),
+            decisions.split('s', required(holders, step.holder), required(occurrences, step.at)),
           )
           break
         case 'hand_up':
-          ledger.handUp('s', required(holders, step.holder))
+          decisions.handUp('s', required(holders, step.holder))
           break
         case 'release':
-          ledger.release('s', required(holders, step.holder))
+          decisions.release('s', required(holders, step.holder))
           break
         case 'revoke':
-          await ledger.revoke('s', required(holders, step.holder))
+          await decisions.revoke('s', required(holders, step.holder))
           break
       }
-      const records = ledger.list('s')
+      const records = decisions.list('s')
       actual.push({
         result,
         records: records.map(record),
@@ -296,7 +296,7 @@ it('hydrates a main-saved grant and checks it without store I/O', async () => {
   await sessions.ensureLoaded()
   expect([store.reads, store.writes]).toEqual([1, 1])
   const baseline = [store.reads, store.writes]
-  const ledger = new Decisions(sessions)
+  const decisions = new Decisions(sessions)
   const ctx: CommandContext = {
     command: 'git',
     argv: ['push'],
@@ -310,8 +310,8 @@ it('hydrates a main-saved grant and checks it without store I/O', async () => {
     rule: { reason: 'first', commands: ['git push'], paths: [], mount: '' },
   } satisfies { kind: 'ask'; reason: string; rule: CommandRule }
   for (let index = 0; index < 3; index += 1) {
-    expect(await ledger.resolve(ctx, ask)).toBeNull()
-    expect(await ledger.held(ctx, ask)).toBeNull()
+    expect(await decisions.resolve(ctx, ask)).toBeNull()
+    expect(await decisions.held(ctx, ask)).toBeNull()
   }
   await sessions.flush()
   expect([store.reads, store.writes]).toEqual(baseline)
@@ -320,7 +320,7 @@ it('hydrates a main-saved grant and checks it without store I/O', async () => {
 
 it('observes mutable approval fields and aliased rule arrays without replacing the record list', async () => {
   const sessions = new Sessions()
-  const ledger = new Decisions(sessions)
+  const decisions = new Decisions(sessions)
   const rule: CommandRule = { reason: 'first', commands: ['git push'] }
   const ask = { kind: 'ask', reason: 'first', rule } satisfies {
     kind: 'ask'
@@ -334,29 +334,29 @@ it('observes mutable approval fields and aliased rule arrays without replacing t
     cwd: '/repo',
     sessionId: 's',
   }
-  await ledger.resolve(ctx, ask)
-  const record = ledger.list('s')[0]
+  await decisions.resolve(ctx, ask)
+  const record = decisions.list('s')[0]
   if (record === undefined) throw new Error('expected the pending approval')
-  await ledger.answer(record.id, Outcome.ALLOW, Scope.SESSION)
-  const granted = ledger.list('s')[0]
+  await decisions.answer(record.id, Outcome.ALLOW, Scope.SESSION)
+  const granted = decisions.list('s')[0]
   if (granted === undefined) throw new Error('expected the settled approval')
-  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  expect(await decisions.resolve(ctx, ask)).toBeNull()
   granted.rule.reason = 'updated'
-  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  expect(await decisions.resolve(ctx, ask)).toBeNull()
   const commands = ['git push']
   granted.rule.commands = commands
-  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  expect(await decisions.resolve(ctx, ask)).toBeNull()
   commands[0] = 'git status'
-  expect(await ledger.resolve(ctx, ask)).toBeNull()
+  expect(await decisions.resolve(ctx, ask)).toBeNull()
   granted.scope = Scope.ONCE
   granted.outcome = Outcome.DENY
-  expect(await ledger.resolve(ctx, ask)).toMatchObject({ kind: 'deny' })
-  expect(ledger.list('s')).toEqual([])
+  expect(await decisions.resolve(ctx, ask)).toMatchObject({ kind: 'deny' })
+  expect(decisions.list('s')).toEqual([])
 })
 
 it('reads mutable fields through independently allocated equal rules', async () => {
   const sessions = new Sessions()
-  const ledger = new Decisions(sessions)
+  const decisions = new Decisions(sessions)
   const ctx: CommandContext = {
     command: 'git',
     argv: ['push'],
@@ -364,15 +364,15 @@ it('reads mutable fields through independently allocated equal rules', async () 
     cwd: '/repo',
     sessionId: 's',
   }
-  await ledger.resolve(ctx, {
+  await decisions.resolve(ctx, {
     kind: 'ask',
     reason: 'first',
     rule: { reason: 'first', commands: ['git push'] },
   })
-  const pending = ledger.list('s')[0]
+  const pending = decisions.list('s')[0]
   if (pending === undefined) throw new Error('expected the pending approval')
-  await ledger.answer(pending.id, Outcome.ALLOW)
-  const records = ledger.list('s')
+  await decisions.answer(pending.id, Outcome.ALLOW)
+  const records = decisions.list('s')
   const stored = sessions.records.get('s')
   const granted = records[0]
   if (granted === undefined) throw new Error('expected the settled approval')
@@ -382,29 +382,29 @@ it('reads mutable fields through independently allocated equal rules', async () 
     rule: { reason: 'first', commands: ['git push'] },
   } satisfies { kind: 'ask'; reason: string; rule: CommandRule }
   expect(granted.rule).not.toBe(ask.rule)
-  expect(await ledger.held(ctx, ask)).toBeNull()
+  expect(await decisions.held(ctx, ask)).toBeNull()
   const argv = ['status']
   granted.argv = argv
-  expect(await ledger.held(ctx, ask)).toMatchObject({ kind: 'pending' })
-  expect(await ledger.held({ ...ctx, argv: ['status'] }, ask)).toBeNull()
+  expect(await decisions.held(ctx, ask)).toMatchObject({ kind: 'pending' })
+  expect(await decisions.held({ ...ctx, argv: ['status'] }, ask)).toBeNull()
   argv[0] = 'fetch'
-  expect(await ledger.held({ ...ctx, argv: ['status'] }, ask)).toMatchObject({ kind: 'pending' })
-  expect(await ledger.held({ ...ctx, argv: ['fetch'] }, ask)).toBeNull()
+  expect(await decisions.held({ ...ctx, argv: ['status'] }, ask)).toMatchObject({ kind: 'pending' })
+  expect(await decisions.held({ ...ctx, argv: ['fetch'] }, ask)).toBeNull()
   granted.cwd = '/other'
-  expect(await ledger.held({ ...ctx, argv: ['fetch'] }, ask)).toMatchObject({ kind: 'pending' })
+  expect(await decisions.held({ ...ctx, argv: ['fetch'] }, ask)).toMatchObject({ kind: 'pending' })
   const current = { ...ctx, argv: ['fetch'], cwd: '/other' }
-  expect(await ledger.held(current, ask)).toBeNull()
+  expect(await decisions.held(current, ask)).toBeNull()
   const commands = ['git push']
   granted.rule.commands = commands
-  expect(await ledger.held(current, ask)).toBeNull()
+  expect(await decisions.held(current, ask)).toBeNull()
   commands[0] = 'git status'
-  expect(await ledger.held(current, ask)).toMatchObject({ kind: 'pending' })
+  expect(await decisions.held(current, ask)).toMatchObject({ kind: 'pending' })
   ask.rule.commands = ['git status']
-  expect(await ledger.held(current, ask)).toBeNull()
+  expect(await decisions.held(current, ask)).toBeNull()
   expect(sessions.records.get('s')).toBe(stored)
-  expect(ledger.list('s')[0]).toBe(granted)
-  expect(await ledger.resolve(current, ask)).toBeNull()
-  expect(ledger.list('s')).toEqual([])
+  expect(decisions.list('s')[0]).toBe(granted)
+  expect(await decisions.resolve(current, ask)).toBeNull()
+  expect(decisions.list('s')).toEqual([])
 })
 
 it.each([
@@ -421,7 +421,7 @@ it.each([
   { stored: { reason: 'first' }, asked: { reason: 'first', mount: '' }, covered: false },
   { stored: { reason: 'first', mount: '' }, asked: { reason: 'first' }, covered: false },
 ])('compares independent rule values: $stored / $asked', async ({ stored, asked, covered }) => {
-  const ledger = new Decisions(new Sessions())
+  const decisions = new Decisions(new Sessions())
   const ctx: CommandContext = {
     command: 'git',
     argv: ['push'],
@@ -429,22 +429,22 @@ it.each([
     cwd: '/repo',
     sessionId: 's',
   }
-  await ledger.resolve(ctx, { kind: 'ask', reason: 'first', rule: stored })
-  const pending = ledger.list('s')[0]
+  await decisions.resolve(ctx, { kind: 'ask', reason: 'first', rule: stored })
+  const pending = decisions.list('s')[0]
   if (pending === undefined) throw new Error('expected the pending approval')
-  await ledger.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
+  await decisions.answer(pending.id, Outcome.ALLOW, Scope.SESSION)
   const ask = { kind: 'ask', reason: 'first', rule: asked } satisfies {
     kind: 'ask'
     reason: string
     rule: CommandRule
   }
   if (covered) {
-    expect(await ledger.held(ctx, ask)).toBeNull()
-    expect(await ledger.resolve(ctx, ask)).toBeNull()
-    expect(ledger.list('s')).toHaveLength(1)
+    expect(await decisions.held(ctx, ask)).toBeNull()
+    expect(await decisions.resolve(ctx, ask)).toBeNull()
+    expect(decisions.list('s')).toHaveLength(1)
   } else {
-    expect(await ledger.held(ctx, ask)).toMatchObject({ kind: 'pending' })
-    expect(await ledger.resolve(ctx, ask)).toMatchObject({ kind: 'pending' })
-    expect(ledger.list('s')).toHaveLength(2)
+    expect(await decisions.held(ctx, ask)).toMatchObject({ kind: 'pending' })
+    expect(await decisions.resolve(ctx, ask)).toMatchObject({ kind: 'pending' })
+    expect(decisions.list('s')).toHaveLength(2)
   }
 })

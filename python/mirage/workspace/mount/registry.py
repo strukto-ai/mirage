@@ -1128,7 +1128,7 @@ class MountRegistry:
 
     @property
     def decisions(self) -> Decisions:
-        """The decision ledger an Ask is taken to, which the policies
+        """The decisions an Ask is taken to, which the policies
         hold (``Policies.decisions``) so a session write reaches it too."""
         return self.policies.decisions
 

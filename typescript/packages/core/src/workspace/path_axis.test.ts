@@ -207,7 +207,7 @@ describe('the path axis end to end', () => {
     // is, so an agent whose file tool reads through the facade is
     // confined like its shell. A session already bound is kept, and
     // A handle runs the same entry point as another session over the
-    // same ledger; a session with an explicit empty profile is the
+    // same op log; a session with an explicit empty profile is the
     // host's entry point to what the default profile hides.
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },

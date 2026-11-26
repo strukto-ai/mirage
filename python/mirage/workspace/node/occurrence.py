@@ -381,7 +381,7 @@ def evaluated_from(
 
 
 def claimant_for(node: Any, handed: HandOff | None) -> Claimant | None:
-    """The reader of the ledger for one command the executor runs, None
+    """The reader of the decisions for one command the executor runs, None
     outside a line.
 
     Args:

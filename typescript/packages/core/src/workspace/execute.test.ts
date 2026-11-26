@@ -498,10 +498,10 @@ describe('native output', () => {
   })
 })
 
-describe('the ledger a file call lands in', () => {
-  // Twin of test_a_call_to_another_workspace_is_on_that_workspaces_ledger:
+describe('the op log a file call lands in', () => {
+  // Twin of test_a_call_to_another_workspace_is_on_that_workspaces_op_log:
   // a handler on one workspace's line reading another workspace's files
-  // makes a read that is the other workspace's, in its ledger, not the
+  // makes a read that is the other workspace's, in its op log, not the
   // line's.
   it("is the called workspace's, from another workspace's line", async () => {
     const other = new Workspace({ '/o': new RAMVFS() }, { mode: MountMode.WRITE })
@@ -528,7 +528,7 @@ describe('the ledger a file call lands in', () => {
     }
   })
 
-  // Twin of test_a_policys_read_leaves_the_op_it_judges_on_the_ledger: a
+  // Twin of test_a_policys_read_leaves_the_op_it_judges_on_the_op_log: a
   // preVfs policy reading through the dispatcher, as a profile script's
   // read does: what it reads is no record of the unlink it judges, which
   // RAM does not record itself.

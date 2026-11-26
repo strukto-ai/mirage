@@ -282,7 +282,7 @@ export function evaluatedFrom(
 }
 
 /**
- * The reader of the ledger for one command the executor runs, null
+ * The reader of the decisions for one command the executor runs, null
  * outside a line.
  */
 export function claimantFor(node: TSNodeLike, handed: HandOff | null | undefined): Claimant | null {

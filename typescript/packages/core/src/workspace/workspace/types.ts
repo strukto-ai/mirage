@@ -213,7 +213,7 @@ export interface WorkspaceOptions {
   policies?: readonly Policy[]
   /**
    * How the host answers an asked line (design 3.9): a blocking
-   * a coroutine over the ledger's own record, or nothing for the
+   * a coroutine over the decisions' own record, or nothing for the
    * recording default the host reads through `ws.decisions`.
    */
   onAsk?: AskHandler

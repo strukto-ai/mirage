@@ -736,10 +736,10 @@ async def resolved(
     cancel: asyncio.Event | None,
     claimant: Claimant | None,
 ) -> Deny | Pending | None:
-    """The chain's answer once the ledger has had its say.
+    """The chain's answer once the decisions have had their say.
 
     An Ask is the chain's answer only after every Deny had its say; the
-    ledger answers it from the session's records or the host, so an
+    decisions answer it from the session's records or the host, so an
     answer never re-opens a deny. A wait the run's kill cut short is the
     kill landing late, not a ruling, so it raises as every other
     abandoned wait does rather than being rendered as a refusal the
@@ -748,7 +748,7 @@ async def resolved(
     Args:
         ctx (CommandContext): the context the chain was shown.
         asked (Deny | Ask | None): what the chain answered.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         cancel (asyncio.Event | None): the run's kill channel.
         claimant (Claimant | None): the command and its line, as
             ``admit`` takes it.
@@ -777,7 +777,7 @@ async def admit(
     rules_only: bool = False,
 ) -> Refused | Admitted:
     """The command plane's admission of one command: the policy chain,
-    then the decision ledger.
+    then the decisions.
 
     The one gate every command class passes through, in the tree
     (``_run_argv``, once the words are expanded) and for a line a
@@ -796,7 +796,7 @@ async def admit(
         operands (Sequence[str | PathSpec]): the same words, classified.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         stdin (ByteSource | None): the line's stdin, which decides
             whether a bare ``rg`` reads the working directory.
@@ -817,7 +817,7 @@ async def admit(
             question covers one run rather than one reader; a reader
             outside a line spends what it matched. A refusal needs no
             such care -- the record refuses the agent's retry from the
-            ledger either way.
+            decisions either way.
         unread (frozenset[str]): paths no policy is shown, as ``gate``
             takes them.
         rules_only (bool): ask the profile's rules alone, as ``gate``
@@ -861,11 +861,11 @@ async def admit(
 @dataclass(frozen=True, slots=True)
 class RedirectAsked:
     """What the session's trees answer about a redirect no command owns
-    when they do not simply let it open: the question the ledger reads a
+    when they do not simply let it open: the question the decisions read a
     grant against, the trees' answer and the path the rule named.
 
     Args:
-        question (CommandContext): the redirect as the ledger reads it.
+        question (CommandContext): the redirect as the decisions read it.
         answer (Deny | Ask): the trees' answer.
         named (str): the virtual path the answer is about.
     """
@@ -985,7 +985,7 @@ async def admit_redirect(
         targets (Sequence[PathSpec]): the redirect's targets so far,
             expanded.
         session (SessionState): the session running the line.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         namespace (Namespace | None): the link table.
         at (TSNodeLike | None): the target word of the redirect that
             opens them, None for targets no one redirect opens (a line
@@ -1038,7 +1038,7 @@ async def admit_test(
         words (list[str]): what it tests, expanded, operators included.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         cancel (asyncio.Event | None): the run's kill channel.
         claimant (Claimant | None): the test and its line, None outside

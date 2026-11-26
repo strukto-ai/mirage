@@ -23,6 +23,7 @@ from mirage.observe.record import (
     RETRACT_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
+    OpLog,
     OpRecord,
 )
 from mirage.types import FileStat, FileType
@@ -455,3 +456,78 @@ def test_a_drift_check_offers_no_hints():
     )
     asyncio.run(check_drift(lambda _p: mount, "/m/a.txt", "t"))
     assert seen == [None]
+
+
+def test_an_op_log_past_its_cap_pins_what_every_record_pins():
+    records = [
+        _rec("read", "/s3/a", "fp-a", timestamp=1),
+        _rec("read", "/s3/a", timestamp=2),
+        _rec("stat", "/s3/a", timestamp=3),
+        _rec("write", "/s3/b", "fp-b", timestamp=4),
+        _rec("append", "/s3/b", timestamp=5),
+        _rec("read", "/s3/c", revision="rev-c", timestamp=6),
+        _rec("readdir", "/s3", timestamp=7),
+        _rec("write", "/s3/d", timestamp=8),
+        _rec("read", "/s3/d", "fp-d", timestamp=9),
+        _rec("rm_r", "/s3/c", timestamp=10),
+        _rec("read", "/s3/e", "fp-e", timestamp=11),
+    ]
+    records += [_rec("read", f"/s3/n{i}", timestamp=12 + i) for i in range(20)]
+    log = OpLog(max_records=4)
+    for rec in records:
+        log.add([rec])
+    assert len(log.records) <= 8 + 4
+    pins = capture_fingerprints(*_log(log.records))
+    assert pins == capture_fingerprints(*_log(records))
+    assert _paths(pins) == ["/s3/a", "/s3/d", "/s3/e"]
+
+
+# Records reach the op log as lines end, so one can land after a record it
+# precedes. Stamps of the live mount and of one since replaced, drops,
+# prefix ops and tokenless reads, some timed before those ahead of them:
+# what the op log keeps pins the paths every record pins.
+def test_a_folded_op_log_pins_what_every_record_pins():
+    paths = ["/s3/a", "/s3/b", "/s3/c", "/s3/c/x", "/s3/c/y", "/s3/d"]
+    shapes: list[tuple[str, bool, bool, str | None]] = [
+        ("read", True, False, None),
+        ("read", True, False, "gone"),
+        ("read", False, True, None),
+        ("read", False, False, None),
+        ("write", True, False, None),
+        ("write", False, False, None),
+        ("append", False, False, None),
+        ("unlink", False, False, None),
+        ("rm_r", False, False, None),
+    ]
+    seed = 7
+    records = []
+    for i in range(600):
+        seed = seed * 48271 % 2147483647
+        op, fingerprint, revision, mount_id = shapes[seed // 7 % len(shapes)]
+        records.append(
+            OpRecord(
+                op=op,
+                path=paths[seed % len(paths)],
+                source="s3",
+                bytes=0,
+                timestamp=i * 10 - (35 if seed // 63 % 5 == 0 else 0),
+                duration_ms=0,
+                fingerprint=f"f{i}" if fingerprint else None,
+                revision=f"r{i}" if revision else None,
+                mount_id=mount_id,
+            )
+        )
+    log = OpLog(max_records=16)
+    at = 0
+    while at < len(records):
+        seed = seed * 48271 % 2147483647
+        log.add(records[at : at + 1 + seed % 7])
+        at += 1 + seed % 7
+    assert len(log.records) < 60
+
+    def by_path(entries: list[dict]) -> list[dict]:
+        return sorted(entries, key=lambda entry: entry[FingerprintKey.PATH])
+
+    pins = capture_fingerprints(*_log(records))
+    assert by_path(capture_fingerprints(*_log(log.records))) == by_path(pins)
+    assert _paths(by_path(pins)) == ["/s3/a", "/s3/c", "/s3/c/y"]

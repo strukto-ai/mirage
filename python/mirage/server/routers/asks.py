@@ -71,10 +71,10 @@ async def list_asks(
     include_settled: bool = Query(False, alias="all"),
 ) -> AskList:
     """The workspace's asks: pending by default, every decision under
-    ``all=true``. The ledger already serves both views from one store,
+    ``all=true``. The decisions already serve both views from one store,
     so the entry point only picks which query to run."""
     entry = require_entry(request, workspace_id)
-    # The ledger reads a named session through SessionManager.get, which
+    # The decisions read a named session through SessionManager.get, which
     # raises for an unknown id; a mistyped filter is the caller's error,
     # answered in the sessions router's voice rather than as a 500.
     await session_of(entry, session_id)

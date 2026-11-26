@@ -86,7 +86,7 @@ async function answered(
  *
  * `signal` is the run's, so a host that puts a question to a person can
  * take its prompt down when the run it belongs to is killed. Ignoring it
- * is safe: the ledger stops waiting on the handler either way.
+ * is safe: the decisions stop waiting on the handler either way.
  */
 export type AskHandler = (record: Decision, signal?: AbortSignal) => Promise<Decision | null>
 
@@ -528,24 +528,24 @@ export class Decisions extends DecisionOwner {
 }
 
 /**
- * The call running in this context under `owner`'s ledger for
- * `sessionId`, null for a bare op, for a call another ledger
- * runs (a host callback reaching a second workspace mid-call) or for
- * another session's call. Without task isolation every live call is in
- * reach, so the newest of this ledger's and session's is taken.
+ * The call running in this context under `owner` for `sessionId`, null
+ * for a bare op, for a call another workspace's decisions run (a host
+ * callback reaching a second workspace mid-call) or for another
+ * session's call. Without task isolation every live call is in reach,
+ * so the newest of this owner's and session's is taken.
  */
 export function getOpCall(owner: Decisions, sessionId: string): HandOff | null {
   const call = liveCallers()
     .flatMap((caller) => (caller.call === null ? [] : [caller.call]))
     .reverse()
-    .find(([ledger, , session]) => ledger === owner && session === sessionId)
+    .find(([decisions, , session]) => decisions === owner && session === sessionId)
   return call?.[1] ?? null
 }
 
 /**
- * The call `caller` runs in under `owner`'s ledger for `sessionId`, null
- * for a bare op, for a call another ledger runs or for another session's
- * call. Mirrors Python's `call_of`.
+ * The call `caller` runs in under `owner` for `sessionId`, null for a
+ * bare op, for a call another workspace's decisions run or for another
+ * session's call. Mirrors Python's `call_of`.
  */
 export function callOf(caller: Caller, owner: Decisions, sessionId: string): HandOff | null {
   const call = caller.call

@@ -1224,7 +1224,7 @@ class MountCore:
         A link routes through the dispatcher rather than straight to the
         node table: ``unlink`` is a LINK_ENTRY_OPS member, so the dispatcher
         answers a link path itself, gated by session grants and
-        admission policies and recorded on the ledger. Writing the
+        admission policies and recorded on the op log. Writing the
         table here instead let a session-scoped kernel mount delete a
         link on a mount its profile hides.
 

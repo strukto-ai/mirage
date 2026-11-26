@@ -220,7 +220,7 @@ def scripts_from_dict(
 
 
 def decision_to_dict(record: Decision) -> DecisionJSON:
-    """A ledger record as the session record stores it.
+    """A decision record as the session record stores it.
 
     Args:
         record (Decision): the record.
@@ -241,7 +241,7 @@ def decision_to_dict(record: Decision) -> DecisionJSON:
 
 
 def decision_from_dict(data: Mapping[str, Any]) -> Decision:
-    """A ledger record read back from a session record.
+    """A decision record read back from a session record.
 
     Args:
         data (Mapping[str, Any]): what ``decision_to_dict`` wrote.

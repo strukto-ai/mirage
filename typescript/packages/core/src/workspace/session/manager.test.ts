@@ -559,7 +559,7 @@ describe('SessionManager admission rules', () => {
   })
 })
 
-describe('SessionManager decision ledger', () => {
+describe('SessionManager decisions', () => {
   const RULE = {
     reason: 'sign-off',
     decision: Outcome.ASK,

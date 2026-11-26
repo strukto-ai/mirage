@@ -123,7 +123,7 @@ def _row(prefix: str = "/", **fields: Any) -> MountRow:
 
 
 def _ctx(dispatch: Any, *rows: MountRow) -> Context:
-    return Context(vfs=Files(dispatch, readers(list(rows)), ledger=False))
+    return Context(vfs=Files(dispatch, readers(list(rows)), log_ops=False))
 
 
 @contextmanager

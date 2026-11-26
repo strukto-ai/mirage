@@ -62,7 +62,7 @@ it('makes approval state visible at each suspension', async () => {
   const sessions = new PausedSessions()
   const prompting = deferred<undefined>()
   const answer = deferred<Decision>()
-  const ledger = new Decisions(sessions, () => {
+  const decisions = new Decisions(sessions, () => {
     prompting.resolve(undefined)
     return answer.promise
   })
@@ -81,39 +81,39 @@ it('makes approval state visible at each suspension', async () => {
   const occurrence: Occurrence = { parent: null, source: 'git push', start: 0, end: 8 }
   const first: Claimant = { line: { claimed: [], parent: null, origin: null }, occurrence }
   const other: Claimant = { line: { claimed: [], parent: null, origin: null }, occurrence }
-  const running = ledger.resolve(ctx, ask, undefined, first)
+  const running = decisions.resolve(ctx, ask, undefined, first)
   const pendingSave = sessions.saving[0]
   const answerSave = sessions.saving[1]
   const continuePrompt = sessions.resume[0]
   const continueAnswer = sessions.resume[1]
   try {
     await pendingSave.promise
-    expect(ledger.pending('s')).toHaveLength(1)
-    const record = ledger.pending('s')[0]
+    expect(decisions.pending('s')).toHaveLength(1)
+    const record = decisions.pending('s')[0]
     if (record === undefined) throw new Error('pending record was not published locally')
-    const pending = await ledger.held(ctx, ask, other)
+    const pending = await decisions.held(ctx, ask, other)
     expect(pending).toEqual({ kind: 'pending', id: record.id, reason: 'first' })
     expect(sessions.flushes).toBe(1)
 
     continuePrompt.resolve(undefined)
     await prompting.promise
-    expect((await ledger.held(ctx, ask, other))?.kind).toBe('pending')
+    expect((await decisions.held(ctx, ask, other))?.kind).toBe('pending')
     expect(sessions.flushes).toBe(1)
 
     answer.resolve({ ...record, outcome: Outcome.ALLOW, scope: Scope.ONCE })
     await answerSave.promise
-    expect(await ledger.held(ctx, ask, first)).toBeNull()
-    expect((await ledger.held(ctx, ask, other))?.kind).toBe('pending')
-    expect(ledger.pending('s')).toEqual([])
+    expect(await decisions.held(ctx, ask, first)).toBeNull()
+    expect((await decisions.held(ctx, ask, other))?.kind).toBe('pending')
+    expect(decisions.pending('s')).toEqual([])
 
     continueAnswer.resolve(undefined)
     expect(await running).toBeNull()
-    await ledger.revoke('s', first.line)
-    expect(ledger.list('s')).toEqual([])
+    await decisions.revoke('s', first.line)
+    expect(decisions.list('s')).toEqual([])
     expect(sessions.flushes).toBe(3)
   } finally {
     for (const resume of sessions.resume) resume.resolve(undefined)
-    const record = ledger.pending('s')[0]
+    const record = decisions.pending('s')[0]
     if (record !== undefined) answer.resolve({ ...record, outcome: Outcome.ALLOW })
     await running
   }

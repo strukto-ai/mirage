@@ -27,7 +27,7 @@ vi.mock('../../../files.ts', async (importOriginal) => {
   class ClockSeen extends mod.Files {
     constructor(...args: ConstructorParameters<typeof mod.Files>) {
       super(...args)
-      if (args[3]?.ledger !== false) seenClocks.push(args[3]?.clock)
+      if (args[3]?.logOps !== false) seenClocks.push(args[3]?.clock)
     }
   }
   return { ...mod, Files: ClockSeen }

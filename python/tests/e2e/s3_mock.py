@@ -173,7 +173,7 @@ class MultiBucketS3Client:
         # Rows per list_objects_v2 page; None answers in one page.
         self.page_size: int | None = None
         # Every request in order, with the condition parameters it sent.
-        self.ledger: list[tuple[str, dict[str, str]]] = []
+        self.requests: list[tuple[str, dict[str, str]]] = []
         self._hooks: dict[str, list[Callable[[], Awaitable[None] | None]]] = {}
         # Raise on a mutation sent without a condition, except a marker key.
         self.tripwire = False
@@ -196,7 +196,7 @@ class MultiBucketS3Client:
         self._hooks.setdefault(op, []).append(hook)
 
     async def _enter(self, op: str, key: str, sent: dict[str, str]) -> None:
-        self.ledger.append((op, sent))
+        self.requests.append((op, sent))
         hooks = self._hooks.get(op)
         if hooks:
             result = hooks.pop(0)()

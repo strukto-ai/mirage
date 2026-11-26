@@ -174,14 +174,14 @@ raises refuses too. What the agent reads for each is on
 
 ## Asks
 
-An Ask records a question in the workspace's ledger:
+An Ask records a question among the workspace's decisions:
 
 - With `on_ask` (`onAsk`), an inline allow answer continues the current request;
   a deny answer refuses it.
 - Without an inline answer, including when the callback returns no decision,
-  the request returns pending. The host records a decision in the ledger, allowing the caller to retry.
+  the request returns pending. The host records its decision there, allowing the caller to retry.
 
-Ledger answers apply as follows:
+A recorded answer applies as follows:
 
 - `allow`, scope `once` (default): the retry runs and spends it.
 - `allow`, scope `session`: everything the ask covers, for the rest of

@@ -778,7 +778,7 @@ def _redirect_gate(
 
     Args:
         context (EvaluationContext): the evaluation's session.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         namespace (Namespace): the link table.
     """
 

@@ -251,7 +251,7 @@ function seenWords(
 
 /**
  * The command plane's admission of one command: the policy chain, then
- * the approval ledger. The one gate every command class passes through,
+ * the decisions. The one gate every command class passes through,
  * in the tree (`runArgv`, once the words are expanded) and for a line a
  * runtime takes whole (`admitLine`, per parsed command). A word a
  * closed tree names nothing for is the profile's Deny, like any other
@@ -640,8 +640,8 @@ export async function gate(
 }
 
 /**
- * The chain's answer once the ledger has had its say. An Ask is the chain's
- * answer only after every Deny had its say; the ledger answers it from the
+ * The chain's answer once the decisions have had their say. An Ask is the chain's
+ * answer only after every Deny had its say; the decisions answer it from the
  * session's records or the host, so an answer never re-opens a deny. A wait
  * the run's kill cut short is the kill landing late, not a ruling, so it
  * throws as every other abandoned wait does rather than being rendered as a
@@ -680,7 +680,7 @@ export async function admit(
   // and spent when the line ends, so one question covers one run rather
   // than one reader; a reader outside a line spends what it matched. A
   // refusal needs no such care: the record refuses the agent's retry
-  // from the ledger either way.
+  // from the decisions either way.
   claimant: Claimant | null = null,
   // Shell-provided operations keep their tool policy even if a function shadows the name.
   intrinsic = false,
@@ -958,7 +958,7 @@ export function unownedRedirects(
 
 /**
  * What the session's trees answer about a redirect no command owns when
- * they do not simply let it open: the question the ledger reads a grant
+ * they do not simply let it open: the question the decisions read a grant
  * against, the trees' answer and the path the rule named. Mirrors
  * Python's RedirectAsked.
  */

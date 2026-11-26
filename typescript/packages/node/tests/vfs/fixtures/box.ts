@@ -41,7 +41,7 @@ function segments(path: string): string[] {
 
 /**
  * Box's folder, file and content routes behind a fetch router, the twin of
- * python's tests/fixtures/box_api.py, with the same ledger strings.
+ * python's tests/fixtures/box_api.py, with the same log strings.
  *
  * Serves what a read, a stat, a listing and the fresh probe reach:
  * `/2.0/folders/{id}/items`, `/2.0/files/{id}` (only the fields its `fields`
@@ -49,7 +49,7 @@ function segments(path: string): string[] {
  * python fake 302s the content route to `/dl/{id}` the way Box sends a
  * download to its content host; a stubbed fetch follows no redirect, so here
  * the content route answers the bytes itself and logs `content:{id}` then
- * `dl:{id}`, the two lines the redirect leaves in python's ledger. Every
+ * `dl:{id}`, the two lines the redirect leaves in python's log. Every
  * write keeps `modified_at`, so two same-size edits land in one second and
  * only `sha1` tells them apart, as on the real service. The two upload
  * routes, `POST /2.0/files/content` (new, logged `upload:{parent_id}`) and

@@ -291,7 +291,7 @@ export class SessionManager extends SessionOwner {
   }
 
   /**
-   * The ledger records one session holds (SessionDecisionsQuery). Read off the
+   * The decision records one session holds (SessionDecisionsQuery). Read off the
    * registered session, never a fork, so a line running in a background
    * copy sees the same answers.
    */
@@ -299,12 +299,12 @@ export class SessionManager extends SessionOwner {
     return this.get(sessionId).decisions
   }
 
-  /** Every session id holding ledger records (SessionDecisionsQuery). */
+  /** Every session id holding decision records (SessionDecisionsQuery). */
   decisionSessions(): readonly string[] {
     return [...this.sessions.entries()].filter(([, s]) => s.decisions.length > 0).map(([id]) => id)
   }
 
-  /** Replace one session's ledger records (SessionDecisionsQuery); durable at the next flush. */
+  /** Replace one session's decision records (SessionDecisionsQuery); durable at the next flush. */
   setDecisions(sessionId: string, records: readonly Decision[]): void {
     this.get(sessionId).decisions = records
   }

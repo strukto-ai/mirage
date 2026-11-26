@@ -25,7 +25,7 @@ import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
  * A RAM mount whose listing version and folder stat a test controls.
  *
  * `indexTtl` is positive so a `fresh` mount keeps listings for the gate to
- * check. `stats` is the ledger of every stat the backend was sent, `sent()`
+ * check. `stats` is the list of every stat the backend was sent, `sent()`
  * resolves when the next one arrives, and a stat waits on `hold` when one is
  * set, so a test orders concurrent checks with promises.
  */

@@ -348,12 +348,12 @@ class SessionManager(SessionOwner):
         return session.scripts
 
     def decision_sessions(self) -> tuple[str, ...]:
-        """Every session id holding ledger records
+        """Every session id holding decision records
         (SessionDecisionsQuery)."""
         return tuple(sid for sid, s in self._sessions.items() if s.decisions)
 
     def decisions_of(self, session_id: str) -> tuple[Decision, ...]:
-        """The ledger records one session holds
+        """The decision records one session holds
         (SessionDecisionsQuery).
 
         Read off the registered session, never a fork, so a line
@@ -367,7 +367,7 @@ class SessionManager(SessionOwner):
     def set_decisions(
         self, session_id: str, records: tuple[Decision, ...]
     ) -> None:
-        """Replace one session's ledger records
+        """Replace one session's decision records
         (SessionDecisionsQuery); durable at the next flush.
 
         Args:

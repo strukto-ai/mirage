@@ -107,12 +107,12 @@ async def _judged(
     line: str, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[list[str], list[tuple[str, list[str], list[str | None]]]]:
     """Run ``line`` with every ``touch`` asked about once, and report the
-    asks and, for each time the ledger judged one, where it stood and the
+    asks and, for each time the decisions judged one, where it stood and the
     origins of the hand-offs it was judged under, innermost first.
 
     Args:
         line (str): the line to run.
-        monkeypatch (pytest.MonkeyPatch): wraps the ledger's resolve.
+        monkeypatch (pytest.MonkeyPatch): wraps the decisions' resolve.
     """
     asks: list[str] = []
     judged: list[tuple[str, list[str], list[str | None]]] = []

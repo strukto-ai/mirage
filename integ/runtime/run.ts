@@ -1072,24 +1072,40 @@ function check(
   return problems.map((p) => `${caseId} ${label}: ${p}`)
 }
 
+/**
+ * The ops the op log took after `newest`, its newest record before a step
+ * (undefined when it was empty), each as `op path`. The op log drops records
+ * in place once it holds enough of them, so a count taken before a step is no
+ * index into it afterwards; the record the step began after still marks where
+ * its own start.
+ */
+function opsAfter(ws: Workspace, newest: Workspace['records'][number] | undefined): string[] {
+  let start = 0
+  if (newest !== undefined) {
+    start = ws.records.lastIndexOf(newest) + 1
+    if (start === 0) throw new Error('the op log dropped the record this step began after')
+  }
+  return ws.records.slice(start).map((r) => `${r.op} ${r.path}`)
+}
+
 function checkOps(expect: Expect, seen: string[]): string[] {
   const recorded = new Set([...seen, ...seen.map((entry) => entry.split(' ', 1)[0])])
   const problems: string[] = []
   for (const entry of expect.ops_contain ?? []) {
     if (!recorded.has(entry)) {
-      problems.push(`ledger missing ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
+      problems.push(`op log missing ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
     }
   }
   for (const entry of expect.ops_absent ?? []) {
     if (recorded.has(entry)) {
-      problems.push(`ledger must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
+      problems.push(`op log must not hold ${JSON.stringify(entry)}: got ${JSON.stringify(seen)}`)
     }
   }
   for (const [entry, want] of Object.entries(expect.ops_count ?? {})) {
     const got = seen.filter((s) => s === entry || s.split(' ', 1)[0] === entry).length
     if (got !== want) {
       problems.push(
-        `ledger holds ${JSON.stringify(entry)} ${String(got)} times, not ${String(want)}: got ${JSON.stringify(seen)}`,
+        `op log holds ${JSON.stringify(entry)} ${String(got)} times, not ${String(want)}: got ${JSON.stringify(seen)}`,
       )
     }
   }
@@ -1152,7 +1168,7 @@ async function runFacade(ws: Workspace, expect: Expect, spec: FacadeSpec): Promi
  * Run each branch on a session of its own, all at once. The branches
  * start together, so their ops reach the mounts interleaved as two
  * agents' would, and each is checked against its own `expect`. A branch
- * cannot check the ledger: the workspace keeps one, and every branch's
+ * cannot check the op log: the workspace keeps one, and every branch's
  * ops land in it. Mirrors run.py `_run_parallel`.
  */
 async function runParallel(
@@ -1161,15 +1177,15 @@ async function runParallel(
   index: number,
   branches: Step[],
 ): Promise<string[]> {
-  const ledger = branches.flatMap((branch, k) =>
-    Object.keys(branch.expect ?? {}).some((key) => LEDGER_CHECKS.has(key))
+  const refused = branches.flatMap((branch, k) =>
+    Object.keys(branch.expect ?? {}).some((key) => OP_LOG_CHECKS.has(key))
       ? [
           `${caseId} step[${index}].parallel[${k}]: a branch cannot check ` +
-            "the ledger, which holds every branch's ops",
+            "the op log, which holds every branch's ops",
         ]
       : [],
   )
-  if (ledger.length > 0) return ledger
+  if (refused.length > 0) return refused
   const runs = branches.map((branch, k) => {
     const sessionId = `parallel-${index}-${k}`
     ws.createSession(sessionId)
@@ -1258,9 +1274,9 @@ async function performStep(
   handles?: RetainedHandles,
 ): Promise<string[]> {
   const expect = step.expect ?? {}
-  // The ledger slice this step adds: ws.records delegates to the Files
+  // The op log slice this step adds: ws.records delegates to the Files
   // facade's account, so the step's own ops are the tail.
-  const ledgerBefore = ws.records.length
+  const newest = ws.records.at(-1)
   if (step.host_program !== undefined) {
     return runHostProgram(ws, caseId, label, step.host_program, expect)
   }
@@ -1288,13 +1304,13 @@ async function performStep(
       problems.push(
         `handle content ${JSON.stringify(content)}, expected ${JSON.stringify(expect.content)}`,
       )
-    const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+    const seen = opsAfter(ws, newest)
     problems.push(...checkOps(expect, seen))
     return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
   if (step.facade !== undefined) {
     const problems = await runFacade(ws, expect, step.facade)
-    const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+    const seen = opsAfter(ws, newest)
     problems.push(...checkOps(expect, seen))
     return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
@@ -1388,7 +1404,7 @@ async function performStep(
   const stdout = DEC.decode(result.stdout)
   const stderr = DEC.decode(result.stderr)
   const problems = check(caseId, label, expect, result.exitCode, stdout, stderr)
-  const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+  const seen = opsAfter(ws, newest)
   problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`))
   return problems
 }
@@ -1426,7 +1442,7 @@ async function runHostProgram(
   source: string,
   expect: Expect,
 ): Promise<string[]> {
-  const ledgerBefore = ws.records.length
+  const newest = ws.records.at(-1)
   const out: string[] = []
   const err: string[] = []
   const guest = capture(out, err)
@@ -1441,7 +1457,7 @@ async function runHostProgram(
     restore()
   }
   const problems = check(caseId, label, expect, exitCode, out.join(''), err.join(''))
-  const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+  const seen = opsAfter(ws, newest)
   problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`))
   return problems
 }
@@ -1482,8 +1498,8 @@ const LANGUAGES = new Set(['python', 'js', 'node'])
 // here, `with ws:` on the python host), which runs a program in the
 // runner's own process with node's `fs` pointed at the workspace.
 const HOST_RUNTIME = 'host'
-// The expect keys that read the workspace's op ledger.
-const LEDGER_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
+// The expect keys that read the workspace's op log.
+const OP_LOG_CHECKS = new Set(['ops_contain', 'ops_absent', 'ops_count'])
 // What a `runtimes` entry needs on this host before it can run. A runtime
 // missing here does not exist on this host (wasi is python's), so its
 // variant is not listed at all. e2b is left out: E2B's sandbox proxy drops

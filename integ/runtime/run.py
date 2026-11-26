@@ -50,6 +50,7 @@ from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.fuse.fs import MirageFS  # noqa: E402
 from mirage.mount.core import MountCore  # noqa: E402
+from mirage.observe.record import OpRecord  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.constants import METADATA_OPS  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
@@ -128,8 +129,8 @@ LANGUAGES = frozenset({"python", "js", "node"})
 # here, `patchNodeFs` on the typescript host), which runs a program in the
 # runner's own process with `open` and `os` pointed at the workspace.
 HOST_RUNTIME = "host"
-# The expect keys that read the workspace's op ledger.
-LEDGER_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
+# The expect keys that read the workspace's op log.
+OP_LOG_CHECKS = frozenset({"ops_contain", "ops_absent", "ops_count"})
 # What a `runtimes` entry needs on this host before it can run. A runtime
 # missing here does not exist on this host (pyodide is typescript's), so
 # its variant is not listed at all.
@@ -1034,8 +1035,43 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     return ws
 
 
+def _newest_op(ws: Workspace) -> OpRecord | None:
+    """The op log's newest record, for a step to begin after.
+
+    Args:
+        ws (Workspace): the workspace under test.
+    """
+    records = ws.vfs.records
+    return records[-1] if records else None
+
+
+def _ops_after(ws: Workspace, newest: OpRecord | None) -> list[str]:
+    """The ops the op log took after ``newest``, each as ``op path``.
+
+    The op log drops records in place once it holds enough of them, so a
+    count taken before a step is no index into it afterwards; the record
+    the step began after still marks where its own start.
+
+    Args:
+        ws (Workspace): the workspace under test.
+        newest (OpRecord | None): the newest record before the step,
+            None when the op log was empty.
+    """
+    records = ws.vfs.records
+    start = 0
+    if newest is not None:
+        start = len(records)
+        while start > 0 and records[start - 1] is not newest:
+            start -= 1
+        if start == 0:
+            raise RuntimeError(
+                "the op log dropped the record this step began after"
+            )
+    return [f"{r.op} {r.path}" for r in records[start:]]
+
+
 def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
-    """Ledger expectations for one step, against the ops it added.
+    """Op log expectations for one step, against the ops it added.
 
     Args:
         expect (dict[str, Any]): the step's expect block; ``ops_contain``
@@ -1048,15 +1084,15 @@ def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
     problems = []
     for entry in expect.get("ops_contain", []):
         if entry not in recorded:
-            problems.append(f"ledger missing {entry!r}: got {seen!r}")
+            problems.append(f"op log missing {entry!r}: got {seen!r}")
     for entry in expect.get("ops_absent", []):
         if entry in recorded:
-            problems.append(f"ledger must not hold {entry!r}: got {seen!r}")
+            problems.append(f"op log must not hold {entry!r}: got {seen!r}")
     for entry, want in expect.get("ops_count", {}).items():
         got = sum(1 for s in seen if entry in (s, s.partition(" ")[0]))
         if got != want:
             problems.append(
-                f"ledger holds {entry!r} {got} times, not {want}: got {seen!r}"
+                f"op log holds {entry!r} {got} times, not {want}: got {seen!r}"
             )
     return problems
 
@@ -1161,7 +1197,7 @@ async def _run_parallel(
 
     The branches start together, so their ops reach the mounts
     interleaved as two agents' would, and each is checked against its
-    own ``expect``. A branch cannot check the ledger: the workspace
+    own ``expect``. A branch cannot check the op log: the workspace
     keeps one, and every branch's ops land in it.
 
     Args:
@@ -1170,14 +1206,14 @@ async def _run_parallel(
         index (int): the step's place in the case.
         branches (list[dict[str, Any]]): the steps to run together.
     """
-    ledger = [
+    refused = [
         f"{case_id} step[{index}].parallel[{k}]: a branch cannot check "
-        "the ledger, which holds every branch's ops"
+        "the op log, which holds every branch's ops"
         for k, branch in enumerate(branches)
-        if set(branch.get("expect", {})) & LEDGER_CHECKS
+        if set(branch.get("expect", {})) & OP_LOG_CHECKS
     ]
-    if ledger:
-        return ledger
+    if refused:
+        return refused
     runs = []
     for k, branch in enumerate(branches):
         session_id = f"parallel-{index}-{k}"
@@ -1272,9 +1308,9 @@ async def _perform_step(
     handles: RetainedHandles | None = None,
 ) -> list[str]:
     expect = step.get("expect", {})
-    # The ledger slice this step adds: ws.vfs.records is the one
+    # The op log slice this step adds: ws.vfs.records is the one
     # workspace-wide account, so the step's own ops are the tail.
-    ledger_before = len(ws.vfs.records)
+    newest = _newest_op(ws)
     if "add_policies" in step:
         for spec in step["add_policies"]:
             ws.policies.add(_build_policy(spec))
@@ -1305,12 +1341,12 @@ async def _perform_step(
             problems.append(
                 f"handle content {content!r}, expected {expect['content']!r}"
             )
-        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+        seen = _ops_after(ws, newest)
         problems.extend(_check_ops(expect, seen))
         return [f"{case_id} {label}: {p}" for p in problems]
     if "facade" in step:
         problems = await _run_facade(ws, expect, step["facade"])
-        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+        seen = _ops_after(ws, newest)
         problems.extend(_check_ops(expect, seen))
         return [f"{case_id} {label}: {p}" for p in problems]
     if "s3_put" in step:
@@ -1411,7 +1447,7 @@ async def _perform_step(
     stdout = await result.stdout_str()
     stderr = await result.stderr_str()
     problems = _check(case_id, label, expect, result.exit_code, stdout, stderr)
-    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+    seen = _ops_after(ws, newest)
     problems.extend(
         f"{case_id} {label}: {p}" for p in _check_ops(expect, seen)
     )
@@ -1735,7 +1771,7 @@ def _run_host_program(
             ``stdin`` what the program reads.
     """
     expect = step.get("expect", {})
-    ledger_before = len(ws.vfs.records)
+    newest = _newest_op(ws)
     stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
     stderr = io.TextIOWrapper(
         io.BytesIO(), encoding="utf-8", errors="backslashreplace"
@@ -1775,7 +1811,7 @@ def _run_host_program(
     out = stdout.buffer.getvalue().decode(errors="replace")
     err = stderr.buffer.getvalue().decode(errors="replace")
     problems = _check(case_id, label, expect, exit_code, out, err)
-    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+    seen = _ops_after(ws, newest)
     problems.extend(
         f"{case_id} {label}: {p}" for p in _check_ops(expect, seen)
     )

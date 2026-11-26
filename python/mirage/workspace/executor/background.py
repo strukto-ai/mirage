@@ -749,7 +749,7 @@ async def handle_background(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run left side in background.
 
-    ``handed`` and ``decisions`` are the line's hand-off and the ledger
+    ``handed`` and ``decisions`` are the line's hand-off and the decisions
     it lives in. The claims the line's pass made for the commands inside
     the job are copied onto one of the job's own before the job starts
     (``Decisions.split``): its gates run after the line has returned,
@@ -1095,7 +1095,7 @@ async def run_statement(
             the caller wired no job plane, which is a programming
             error once a ``&`` shows up, not a reason to run inline.
         handed (HandOff | None): approval claims inherited by a job.
-        decisions (Decisions | None): ledger that holds those claims.
+        decisions (Decisions | None): the decisions that hold those claims.
     """
     session = context.session
     if not is_backgrounded(node):

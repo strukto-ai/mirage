@@ -387,7 +387,7 @@ describe('RuntimeFiles transport', () => {
 
   it('forwards truncate as its own op, never a write', async () => {
     // The bridge used to lack the verb, so quickjs faked it with write:
-    // the ledger recorded the wrong op and a backend with a native
+    // the op log recorded the wrong op and a backend with a native
     // truncate got a whole-file write instead.
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     const vfs = new RuntimeFiles(dispatch)

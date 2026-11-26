@@ -629,7 +629,7 @@ describe('IndexView cleanup after a re-list', () => {
       fingerprint: name,
     })
 
-  function ledger(): [Evicted[], (gone: readonly Evicted[]) => Promise<void>] {
+  function evicted(): [Evicted[], (gone: readonly Evicted[]) => Promise<void>] {
     const seen: Evicted[] = []
     return [
       seen,
@@ -641,7 +641,7 @@ describe('IndexView cleanup after a re-list', () => {
   }
 
   it('hands each dropped child to cleanup', async () => {
-    const [seen, onGone] = ledger()
+    const [seen, onGone] = evicted()
     const view = new IndexView(
       new RAMIndexCacheStore(),
       new RAMFileCacheStore(),
@@ -661,7 +661,7 @@ describe('IndexView cleanup after a re-list', () => {
   })
 
   it('hands nothing to cleanup for a window', async () => {
-    const [seen, onGone] = ledger()
+    const [seen, onGone] = evicted()
     const view = new IndexView(
       new RAMIndexCacheStore(),
       new RAMFileCacheStore(),
@@ -676,7 +676,7 @@ describe('IndexView cleanup after a re-list', () => {
 
   // A nested mount took /data/n after the parent listed it.
   it('skips a key the mount no longer owns', async () => {
-    const [seen, onGone] = ledger()
+    const [seen, onGone] = evicted()
     const owned = new Set(['/data', '/data/a', '/data/n'])
     const view = new IndexView(
       new RAMIndexCacheStore(),
@@ -699,7 +699,7 @@ describe('IndexView cleanup after a re-list', () => {
 
   // The mount table can change between the fenced write and the cleanup.
   it('rechecks ownership after the write', async () => {
-    const [seen, onGone] = ledger()
+    const [seen, onGone] = evicted()
     const owned = new Set(['/data', '/data/a'])
     const store = new RAMIndexCacheStore()
     const view = new IndexView(store, new RAMFileCacheStore(), '/data', (k) => owned.has(k), {
@@ -734,7 +734,7 @@ describe('IndexView cleanup after a re-list', () => {
   })
 
   it('hands owned reported keys to cleanup', async () => {
-    const [seen, onGone] = ledger()
+    const [seen, onGone] = evicted()
     const view = new IndexView(
       new RAMIndexCacheStore(),
       new RAMFileCacheStore(),

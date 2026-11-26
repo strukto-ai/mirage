@@ -1404,7 +1404,7 @@ class _Box(Runtime, LineExecutorMixin):
 async def test_a_whole_line_runtime_is_gated_like_the_tree():
     # A runtime that captures the raw line runs it under the same
     # rules: every parsed command clears the policy chain and the
-    # approval ledger before the runtime sees a byte, so a
+    # decisions before the runtime sees a byte, so a
     # captured line cannot run what the tree would refuse.
     box = _Box()
     ws = Workspace(
@@ -1997,7 +1997,7 @@ async def _host_denies(record: Decision) -> Decision:
 
 @pytest.mark.asyncio
 async def test_a_blocking_host_answers_inside_the_line():
-    # The host is a plain coroutine over the ledger's own record, not a
+    # The host is a plain coroutine over the decisions' own record, not a
     # class implementing a protocol: it answers by returning the record
     # with an outcome set.
     ws = _ask_ws(on_ask=_host_allows_once)

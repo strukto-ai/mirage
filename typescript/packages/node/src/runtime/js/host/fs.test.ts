@@ -629,7 +629,7 @@ describe('patchNodeFs — descriptors', () => {
   })
 })
 
-describe('patchNodeFs — ledger', () => {
+describe('patchNodeFs — op log', () => {
   it('records each call on ws.vfs.records', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

@@ -299,7 +299,7 @@ One session's handle, from [`ws.session`](#workspace-methods). Every call on it 
 <ResponseField name="state" type="SessionState">The session's record, as returned by [`ws.listSessions`](#workspace-methods).</ResponseField>
 <ResponseField name="vfs" type="Files">The file API, below.</ResponseField>
 <ResponseField name="tools" type="MirageToolOperations">The agent tools, below.</ResponseField>
-<ResponseField name="decisions" type="Decisions">The workspace's [asks](/home/policy/policies#asks) ledger, which records pending approval requests for this session.</ResponseField>
+<ResponseField name="decisions" type="Decisions">The workspace's decisions on [asks](/home/policy/policies#asks), which hold pending approval requests for this session.</ResponseField>
 
 ### session.shell
 

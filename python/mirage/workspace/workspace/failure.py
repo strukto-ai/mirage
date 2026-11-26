@@ -43,7 +43,7 @@ def placement_refused(action: Deny | Pending, command: str) -> IOResult:
     name like every per-command error.
 
     Args:
-        action (Deny | Pending): the stage's refusal, or the ledger's
+        action (Deny | Pending): the stage's refusal, or the decisions'
             open question.
         command (str): the raw command line, for the diagnostic name.
     """

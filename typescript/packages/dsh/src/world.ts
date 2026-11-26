@@ -39,7 +39,7 @@ export interface MirageWorld {
   readonly workspace: Workspace
   /** The workspace in this process, or null while it builds and for a remote world. */
   readonly workspaceIfReady: Workspace | null
-  /** The decision ledger of the workspace in this process. */
+  /** The decisions of the workspace in this process. */
   readonly decisions: Workspace['decisions']
   /** True while every runtime in the world reaches only the VFS: the claim behind `workspace-write`. */
   readonly vfsOnly: boolean

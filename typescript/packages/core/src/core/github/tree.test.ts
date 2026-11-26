@@ -262,7 +262,7 @@ describe('the point request', () => {
   })
 })
 
-function ledgered(): { gone: Evicted[]; index: IndexView } {
+function recording(): { gone: Evicted[]; index: IndexView } {
   const gone: Evicted[] = []
   const index = new IndexView(
     new RAMIndexCacheStore(),
@@ -297,7 +297,7 @@ describe('a relisting reports what left the repository', () => {
     const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'd1/b.txt': 'b', 'top.txt': 't' })
     vi.stubGlobal('fetch', gh.fetch)
     const accessor = servedAccessor()
-    const { gone, index } = ledgered()
+    const { gone, index } = recording()
     await relist(accessor, index)
     expect(gone).toEqual([])
     for (const path of removed) gh.files.delete(path)

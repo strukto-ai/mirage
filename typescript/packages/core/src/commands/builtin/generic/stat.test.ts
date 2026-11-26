@@ -278,7 +278,7 @@ describe('stat -c directive formatting', () => {
     const quota = {
       ...ctx('%T %S %b %f %a %c %d %i %5l|'),
       flags: { format: '%T %S %b %f %a %c %d %i %5l|', file_system: true },
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
     const result = await statGeneric([PathSpec.fromStrPath('/data/f.txt')], quota, () =>
       Promise.resolve(fs()),

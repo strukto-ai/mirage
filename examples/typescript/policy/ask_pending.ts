@@ -50,7 +50,7 @@ async function run(ws: Workspace, line: string): Promise<void> {
 
 async function main(): Promise<void> {
   // No `onAsk`: nobody answers inline, so an asked line is refused for
-  // now and its question waits in the ledger under an id the agent is
+  // now and its question waits among the decisions under an id the agent is
   // told to quote.
   const ws = new Workspace(
     { "/data/": new RAMVFS() },

@@ -338,7 +338,7 @@ async def _run_alias(
 
     Args:
         recurse (Callable): runs the rewritten line.
-        registry (MountRegistry): holds the decision ledger.
+        registry (MountRegistry): holds the decisions.
         node (TSNodeLike): the command.
         parts (list[TSNodeLike]): its words past the prefix assignments.
         context (EvaluationContext): the evaluation.

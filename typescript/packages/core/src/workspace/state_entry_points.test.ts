@@ -101,7 +101,7 @@ describe('name-plane writes go through the dispatcher', () => {
   })
 
   it('ln leaves an op record', async () => {
-    // The op ledger must not say a workspace with ln traffic did
+    // The op log must not say a workspace with ln traffic did
     // nothing: the dispatcher records the namespace write like any other op.
     const ws = makeWs()
     const io = await ws.shell('ln -s x.txt /a/lk')
@@ -1614,7 +1614,7 @@ describe('command permissions end to end', () => {
   it('a whole-line runtime is gated like the tree', async () => {
     // A runtime that captures the raw line runs it under the same
     // tiers: every parsed command clears the policy chain and the
-    // approval ledger before the runtime sees a byte, so a
+    // decisions before the runtime sees a byte, so a
     // captured line cannot run what the tree would refuse.
     const box = new Box()
     const ws = new Workspace(
@@ -2112,7 +2112,7 @@ describe('ask end to end', () => {
   })
 
   it('a blocking host answers inside the line', async () => {
-    // The host is a plain function over the ledger's own record, not a
+    // The host is a plain function over the decisions' own record, not a
     // class implementing a protocol: it answers by returning the record
     // with an outcome set.
     const allowOnce = (r: Decision): Promise<Decision> =>

@@ -923,8 +923,8 @@ describe('Ask in the chain', () => {
     })
   })
 
-  it('an op ask with no ledger refuses like a deny', async () => {
-    // An entry point that cannot put the question (no ledger) refuses it, in the
+  it('an op ask with no decisions refuses like a deny', async () => {
+    // An entry point that cannot put the question (no decisions) refuses it, in the
     // deny voice, with the reason on the record.
     const policies = new Policies([new AskOnOps()])
     const refused = await preVfsGate(

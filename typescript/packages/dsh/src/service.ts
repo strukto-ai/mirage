@@ -316,7 +316,7 @@ export class MirageService extends Service implements MirageWorld {
   }
 
   /**
-   * The decision ledger: every ask this world has raised and every
+   * The decisions: every ask this world has raised and every
    * answer given, questions still waiting included.
    *
    * The host's handle on the ask layer. A composition with an approval

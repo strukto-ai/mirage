@@ -15,6 +15,8 @@
 import { VFSName } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
 import { underPath } from '../utils/key_prefix.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import { OP_LOG_RECORDS } from './constants.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -190,15 +192,171 @@ export class OpRecord {
 }
 
 /**
+ * Whether a snapshot's fingerprint capture changes a path's pin by `rec`:
+ * it retracts one, changes the bytes, or stamps a token. A read that carries
+ * no token and an op outside those sets change none. Mirrors Python's
+ * `changes_pin`.
+ */
+export function changesPin(rec: OpRecord): boolean {
+  if (RETRACT_FINGERPRINT_OPS.has(rec.op) || CONTENT_CHANGING_OPS.has(rec.op)) return true
+  return STAMP_FINGERPRINT_OPS.has(rec.op) && (rec.fingerprint !== null || rec.revision !== null)
+}
+
+/**
+ * The pins `rec` has the last word on until a later record has it, as
+ * fingerprint capture reads the op log: the one it is overruled in first. A
+ * retraction and a change of the bytes drop the pin at their path, a prefix
+ * op every pin beneath it too, and a token stamps the pin of its path and
+ * mount. A later drop at a path overrules an earlier one there, a later
+ * prefix op only another prefix op, and a later stamp the stamps of the same
+ * path and mount: a capture skips or takes both alike. Later is by
+ * timestamp, as a capture orders them, so a record that arrives after one it
+ * precedes changes nothing. A record that changes no pin settles none.
+ * Mirrors Python's `_settles`.
+ */
+function settles(rec: OpRecord): string[] {
+  if (RETRACT_FINGERPRINT_OPS.has(rec.op)) {
+    const base = rstripSlash(rec.path)
+    return SUBTREE_RETRACT_OPS.has(rec.op) ? [`sweep ${base}`, `drop ${base}`] : [`drop ${base}`]
+  }
+  if (
+    CONTENT_CHANGING_OPS.has(rec.op) &&
+    (!STAMP_FINGERPRINT_OPS.has(rec.op) || !(rec.fingerprint || rec.revision))
+  ) {
+    return [`drop ${rstripSlash(rec.path)}`]
+  }
+  if (STAMP_FINGERPRINT_OPS.has(rec.op) && (rec.fingerprint !== null || rec.revision !== null)) {
+    return [`stamp ${JSON.stringify([rec.path, rec.mountId])}`]
+  }
+  return []
+}
+
+/**
+ * A workspace's op log: every record that has the last word on a pin a
+ * snapshot takes, and the newest of the rest, which only account for an op.
+ *
+ * It holds at most `maxRecords` of the rest: past it the oldest go first,
+ * down to three quarters of it. A record a later one overrules (`settles`)
+ * goes once a quarter of `maxRecords` more that change a pin arrived, or half
+ * as many as the last such pass kept where that is more, so reading a file
+ * again adds no record for good and a pass over the pins costs in step with
+ * what arrived. The bytes a dropped record moved stay in the totals. A
+ * snapshot takes the same pins from what is left, in an order that can
+ * differ. Mirrors Python's `OpLog`.
+ */
+export class OpLog {
+  readonly records: OpRecord[] = []
+  readonly maxRecords: number
+  private unpinned = 0
+  private oldest = 0
+  private settling = 0
+  private settled = 0
+  private droppedNetworkBytes = 0
+  private droppedCacheBytes = 0
+
+  /** @param maxRecords the most records it holds that change no pin. */
+  constructor(maxRecords: number = OP_LOG_RECORDS) {
+    this.maxRecords = maxRecords
+  }
+
+  /** Take the records of an op or a line that ended, oldest first. */
+  add(records: Iterable<OpRecord>): void {
+    for (const rec of [...records]) {
+      this.records.push(rec)
+      if (changesPin(rec)) this.settling += 1
+      else this.unpinned += 1
+    }
+    if (this.settling > Math.max(Math.floor(this.maxRecords / 4), Math.floor(this.settled / 2))) {
+      this.fold()
+    }
+    if (this.unpinned > this.maxRecords) this.trim()
+  }
+
+  /** Let go of every record a later one overrules. */
+  private fold(): void {
+    const settled = this.records.map(settles)
+    const last = new Map<string, OpRecord>()
+    this.records.forEach((rec, at) => {
+      for (const pin of settled[at] ?? []) {
+        const held = last.get(pin)
+        if (held === undefined || held.timestamp <= rec.timestamp) last.set(pin, rec)
+      }
+    })
+    let kept = 0
+    let oldest: number | null = null
+    for (const [at, rec] of this.records.entries()) {
+      const judged = settled[at]?.[0]
+      if (judged !== undefined && last.get(judged) !== rec) {
+        this.dropped(rec)
+        continue
+      }
+      if (judged === undefined) oldest ??= kept
+      this.records[kept] = rec
+      kept += 1
+    }
+    this.records.length = kept
+    this.oldest = oldest ?? kept
+    this.settling = 0
+    this.settled = kept - this.unpinned
+  }
+
+  /**
+   * Let go of the oldest records that change no pin, down to three quarters
+   * of `maxRecords`. It reads on from the oldest of them, so the pins held
+   * before it are not read again.
+   */
+  private trim(): void {
+    let excess = this.unpinned - Math.floor((this.maxRecords * 3) / 4)
+    this.unpinned -= excess
+    let kept = this.oldest
+    let at = this.oldest
+    while (excess > 0) {
+      const rec = this.records[at]
+      at += 1
+      if (rec === undefined) break
+      if (changesPin(rec)) {
+        this.records[kept] = rec
+        kept += 1
+      } else {
+        excess -= 1
+        this.dropped(rec)
+      }
+    }
+    this.records.copyWithin(kept, at)
+    this.records.length -= at - kept
+    this.oldest = kept
+  }
+
+  private dropped(rec: OpRecord): void {
+    if (rec.isCache) this.droppedCacheBytes += rec.bytes
+    else this.droppedNetworkBytes += rec.bytes
+  }
+
+  /** Bytes every record it took moved over the network. */
+  get networkBytes(): number {
+    let total = this.droppedNetworkBytes
+    for (const r of this.records) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Bytes every record it took was served from cache. */
+  get cacheBytes(): number {
+    let total = this.droppedCacheBytes
+    for (const r of this.records) if (r.isCache) total += r.bytes
+    return total
+  }
+}
+
+/**
  * A line's recording: its records, the mount serving them, the workspace
- * ledger the line hands its records to when it ends (null for a file call's
+ * op log the line hands its records to when it ends (null for a file call's
  * own recording, which no other call joins), and the workspace clock every
  * op recorded here is timed and stamped on.
  */
 export interface Recorder {
   records: OpRecord[]
   mountId: string | null
-  ledger: OpRecord[] | null
+  opLog: OpLog | null
   clock: Clock
 }
 

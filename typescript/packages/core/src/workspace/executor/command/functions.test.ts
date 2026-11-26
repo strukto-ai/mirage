@@ -103,7 +103,7 @@ type Judged = [string, string[], (string | null)[]]
 
 /**
  * Run a line with every `touch` asked about once, and report the asks and,
- * for each time the ledger judged one, where it stood and the origins of the
+ * for each time the decisions judged one, where it stood and the origins of the
  * hand-offs it was judged under, innermost first.
  */
 async function judged(line: string): Promise<[string[], Judged[]]> {

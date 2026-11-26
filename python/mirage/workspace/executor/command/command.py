@@ -1112,7 +1112,7 @@ async def handle_command(
         dispatch,
         namespace.readers(lambda _session: session.visibility),
         follow=follow,
-        ledger=False,
+        log_ops=False,
     )
 
     def cli_context() -> CLIContext:

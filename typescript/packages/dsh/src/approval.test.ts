@@ -226,7 +226,7 @@ describe('an asked line with an approval channel', () => {
 })
 
 describe('an asked line with no approval channel', () => {
-  it('stays pending in the ledger rather than being rewritten as a deny', async () => {
+  it('stays pending among the decisions rather than being rewritten as a deny', async () => {
     const { shell, ws } = await world(ASK_RM)
     const run = await runOn(shell, shell.resolve({ command: 'rm /data/notes.txt' }))
     expect(run.exitCode).toBe(126)

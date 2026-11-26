@@ -23,7 +23,7 @@ import { driveLoc } from './client.ts'
  * Create an empty file.
  *
  * Not a delegation to `write`: that records the op as 'write', so a guest
- * creating a file and one writing one would be the same row in the ledger.
+ * creating a file and one writing one would be the same row in the op log.
  *
  * Args:
  *   accessor: OneDrive accessor.

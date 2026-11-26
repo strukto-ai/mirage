@@ -96,7 +96,7 @@ describe('conditional writes on an S3 mount', () => {
   beforeEach(() => {
     for (const b of mock.store.allBuckets()) mock.store.objects(b).clear()
     for (const [k, v] of Object.entries(SEED)) mock.store.set('b', k, ENC.encode(v))
-    mock.ledger.length = 0
+    mock.requests.length = 0
     mock.tripwire = false
     mock.pageSize = null
     mock.undeletable.clear()
@@ -124,11 +124,11 @@ describe('conditional writes on an S3 mount', () => {
     ws.createSession('a')
     ws.createSession('b')
     if (warm) await ws.shell('cat /s3/f', { sessionId: 'b' })
-    mock.ledger.length = 0
+    mock.requests.length = 0
     const read = await ws.shell(`${command} /s3/f`, { sessionId: 'a' })
     expect(read.exitCode, DEC.decode(read.stderr)).toBe(0)
     if (command === 'md5sum' && !warm)
-      expect(mock.ledger.some(([op]) => op === 'GetObject')).toBe(false)
+      expect(mock.requests.some(([op]) => op === 'GetObject')).toBe(false)
     expect((await ws.shell('echo peer > /s3/f', { sessionId: 'b' })).exitCode).toBe(0)
     const refused = await ws.shell('echo mine > /s3/f', { sessionId: 'a' })
     expect(refused.exitCode).toBe(1)
@@ -262,7 +262,7 @@ describe('conditional writes on an S3 mount', () => {
   })
 
   const mutations = (): [string, Record<string, string>][] =>
-    mock.ledger.filter(([op]) => MUTATIONS.has(op))
+    mock.requests.filter(([op]) => MUTATIONS.has(op))
   const sent = (op: string): Record<string, string>[] =>
     mutations()
       .filter(([name]) => name === op)
@@ -288,7 +288,7 @@ describe('conditional writes on an S3 mount', () => {
     expect([code, err.includes(STALE)], err).toEqual([1, true])
     expect(object(key)).toBeUndefined()
     await run(ws, `cat /s3/${key}`)
-    mock.ledger.length = 0
+    mock.requests.length = 0
     ;[code, , err] = await run(ws, `echo z > /s3/${key}`)
     expect(code, err).toBe(0)
     expect(object(key)).toBe('z\n')
@@ -406,7 +406,7 @@ describe('conditional writes on an S3 mount', () => {
     async (_name, setup, line, op, expected) => {
       const ws = workspace()
       for (const prior of setup) expect((await run(ws, prior))[0], prior).toBe(0)
-      mock.ledger.length = 0
+      mock.requests.length = 0
       const [code, , err] = await run(ws, line)
       expect([code, err]).toEqual([0, ''])
       expect(sent(op)).toEqual(expected)
@@ -423,7 +423,7 @@ describe('conditional writes on an S3 mount', () => {
     async (read, call, key, data, expected) => {
       const ws = workspace()
       if (read) await ws.vfs.read(`/s3/${key}`)
-      mock.ledger.length = 0
+      mock.requests.length = 0
       if (call === 'pwrite') await ws.vfs.pwrite(`/s3/${key}`, ENC.encode(data), 0)
       else await ws.vfs[call](`/s3/${key}`, ENC.encode(data))
       expect(sent('PutObject')).toEqual(expected)
@@ -458,7 +458,7 @@ describe('conditional writes on an S3 mount', () => {
     const ws = workspace()
     await run(ws, 'cat /s3/f')
     mock.store.delete('b', 'f')
-    mock.ledger.length = 0
+    mock.requests.length = 0
     const [, out, err] = await run(ws, 'echo a > /s3/f; cat /s3/f; echo b > /s3/f; echo $?')
     expect([out, err.split(STALE).length - 1], err).toEqual(['0\n', 1])
     expect(object('f')).toBe('b\n')
@@ -473,7 +473,7 @@ describe('conditional writes on an S3 mount', () => {
     })
     let [code, , err] = await run(ws, 'echo x >> /s3/new')
     expect([code, err.includes(STALE)], err).toEqual([1, true])
-    mock.ledger.length = 0
+    mock.requests.length = 0
     ;[code, , err] = await run(ws, 'echo y > /s3/new')
     expect([code, err.includes(STALE)], err).toEqual([1, true])
     expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }])
@@ -502,7 +502,7 @@ describe('conditional writes on an S3 mount', () => {
       const ws = workspace()
       await run(ws, 'test -e /s3/new')
       theirs('new')
-      mock.ledger.length = 0
+      mock.requests.length = 0
       const [code, , err] = await run(ws, `${verb} /s3/f /s3/new`)
       expect(code, err).toBe(1)
       expect(sent('CopyObject')[0]).toMatchObject({ IfNoneMatch: '*' })
@@ -515,7 +515,7 @@ describe('conditional writes on an S3 mount', () => {
     const ws = workspace()
     await run(ws, 'cat /s3/f')
     mock.store.delete('b', 'f')
-    mock.ledger.length = 0
+    mock.requests.length = 0
     mock.before('PutObject', () => {
       mock.store.set('b', 'f', ENC.encode(SEED.f ?? ''))
     })
@@ -539,7 +539,7 @@ describe('conditional writes on an S3 mount', () => {
       if (call === 'shell') await run(ws, 'cat /s3/f')
       else await ws.vfs.read('/s3/f')
       mock.store.delete('b', 'f')
-      mock.ledger.length = 0
+      mock.requests.length = 0
       mock.before('PutObject', () => {
         mock.store.set('b', 'f', ENC.encode(SEED.f ?? ''))
       })
@@ -624,9 +624,9 @@ describe('conditional writes on an S3 mount', () => {
       expect(err.includes(STALE) && err.startsWith(prefix), err).toBe(true)
       expect(object(key)).toBe('theirs\n')
       expect(object('new')).toBeUndefined()
-      mock.ledger.length = 0
+      mock.requests.length = 0
       expect(await run(ws, `cat /s3/${key}`)).toEqual([0, 'theirs\n', ''])
-      expect(mock.ledger.filter(([op]) => op === 'GetObject').length).toBe(1)
+      expect(mock.requests.filter(([op]) => op === 'GetObject').length).toBe(1)
     },
   )
 
@@ -728,7 +728,7 @@ describe('conditional writes on an S3 mount', () => {
       const ws = workspace()
       await run(ws, 'cat /s3/f')
       theirs()
-      mock.ledger.length = 0
+      mock.requests.length = 0
       for (const line of lines) {
         const [code, , err] = await run(ws, line)
         expect(code === 1 && err.includes(STALE), `${line}: ${err}`).toBe(true)
@@ -1112,7 +1112,7 @@ describe('conditional writes on an S3 mount', () => {
     const ws = workspace()
     const core = new MountCore(ws.vfs)
     expect(DEC.decode(await core.read('/s3/d/a', -1, 0, 100))).toBe('a\n')
-    mock.ledger.length = 0
+    mock.requests.length = 0
     const fd = await core.open(
       '/s3/d/a',
       openMode(constants.O_WRONLY | constants.O_TRUNC, constants),
@@ -1170,7 +1170,7 @@ describe('conditional writes on an S3 mount', () => {
       expect((await run(ws, line))[0], line).toBe(0)
     }
     expect(mutations().every(([, params]) => Object.keys(params).length === 0)).toBe(true)
-    mock.ledger.length = 0
+    mock.requests.length = 0
     expect(await run(ws, 'echo new >> /s3/new')).toEqual([0, '', ''])
     expect(sent('PutObject')).toEqual([{ IfNoneMatch: '*' }, {}])
     // Nor does it keep a version without bytes: a read that keeps none
@@ -1185,11 +1185,11 @@ describe('conditional writes on an S3 mount', () => {
       '/u': new Mount(s3Vfs('u'), { mode: MountMode.WRITE }),
     })
     await run(ws, 'cat /s3/f')
-    mock.ledger.length = 0
+    mock.requests.length = 0
     expect((await run(ws, 'cp /s3/f /u/f'))[0]).toBe(0)
     expect((await run(ws, 'sort -o /u/g /s3/f'))[0]).toBe(0)
     expect(mutations().every(([, params]) => Object.keys(params).length === 0)).toBe(true)
-    mock.ledger.length = 0
+    mock.requests.length = 0
     expect((await run(ws, 'cat /u/f; cp /u/f /s3/f'))[0]).toBe(0)
     expect(mutations()).toEqual([['PutObject', ONE]])
   })
@@ -1382,10 +1382,10 @@ describe('conditional writes on an S3 mount', () => {
     for (const policy of [WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL]) {
       for (const b of mock.store.allBuckets()) mock.store.objects(b).clear()
       for (const [k, v] of Object.entries(SEED)) mock.store.set('b', k, ENC.encode(v))
-      mock.ledger.length = 0
+      mock.requests.length = 0
       const [code, , err] = await run(workspace(policy), line)
       expect(code, `${policy}: ${err}`).toBe(0)
-      ops[policy] = mock.ledger.map(([op]) => op)
+      ops[policy] = mock.requests.map(([op]) => op)
     }
     expect(ops[WritePolicy.CONDITIONAL]).toEqual(ops[WritePolicy.UNCONDITIONAL])
   })

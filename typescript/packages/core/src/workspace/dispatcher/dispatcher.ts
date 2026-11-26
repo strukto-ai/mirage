@@ -692,7 +692,7 @@ export class Dispatcher {
   // So does the workspace's write admission, which holds a write while a
   // capture reads.
   private readonly admitWrite: AdmitWrite | null
-  // And the approval ledger, which a path rule that asks is put to where
+  // And the decisions, which a path rule that asks is put to where
   // no line is running.
   private readonly decisions: Decisions | null
   private access: SessionAccess | undefined

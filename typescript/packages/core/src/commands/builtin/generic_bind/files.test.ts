@@ -109,7 +109,7 @@ function contextFor(
   { prefixes = [], row = null, signal }: Mounts = {},
 ): Context {
   const rows = [...(row === null ? [] : [row]), ...prefixes.filter((p) => p !== row?.prefix)]
-  const vfs = new Files(dispatch, readers(rows), null, { ledger: false })
+  const vfs = new Files(dispatch, readers(rows), null, { logOps: false })
   return { stdin: null, flags: {}, cwd: at('/'), vfs, ...(signal === undefined ? {} : { signal }) }
 }
 

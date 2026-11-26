@@ -127,7 +127,7 @@ async function drained([source, io, ran]: RedirectResult): Promise<RedirectResul
  *
  * `deps.dispatch` is the dispatcher, threaded so an active `exec` redirect
  * can send each statement's output to its file. `deps.handed` and the
- * registry's `decisions` are the line's hand-off and its ledger, for a
+ * registry's `decisions` are the line's hand-off and what holds it, for a
  * background job to borrow. `deps.sink` takes each statement's output as it
  * finishes, in the order it was written, instead of the result. The outermost program of a
  * session's line routes what a statement wrote to the session's terminal

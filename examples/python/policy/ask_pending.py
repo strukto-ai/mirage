@@ -47,7 +47,7 @@ async def run(ws: Workspace, line: str) -> None:
 
 async def main() -> None:
     # No `on_ask`: nobody answers inline, so an asked line is refused for
-    # now and its question waits in the ledger under an id the agent is
+    # now and its question waits among the decisions under an id the agent is
     # told to quote.
     ws = Workspace(
         {"/data/": RAMVFS()}, mode=MountMode.WRITE, profiles={"agent": ROLE}

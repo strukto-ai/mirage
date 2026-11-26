@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.observe import OpRecord
-from mirage.observe.record import RecordIndex
+from mirage.observe.record import OpLog, RecordIndex
 from mirage.workspace.types import ExecutionNode
 
 
@@ -189,3 +189,108 @@ def test_the_index_reads_each_record_once():
     index.newest_version("/a")
     records[0] = _op("read", "/b")
     assert index.newest_version("/b") is None
+
+
+def test_the_op_log_drops_the_oldest_records_that_change_no_pin():
+    def rec(op: str, source: str = "disk", fingerprint: str | None = None):
+        return OpRecord(
+            op=op,
+            path="/data/" + op,
+            source=source,
+            bytes=10,
+            timestamp=0,
+            duration_ms=0,
+            fingerprint=fingerprint,
+        )
+
+    log = OpLog(max_records=4)
+    stamp, gone, kept = rec("read", "s3", "etag"), rec("unlink"), rec("read")
+    log.add([rec("read"), stamp, rec("stat", "ram"), gone, kept])
+    assert len(log.records) == 5
+    newest = [rec("read"), rec("readdir")]
+    log.add(newest)
+    assert [id(r) for r in log.records] == [
+        id(r) for r in (stamp, gone, kept, *newest)
+    ]
+    assert (log.network_bytes, log.cache_bytes) == (60, 10)
+    # A later trim reads on from the oldest it kept, past the pins.
+    more = [rec("stat"), rec("stat"), rec("stat")]
+    log.add(more)
+    assert [id(r) for r in log.records] == [
+        id(r) for r in (stamp, gone, *more)
+    ]
+    assert (log.network_bytes, log.cache_bytes) == (90, 10)
+
+
+# A later stamp of a path overrules the earlier ones of the same mount, a
+# later drop the earlier drops there, and a later prefix op an earlier
+# prefix op and drop there, so reading or writing a file again leaves one
+# record of it. A stamp of another mount and a prefix op followed by a
+# drop both stay, and a record that arrives late with an earlier time is
+# overruled as it lands.
+def test_the_op_log_drops_a_record_a_later_one_overrules():
+    def rec(
+        op: str,
+        path: str,
+        timestamp: int,
+        fingerprint: str | None = None,
+        mount_id: str | None = None,
+    ) -> OpRecord:
+        return OpRecord(
+            op=op,
+            path=path,
+            source="s3",
+            bytes=10,
+            timestamp=timestamp,
+            duration_ms=0,
+            fingerprint=fingerprint,
+            mount_id=mount_id,
+        )
+
+    def held() -> list[int]:
+        return [id(r) for r in log.records]
+
+    log = OpLog(max_records=3)
+    read = rec("read", "/s3/a", 1, "v1")
+    replaced = rec("read", "/s3/a", 2, "v1", "gone")
+    appended = rec("append", "/s3/b", 3)
+    swept = rec("rm_r", "/s3/c", 4)
+    log.add([read, replaced, appended, swept])
+    assert held() == [id(r) for r in (read, replaced, appended, swept)]
+    again = rec("read", "/s3/a", 5, "v2")
+    removed = rec("unlink", "/s3/b", 6)
+    inside = rec("append", "/s3/c", 7)
+    log.add([again, removed, inside, rec("read", "/s3/a", 0, "v0")])
+    assert held() == [id(r) for r in (replaced, swept, again, removed, inside)]
+    resweep = rec("rm_r", "/s3/c", 9)
+    others = [rec("read", f"/s3/{name}", 10, "v") for name in "def"]
+    log.add([resweep, *others])
+    assert held() == [
+        id(r) for r in (replaced, again, removed, resweep, *others)
+    ]
+    assert (log.network_bytes, log.cache_bytes) == (120, 0)
+
+
+# The cap on the rest holds at every add, however many pins the op log
+# keeps: a pass over the pins waits for half as many more, and the rest
+# is trimmed without it.
+def test_the_op_log_holds_its_cap_of_the_rest_beside_many_pins():
+    def rec(op: str, path: str, fingerprint: str | None = None) -> OpRecord:
+        return OpRecord(
+            op=op,
+            path=path,
+            source="s3",
+            bytes=1,
+            timestamp=0,
+            duration_ms=0,
+            fingerprint=fingerprint,
+        )
+
+    log = OpLog(max_records=4)
+    pins = [rec("read", f"/s3/{i}", "v") for i in range(200)]
+    log.add(pins)
+    for i in range(20):
+        log.add([rec("stat", f"/s3/{i}")])
+        assert sum(r.fingerprint is None for r in log.records) <= 4
+    assert [id(r) for r in log.records[:200]] == [id(r) for r in pins]
+    assert log.network_bytes == 220

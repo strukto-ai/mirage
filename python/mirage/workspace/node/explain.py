@@ -347,7 +347,7 @@ async def _explained(
 
     Args:
         ctx (CommandContext): the classified command.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         asked (Deny | Ask | None): what the policy chain answered.
         answers (tuple[Deny | Ask | Route, ...]): the answers it came
             from.
@@ -405,7 +405,7 @@ async def _explained(
 class Judged:
     """One command's explanation and where the command stands.
 
-    The occurrence is what the pass hands the ledger beside the
+    The occurrence is what the pass hands the decisions beside the
     explanation: a grant claimed for the command is bound to it, so
     the gate that runs the same occurrence finds it and no other
     reader does.
@@ -641,7 +641,7 @@ async def _judge_words(
     Args:
         item (Walked): the read command and its place in the shell.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         mode (JudgmentMode): how this judgment reads the command and policies.
     """
@@ -1782,7 +1782,7 @@ async def line_judgments(
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, whose origin places each
             command on the line.
@@ -1922,7 +1922,7 @@ async def prejudge_line(
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, on which every grant
             claimed here rides to the executor's sweep.
@@ -1969,7 +1969,7 @@ async def _admitted(
     handed: HandOff | None,
     cancel: asyncio.Event | None,
 ) -> Refused | None:
-    """One judged command put through the ledger, as the gate puts it.
+    """One judged command put through the decisions, as the gate puts it.
 
     A command refused before any policy was asked (``Judged.ctx`` None)
     stands as judged. Otherwise the chain's answer the judgment recorded
@@ -1979,7 +1979,7 @@ async def _admitted(
 
     Args:
         one (Judged): the command's judgment and its place on the line.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         handed (HandOff | None): the line's hand-off, None outside a
             line.
         cancel (asyncio.Event | None): the run's kill channel.
@@ -2046,7 +2046,7 @@ async def admit_line(
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         cancel (asyncio.Event | None): the run's kill channel.
         handed (HandOff | None): the line's hand-off, None outside a
@@ -2142,13 +2142,13 @@ async def _verdict_refuses(
     outright. An ask's settled record is read without being spent
     (``Decisions.held``), so the gate that then runs the line consumes
     the same answer, in its own voice and behind the line's
-    redirections; an unanswered rule is raised through the same ledger
+    redirections; an unanswered rule is raised through the same decisions
     the gate reads, so the answer lands exactly once and the gate does
     not ask again.
 
     Args:
         judged (Judged): the verdict's explanation and its occurrence.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
@@ -2234,13 +2234,13 @@ async def _command_refused(
     line: bool = False,
 ) -> bool:
     """Whether one walked command is refused on its text, resolving an
-    unanswered ask through the ledger the gate reads.
+    unanswered ask through the decisions the gate reads.
 
     Args:
         item (Walked): the command's words, redirect targets, the
             session it is judged in and its place on the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off.
         cancel (asyncio.Event | None): the run's kill channel.
@@ -2305,7 +2305,7 @@ async def unrefused_nodes(
     an effect: contacting a secret store for a line the host then
     refuses would do a piece of exactly what was refused. A settled
     answer is read without being spent; an unanswered rule is put to
-    the host now, through the same ledger the gate reads, so the answer
+    the host now, through the same decisions the gate reads, so the answer
     lands exactly once -- an approval keeps the node and the gate
     consumes the grant, while a denial or a question left waiting drops
     it, and the line still runs into the gate, which refuses in place
@@ -2316,7 +2316,7 @@ async def unrefused_nodes(
             the line's own tree first.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         handed (HandOff): the line's hand-off, on which an approval
             given here is claimed for the gate.
@@ -2368,7 +2368,7 @@ async def _judge_line(
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         frame (Frame): the scope the line is read in.
         mode (JudgmentMode): how this judgment reads the commands and policies.
@@ -2715,7 +2715,7 @@ async def line_held(
     Args:
         judged (list[tuple[Walked, list[Judged]]]): the line's read-only
             judgments (:func:`line_judgments`).
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         handed (HandOff): the line's hand-off, on which an answer given
             here is claimed for the gate.
         cancel (asyncio.Event | None): the run's kill channel.
@@ -2780,7 +2780,7 @@ async def explain_line(
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
-            decision ledger and the CLI installs.
+            decisions and the CLI installs.
         namespace (Namespace | None): the link table.
         mode (JudgmentMode): how this judgment reads the commands and policies.
     """
@@ -2819,7 +2819,7 @@ def explain_redirects(
     Args:
         ast (Any): the parsed root node.
         session (SessionState): the session running the line.
-        registry (MountRegistry): registry holding the decision ledger.
+        registry (MountRegistry): registry holding the decisions.
         namespace (Namespace | None): the link table.
     """
     out: list[Opened] = []

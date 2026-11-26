@@ -212,7 +212,7 @@ def op_question(
     ctx: VfsContext | RouteContext | ExecuteResultContext,
     ask: Ask,
 ) -> tuple[CommandContext, Ask]:
-    """A question about no command as the ledger keys it: no command,
+    """A question about no command as the decisions key it: no command,
     and the words of its record are what was asked about: the path of a
     VFS call, the line.
 
@@ -649,13 +649,13 @@ class Decisions(DecisionOwner):
 
 
 def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
-    """The call running in this context under ``owner``'s ledger for
-    ``session_id``, None for a bare op, for a call another ledger runs
-    (a host callback reaching a second workspace mid-call) or for
-    another session's call.
+    """The call running in this context under ``owner`` for
+    ``session_id``, None for a bare op, for a call another workspace's
+    decisions run (a host callback reaching a second workspace mid-call)
+    or for another session's call.
 
     Args:
-        owner (Decisions): the ledger asking.
+        owner (Decisions): the decisions asking.
         session_id (str): the session asking.
     """
     return call_of(current_caller(), owner, session_id)
@@ -664,13 +664,13 @@ def get_op_call(owner: Decisions, session_id: str) -> HandOff | None:
 def call_of(
     caller: Caller, owner: Decisions, session_id: str
 ) -> HandOff | None:
-    """The call ``caller`` runs in under ``owner``'s ledger for
-    ``session_id``, None for a bare op, for a call another ledger runs
-    or for another session's call.
+    """The call ``caller`` runs in under ``owner`` for ``session_id``,
+    None for a bare op, for a call another workspace's decisions run or
+    for another session's call.
 
     Args:
         caller (Caller): who is calling.
-        owner (Decisions): the ledger asking.
+        owner (Decisions): the decisions asking.
         session_id (str): the session asking.
     """
     call = caller.call

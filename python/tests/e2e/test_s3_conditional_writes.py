@@ -111,7 +111,7 @@ def _minio_mount() -> Mount:
 def _mutations(
     client: MultiBucketS3Client,
 ) -> list[tuple[str, dict[str, str]]]:
-    return [e for e in client.ledger if e[0] in MUTATIONS]
+    return [e for e in client.requests if e[0] in MUTATIONS]
 
 
 def _sent(client: MultiBucketS3Client, op: str) -> list[dict[str, str]]:
@@ -150,7 +150,7 @@ async def _refused_until_read(
     assert (code, STALE in err) == (1, True), err
     assert key not in fake.buckets["b"]
     await _run(ws, f"cat /s3/{key}")
-    fake.ledger.clear()
+    fake.requests.clear()
     code, _, err = await _run(ws, f"echo z > /s3/{key}")
     assert code == 0, err
     assert fake.buckets["b"][key] == b"z\n"
@@ -272,7 +272,7 @@ async def test_a_write_carries_the_version_mirage_holds(
     ws = workspaces()
     for prior in setup:
         assert (await _run(ws, prior))[0] == 0, prior
-    fake.ledger.clear()
+    fake.requests.clear()
     code, _, err = await _run(ws, line)
     assert (code, err) == (0, "")
     assert _sent(fake, op) == sent
@@ -294,7 +294,7 @@ async def test_the_ops_api_writes_with_the_version_it_holds(
     ws = workspaces()
     if read:
         await ws.vfs.read(f"/s3/{key}")
-    fake.ledger.clear()
+    fake.requests.clear()
     await getattr(ws.vfs, call)(f"/s3/{key}", *args)
     assert _sent(fake, PUT) == sent
 
@@ -370,7 +370,7 @@ async def test_an_op_finding_a_read_file_gone_refuses_before_writing(
     else:
         await ws.vfs.read("/s3/f")
     del fake.buckets["b"]["f"]
-    fake.ledger.clear()
+    fake.requests.clear()
     fake.before(PUT, lambda: _restore_f(fake))
     if call == "shell":
         code, _, err = await _run(ws, arg)
@@ -390,7 +390,7 @@ async def test_a_miss_later_on_the_line_lifts_its_refusal(fake, workspaces):
     ws = workspaces()
     await _run(ws, "cat /s3/f")
     del fake.buckets["b"]["f"]
-    fake.ledger.clear()
+    fake.requests.clear()
     line = "echo a > /s3/f; cat /s3/f; echo b > /s3/f; echo $?"
     _, out, err = await _run(ws, line)
     assert (out, err.count(STALE)) == ("0\n", 1), err
@@ -414,7 +414,7 @@ async def test_a_fresh_reread_that_finds_no_file_lets_a_create_through(
     del fake.buckets["b"]["f"]
     with pytest.raises(FileNotFoundError):
         await ws.vfs.read("/s3/f")
-    fake.ledger.clear()
+    fake.requests.clear()
     await ws.vfs.write("/s3/f", b"z\n")
     assert fake.buckets["b"]["f"] == b"z\n"
     assert _sent(fake, PUT) == [{"IfNoneMatch": "*"}]
@@ -427,7 +427,7 @@ async def test_a_refused_create_keeps_asking_for_absence(fake, workspaces):
     fake.before(PUT, lambda: _theirs(fake, "new"))
     code, _, err = await _run(ws, "echo x >> /s3/new")
     assert (code, STALE in err) == (1, True), err
-    fake.ledger.clear()
+    fake.requests.clear()
     code, _, err = await _run(ws, "echo y > /s3/new")
     assert (code, STALE in err) == (1, True), err
     assert _sent(fake, PUT) == [{"IfNoneMatch": "*"}]
@@ -459,7 +459,7 @@ async def test_a_truncate_finding_a_read_file_gone_creates_it_only_if_absent(
     ws = workspaces()
     await _run(ws, "cat /s3/f")
     del fake.buckets["b"]["f"]
-    fake.ledger.clear()
+    fake.requests.clear()
     fake.before(PUT, lambda: _restore_f(fake))
     code, _, err = await _run(ws, "truncate -s 5 /s3/f")
     assert (code, STALE in err) == (1, True), err
@@ -563,10 +563,10 @@ async def test_a_stale_write_is_refused_and_leaves_the_object(
     assert STALE in err and err.startswith(prefix), err
     assert fake.buckets["b"][key] == b"theirs\n"
     assert fake.buckets["b"].get("new") is None
-    fake.ledger.clear()
+    fake.requests.clear()
     code, out, _ = await _run(ws, f"cat /s3/{key}")
     assert (code, out) == (0, "theirs\n")
-    assert [e[0] for e in fake.ledger].count("get_object") == 1
+    assert [e[0] for e in fake.requests].count("get_object") == 1
 
 
 @pytest.mark.asyncio
@@ -708,7 +708,7 @@ async def test_a_refused_write_stays_refused_until_a_read(
     ws = workspaces()
     await _run(ws, "cat /s3/f")
     _theirs(fake)
-    fake.ledger.clear()
+    fake.requests.clear()
     for line in lines:
         code, _, err = await _run(ws, line)
         assert code == 1 and STALE in err, (line, err)
@@ -1187,7 +1187,7 @@ async def test_a_kernel_mount_write_carries_the_version(fake, workspaces):
     ws = workspaces()
     core = MountCore(ws.vfs)
     assert await core.read("/s3/d/a", 100, 0, None) == SEED["d/a"]
-    fake.ledger.clear()
+    fake.requests.clear()
     fh = await core.open("/s3/d/a", open_mode(os.O_WRONLY | os.O_TRUNC))
     await core.write("/s3/d/a", b"A\n", 0, fh)
     await core.release(fh)
@@ -1274,11 +1274,11 @@ async def test_the_condition_follows_the_mount_written_to(fake, workspaces):
         }
     )
     await _run(ws, "cat /s3/f")
-    fake.ledger.clear()
+    fake.requests.clear()
     assert (await _run(ws, "cp /s3/f /u/f"))[0] == 0
     assert (await _run(ws, "sort -o /u/g /s3/f"))[0] == 0
     assert all(p == {} for _, p in _mutations(fake))
-    fake.ledger.clear()
+    fake.requests.clear()
     assert (await _run(ws, "cat /u/f; cp /u/f /s3/f"))[0] == 0
     assert _mutations(fake) == [(PUT, ONE)]
 
@@ -1468,7 +1468,7 @@ async def test_a_conditional_line_sends_the_same_requests(line):
             try:
                 code, _, err = await _run(ws, line)
                 assert code == 0, (policy, err)
-                ops[policy] = [e[0] for e in session._client.ledger]
+                ops[policy] = [e[0] for e in session._client.requests]
             finally:
                 await ws.close()
     assert ops[WritePolicy.CONDITIONAL] == ops[WritePolicy.UNCONDITIONAL]
@@ -1764,7 +1764,7 @@ async def test_missing_rewrite_refuses_a_competing_creation(
                     0,
                 )
     assert fake.buckets["b"]["new_f"] == b"theirs\n"
-    assert [headers for op, headers in fake.ledger if op == PUT] == [
+    assert [headers for op, headers in fake.requests if op == PUT] == [
         {"IfNoneMatch": "*"}
     ]
 
@@ -1780,11 +1780,11 @@ async def test_live_session_checksum_keeps_observed_version(
     ws.create_session("b")
     if warm:
         await ws.shell("cat /s3/f", session_id="b")
-    fake.ledger.clear()
+    fake.requests.clear()
     read = await ws.shell(f"{command} /s3/f", session_id="a")
     assert read.exit_code == 0, await read.stderr_str()
     if command == "md5sum" and not warm:
-        assert not any(op == "get_object" for op, _ in fake.ledger)
+        assert not any(op == "get_object" for op, _ in fake.requests)
     assert (await ws.shell("echo peer > /s3/f", session_id="b")).exit_code == 0
     refused = await ws.shell("echo mine > /s3/f", session_id="a")
     assert refused.exit_code == 1
@@ -1826,10 +1826,10 @@ async def test_incomplete_move_cleanup_keeps_primary_error_and_refreshes_cache(
         "mv: rollback of '/s3/new' incomplete: Permission denied; "
         "destination may remain\n"
     )
-    fake.ledger.clear()
+    fake.requests.clear()
     code, out, _ = await _run(ws, "cat /s3/f /s3/new")
     assert (code, out) == (0, "theirs\none\n")
-    assert [name for name, _ in fake.ledger].count("get_object") == 2
+    assert [name for name, _ in fake.requests].count("get_object") == 2
 
 
 _WORKSPACE_RECOVERY = [

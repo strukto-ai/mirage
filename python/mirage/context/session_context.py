@@ -151,7 +151,7 @@ class Caller:
         exec_reason (str): why, in those words: execvp's reason, or
             ``not found`` for the shell's ``exec``.
         call (tuple[DecisionOwner, HandOff, str] | None): the call an
-            op-level answer covers: its ledger, hand-off and session.
+            op-level answer covers: its decisions, hand-off and session.
         policy_read (bool): whether the call is a policy program's own
             read.
         stop (asyncio.Event | None): the running line's stop signal.

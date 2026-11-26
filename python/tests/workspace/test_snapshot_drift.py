@@ -120,7 +120,7 @@ def test_strict_load_raises_when_a_file_tool_touched_what_drifted(
     tmp_path, write
 ):
     """A read or write through ``ws.vfs`` (an agent's file tool, FUSE) is
-    pinned as a shell line's is: it records into the same ledger, with the
+    pinned as a shell line's is: it records into the same op log, with the
     token the backend returned, so drift since is caught on load.
     """
     store = {"data.csv": b"version 1 bytes\n"}

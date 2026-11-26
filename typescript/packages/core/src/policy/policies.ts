@@ -317,7 +317,7 @@ export function policyDenied(
 /**
  * What the gate would answer one VFS call, as `preVfsGate` decides it and
  * without its consequences: every policy's answer, the one that wins,
- * and the error the entry point would throw. A question reads the ledger's
+ * and the error the entry point would throw. A question reads the decisions'
  * settled records and records nothing. Mirrors the Python `_explained_op`.
  */
 async function explainedOp(
@@ -377,9 +377,9 @@ async function explainedOp(
  * pass the same file gates. A policy method's own read meets the hides,
  * path rules and mount mode alone; its write is refused. `access` carries the
  * owning mount's mode (unset at an entry point that judges it itself), whether
- * the op creates the path or mutates below it, and the approval ledger. An Ask is a question only where no line is running and
- * the entry point holds the ledger (a file tool, the host's facade): the ledger
- * answers it from a standing grant or records it, and an unanswered one
+ * the op creates the path or mutates below it, and the decisions. An Ask is a question only where no line is running and
+ * the entry point holds the decisions (a file tool, the host's facade): they
+ * answer it from a standing grant or record it, and an unanswered one
  * refuses with the ask id on the record. Inside a line an Ask refuses
  * like a deny, since the line was admitted without it. `final` is false
  * only for a rename's source, whose destination is gated next. In a dry
@@ -387,7 +387,7 @@ async function explainedOp(
  * once the op would refuse or has no gate left, so the entry point stops before
  * any backend or cache is touched; a write a policy makes while it
  * decides that op throws EROFS, since the dry run may change nothing, and
- * an ask its read meets reads the ledger and records nothing. `caller` is
+ * an ask its read meets reads the decisions and records nothing. `caller` is
  * who makes the call; without one, the gate reads the async context's.
  * The chain runs only where it can speak: when some policy will answer
  * `preVfs` for this session (`Policies.wantsFor`, asked on every call, so a
@@ -397,7 +397,7 @@ async function explainedOp(
  */
 /**
  * A VFS call's policy answer, the policy's own reads recorded apart. They
- * still reach the ledger, but they are no records of the call being
+ * still reach the decisions, but they are no records of the call being
  * judged: counted as its, they would pass for the call's own record (a RAM
  * unlink records none, so the facade records it) and be charged to the
  * command the call runs in. Without task isolation the binding would reach
@@ -536,7 +536,7 @@ export async function postVfsGate(
 
 /**
  * Fire postExecute at the workspace boundary. Returns what drops the
- * line's output (a Deny, or the ledger's answer to an Ask), else the
+ * line's output (a Deny, or the decisions' answer to an Ask), else the
  * merged Limit bound for the boundary to enforce. Nothing the line did is
  * undone. A run killed while the host decides throws the abort.
  */
@@ -557,7 +557,7 @@ export async function postExecuteGate(
 
 /**
  * Fire postCommand once a command or CLI ran and its output drained.
- * Returns what refuses it after the fact (a Deny, or the ledger's answer
+ * Returns what refuses it after the fact (a Deny, or the decisions' answer
  * to an Ask), which the caller turns into exit 126 and a decision record.
  * Nothing the command did is undone. A run killed while the host decides
  * throws the abort. Mirrors the Python `post_command_gate`.
@@ -662,7 +662,7 @@ export async function postNetworkGate(
  * not return (VALIDITY) throws PolicyError: that is a programming
  * error, not a refusal.
  *
- * The chain holds the decision ledger an Ask is put to (`decisions`),
+ * The chain holds the decisions an Ask is put to (`decisions`),
  * `views`, which the workspace sets to fill a method's read-only `session`
  * and `vfs`, and `account`, which a server sets to the account it holds the
  * workspace for, for every method's `caller`.

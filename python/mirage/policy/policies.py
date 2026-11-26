@@ -109,7 +109,7 @@ def render_deny(subject: str, deny: Deny | Pending) -> tuple[bytes, int]:
 
     Args:
         subject (str): the command name (or ``line`` at the boundary).
-        deny (Deny | Pending): the action, or the ledger's open question.
+        deny (Deny | Pending): the action, or the decisions' open question.
     """
     if isinstance(deny, Deny) and deny.path is not None:
         line = fs_error_line(subject, deny.path, eacces(deny.path))
@@ -133,7 +133,7 @@ async def render_command_deny(
 
     Args:
         subject (str): the command name.
-        deny (Deny | Pending): the action, or the ledger's open question.
+        deny (Deny | Pending): the action, or the decisions' open question.
         ctx (CommandContext): the refused command.
     """
     if isinstance(deny, Deny) and deny.path is not None:
@@ -315,7 +315,7 @@ def policy_denied(
     that only reads what a command printed.
 
     Args:
-        action (Deny | Pending): the policy's refusal or the ledger's
+        action (Deny | Pending): the policy's refusal or the decisions'
             answer.
         filename (str): the path or name refused.
         strerror (str): the terminal's words, ``Permission denied``
@@ -338,7 +338,7 @@ _T = TypeVar("_T")
 async def _apart(answer: Awaitable[_T]) -> _T:
     """A VFS call's policy answer, the policy's own reads recorded apart.
 
-    They still reach the ledger, but they are no records of the call
+    They still reach the decisions, but they are no records of the call
     being judged: counted as its, they would pass for the call's own
     record (a RAM unlink records none, so the facade records it) and be
     charged to the command the call runs in.
@@ -374,8 +374,8 @@ async def pre_vfs_gate(
     file gates. A policy method's own read meets the hides, path rules
     and mount mode alone; its write is refused. An Ask is a question only
     where no line is running and the entry
-    point holds the ledger (a file tool, the host's facade): the ledger
-    answers it from a standing grant or records it, and an unanswered
+    point holds the decisions (a file tool, the host's facade): they
+    answer it from a standing grant or record it, and an unanswered
     one refuses with the ask id on the record. Inside a line an Ask
     refuses like a deny, since the line was admitted without it.
 
@@ -396,7 +396,7 @@ async def pre_vfs_gate(
             unbound host view.
         mode (MountMode | None): the owning mount's mode, judged by the
             mount-mode built-in; None at an entry point that judges it itself.
-        decisions (Decisions | None): the approval ledger, None at an
+        decisions (Decisions | None): the decisions, None at an
             entry point that cannot ask.
         final (bool): the op's last gate; False for a rename's source,
             whose destination is gated next.
@@ -411,7 +411,7 @@ async def pre_vfs_gate(
             entry point stops before any backend or cache is touched.
         ReadOnlyError: a write a policy makes while it decides a dry
             run's op, which the dry run may not let change anything (an
-            ask its read meets reads the ledger and records nothing).
+            ask its read meets reads the decisions and records nothing).
     """
     if caller is None:
         caller = current_caller()
@@ -487,12 +487,12 @@ async def _explained_op(
     """What the gate would answer one VFS call, as ``pre_vfs_gate``
     decides it and without its consequences: every policy's answer, the
     one that wins, and the error the entry point would raise. A question reads
-    the ledger's settled records and records nothing.
+    the decisions' settled records and records nothing.
 
     Args:
         policies (Policies): the workspace's admission policies.
         ctx (VfsContext): the call the gate sees.
-        decisions (Decisions | None): the approval ledger, None at an
+        decisions (Decisions | None): the decisions, None at an
             entry point that cannot ask.
         line (bool): whether the call is a running line's, which asks
             no question.
@@ -564,7 +564,7 @@ async def post_vfs_gate(
         session_id (str): the session the dispatcher serves.
         mode (MountMode | None): the owning mount's mode, as pre_vfs saw
             it.
-        decisions (Decisions | None): the approval ledger, None at an
+        decisions (Decisions | None): the decisions, None at an
             entry point that cannot ask.
         caller (Caller | None): who made the call; None for the caller
             bound here.
@@ -680,7 +680,7 @@ async def post_execute_gate(
 ) -> tuple[Deny | Pending | None, Limit | None]:
     """Fire post_execute at the workspace boundary.
 
-    Returns what drops the line's output (a Deny, or the ledger's
+    Returns what drops the line's output (a Deny, or the decisions'
     answer to an Ask), else the merged Limit bound for the boundary to
     enforce. Nothing the line did is undone.
 
@@ -716,7 +716,7 @@ async def post_command_gate(
 ) -> Deny | Pending | None:
     """Fire post_command once a command or CLI ran and its output drained.
 
-    Returns what refuses it after the fact (a Deny, or the ledger's
+    Returns what refuses it after the fact (a Deny, or the decisions'
     answer to an Ask), which the caller turns into exit 126 and a
     decision record. Nothing the command did is undone.
 
@@ -809,7 +809,7 @@ class Policies:
     or a promise. Without that a plain ``def`` raised inside the
     fail-closed arm and every command read ``policy X failed``.
 
-    The chain holds the decision ledger an Ask is put to
+    The chain holds the decisions an Ask is put to
     (``decisions``), ``views``, which the workspace sets to fill a
     method's read-only ``session`` and ``vfs``, and ``account``, which a
     server sets to the account it holds the workspace for, for every

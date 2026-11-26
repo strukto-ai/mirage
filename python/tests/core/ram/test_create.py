@@ -53,7 +53,7 @@ async def test_create_normalizes_path():
 
 @pytest.mark.asyncio
 async def test_create_records_its_own_op():
-    # A guest creating a file must land in the ledger as 'create', not
+    # A guest creating a file must land in the op log as 'create', not
     # as a zero-byte 'write' (the TS core's old shape) and not as
     # nothing at all (this core's old shape): anything keyed on op
     # names — policy, snapshots, integ truth — reads the same world in

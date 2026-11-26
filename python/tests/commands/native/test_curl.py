@@ -85,7 +85,7 @@ def _run(
 ) -> tuple[bytes, object]:
     base = cwd or "/"
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
-    vfs = Files(dispatch, ledger=False) if dispatch is not None else None
+    vfs = Files(dispatch, log_ops=False) if dispatch is not None else None
     ctx = Context(vfs=vfs, cwd=spec, flags=flags)
 
     async def run() -> tuple[bytes, IOResult]:
@@ -792,7 +792,7 @@ def test_c_writes_the_jar_when_the_reader_lets_the_body_go(httpx_mock):
 
     spec = PathSpec(virtual="/", directory="/", vfs_path="", resolved=False)
     ctx = Context(
-        vfs=Files(dispatch, ledger=False),
+        vfs=Files(dispatch, log_ops=False),
         cwd=spec,
         flags={"cookie_jar": "/data/jar"},
     )

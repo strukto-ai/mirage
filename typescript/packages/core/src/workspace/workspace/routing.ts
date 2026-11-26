@@ -53,7 +53,7 @@ import { makeAbortError } from '../../utils/abort.ts'
  *
  * `decide` returns the static bindings as the decision when nothing
  * decides (no machine argument, nothing to consult), the stage's Deny when
- * a policy refuses the line, and the ledger's answer to its Ask when the
+ * a policy refuses the line, and the decisions' answer to its Ask when the
  * host refuses the line or has not answered yet; a nested eval inherits
  * the typed line's decision and never re-routes. The machine argument is
  * the caller's own placement, so a Route is not asked for, but a coded
@@ -190,7 +190,7 @@ export class Router {
 
   /**
    * Every `preExecute` answer for a line and what they decide, without
-   * running it: what `explain` shows. An Ask reads the ledger's settled
+   * running it: what `explain` shows. An Ask reads the decisions' settled
    * records alone and records nothing. Mirrors Python's
    * `Router.placement`.
    */

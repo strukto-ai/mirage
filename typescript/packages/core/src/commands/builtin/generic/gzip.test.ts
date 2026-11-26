@@ -196,7 +196,7 @@ it('asks the mount before -r touches a file', async () => {
         flags: { recursive: true },
         stdin: null,
         cwd: PathSpec.fromStrPath('/'),
-        vfs: new Files(refusingWalks as unknown as DispatchFn, null, null, { ledger: false }),
+        vfs: new Files(refusingWalks as unknown as DispatchFn, null, null, { logOps: false }),
       } as unknown as Context,
       read,
       () => Promise.resolve(),
