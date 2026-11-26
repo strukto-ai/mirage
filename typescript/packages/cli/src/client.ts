@@ -42,13 +42,6 @@ export class DaemonUnreachable extends Error {
   override readonly name = 'DaemonUnreachable'
 }
 
-/** Whether a fetch failed because nothing accepted its connection. */
-function refused(err: unknown): boolean {
-  if (!(err instanceof TypeError)) return false
-  const cause: unknown = err.cause
-  return cause instanceof Error && (cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
-}
-
 export class DaemonClient {
   readonly settings: DaemonSettings
   private refreshing: Promise<string> | undefined
@@ -119,10 +112,17 @@ export class DaemonClient {
       return await this.send(method, path, init)
     } catch (err) {
       const resendable = init.body === undefined || typeof init.body === 'string'
-      if (!this.maySpawn || !resendable || !refused(err)) throw err
+      if (!this.maySpawn || !resendable || !DaemonClient.refused(err)) throw err
     }
     await this.ensureRunning()
     return this.send(method, path, init)
+  }
+
+  /** Whether a fetch failed because nothing accepted its connection. */
+  private static refused(err: unknown): boolean {
+    if (!(err instanceof TypeError)) return false
+    const cause: unknown = err.cause
+    return cause instanceof Error && (cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
   }
 
   private async send(
