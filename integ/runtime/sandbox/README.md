@@ -24,7 +24,9 @@ takes a repository there as its own. A rename over an existing name lands, throu
 posix-rename extension the server names. Each `ssh` case has a `mirage` twin, the
 same mounts served by mirage-fuse, which answers alike except that a write into a
 read-only mount says `Read-only file system`, as Mirage does, where sshfs can only say
-`Permission denied`. `both` serves the rest through mirage-fuse, so a box running
+`Permission denied`. mirage-fuse sends a file's writes ahead of their answers and its close
+waits for them, so a file written in many writes, or past the 8 MiB it sends ahead, lands whole.
+`both` serves the rest through mirage-fuse, so a box running
 these cases needs sshfs and mirage-fuse; CI builds mirage-fuse and copies it in.
 
 | File              | Pins                                                                                                                                                                                                                                                                                                                         | Runs on                                                                     |
