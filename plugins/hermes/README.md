@@ -68,7 +68,7 @@ Mirage refreshes OAuth tokens itself, and a Hermes plugin may not, so a mount wi
 - **Keys:** read from the active Hermes profile when a Hermes task starts, and held in memory for the workspace's life. The plugin writes no key anywhere.
 - **Local files:** a `disk` mount reads and writes the folder its `root` names.
 - **Commands:** commands run inside the workspace. A program Mirage does not run itself runs on a machine the YAML adds. A `docker`, `apple_container`, `smolvm` or `microsandbox` machine runs that tool's CLI on your computer, with your environment and that tool's own configuration (for Docker, `DOCKER_HOST` and its contexts). A `host` machine runs programs directly on your computer, where they reach whatever your user account can, unless a `sandbox` block confines them (Linux only).
-- **Background work:** each Hermes task gets its own sessions in the workspace for its YAML and keys, and a background job lives until its task ends. The workspaces close when Hermes exits. A YAML with a FUSE mount serves one set of keys: a profile whose keys differ needs its own YAML.
+- **Background work:** each Hermes task gets its own sessions in the workspace for its YAML and keys, and a background job lives until its task ends. A workspace closes when Hermes exits, or sooner once no profile uses its keys any more and its tasks have ended. A YAML with a FUSE mount serves one set of keys at a time: a profile whose keys differ needs its own YAML.
 - **Approvals:** Hermes' `approvals.mode` still decides which commands ask first, and the workspace's command rules apply as well.
 
 Full guide: [docs.mirage.strukto.ai/home/agents/hermes](https://docs.mirage.strukto.ai/home/agents/hermes)

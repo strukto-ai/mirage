@@ -16,9 +16,22 @@ import importlib.util
 
 import pytest
 
-from mirage.agents.hermes.credentials import HermesSecrets, through_hermes
+from mirage.agents.hermes.constants import (
+    AMBIENT_MACHINES,
+    AMBIENT_VFS,
+    KEYED_MACHINES,
+    MONGO_VFS,
+    OAUTH_VFS,
+)
+from mirage.agents.hermes.credentials import (
+    HermesSecrets,
+    _s3_shaped,
+    through_hermes,
+)
 from mirage.config import WorkspaceConfig, load_config
+from mirage.machine.registry import MACHINE_MODULES
 from mirage.utils.yaml import parse_yaml
+from mirage.vfs.registry import REGISTRY
 
 NEEDS_S3 = pytest.mark.skipif(
     importlib.util.find_spec("aioboto3") is None,
@@ -214,3 +227,58 @@ ALLOWED = {
 @pytest.mark.parametrize("extra", ALLOWED.values(), ids=ALLOWED.keys())
 def test_a_key_hermes_hands_over_is_allowed(extra):
     read(extra)
+
+
+UNCHECKED_VFS = {
+    "airtable",
+    "databricks_volume",
+    "dify",
+    "discord",
+    "disk",
+    "email",
+    "github",
+    "hf_buckets",
+    "hf_datasets",
+    "hf_models",
+    "hf_spaces",
+    "jaeger",
+    "langfuse",
+    "linear",
+    "machine",
+    "mem0",
+    "nextcloud",
+    "notion",
+    "onedrive",
+    "qdrant",
+    "ram",
+    "redis",
+    "sharepoint",
+    "slack",
+    "sql",
+    "tidb_filesystem",
+    "trello",
+    "wandb",
+}
+UNCHECKED_MACHINES = {
+    "apple_container",
+    "cloudflare_container",
+    "docker",
+    "microsandbox",
+    "smolvm",
+}
+UNJUDGED = (
+    "decide how a new one gets its keys under Hermes: give it a check in "
+    "credentials.py, or list it here once it needs none"
+)
+
+
+@NEEDS_S3
+def test_every_backend_has_been_judged():
+    judged = {*AMBIENT_VFS, *OAUTH_VFS, *MONGO_VFS, "postgres", "lancedb"}
+    judged |= {name for name in REGISTRY if _s3_shaped(name)}
+    assert set(REGISTRY) - judged == UNCHECKED_VFS, UNJUDGED
+
+
+def test_every_machine_provider_has_been_judged():
+    judged = {*AMBIENT_MACHINES, *KEYED_MACHINES}
+    assert set(MACHINE_MODULES) - judged == UNCHECKED_MACHINES, UNJUDGED

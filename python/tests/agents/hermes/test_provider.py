@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import subprocess
 import sys
 import threading
@@ -22,6 +23,7 @@ pytest.importorskip("agent.terminal_env_provider")
 
 from agent.secret_scope import reset_secret_scope, set_secret_scope
 
+import mirage.agents.hermes.provider as provider_module
 from mirage.agents.hermes import MirageTerminalProvider, register
 
 WORKSPACE_YAML = """
@@ -112,8 +114,8 @@ def test_secret_pointers_in_the_yaml_resolve(tmp_path, monkeypatch):
 def profile():
     tokens = []
 
-    def bind(values: dict[str, str]) -> None:
-        tokens.append(set_secret_scope(values))
+    def bind(values: dict[str, str], home: str | None = None) -> None:
+        tokens.append(set_secret_scope(values, profile_home=home))
 
     yield bind
     for token in reversed(tokens):
@@ -197,13 +199,122 @@ def test_a_fuse_folder_serves_one_set_of_keys(tmp_path):
         + "  /f: {vfs: ram, backend: fuse, mountpoint: /tmp/mirage-hermes}\n"
     )
     provider = MirageTerminalProvider(lambda: str(config))
-    provider._workspaces[(config.resolve(), (("OLD", "key"),))] = None
+    busy = (config.resolve(), (("OLD", "key"),))
+    provider._workspaces[busy] = None
+    provider._entering[busy] = 1
     try:
         with pytest.raises(ValueError, match="FUSE folder"):
             provider.create_environment(cwd="/", timeout=30, task_id="f")
         assert provider._loop is None
     finally:
         provider._workspaces.clear()
+        provider.close()
+
+
+def test_a_changed_key_closes_the_workspace_its_tasks_left(tmp_path, profile):
+    config = tmp_path / "workspace.yaml"
+    config.write_text(WORKSPACE_YAML + "env:\n  TOKEN: {from: env}\n")
+    provider = MirageTerminalProvider(lambda: str(config))
+    profile({"TOKEN": "a"})
+    first = provider.create_environment(cwd="/", timeout=30, task_id="a")
+    profile({"TOKEN": "b"})
+    second = provider.create_environment(cwd="/", timeout=30, task_id="b")
+    try:
+        assert first.execute("echo $TOKEN")["output"].strip() == "a"
+        assert len(provider._workspaces) == 2
+        first.cleanup()
+        third = provider.create_environment(cwd="/", timeout=30, task_id="c")
+        third.cleanup()
+        assert third._ws is second._ws
+        assert len(provider._workspaces) == 1
+        assert first._ws._closed
+    finally:
+        for environment in (first, second):
+            environment.cleanup()
+        provider.close()
+
+
+def test_profiles_taking_turns_keep_their_workspaces(tmp_path, profile):
+    config = tmp_path / "workspace.yaml"
+    config.write_text(WORKSPACE_YAML + "env:\n  TOKEN: {from: env}\n")
+    provider = MirageTerminalProvider(lambda: str(config))
+    try:
+        seen = []
+        for home, token in (("/a", "a"), ("/b", "b"), ("/a", "a")):
+            profile({"TOKEN": token}, home)
+            environment = provider.create_environment(
+                cwd="/", timeout=30, task_id=token
+            )
+            seen.append(environment._ws)
+            environment.cleanup()
+        assert seen[0] is seen[2]
+        assert seen[0] is not seen[1]
+        assert not seen[0]._closed
+    finally:
+        provider.close()
+
+
+def test_a_failed_build_is_tried_again(config, monkeypatch):
+    build = provider_module.build_owned_workspace
+    calls = []
+
+    async def failing_once(*args):
+        calls.append(args)
+        if len(calls) == 1:
+            raise OSError("no route to the backend")
+        return await build(*args)
+
+    monkeypatch.setattr(provider_module, "build_owned_workspace", failing_once)
+    provider = MirageTerminalProvider(lambda: str(config))
+    try:
+        with pytest.raises(OSError, match="no route"):
+            provider.create_environment(cwd="/", timeout=30, task_id="a")
+        assert not provider._workspaces
+        environment = provider.create_environment(
+            cwd="/", timeout=30, task_id="b"
+        )
+        assert environment.execute("echo hi")["output"].strip() == "hi"
+        environment.cleanup()
+    finally:
+        provider.close()
+
+
+def test_a_slow_build_holds_up_no_other_task(tmp_path, monkeypatch):
+    slow, quick = tmp_path / "slow.yaml", tmp_path / "quick.yaml"
+    for path in (slow, quick):
+        path.write_text(WORKSPACE_YAML)
+    build = provider_module.build_owned_workspace
+    building, finish = threading.Event(), threading.Event()
+
+    async def gated(*args):
+        if not building.is_set():
+            building.set()
+            await asyncio.to_thread(finish.wait)
+        return await build(*args)
+
+    monkeypatch.setattr(provider_module, "build_owned_workspace", gated)
+    chosen = [slow]
+    provider = MirageTerminalProvider(lambda: str(chosen[0]))
+    environments = []
+    waiting = threading.Thread(
+        target=lambda: environments.append(
+            provider.create_environment(cwd="/", timeout=30, task_id="slow")
+        )
+    )
+    waiting.start()
+    try:
+        assert building.wait(30)
+        chosen[0] = quick
+        environments.append(
+            provider.create_environment(cwd="/", timeout=30, task_id="quick")
+        )
+        assert waiting.is_alive()
+        assert environments[0].execute("echo hi")["output"].strip() == "hi"
+    finally:
+        finish.set()
+        waiting.join()
+        for environment in environments:
+            environment.cleanup()
         provider.close()
 
 

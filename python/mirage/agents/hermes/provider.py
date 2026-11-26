@@ -16,16 +16,21 @@ import asyncio
 import logging
 import threading
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
 from typing import Any
 
-from agent.secret_scope import get_secret
+from agent.secret_scope import current_secret_scope_home, get_secret
 from agent.terminal_env_provider import TerminalEnvironmentProvider
 from hermes_cli.plugins_context import PluginContext
 
-from mirage.agents.hermes.constants import BACKEND, SETTING, SOURCE
+from mirage.agents.hermes.constants import (
+    BACKEND,
+    SESSION_PREFIX,
+    SETTING,
+    SOURCE,
+)
 from mirage.agents.hermes.credentials import (
     SCOPE,
     HermesSecrets,
@@ -42,6 +47,8 @@ from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
+WorkspaceKey = tuple[Path, tuple[tuple[str, str], ...]]
+
 
 class MirageTerminalProvider(TerminalEnvironmentProvider):
     """hermes' ``mirage`` terminal backend.
@@ -51,6 +58,8 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
     in it. Every key comes from hermes' active profile: ``${NAME}`` and
     ``{from: env, key: NAME}`` read ``get_secret(NAME)`` on hermes'
     thread, and a YAML that would reach a key any other way is refused.
+    A workspace closes once no profile uses its keys any more and no
+    task holds a session in it.
 
     Args:
         config_path (Callable[[], str | None]): Returns the workspace
@@ -66,9 +75,9 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         register_secrets(SOURCE, HermesSourceConfig, fetch_hermes)
         self._config_path = config_path
         self._lock = threading.Lock()
-        self._workspaces: dict[
-            tuple[Path, tuple[tuple[str, str], ...]], Workspace
-        ] = {}
+        self._workspaces: dict[WorkspaceKey, Future[Workspace]] = {}
+        self._serving: dict[str | None, WorkspaceKey] = {}
+        self._entering: dict[WorkspaceKey, int] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._closed = False
@@ -102,14 +111,22 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         task_id: str = "default",
         **kwargs: Any,
     ) -> MirageEnvironment:
-        workspace, values = self._workspace()
-        return MirageEnvironment(
-            workspace,
-            cwd=cwd,
-            timeout=timeout,
-            task_id=task_id,
-            secrets=values,
-        )
+        key, built, values = self._workspace()
+        try:
+            return MirageEnvironment(
+                built.result(),
+                cwd=cwd,
+                timeout=timeout,
+                task_id=task_id,
+                secrets=values,
+            )
+        finally:
+            with self._lock:
+                self._entering[key] -= 1
+                if not self._entering[key]:
+                    del self._entering[key]
+                if failed(built) and self._workspaces.get(key) is built:
+                    del self._workspaces[key]
 
     def _owner(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
@@ -125,7 +142,9 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             self._thread.start()
         return self._loop
 
-    def _workspace(self) -> tuple[Workspace, dict[str, str]]:
+    def _workspace(
+        self,
+    ) -> tuple[WorkspaceKey, Future[Workspace], dict[str, str]]:
         path = self._path()
         if path is None:
             raise ValueError(
@@ -146,20 +165,46 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
         with self._lock:
             if self._closed:
                 raise RuntimeError("the mirage backend has shut down")
-            workspace = self._workspaces.get(key)
-            if workspace is None and config.kernel_mounts():
-                if any(built == path for built, _ in self._workspaces):
+            self._serving[current_secret_scope_home()] = key
+            self._retire()
+            built = self._workspaces.get(key)
+            if built is None and config.kernel_mounts():
+                if any(other == path for other, _ in self._workspaces):
                     raise ValueError(
                         f"{path} mounts a FUSE folder another Hermes profile, "
                         "or this one before a key changed, already serves; "
                         "give each profile its own workspace YAML"
                     )
-            if workspace is None:
-                workspace = asyncio.run_coroutine_threadsafe(
+            if built is None:
+                # Awaited off the lock, so a slow build holds up no other task.
+                built = asyncio.run_coroutine_threadsafe(
                     build_owned_workspace(config, values), self._owner()
-                ).result()
-                self._workspaces[key] = workspace
-        return workspace, values
+                )
+                self._workspaces[key] = built
+            self._entering[key] = self._entering.get(key, 0) + 1
+        return key, built, values
+
+    def _retire(self) -> None:
+        serving = set(self._serving.values())
+        for key, built in list(self._workspaces.items()):
+            if key in serving or key in self._entering or not built.done():
+                continue
+            if in_use(built.result()):
+                continue
+            del self._workspaces[key]
+            self._shut(built)
+
+    def _shut(self, built: Future[Workspace]) -> None:
+        if self._loop is None or failed(built):
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                built.result().close(), self._loop
+            ).result()
+        except Exception as exc:
+            logger.warning(
+                "closing a mirage workspace failed: %r", exc, exc_info=True
+            )
 
     def close(self) -> None:
         """Close every workspace this provider built, then its loop. hermes
@@ -170,22 +215,36 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             loop, thread = self._loop, self._thread
             if loop is None or thread is None:
                 return
-            for workspace in self._workspaces.values():
-                try:
-                    asyncio.run_coroutine_threadsafe(
-                        workspace.close(), loop
-                    ).result()
-                except Exception as exc:
-                    logger.warning(
-                        "closing a mirage workspace failed: %r",
-                        exc,
-                        exc_info=True,
-                    )
+            for built in self._workspaces.values():
+                self._shut(built)
             self._workspaces.clear()
             loop.call_soon_threadsafe(loop.stop)
             thread.join()
             loop.close()
             self._loop = self._thread = None
+
+
+def failed(built: Future[Workspace]) -> bool:
+    """Whether a workspace's build ended without one.
+
+    Args:
+        built (Future[Workspace]): The build.
+    """
+    return built.done() and (
+        built.cancelled() or built.exception() is not None
+    )
+
+
+def in_use(workspace: Workspace) -> bool:
+    """Whether a hermes task still holds a session in a workspace.
+
+    Args:
+        workspace (Workspace): The workspace.
+    """
+    return any(
+        session.session_id.startswith(SESSION_PREFIX)
+        for session in workspace.list_sessions()
+    )
 
 
 async def build_owned_workspace(
