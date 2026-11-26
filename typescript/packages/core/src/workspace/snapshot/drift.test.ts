@@ -33,6 +33,7 @@ import {
   installFingerprints,
   liveOnlyMountPrefixes,
 } from './drift.ts'
+import type { FingerprintEntrySnapshot } from './types.ts'
 
 interface RegistryLike {
   tryMountFor(path: string): MountEntry | null
@@ -549,5 +550,61 @@ describe('an op log past its cap', () => {
     const pins = captureFingerprints(log.records, registry)
     expect(pins).toEqual(captureFingerprints(records, registry))
     expect(pins.map((entry) => entry.path)).toEqual(['/s3/a', '/s3/d', '/s3/e'])
+  })
+
+  // Records reach the op log as lines end, so one can land after a record it
+  // precedes. Stamps of the live mount and of one since replaced, drops,
+  // prefix ops and tokenless reads, some timed before those ahead of them:
+  // what the op log keeps pins the paths every record pins.
+  it('pins what every record pins once later records overrule earlier ones', () => {
+    const registry = makeRegistry([makeMount('/s3/', true)])
+    const paths = ['/s3/a', '/s3/b', '/s3/c', '/s3/c/x', '/s3/c/y', '/s3/d']
+    const shapes: [string, boolean, boolean, string | null][] = [
+      ['read', true, false, null],
+      ['read', true, false, 'gone'],
+      ['read', false, true, null],
+      ['read', false, false, null],
+      ['write', true, false, null],
+      ['write', false, false, null],
+      ['append', false, false, null],
+      ['unlink', false, false, null],
+      ['rm_r', false, false, null],
+    ]
+    const pick = <T>(items: readonly T[], at: number): T => {
+      const item = items[at % items.length]
+      if (item === undefined) throw new Error('nothing to pick from')
+      return item
+    }
+    let seed = 7
+    const records: OpRecord[] = []
+    for (let i = 0; i < 600; i++) {
+      seed = (seed * 48271) % 2147483647
+      const [op, fingerprint, revision, mountId] = pick(shapes, Math.floor(seed / 7))
+      records.push(
+        new OpRecord({
+          op,
+          path: pick(paths, seed),
+          source: 's3',
+          bytes: 0,
+          timestamp: i * 10 - (Math.floor(seed / 63) % 5 === 0 ? 35 : 0),
+          durationMs: 0,
+          fingerprint: fingerprint ? `f${String(i)}` : null,
+          revision: revision ? `r${String(i)}` : null,
+          mountId,
+        }),
+      )
+    }
+    const log = new OpLog(16)
+    for (let at = 0; at < records.length;) {
+      seed = (seed * 48271) % 2147483647
+      log.add(records.slice(at, at + 1 + (seed % 7)))
+      at += 1 + (seed % 7)
+    }
+    expect(log.records.length).toBeLessThan(60)
+    const byPath = (entries: FingerprintEntrySnapshot[]): FingerprintEntrySnapshot[] =>
+      [...entries].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    const pins = byPath(captureFingerprints(records, registry))
+    expect(byPath(captureFingerprints(log.records, registry))).toEqual(pins)
+    expect(pins.map((entry) => entry.path)).toEqual(['/s3/a', '/s3/c', '/s3/c/y'])
   })
 })

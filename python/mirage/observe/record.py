@@ -157,13 +157,50 @@ def changes_pin(rec: OpRecord) -> bool:
     )
 
 
-class OpLog:
-    """A workspace's op log: every record a snapshot pins a path by,
-    and the newest of the rest, which only account for an op.
+def _settles(rec: OpRecord) -> tuple[tuple[str, str, str | None], ...]:
+    """The pins ``rec`` has the last word on until a later record has it,
+    as fingerprint capture reads the op log: the one it is overruled in
+    first. A retraction and a change of the bytes drop the pin at their
+    path, a prefix op every pin beneath it too, and a token stamps the
+    pin of its path and mount. A later drop at a path overrules an
+    earlier one there, a later prefix op only another prefix op, and a
+    later stamp the stamps of the same path and mount: a capture skips
+    or takes both alike. Later is by timestamp, as a capture orders
+    them, so a record that arrives after one it precedes changes
+    nothing. A record that changes no pin settles none.
 
-    It holds at most ``max_records`` of those: past it the oldest go
-    first, down to three quarters of it, and the bytes they moved stay
-    in the totals. Mirrors TypeScript's ``OpLog``.
+    Args:
+        rec (OpRecord): the record.
+    """
+    if rec.op in RETRACT_FINGERPRINT_OPS:
+        dropped = ("drop", rec.path.rstrip("/"), None)
+        if rec.op in SUBTREE_RETRACT_OPS:
+            return (("sweep", dropped[1], None), dropped)
+        return (dropped,)
+    if rec.op in CONTENT_CHANGING_OPS and (
+        rec.op not in STAMP_FINGERPRINT_OPS
+        or not (rec.fingerprint or rec.revision)
+    ):
+        return (("drop", rec.path.rstrip("/"), None),)
+    if rec.op in STAMP_FINGERPRINT_OPS and (
+        rec.fingerprint is not None or rec.revision is not None
+    ):
+        return (("stamp", rec.path, rec.mount_id),)
+    return ()
+
+
+class OpLog:
+    """A workspace's op log: every record that has the last word on a
+    pin a snapshot takes, and the newest of the rest, which only account
+    for an op.
+
+    It holds at most ``max_records`` of the rest: past it the oldest go
+    first, down to three quarters of it. A record a later one overrules
+    (``_settles``) goes with them, or once ``max_records`` more that
+    change a pin arrived, so reading a file again adds no record for
+    good. The bytes a dropped record moved stay in the totals. A
+    snapshot takes the same pins from what is left, in an order that
+    can differ. Mirrors TypeScript's ``OpLog``.
 
     Args:
         max_records (int): the most records it holds that change no pin.
@@ -173,6 +210,7 @@ class OpLog:
         self.records: list[OpRecord] = []
         self.max_records = max_records
         self._unpinned = 0
+        self._settling = 0
         self._network_bytes = 0
         self._cache_bytes = 0
 
@@ -184,26 +222,35 @@ class OpLog:
         """
         held = len(self.records)
         self.records.extend(records)
-        self._unpinned += sum(
-            not changes_pin(rec) for rec in self.records[held:]
-        )
-        if self._unpinned <= self.max_records:
+        unpinned = sum(not changes_pin(rec) for rec in self.records[held:])
+        self._unpinned += unpinned
+        self._settling += len(self.records) - held - unpinned
+        if max(self._unpinned, self._settling) <= self.max_records:
             return
-        excess = self._unpinned - self.max_records * 3 // 4
+        last: dict[tuple[str, str, str | None], tuple[int, int]] = {}
+        for at, rec in enumerate(self.records):
+            when = (rec.timestamp, at)
+            for pin in _settles(rec):
+                last[pin] = max(last.get(pin, when), when)
+        excess = 0
+        if self._unpinned > self.max_records:
+            excess = self._unpinned - self.max_records * 3 // 4
         kept: list[OpRecord] = []
-        self._unpinned = 0
-        for rec in self.records:
-            if changes_pin(rec):
-                kept.append(rec)
-            elif excess > 0:
-                excess -= 1
-                if rec.is_cache:
-                    self._cache_bytes += rec.bytes
-                else:
-                    self._network_bytes += rec.bytes
+        self._unpinned = self._settling = 0
+        for at, rec in enumerate(self.records):
+            settled = _settles(rec)
+            if settled:
+                dropped = last[settled[0]] != (rec.timestamp, at)
             else:
-                self._unpinned += 1
+                dropped = excess > 0
+                excess -= dropped
+                self._unpinned += not dropped
+            if not dropped:
                 kept.append(rec)
+            elif rec.is_cache:
+                self._cache_bytes += rec.bytes
+            else:
+                self._network_bytes += rec.bytes
         self.records[:] = kept
 
     @property

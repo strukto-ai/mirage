@@ -245,4 +245,53 @@ describe('OpLog', () => {
     })
     expect([log.networkBytes, log.cacheBytes]).toEqual([60, 10])
   })
+
+  // A later stamp of a path overrules the earlier ones of the same mount, a
+  // later drop the earlier drops there, and a later prefix op an earlier
+  // prefix op and drop there, so reading or writing a file again leaves one
+  // record of it. A stamp of another mount and a prefix op followed by a
+  // drop both stay, and a record that arrives late with an earlier time is
+  // overruled as it lands.
+  it('drops a record a later one overrules', () => {
+    const rec = (
+      op: string,
+      path: string,
+      timestamp: number,
+      fingerprint: string | null = null,
+      mountId: string | null = null,
+    ): OpRecord =>
+      new OpRecord({
+        op,
+        path,
+        source: 's3',
+        bytes: 10,
+        timestamp,
+        durationMs: 0,
+        fingerprint,
+        mountId,
+      })
+    const log = new OpLog(3)
+    const holds = (held: OpRecord[]): void => {
+      expect(log.records).toHaveLength(held.length)
+      log.records.forEach((r, i) => {
+        expect(r).toBe(held[i])
+      })
+    }
+    const read = rec('read', '/s3/a', 1, 'v1')
+    const replaced = rec('read', '/s3/a', 2, 'v1', 'gone')
+    const appended = rec('append', '/s3/b', 3)
+    const swept = rec('rm_r', '/s3/c', 4)
+    log.add([read, replaced, appended, swept])
+    holds([read, replaced, appended, swept])
+    const again = rec('read', '/s3/a', 5, 'v2')
+    const removed = rec('unlink', '/s3/b', 6)
+    const inside = rec('append', '/s3/c', 7)
+    log.add([again, removed, inside, rec('read', '/s3/a', 0, 'v0')])
+    holds([replaced, swept, again, removed, inside])
+    const resweep = rec('rm_r', '/s3/c', 9)
+    const others = ['d', 'e', 'f'].map((name) => rec('read', `/s3/${name}`, 10, 'v'))
+    log.add([resweep, ...others])
+    holds([replaced, again, removed, resweep, ...others])
+    expect([log.networkBytes, log.cacheBytes]).toEqual([120, 0])
+  })
 })

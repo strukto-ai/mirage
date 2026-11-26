@@ -1072,6 +1072,22 @@ function check(
   return problems.map((p) => `${caseId} ${label}: ${p}`)
 }
 
+/**
+ * The ops the op log took after `newest`, its newest record before a step
+ * (undefined when it was empty), each as `op path`. The op log drops records
+ * in place once it holds enough of them, so a count taken before a step is no
+ * index into it afterwards; the record the step began after still marks where
+ * its own start.
+ */
+function opsAfter(ws: Workspace, newest: Workspace['records'][number] | undefined): string[] {
+  let start = 0
+  if (newest !== undefined) {
+    start = ws.records.lastIndexOf(newest) + 1
+    if (start === 0) throw new Error('the op log dropped the record this step began after')
+  }
+  return ws.records.slice(start).map((r) => `${r.op} ${r.path}`)
+}
+
 function checkOps(expect: Expect, seen: string[]): string[] {
   const recorded = new Set([...seen, ...seen.map((entry) => entry.split(' ', 1)[0])])
   const problems: string[] = []
@@ -1260,7 +1276,7 @@ async function performStep(
   const expect = step.expect ?? {}
   // The op log slice this step adds: ws.records delegates to the Files
   // facade's account, so the step's own ops are the tail.
-  const opsBefore = ws.records.length
+  const newest = ws.records.at(-1)
   if (step.host_program !== undefined) {
     return runHostProgram(ws, caseId, label, step.host_program, expect)
   }
@@ -1288,13 +1304,13 @@ async function performStep(
       problems.push(
         `handle content ${JSON.stringify(content)}, expected ${JSON.stringify(expect.content)}`,
       )
-    const seen = ws.records.slice(opsBefore).map((r) => `${r.op} ${r.path}`)
+    const seen = opsAfter(ws, newest)
     problems.push(...checkOps(expect, seen))
     return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
   if (step.facade !== undefined) {
     const problems = await runFacade(ws, expect, step.facade)
-    const seen = ws.records.slice(opsBefore).map((r) => `${r.op} ${r.path}`)
+    const seen = opsAfter(ws, newest)
     problems.push(...checkOps(expect, seen))
     return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
@@ -1388,7 +1404,7 @@ async function performStep(
   const stdout = DEC.decode(result.stdout)
   const stderr = DEC.decode(result.stderr)
   const problems = check(caseId, label, expect, result.exitCode, stdout, stderr)
-  const seen = ws.records.slice(opsBefore).map((r) => `${r.op} ${r.path}`)
+  const seen = opsAfter(ws, newest)
   problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`))
   return problems
 }
@@ -1426,7 +1442,7 @@ async function runHostProgram(
   source: string,
   expect: Expect,
 ): Promise<string[]> {
-  const opsBefore = ws.records.length
+  const newest = ws.records.at(-1)
   const out: string[] = []
   const err: string[] = []
   const guest = capture(out, err)
@@ -1441,7 +1457,7 @@ async function runHostProgram(
     restore()
   }
   const problems = check(caseId, label, expect, exitCode, out.join(''), err.join(''))
-  const seen = ws.records.slice(opsBefore).map((r) => `${r.op} ${r.path}`)
+  const seen = opsAfter(ws, newest)
   problems.push(...checkOps(expect, seen).map((p) => `${caseId} ${label}: ${p}`))
   return problems
 }

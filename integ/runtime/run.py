@@ -50,6 +50,7 @@ from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
 from mirage.fuse.fs import MirageFS  # noqa: E402
 from mirage.mount.core import MountCore  # noqa: E402
+from mirage.observe.record import OpRecord  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.constants import METADATA_OPS  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
@@ -1034,6 +1035,41 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     return ws
 
 
+def _newest_op(ws: Workspace) -> OpRecord | None:
+    """The op log's newest record, for a step to begin after.
+
+    Args:
+        ws (Workspace): the workspace under test.
+    """
+    records = ws.vfs.records
+    return records[-1] if records else None
+
+
+def _ops_after(ws: Workspace, newest: OpRecord | None) -> list[str]:
+    """The ops the op log took after ``newest``, each as ``op path``.
+
+    The op log drops records in place once it holds enough of them, so a
+    count taken before a step is no index into it afterwards; the record
+    the step began after still marks where its own start.
+
+    Args:
+        ws (Workspace): the workspace under test.
+        newest (OpRecord | None): the newest record before the step,
+            None when the op log was empty.
+    """
+    records = ws.vfs.records
+    start = 0
+    if newest is not None:
+        start = len(records)
+        while start > 0 and records[start - 1] is not newest:
+            start -= 1
+        if start == 0:
+            raise RuntimeError(
+                "the op log dropped the record this step began after"
+            )
+    return [f"{r.op} {r.path}" for r in records[start:]]
+
+
 def _check_ops(expect: dict[str, Any], seen: list[str]) -> list[str]:
     """Op log expectations for one step, against the ops it added.
 
@@ -1274,7 +1310,7 @@ async def _perform_step(
     expect = step.get("expect", {})
     # The op log slice this step adds: ws.vfs.records is the one
     # workspace-wide account, so the step's own ops are the tail.
-    ops_before = len(ws.vfs.records)
+    newest = _newest_op(ws)
     if "add_policies" in step:
         for spec in step["add_policies"]:
             ws.policies.add(_build_policy(spec))
@@ -1305,12 +1341,12 @@ async def _perform_step(
             problems.append(
                 f"handle content {content!r}, expected {expect['content']!r}"
             )
-        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ops_before:]]
+        seen = _ops_after(ws, newest)
         problems.extend(_check_ops(expect, seen))
         return [f"{case_id} {label}: {p}" for p in problems]
     if "facade" in step:
         problems = await _run_facade(ws, expect, step["facade"])
-        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ops_before:]]
+        seen = _ops_after(ws, newest)
         problems.extend(_check_ops(expect, seen))
         return [f"{case_id} {label}: {p}" for p in problems]
     if "s3_put" in step:
@@ -1411,7 +1447,7 @@ async def _perform_step(
     stdout = await result.stdout_str()
     stderr = await result.stderr_str()
     problems = _check(case_id, label, expect, result.exit_code, stdout, stderr)
-    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ops_before:]]
+    seen = _ops_after(ws, newest)
     problems.extend(
         f"{case_id} {label}: {p}" for p in _check_ops(expect, seen)
     )
@@ -1735,7 +1771,7 @@ def _run_host_program(
             ``stdin`` what the program reads.
     """
     expect = step.get("expect", {})
-    ops_before = len(ws.vfs.records)
+    newest = _newest_op(ws)
     stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
     stderr = io.TextIOWrapper(
         io.BytesIO(), encoding="utf-8", errors="backslashreplace"
@@ -1775,7 +1811,7 @@ def _run_host_program(
     out = stdout.buffer.getvalue().decode(errors="replace")
     err = stderr.buffer.getvalue().decode(errors="replace")
     problems = _check(case_id, label, expect, exit_code, out, err)
-    seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ops_before:]]
+    seen = _ops_after(ws, newest)
     problems.extend(
         f"{case_id} {label}: {p}" for p in _check_ops(expect, seen)
     )

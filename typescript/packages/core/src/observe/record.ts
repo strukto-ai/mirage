@@ -15,6 +15,7 @@
 import { VFSName } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
 import { underPath } from '../utils/key_prefix.ts'
+import { rstripSlash } from '../utils/slash.ts'
 import { OP_LOG_RECORDS } from './constants.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
@@ -202,17 +203,50 @@ export function changesPin(rec: OpRecord): boolean {
 }
 
 /**
- * A workspace's op log: every record a snapshot pins a path by, and the
- * newest of the rest, which only account for an op.
+ * The pins `rec` has the last word on until a later record has it, as
+ * fingerprint capture reads the op log: the one it is overruled in first. A
+ * retraction and a change of the bytes drop the pin at their path, a prefix
+ * op every pin beneath it too, and a token stamps the pin of its path and
+ * mount. A later drop at a path overrules an earlier one there, a later
+ * prefix op only another prefix op, and a later stamp the stamps of the same
+ * path and mount: a capture skips or takes both alike. Later is by
+ * timestamp, as a capture orders them, so a record that arrives after one it
+ * precedes changes nothing. A record that changes no pin settles none.
+ * Mirrors Python's `_settles`.
+ */
+function settles(rec: OpRecord): string[] {
+  if (RETRACT_FINGERPRINT_OPS.has(rec.op)) {
+    const base = rstripSlash(rec.path)
+    return SUBTREE_RETRACT_OPS.has(rec.op) ? [`sweep ${base}`, `drop ${base}`] : [`drop ${base}`]
+  }
+  if (
+    CONTENT_CHANGING_OPS.has(rec.op) &&
+    (!STAMP_FINGERPRINT_OPS.has(rec.op) || !(rec.fingerprint || rec.revision))
+  ) {
+    return [`drop ${rstripSlash(rec.path)}`]
+  }
+  if (STAMP_FINGERPRINT_OPS.has(rec.op) && (rec.fingerprint !== null || rec.revision !== null)) {
+    return [`stamp ${JSON.stringify([rec.path, rec.mountId])}`]
+  }
+  return []
+}
+
+/**
+ * A workspace's op log: every record that has the last word on a pin a
+ * snapshot takes, and the newest of the rest, which only account for an op.
  *
- * It holds at most `maxRecords` of those: past it the oldest go first, down
- * to three quarters of it, and the bytes they moved stay in the totals.
- * Mirrors Python's `OpLog`.
+ * It holds at most `maxRecords` of the rest: past it the oldest go first,
+ * down to three quarters of it. A record a later one overrules (`settles`)
+ * goes with them, or once `maxRecords` more that change a pin arrived, so
+ * reading a file again adds no record for good. The bytes a dropped record
+ * moved stay in the totals. A snapshot takes the same pins from what is
+ * left, in an order that can differ. Mirrors Python's `OpLog`.
  */
 export class OpLog {
   readonly records: OpRecord[] = []
   readonly maxRecords: number
   private unpinned = 0
+  private settling = 0
   private droppedNetworkBytes = 0
   private droppedCacheBytes = 0
 
@@ -225,21 +259,37 @@ export class OpLog {
   add(records: Iterable<OpRecord>): void {
     for (const rec of records) {
       this.records.push(rec)
-      if (!changesPin(rec)) this.unpinned += 1
+      if (changesPin(rec)) this.settling += 1
+      else this.unpinned += 1
     }
-    if (this.unpinned <= this.maxRecords) return
-    let excess = this.unpinned - Math.floor((this.maxRecords * 3) / 4)
+    if (Math.max(this.unpinned, this.settling) <= this.maxRecords) return
+    const last = new Map<string, OpRecord>()
+    for (const rec of this.records) {
+      for (const pin of settles(rec)) {
+        const held = last.get(pin)
+        if (held === undefined || held.timestamp <= rec.timestamp) last.set(pin, rec)
+      }
+    }
+    let excess =
+      this.unpinned > this.maxRecords ? this.unpinned - Math.floor((this.maxRecords * 3) / 4) : 0
     let kept = 0
     this.unpinned = 0
+    this.settling = 0
     for (const rec of this.records) {
-      if (!changesPin(rec)) {
-        if (excess > 0) {
-          excess -= 1
-          if (rec.isCache) this.droppedCacheBytes += rec.bytes
-          else this.droppedNetworkBytes += rec.bytes
-          continue
-        }
+      const [judged] = settles(rec)
+      let dropped = false
+      if (judged !== undefined) {
+        dropped = last.get(judged) !== rec
+      } else if (excess > 0) {
+        dropped = true
+        excess -= 1
+      } else {
         this.unpinned += 1
+      }
+      if (dropped) {
+        if (rec.isCache) this.droppedCacheBytes += rec.bytes
+        else this.droppedNetworkBytes += rec.bytes
+        continue
       }
       this.records[kept] = rec
       kept += 1
