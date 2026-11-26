@@ -142,6 +142,24 @@ struct Open {
     watched: bool,
 }
 
+/// When an open was asked of the host: whether its reply said a policy
+/// judges every call, and how many `watch` pushes had come before it, so
+/// one that came meanwhile marks the open watched too.
+#[derive(Clone, Copy)]
+struct Asked {
+    watched: bool,
+    watches: u64,
+}
+
+/// An open asked when `watches` pushes had come, whose reply said no
+/// policy judges every call.
+fn unwatched(watches: u64) -> Asked {
+    Asked {
+        watched: false,
+        watches,
+    }
+}
+
 /// What the kernel must forget, and the host's barriers, in the order they
 /// came: run on a thread of their own, so a notification the kernel holds
 /// back never stalls the replies a request waits for.
@@ -166,6 +184,7 @@ struct State {
     revoked_dirs: HashSet<u64>,
     next_fh: u64,
     epoch: u64,
+    watches: u64,
 }
 
 /// A listing's rows from its JSON: `[[name, attrs], ...]`.
@@ -422,6 +441,7 @@ impl Shared {
         if frame.str("push") == Some("watch") {
             self.forget(&self.root.clone());
             let mut st = locked(&self.state);
+            st.watches += 1;
             for open in st.opens.values_mut() {
                 if open.cached {
                     open.revoked = true;
@@ -763,12 +783,13 @@ impl MirageFs {
         data: Option<(Arc<Vec<u8>>, Attrs)>,
         writes: bool,
         cached: bool,
-        watched: bool,
+        asked: Asked,
     ) -> u64 {
         let mut st = self.st();
         let fh = st.next_fh;
         st.next_fh += 1;
         let (data, attrs) = data.unzip();
+        let crossed = st.watches != asked.watches;
         st.opens.insert(
             fh,
             Open {
@@ -779,8 +800,8 @@ impl MirageFs {
                 writes,
                 detached: false,
                 cached,
-                revoked: false,
-                watched,
+                revoked: cached && crossed,
+                watched: asked.watched || crossed,
             },
         );
         fh
@@ -799,6 +820,9 @@ impl MirageFs {
         self.changed(&open.path);
         let args = json!({ "fh": host, "offset": offset });
         if open.watched {
+            if let Some(refused) = self.link.refusal(host) {
+                return Err(failed(refused));
+            }
             self.call("write", args, data)?;
         } else {
             self.link
@@ -1216,6 +1240,7 @@ impl Filesystem for MirageFs {
             return reply.error(Errno::ENOENT);
         };
         let writes = flags.0 & libc::O_ACCMODE != libc::O_RDONLY || flags.0 & libc::O_TRUNC != 0;
+        let watches = self.st().watches;
         if !writes
             && let Ok(attrs) = self.stat(&path)
             && attrs.kept
@@ -1223,7 +1248,14 @@ impl Filesystem for MirageFs {
             && attrs.size <= WHOLE_FILE
         {
             if let Some(data) = self.cached(&path, &attrs) {
-                let fh = self.opened(&path, None, Some((data, attrs)), false, true, false);
+                let fh = self.opened(
+                    &path,
+                    None,
+                    Some((data, attrs)),
+                    false,
+                    true,
+                    unwatched(watches),
+                );
                 return reply.opened(FileHandle(fh), FopenFlags::FOPEN_KEEP_CACHE);
             }
             let held = match self.whole(&path, attrs) {
@@ -1233,7 +1265,7 @@ impl Filesystem for MirageFs {
                 Err(err) => return reply.error(err),
             };
             if let Some(held) = held {
-                let fh = self.opened(&path, None, Some(held), false, true, false);
+                let fh = self.opened(&path, None, Some(held), false, true, unwatched(watches));
                 return reply.opened(FileHandle(fh), FopenFlags::empty());
             }
         }
@@ -1253,7 +1285,14 @@ impl Filesystem for MirageFs {
                     return reply.error(Errno::EIO);
                 };
                 let (kept, watched) = keep_of(&frame);
-                let fh = self.opened(&path, Some(host), None, writes, kept && !writes, watched);
+                let fh = self.opened(
+                    &path,
+                    Some(host),
+                    None,
+                    writes,
+                    kept && !writes,
+                    Asked { watched, watches },
+                );
                 let mode = if kept && !writes {
                     FopenFlags::empty()
                 } else {
@@ -1584,6 +1623,7 @@ impl Filesystem for MirageFs {
         };
         let path = child(&dir, name);
         self.changed(&path);
+        let watches = self.st().watches;
         let args = json!({
             "path": path,
             "mode": mode & !umask & 0o7777,
@@ -1595,7 +1635,17 @@ impl Filesystem for MirageFs {
                     return reply.error(Errno::EIO);
                 };
                 let ino = self.ino(&path);
-                let fh = self.opened(&path, Some(host), None, true, false, attrs.watched);
+                let fh = self.opened(
+                    &path,
+                    Some(host),
+                    None,
+                    true,
+                    false,
+                    Asked {
+                        watched: attrs.watched,
+                        watches,
+                    },
+                );
                 reply.created(
                     &ttl(&attrs),
                     &self.attr(ino, &attrs),
@@ -1701,7 +1751,7 @@ mod tests {
     #[test]
     fn a_write_goes_ahead_of_its_answer_and_the_close_waits_for_it() {
         let (fs, mut host) = hosted();
-        let fh = fs.opened("/w/a", Some(7), None, true, false, false);
+        let fh = fs.opened("/w/a", Some(7), None, true, false, unwatched(0));
         assert_eq!(fs.write_at(fh, 0, b"hi"), Ok(()));
         let sent = host.next();
         assert_eq!(
@@ -1720,7 +1770,7 @@ mod tests {
     #[test]
     fn a_write_while_a_policy_judges_every_call_waits_for_its_answer() {
         let (fs, mut host) = hosted();
-        let fh = fs.opened("/w/a", Some(7), None, true, false, false);
+        let fh = fs.opened("/w/a", Some(7), None, true, false, unwatched(0));
         fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
         let writing = {
             let fs = fs.clone();
@@ -1733,12 +1783,43 @@ mod tests {
     }
 
     #[test]
+    fn a_watched_write_after_a_refused_one_fails_unsent_and_the_close_still_hears_it() {
+        let (fs, mut host) = hosted();
+        let fh = fs.opened("/w/a", Some(7), None, true, false, unwatched(0));
+        fs.write_at(fh, 0, b"a").unwrap();
+        let sent = host.next();
+        host.send(json!({"id": sent.u64("id"), "errno": "EACCES"}), b"");
+        while fs.link.refusal(7).is_none() {
+            std::thread::yield_now();
+        }
+        fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
+        assert_eq!(fs.write_at(fh, 1, b"b"), Err(Errno::EACCES));
+        assert_eq!(fs.settle(fh), Err(Errno::EACCES));
+    }
+
+    #[test]
+    fn an_open_a_watch_crossed_is_watched_and_its_kept_pages_revoked() {
+        let (fs, _host) = hosted();
+        let asked = fs.st().watches;
+        fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
+        let held = Some((Arc::new(b"old".to_vec()), attrs(true)));
+        let cached = fs.opened("/w/a", None, held, false, true, unwatched(asked));
+        let direct = fs.opened("/w/b", Some(7), None, true, false, unwatched(asked));
+        let now = fs.st().watches;
+        let after = fs.opened("/w/c", Some(8), None, true, false, unwatched(now));
+        let st = fs.st();
+        assert!(st.opens[&cached].revoked && st.opens[&cached].watched);
+        assert!(st.opens[&direct].watched && !st.opens[&direct].revoked);
+        assert!(!st.opens[&after].watched);
+    }
+
+    #[test]
     fn a_reader_of_a_removed_name_keeps_its_bytes_when_the_name_is_rewritten() {
         let (fs, _host) = hosted();
         let held = |bytes: &[u8]| Some((Arc::new(bytes.to_vec()), attrs(true)));
-        let old = fs.opened("/w/a", None, held(b"old"), false, true, false);
+        let old = fs.opened("/w/a", None, held(b"old"), false, true, unwatched(0));
         MirageFs::detach(&mut fs.st(), "/w/a");
-        let new = fs.opened("/w/a", None, held(b"new"), false, true, false);
+        let new = fs.opened("/w/a", None, held(b"new"), false, true, unwatched(0));
         fs.rewritten("/w/a");
         let st = fs.st();
         assert_eq!(
@@ -1969,8 +2050,8 @@ mod tests {
     fn a_policy_that_comes_refuses_reads_the_kernel_may_cache_and_old_streams() {
         let (fs, _host) = hosted();
         let held = Some((Arc::new(b"plan".to_vec()), attrs(true)));
-        let cached = fs.opened("/w/a", None, held, false, true, false);
-        let direct = fs.opened("/w/b", Some(7), None, false, false, false);
+        let cached = fs.opened("/w/a", None, held, false, true, unwatched(0));
+        let direct = fs.opened("/w/b", Some(7), None, false, false, unwatched(0));
         fs.st().dirs.insert(9, ("/w".into(), 0, vec![]));
         fs.shared.push(Frame::new(json!({"push": "watch"}), vec![]));
         let st = fs.st();

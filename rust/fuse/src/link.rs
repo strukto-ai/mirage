@@ -157,6 +157,15 @@ impl Link {
         refused.map_or(Ok(()), Err)
     }
 
+    /// The first refusal among host handle `fh`'s requests sent ahead, if
+    /// one came: it stays for the close or fsync that waits on them.
+    pub fn refusal(&self, fh: u64) -> Option<Failure> {
+        locked(&self.ahead)
+            .handles
+            .get(&fh)
+            .and_then(|h| h.refused.clone())
+    }
+
     /// Forget host handle `fh` once its last request sent ahead has its
     /// reply: it is released, so no close or fsync waits for it any more.
     pub fn released(&self, fh: u64) {
