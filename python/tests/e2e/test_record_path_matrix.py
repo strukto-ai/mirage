@@ -182,7 +182,7 @@ def _under_m(path: str) -> bool:
     return path == "/m" or path.startswith("/m/")
 
 
-def _ledger(records) -> list[tuple[str, str]]:
+def _ops(records) -> list[tuple[str, str]]:
     return [
         (r.op, r.path)
         for r in records
@@ -217,7 +217,7 @@ async def _run_records(
     for line in script:
         io = await ws.shell(line)
         await io.stdout_str()
-        # A loud failure trips the exit code; a silent no-op, the exact ledger.
+        # A loud failure trips the exit code; a silent no-op, the exact ops.
         assert io.exit_code == 0, (line, await io.stderr_str())
     records = list(ws._files.records)
     # touch records write, so only the dispatcher reaches create.
@@ -241,7 +241,7 @@ async def _close(ws: Workspace, state: MountState) -> None:
 async def _run_row(state: MountState) -> list[tuple[str, str]]:
     ws, records = await _run_records(state, SCRIPT, [])
     try:
-        return _ledger(records)
+        return _ops(records)
     finally:
         await _close(ws, state)
 
@@ -261,8 +261,8 @@ def test_record_paths_are_virtual(ptype, tmp_path):
         if ptype == "s3":
             stack.enter_context(patch_s3_multi({S3_BUCKET: {}}))
         # One loop per row: FakeRedis and pooled clients break across loops.
-        ledger = asyncio.run(_run_row(state))
-    assert ledger == EXPECTED[ptype]
+        ops = asyncio.run(_run_row(state))
+    assert ops == EXPECTED[ptype]
 
 
 # A mount-root key: a site that records the mount-relative "/k2.txt" names a

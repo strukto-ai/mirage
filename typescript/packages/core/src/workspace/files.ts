@@ -47,12 +47,12 @@ export interface FilesOptions {
   records?: OpLog
   // The line's operand resolution a command's globs give their matches.
   follow?: FollowOperands | null
-  // Record each op on the ledger; false where the dispatcher does the accounting.
-  ledger?: boolean
+  // Record each op on the op log; false where the dispatcher does the accounting.
+  logOps?: boolean
   // The mount whose command scope a command's files run in, null across
   // mounts; unset where nothing said one (`servedBy`).
   served?: Caller['mount']
-  // The workspace clock a ledgered op is timed and stamped on; unset is the
+  // The workspace clock a logged op is timed and stamped on; unset is the
   // system clock.
   clock?: Clock
 }
@@ -109,10 +109,10 @@ async function* recorded(
  * same pipeline as a shell command: link follow, session grants,
  * admission policies, cache read-through, namespace structure, and
  * post-write invalidation all fire once, at that one dispatcher. The facade
- * keeps only what is its own: the typed surface and the op ledger it
- * records on — the ledger lives here, not on the workspace, which is what
+ * keeps only what is its own: the typed surface and the op log it
+ * records on — the op log lives here, not on the workspace, which is what
  * lets `MountCore` take one `Files` instead of reaching through a whole
- * `Workspace`. The ledger is read on `ws.vfs`, a `WorkspaceFiles`. Mirrors
+ * `Workspace`. The op log is read on `ws.vfs`, a `WorkspaceFiles`. Mirrors
  * Python's `Files`.
  *
  * The facade runs as one session, `sessionId`, through `bind`: every
@@ -124,7 +124,7 @@ async function* recorded(
  * when the op arrives (a command's own runtime, a kernel mount serving
  * one session) is kept, so the facade never widens the caller's view,
  * and the record names the session that judged the op. `Session`
- * derives a facade for another session over the same ledger.
+ * derives a facade for another session over the same op log.
  *
  * Every op also takes a trailing `sessionId` for the one-call case,
  * the way `Workspace.shell` does. One rule decides between them: a
@@ -160,10 +160,10 @@ export class Files {
   private readonly caller: Partial<Caller> | null
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
-  /** The op ledger this facade records on; `WorkspaceFiles.records` reads it. */
+  /** The op log this facade records on; `WorkspaceFiles.records` reads it. */
   protected readonly recorded: OpLog
   private readonly follow: FollowOperands | null
-  private readonly ledger: boolean
+  private readonly logOps: boolean
   private readonly clock: Clock
   /**
    * The mount whose command scope these files run in, null for a run across
@@ -197,7 +197,7 @@ export class Files {
     this.sessionId = options.sessionId ?? null
     this.recorded = options.records ?? new OpLog()
     this.follow = options.follow ?? null
-    this.ledger = options.ledger ?? true
+    this.logOps = options.logOps ?? true
     this.served = options.served
     this.clock = options.clock ?? new SystemClock()
   }
@@ -213,7 +213,7 @@ export class Files {
   }
 
   /**
-   * The same facade run as another session, over the same ledger, so
+   * The same facade run as another session, over the same op log, so
    * the workspace-wide account stays one list.
    *
    * @internal The mechanism behind `Session.vfs`, not an entry point of
@@ -261,13 +261,13 @@ export class Files {
       ...this.options(),
       caller: this.caller,
       follow: this.follow,
-      ledger: this.ledger,
+      logOps: this.logOps,
       served: mount,
     })
   }
 
   /**
-   * The same files over another dispatcher, keeping no ledger.
+   * The same files over another dispatcher, keeping no op log.
    *
    * @internal Behind `captureBinding`; Python spells it `Files._over`.
    * @param dispatch the dispatcher the calls go to.
@@ -276,7 +276,7 @@ export class Files {
     return new Files(dispatch, this.namespace, null, {
       sessionId: this.sessionId,
       follow: this.follow,
-      ledger: false,
+      logOps: false,
     })
   }
 
@@ -331,11 +331,11 @@ export class Files {
 
   /**
    * `Workspace.dispatch` as this facade runs it: as its session, and
-   * recorded on the ledger. The dispatcher `RuntimeFiles` drives for node's
+   * recorded on the op log. The dispatcher `RuntimeFiles` drives for node's
    * patched `fs` (`patchNodeFs`), a facade caller like FUSE, and a
    * handler's for any op its typed methods do not spell; bound, so a handler
    * can hand it on. The IOResult is empty unless this facade keeps no
-   * ledger. Mirrors Python's `Files.dispatch`.
+   * op log. Mirrors Python's `Files.dispatch`.
    */
   readonly dispatch = async (
     name: string,
@@ -344,7 +344,7 @@ export class Files {
     kwargs: OpKwargs = {},
     report?: OpReport,
   ): Promise<[unknown, IOResult]> => {
-    if (!this.ledger)
+    if (!this.logOps)
       return this.dispatchFn(name, PathSpec.fromStrPath(path, undefined, '/'), args, kwargs, report)
     return [await this.through(name, path, args, kwargs), new IOResult()]
   }
@@ -356,7 +356,7 @@ export class Files {
    * structure, invalidation). On a line this workspace runs, the op records
    * where the line records, so its records are the line's; anywhere else
    * (outside a line, or on another workspace's) it records into its own
-   * recording, handed to this ledger and the sink once the op ends, a
+   * recording, handed to this op log and the sink once the op ends, a
    * stream's once it closes. What records it is what records a line's
    * calls: the backend and the dispatcher, with the tokens they read. An op
    * nothing below recorded (a stat, a listing, a warm cache hit, a
@@ -371,7 +371,7 @@ export class Files {
     kwargs: OpKwargs = {},
     sessionId?: string,
   ): Promise<unknown> {
-    if (!this.ledger) return (await this.dispatch(op, path, args, kwargs))[0]
+    if (!this.logOps) return (await this.dispatch(op, path, args, kwargs))[0]
     const timer = new OpTimer(this.clock)
     const report = new OpReport()
     const spelled = typeof path === 'string' ? path : path.virtual
@@ -379,14 +379,14 @@ export class Files {
     // Without task isolation (a browser) a backend's record lands in
     // whichever call bound last, so a call cannot tell its own records from
     // an overlapping call's: there it records the op itself, from the
-    // dispatcher's report, straight onto the ledger.
+    // dispatcher's report, straight onto the op log.
     const isolated = asyncContextIsolatesTasks
     // Only a line this workspace runs is joined: another workspace's line
     // would take this workspace's records.
     const own: Recorder | null =
-      !isolated || outer.recording?.ledger === this.recorded
+      !isolated || outer.recording?.opLog === this.recorded
         ? null
-        : { records: [], mountId: null, ledger: null, clock: this.clock }
+        : { records: [], mountId: null, opLog: null, clock: this.clock }
     // The op's own list gathers every record made below it; a command the
     // op runs in on that line (a handler reaching `ws.vfs`) is charged them
     // once the op ends.
@@ -628,7 +628,7 @@ export class Files {
    *
    * Routed through the dispatcher like every write: session grants and
    * admission policies fire on the link's turf, and the write lands on
-   * the ledger. The target is stored verbatim as typed. Throws EEXIST
+   * the op log. The target is stored verbatim as typed. Throws EEXIST
    * when something is already at `path` (a file, a directory, another
    * link, a mount root): symlink(2) never overwrites, and the dispatcher is
    * the layer that can see both planes to tell. Throws ENOENT when the
@@ -774,9 +774,9 @@ export class Files {
 /**
  * `ws.vfs`: the files the host holds, with what only the host asks of them.
  *
- * The op ledger every ledgered facade appends to (`records`, with the
+ * The op log every facade that logs its ops appends to (`records`, with the
  * network/cache split derived from it). The `Files` a handler, a CLI leaf, a
- * runtime or `session.vfs` gets is a facade of its own, on which the ledger
+ * runtime or `session.vfs` gets is a facade of its own, on which the op log
  * would report only that facade, so it is a plain `Files`. Mirrors Python's
  * `WorkspaceFiles`, which also answers the mount questions FUSE and the
  * runtime's `open()` interception ask; here the workspace's registry answers
@@ -784,7 +784,7 @@ export class Files {
  */
 export class WorkspaceFiles extends Files {
   /**
-   * The op ledger: every facade op lands here, and the executor appends each
+   * The op log: every facade op lands here, and the executor appends each
    * shell line's ops too, so this is the one workspace-wide account (Python's
    * `WorkspaceFiles.records`). It holds every record a snapshot pins a path
    * by and the newest of the rest (`OpLog`).

@@ -23,7 +23,7 @@ import { checkDestParents, touchParent } from './dest.ts'
 export async function create(accessor: RAMAccessor, path: PathSpec): Promise<void> {
   // Not a delegation to writeBytes: that recorded the op as 'write',
   // so a guest creating a file and one writing one were the same row
-  // in the ledger.
+  // in the op log.
   const timer = startOp()
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)

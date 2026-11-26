@@ -264,7 +264,7 @@ export async function runOnMount(
         dispatch,
         namespace === undefined ? null : namespace.readers(() => session.visibility),
         null,
-        { follow: ctx.follow ?? null, ledger: false },
+        { follow: ctx.follow ?? null, logOps: false },
       ),
       env: envSnapshot(session),
       session: sessionView(session, context.frame.diagnostics),

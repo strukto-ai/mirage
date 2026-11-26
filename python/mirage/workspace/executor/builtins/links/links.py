@@ -281,7 +281,7 @@ async def strip_link_operands(
 
     The removal is a dispatch op, never a direct table write: the dispatcher
     is where session grants, the turf's mode, admission policies and
-    the op ledger fire, and writing the table from here let a session
+    the op log fire, and writing the table from here let a session
     delete a link its grant reads and a policy protecting one never
     fired (the same hole the FUSE unlink had). A refused operand does
     not stop the rest, which is also rm's rule for a backend operand;

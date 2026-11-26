@@ -94,7 +94,7 @@ describe('object-store write fingerprint (mocked S3)', () => {
   })
 
   it('a file tool write records the ETag S3 returned', async () => {
-    // ws.vfs records into the same ledger a shell line does, with the
+    // ws.vfs records into the same op log a shell line does, with the
     // fingerprint the backend returned, so a snapshot pins the write.
     const ws = makeWorkspace(BOUNDED)
     try {

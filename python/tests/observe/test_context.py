@@ -367,7 +367,7 @@ async def _dispatch_recording_read(
 ) -> list[str]:
     # A RAM mount at /m whose read records exactly the paths it is given,
     # inside a real mount frame, so the recorder's own treatment of the
-    # path is what the ledger shows.
+    # path is what the op log shows.
     async def recording_read() -> AsyncIterator[bytes]:
         for path in recorded:
             if stream:

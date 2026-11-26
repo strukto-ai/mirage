@@ -231,7 +231,7 @@ export function answeringFiles(
     dispatch,
     rows.length === 0 && links === null ? null : readers(rows, links),
     null,
-    { ...options, ledger: false },
+    { ...options, logOps: false },
   )
 }
 

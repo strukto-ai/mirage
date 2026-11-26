@@ -60,7 +60,7 @@ async def test_truncate_onto_a_directory_is_a_directory():
 @pytest.mark.asyncio
 async def test_truncate_records_its_own_op():
     # The op used to leave no record at all, so a guest's 'w' open on
-    # an existing file was invisible to the ledger while the same open
+    # an existing file was invisible to the op log while the same open
     # on a missing file was not.
     s = RAMStore()
     a = RAMAccessor(s)

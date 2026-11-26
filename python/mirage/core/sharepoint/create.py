@@ -24,7 +24,7 @@ async def create(accessor: SharePointAccessor, path: PathSpec) -> None:
 
     Not a delegation to ``write_bytes``: that records the op as "write",
     so a guest creating a file and one writing one would be the same row
-    in the ledger.
+    in the op log.
 
     Args:
         accessor (SharePointAccessor): SharePoint accessor.

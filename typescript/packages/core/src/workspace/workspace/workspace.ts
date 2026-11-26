@@ -669,7 +669,7 @@ export class Workspace {
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
     // the policy gates fire exactly once, at that entry point. It keeps the
-    // ledger, which is its own; the sink is only the observer's copy.
+    // op log, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
     this.vfs = new WorkspaceFiles(
@@ -2299,7 +2299,7 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on `ws.vfs`, a `WorkspaceFiles` (python parity);
+   * The op log. It lives on `ws.vfs`, a `WorkspaceFiles` (python parity);
    * these are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {

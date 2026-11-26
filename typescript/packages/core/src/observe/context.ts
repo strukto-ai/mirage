@@ -131,16 +131,16 @@ export function activeRecords(): readonly OpRecord[] | undefined {
 
 /**
  * Run `fn` recording its calls, and answer what it returned with what it
- * recorded. `ledger` is the workspace ledger a line hands its records to,
+ * recorded. `opLog` is the workspace op log a line hands its records to,
  * which a file call of that workspace made on the line joins; `clock` is
  * the workspace clock its ops are timed and stamped on.
  */
 export async function recordingScope<T>(
   fn: () => Promise<T>,
-  ledger: OpLog | null = null,
+  opLog: OpLog | null = null,
   clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
-  const state: Recorder = { records: [], mountId: null, ledger, clock }
+  const state: Recorder = { records: [], mountId: null, opLog, clock }
   const value = await bindCaller({ ...currentCaller(), recording: state }, fn)
   return [value, state.records]
 }
@@ -279,7 +279,7 @@ function processText(): string | null {
  * The one place an op's duration and wall-clock stamp are read, both on the
  * timer's clock, shared
  * by the recorder sink ({@link record}) and by the `Files` facade's own
- * ledger, so the two cannot disagree about what a duration measures.
+ * op log, so the two cannot disagree about what a duration measures.
  * `path` is stored as given.
  */
 export function finishRecord(

@@ -1344,7 +1344,7 @@ async def run_prepared_line(
     # and read its variables to whichever route runs it.
     budget_start = asyncio.get_running_loop().time()
     scope = RecordingScope(
-        active=is_line, ledger=ws.records, clock=ws.registry.clock
+        active=is_line, op_log=ws.records, clock=ws.registry.clock
     )
     parse_scope = ParseScope()
     # A nested line keeps versions against the records added to the

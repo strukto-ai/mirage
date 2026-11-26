@@ -264,14 +264,14 @@ export class OpLog {
 
 /**
  * A line's recording: its records, the mount serving them, the workspace
- * ledger the line hands its records to when it ends (null for a file call's
+ * op log the line hands its records to when it ends (null for a file call's
  * own recording, which no other call joins), and the workspace clock every
  * op recorded here is timed and stamped on.
  */
 export interface Recorder {
   records: OpRecord[]
   mountId: string | null
-  ledger: OpLog | null
+  opLog: OpLog | null
   clock: Clock
 }
 

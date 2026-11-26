@@ -121,7 +121,7 @@ def test_a_ws_vfs_symlink_fires_the_op_methods():
 
 
 def test_ln_leaves_an_op_record():
-    # The op ledger must not say a workspace with ln traffic did
+    # The op log must not say a workspace with ln traffic did
     # nothing: the dispatcher records the namespace write like any other op.
     ws = _two_mounts()
 

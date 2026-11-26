@@ -371,7 +371,7 @@ class Recorder:
         lost (LostPaths): The line's lost paths.
         index (RecordIndex): The line's version index over ``sink``.
         mount_id (str | None): Identity of the mounted instance serving reads.
-        ledger (OpLog | None): the workspace ledger a line hands
+        op_log (OpLog | None): the workspace op log a line hands
             its records to when it ends; None for a file call's own
             recorder, which no other call joins.
         clock (Clock): the workspace clock every op recorded here is
@@ -382,5 +382,5 @@ class Recorder:
     lost: LostPaths
     index: RecordIndex
     mount_id: str | None = None
-    ledger: OpLog | None = None
+    op_log: OpLog | None = None
     clock: Clock = field(default_factory=SystemClock)

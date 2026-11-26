@@ -1426,7 +1426,7 @@ async function runOnLineRuntime(
   const recording: Recorder = {
     records: [],
     mountId: null,
-    ledger: env.records,
+    opLog: env.records,
     clock: env.registry.clock,
   }
   const lineRecords = recording.records

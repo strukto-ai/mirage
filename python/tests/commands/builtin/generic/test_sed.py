@@ -126,7 +126,7 @@ async def test_reached_writes_and_status_survive_early_output_close(
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         data = b"".join(b"%d\n" % n for n in range(100_000))
-        ctx = Context(stdin=data, vfs=Files(ws.dispatch, ledger=False))
+        ctx = Context(stdin=data, vfs=Files(ws.dispatch, log_ops=False))
         output, io = await sed_generic(
             [], [script], ctx, _resolved, _no_read, True
         )

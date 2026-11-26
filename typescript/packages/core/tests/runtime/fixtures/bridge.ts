@@ -120,7 +120,7 @@ export function bindOver(
 ): void {
   const dispatch = dispatchOver(bridge)
   runtime.bind(new WorkspaceBinding(dispatch, resolver))
-  runFiles.set(runtime, new Files(dispatch, null, null, { ledger: false }))
+  runFiles.set(runtime, new Files(dispatch, null, null, { logOps: false }))
 }
 
 /**
@@ -139,6 +139,6 @@ export function filesOver(bridge: BridgeDispatchFn, resolver: MountResolver): Ru
     bridge,
     resolver,
     null,
-    new MountCore(new Files(dispatchOver(bridge), null, null, { ledger: false })),
+    new MountCore(new Files(dispatchOver(bridge), null, null, { logOps: false })),
   )
 }

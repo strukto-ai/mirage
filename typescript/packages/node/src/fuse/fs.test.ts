@@ -243,11 +243,11 @@ describe('MirageFS — read-only mount write consistency', () => {
   })
 })
 
-describe('MirageFS — the op ledger', () => {
+describe('MirageFS — the op log', () => {
   it('accounts for writes too, not only reads', async () => {
     // The mount runs every op through `ws.vfs`, which is what
     // records them; a write issued straight at the dispatcher would
-    // mutate the mount and leave the ledger reporting nothing.
+    // mutate the mount and leave the op log reporting nothing.
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
     const bytes = Buffer.from('written through the mount\n')

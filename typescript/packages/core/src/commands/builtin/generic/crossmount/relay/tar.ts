@@ -68,7 +68,7 @@ export async function runTar(
       ...crossOpts(flagKwargs),
       cwd: PathSpec.fromStrPath(cwd),
       stdin,
-      vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
+      vfs: vfs ?? new Files(dispatch, null, null, { logOps: false }).servedBy(null),
       ...(env !== undefined ? { env } : {}),
     },
     {

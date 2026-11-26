@@ -59,7 +59,7 @@ def _run(
 ) -> tuple[bytes, object]:
     base = cwd or "/"
     spec = PathSpec(virtual=base, directory=base, vfs_path="", resolved=False)
-    vfs = Files(dispatch, ledger=False) if dispatch is not None else None
+    vfs = Files(dispatch, log_ops=False) if dispatch is not None else None
     ctx = Context(vfs=vfs, cwd=spec, flags=flags)
 
     async def run() -> tuple[bytes, IOResult]:

@@ -114,7 +114,7 @@ async function runCurl(
     stdin: null,
     flags,
     cwd: PathSpec.fromStrPath('/'),
-    vfs: new Files(dispatch, null, null, { ledger: false }),
+    vfs: new Files(dispatch, null, null, { logOps: false }),
   })
   if (result === null) return { out: '', err: '', exitCode: -1, writes }
   const [out, ioResult] = result
@@ -714,7 +714,7 @@ describe('curl -b and -c', () => {
       stdin: null,
       flags,
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     })
     if (result === null) throw new Error('no result')
     const [out, io] = result
@@ -789,7 +789,7 @@ describe('curl -b and -c', () => {
       stdin: null,
       flags: { cookie_jar: '/data/jar' },
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     })
     if (result === null) throw new Error('no result')
     const body = (result[0] as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]()

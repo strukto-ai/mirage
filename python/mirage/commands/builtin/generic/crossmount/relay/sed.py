@@ -48,7 +48,7 @@ async def run_sed(
             flags=flags,
             stdin=stdin,
             cwd=PathSpec.from_str_path(cwd),
-            vfs=Files(dispatch, ledger=False),
+            vfs=Files(dispatch, log_ops=False),
             env=env,
             argv=argv,
         ),

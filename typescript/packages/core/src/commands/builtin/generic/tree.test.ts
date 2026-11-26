@@ -122,7 +122,7 @@ describe('treeGeneric operand that is not a directory', () => {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
   }
 
@@ -236,7 +236,7 @@ describe('treeGeneric across a nested mount', () => {
     }
     return {
       ...ctx({}),
-      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { ledger: false }),
+      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { logOps: false }),
     } as unknown as Context
   }
 
@@ -280,7 +280,7 @@ describe('treeGeneric across a nested mount', () => {
       ])
     const withRow = {
       ...ctx({ p: true, noreport: true }),
-      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { ledger: false }),
+      vfs: new Files(dispatch, readers(['/', `${ROOT}/`]), null, { logOps: false }),
     } as unknown as Context
     const [out] = (await setMountGate('/', MountMode.WRITE, () =>
       treeGeneric([spec('/base')], withRow, backendReaddir, backendStat),

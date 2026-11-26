@@ -1156,9 +1156,9 @@ def test_is_mounted_skips_the_anchor_and_claims_for_a_root_mount():
 
 
 @pytest.mark.asyncio
-async def test_a_call_to_another_workspace_is_on_that_workspaces_ledger():
+async def test_a_call_to_another_workspace_is_on_that_workspaces_op_log():
     # A handler on one workspace's line reading another workspace's files:
-    # the read is the other workspace's, in its ledger, not the line's.
+    # the read is the other workspace's, in its op log, not the line's.
     other = Workspace({"/o/": RAMVFS()}, mode=MountMode.WRITE)
     await other.vfs.write("/o/f.txt", b"theirs\n")
     del other.vfs.records[:]
@@ -1199,7 +1199,7 @@ async def test_a_write_admission_check_takes_no_record():
 
 
 @pytest.mark.asyncio
-async def test_a_policys_read_leaves_the_op_it_judges_on_the_ledger():
+async def test_a_policys_read_leaves_the_op_it_judges_on_the_op_log():
     # A pre_vfs policy reading through the dispatcher, as a profile
     # script's read does: what it reads is no record of the unlink it
     # judges, which RAM does not record itself.

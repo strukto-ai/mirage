@@ -123,7 +123,7 @@ async def _du(
     """
     ctx = Context(
         flags={"bytes": True, **flags},
-        vfs=Files(mount, readers([mount.row], links), ledger=False),
+        vfs=Files(mount, readers([mount.row], links), log_ops=False),
     )
     token = set_mount_gate("/", MountMode.WRITE)
     try:

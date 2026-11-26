@@ -877,13 +877,13 @@ export async function handleCommand(
   }
 
   const dispatch = madeByCommand(deps.dispatch, admission)
-  // The command's own files keep no ledger: the dispatcher accounts for the line.
+  // The command's own files keep no op log: the dispatcher accounts for the line.
   const commandFiles = (follow: FollowOperands | null): Files =>
     new Files(
       dispatch,
       namespace.readers(() => session.visibility),
       null,
-      { follow, ledger: false },
+      { follow, logOps: false },
     )
   const cliContext = (vfs: Files): CLIContext => {
     const cliSignal = mergeSignals(signal, context.frame.abortSignal)

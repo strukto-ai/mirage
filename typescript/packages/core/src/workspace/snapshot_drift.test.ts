@@ -186,7 +186,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
   })
 
   it('pins what a file tool read, as a line read is pinned', async () => {
-    // ws.vfs records into the same ledger a shell line does, with the
+    // ws.vfs records into the same op log a shell line does, with the
     // fingerprint and revision the backend returned, so the read is pinned
     // and a load serves the bytes it saw.
     const accessor = new FakeRemoteAccessor()
