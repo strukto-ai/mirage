@@ -306,16 +306,18 @@ export function router(
     if (templateID !== constants.BASE_TEMPLATE) {
       throw new HttpError('not_found', 'sandbox template not found')
     }
-    let config: Record<string, JsonValue>
-    try {
-      config = (await deps.resources.getTemplate(constants.BASE_TEMPLATE)).config
-    } catch (error) {
-      if (!(error instanceof ResourceError)) throw error
-      if (error.code !== 'not_found') throw storeRefusal(error)
-      config = {
-        mode: 'read',
-        mounts: { [constants.HOME]: { vfs: 'ram', mode: 'write' } },
-        env: { HOME: constants.HOME },
+    let config: Record<string, JsonValue> = {
+      mode: 'read',
+      mounts: { [constants.HOME]: { vfs: 'ram', mode: 'write' } },
+      env: { HOME: constants.HOME },
+    }
+    if (!deps.registry.accountsRequired) {
+      try {
+        config = (await deps.resources.getTemplate(constants.BASE_TEMPLATE)).config
+      } catch (error) {
+        if (!(error instanceof ResourceError)) throw error
+        if (error.code !== 'not_found') throw storeRefusal(error)
+        console.debug('using the built-in E2B base:', error.message)
       }
     }
     const entry = await createEphemeralWorkspace(deps, req, reply, config)

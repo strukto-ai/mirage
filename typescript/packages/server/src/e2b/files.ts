@@ -103,6 +103,7 @@ export class SandboxFiles {
       await this.files.rmdir(spec)
     } catch (error) {
       if (classify(error) !== 'ENOENT') throw error
+      console.debug('sandbox file already absent during removal:', error)
     }
   }
 
@@ -144,8 +145,9 @@ export class SandboxFiles {
       try {
         info = await this.files.stat(child, undefined, { nofollow: true })
       } catch (error) {
-        if (classify(error) === 'ENOENT') continue
-        throw error
+        if (classify(error) !== 'ENOENT') throw error
+        console.debug('sandbox file disappeared during listing:', error)
+        continue
       }
       entries.push(await this.entry(child, info))
       if (left > 1 && info.type === FileType.DIRECTORY) {

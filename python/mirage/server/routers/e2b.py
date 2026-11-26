@@ -267,20 +267,23 @@ async def create_sandbox(
         )
     if req.template != constants.BASE_TEMPLATE:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox template not found")
-    try:
-        config, written = await template_config(
-            request, constants.BASE_TEMPLATE
-        )
-    except HttpError as exc:
-        if exc.code != ErrorCode.NOT_FOUND:
-            raise
-        logger.debug("using the built-in E2B base because %s", exc.message)
+    saved = None
+    if not request.app.state.registry.accounts_required:
+        try:
+            saved = await template_config(request, constants.BASE_TEMPLATE)
+        except HttpError as exc:
+            if exc.code != ErrorCode.NOT_FOUND:
+                raise
+            logger.debug("using the built-in E2B base because %s", exc.message)
+    if saved is None:
         written = {
             "mode": "read",
             "mounts": {constants.HOME: {"vfs": "ram", "mode": "write"}},
             "env": {"HOME": constants.HOME},
         }
         config = check_config(written)
+    else:
+        config, written = saved
     entry = await open_workspace(
         request, response, new_workspace_id(), config, written, ephemeral=True
     )

@@ -149,7 +149,16 @@ async def test_lifecycle_respects_capacity_and_owner(tmp_path):
     auth = AuthConfig(
         mode=AuthMode.JWT, jwt=JWTConfig(algorithm="HS256", key=SECRET)
     )
-    async with server(tmp_path, auth_config=auth, max_workspaces=1) as (
+    resources = memory_resource_store()
+    await resources.create_template(
+        TemplateInput(
+            name="base",
+            config={"mounts": {"/private": {"vfs": "ram"}}},
+        )
+    )
+    async with server(
+        tmp_path, auth_config=auth, max_workspaces=1, resource_store=resources
+    ) as (
         app,
         client,
     ):
@@ -180,8 +189,9 @@ async def test_lifecycle_respects_capacity_and_owner(tmp_path):
             f"{NATIVE}/v1/workspaces/{wid}", headers=native
         )
         assert response.status_code == 200
-        assert "/home/user/" in [
-            mount["prefix"] for mount in response.json()["mounts"]
+        assert [mount["prefix"] for mount in response.json()["mounts"]] == [
+            "/home/user/",
+            "/",
         ]
         assert (await client.post(CREATE, headers=alice)).status_code == 503
         connect = f"{CREATE}/{wid}/connect"

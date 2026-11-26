@@ -29,8 +29,14 @@ export function processResponse(
   const canceled = new AbortController()
   const connection = AbortSignal.any([closed, canceled.signal])
   const deadline = new AbortController()
+  const body = new PassThrough()
+  let grace: ReturnType<typeof setTimeout> | undefined
+  const closeStalledStream = (): void => {
+    grace ??= setTimeout(() => body.destroy(), ABORT_JOIN_MS)
+  }
   const expire = (): void => {
     deadline.abort(new DOMException(constants.DEADLINE_MESSAGE, 'TimeoutError'))
+    closeStalledStream()
   }
   const signal = AbortSignal.any([connection, deadline.signal, lease.revoked])
   const { runner } = lease.entry
@@ -110,11 +116,9 @@ export function processResponse(
     }
   }
 
-  const body = new PassThrough()
-  let grace: ReturnType<typeof setTimeout> | undefined
   const revoke = (): void => {
     execution?.cancel()
-    grace = setTimeout(() => body.destroy(), ABORT_JOIN_MS)
+    closeStalledStream()
   }
   body.once('close', () => {
     clearTimeout(grace)

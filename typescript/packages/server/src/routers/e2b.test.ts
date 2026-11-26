@@ -6,6 +6,7 @@ import { Agent, request } from 'node:http'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import { buffer } from 'node:stream/consumers'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { abortable } from '@struktoai/mirage-core/utils/abort'
@@ -505,13 +506,28 @@ describe('E2B lifecycle', () => {
         .setProtectedHeader({ alg: 'RS256' })
         .sign(privateKey),
     })
-    const { app, stateRoot, templateRoot } = await setup({ authConfig })
+    const resourceStore = memoryResourceStore()
+    const { app, stateRoot, templateRoot } = await setup({ authConfig, resourceStore }, false)
+    await resourceStore.createTemplate({
+      name: 'base',
+      description: null,
+      config: {
+        mounts: { ...RAM.mounts, '/private': { vfs: 'ram' } },
+        store: { type: 'disk', root: templateRoot },
+      },
+    })
     const owner = await keyFor('owner')
     const other = await keyFor('other')
     const { sandboxID: id } = await create(app, {}, owner)
     const entry = app.registry.get(id)
     expect(entry.owner).toBe('owner')
     expect(entry.runner.ws.stateStore).toBeInstanceOf(RAMWorkspaceStateStore)
+    const detail = await app.inject({
+      url: `/v1/workspaces/${id}`,
+      headers: { authorization: `Bearer ${owner['x-api-key']}` },
+    })
+    expect(detail.statusCode, detail.body).toBe(200)
+    expect(detail.json()).toMatchObject({ mounts: [{ prefix: '/home/user/' }, { prefix: '/' }] })
     expect((await connect(app, id, 300, other)).statusCode).toBe(404)
     expect((await setSandboxTimeout(app, id, 300, other)).statusCode).toBe(404)
     expect((await kill(app, id, other)).statusCode).toBe(404)
@@ -795,6 +811,25 @@ describe('E2B commands', () => {
     await new Promise((resolve) => setTimeout(resolve, 350))
     const after = await runCommand(app, headers, processBody('test ! -e late'))
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
+  it('closes a timed-out command response when the transport stops reading', async () => {
+    const { app } = await setup()
+    const listener = e2bListener(app)
+    listener.addHook('onSend', async (request, _reply, payload) => {
+      if (request.url !== START) return payload
+      if (!(payload instanceof Readable)) throw new Error('expected a command stream')
+      await once(payload, 'close', { signal: AbortSignal.timeout(2_000) })
+      return ''
+    })
+    const headers = dataHeaders(await create(app))
+    const response = await listener.inject({
+      method: 'POST',
+      url: START,
+      headers: { ...headers, 'connect-timeout-ms': '250' },
+      payload: processBody('yes'),
+    })
+    expect(response.statusCode, response.body).toBe(200)
   })
 
   it('expires a Connect deadline while the request body is still uploading', async () => {
