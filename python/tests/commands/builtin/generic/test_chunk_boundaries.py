@@ -118,6 +118,10 @@ STDIN_LINES = [
     "line,data", STDIN_LINES, ids=[line for line, _ in STDIN_LINES]
 )
 async def test_output_does_not_depend_on_where_stdin_is_cut(line, data):
+    # A pipe hands a command its input in pieces of any size, so a line, a
+    # UTF-8 character or a compressed block can arrive split in two. A test
+    # that feeds the input whole never sees that. A bug of this kind sits at
+    # one offset, so every offset is cut, and then all of them at once.
     ws = Workspace(
         {"/data": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE
     )

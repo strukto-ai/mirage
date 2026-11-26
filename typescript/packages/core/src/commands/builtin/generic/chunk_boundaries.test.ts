@@ -53,6 +53,10 @@ async function* splitSource(data: Uint8Array, ...cuts: number[]): AsyncGenerator
   for (let i = 0; i + 1 < edges.length; i++) yield data.subarray(edges[i], edges[i + 1])
 }
 
+// A pipe hands a command its input in pieces of any size, so a line, a UTF-8
+// character or a compressed block can arrive split in two. A test that feeds
+// the input whole never sees that. A bug of this kind sits at one offset, so
+// every offset is cut, and then all of them at once.
 it.each<[string, Uint8Array]>([
   ['cat', TEXT],
   ['cat -n', TEXT],

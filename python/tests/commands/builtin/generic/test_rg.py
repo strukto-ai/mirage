@@ -13,7 +13,6 @@ from mirage.commands.builtin.rg_search import RgFlags
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.types import materialize
 from mirage.types import (
     MountMode,
     PathSpec,
@@ -30,6 +29,15 @@ def _spec(path: str) -> PathSpec:
     )
 
 
+async def _drain_async(stdout):
+    if stdout is None:
+        return b""
+    if isinstance(stdout, bytes):
+        return stdout
+    chunks = [chunk async for chunk in stdout]
+    return b"".join(chunks)
+
+
 @pytest.mark.asyncio
 async def test_rg_count_stdin_zero_exits_1_without_output():
     readdir, stat, rb, rs = _make_backend({})
@@ -42,7 +50,7 @@ async def test_rg_count_stdin_zero_exits_1_without_output():
         read=rs,
         stdin=b"bar\nbaz\n",
     )
-    assert await materialize(output) == b""
+    assert await _drain_async(output) == b""
     assert io.exit_code == 1
 
 
@@ -129,7 +137,7 @@ async def test_rg_refuses_an_operand_the_walk_refused(operand, message):
             stat=stat,
             read=rs,
         )
-        assert await materialize(output) == want
+        assert await _drain_async(output) == want
         assert io.stderr == said
         assert io.exit_code == 2
 
@@ -153,7 +161,7 @@ async def test_rg_lone_operand_it_may_not_read_is_the_searchers_refusal():
         stat=stat,
         read=denied,
     )
-    assert await materialize(output) == b""
+    assert await _drain_async(output) == b""
     assert io.stderr == b"rg: locked.txt: Permission denied (os error 13)\n"
     assert io.exit_code == 2
 
@@ -184,7 +192,7 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
         stat=stat,
         read=rs,
     )
-    decoded = (await materialize(output)).decode()
+    decoded = (await _drain_async(output)).decode()
     assert decoded == "/real/b.txt\n"
     assert b"/a.txt/x" in (io.stderr or b"")
 
@@ -226,7 +234,7 @@ async def _run(
         read=rs,
         stdin=stdin,
     )
-    return await materialize(output), io
+    return await _drain_async(output), io
 
 
 @pytest.mark.asyncio
@@ -415,7 +423,7 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
         stat=stat,
         read=read_stream,
     )
-    return await materialize(output), await materialize(io.stderr), io
+    return await _drain_async(output), await _drain_async(io.stderr), io
 
 
 @pytest.mark.asyncio

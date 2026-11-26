@@ -153,6 +153,9 @@ describe('headGeneric over chunks', () => {
     expect(await headOf(['1\n2\n', '3\n4\n5\n'], lines)).toEqual(['1\n2\n', '3\n'])
   })
 
+  // head -n -N and -c -N hold back a window that may never be printed, so
+  // only head can count it. headOf collects the pieces and checks nothing,
+  // where materialize checks the budget itself; the refusal must be head's.
   it.each(['lines', 'bytes'])(
     '--%s=-N counts its window against the memory budget',
     async (flag) => {

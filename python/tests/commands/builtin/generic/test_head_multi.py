@@ -15,7 +15,6 @@
 import pytest
 
 from mirage.commands.builtin.generic.head import head_multi
-from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 
@@ -27,6 +26,13 @@ def _paths(*names: str) -> list[PathSpec]:
         )
         for n in names
     ]
+
+
+async def _collect(gen) -> bytes:
+    out = b""
+    async for chunk in gen:
+        out += chunk
+    return out
 
 
 _CHUNKS = {"/a": [b"a1\n", b"a2\n"], "/b": [b"b1\n"]}
@@ -53,7 +59,7 @@ def _read_stream(p: PathSpec):
     ],
 )
 async def test_head_multi_takes_a_bytes_or_a_stream_reader(read, n, expected):
-    out = await materialize(
+    out = await _collect(
         head_multi(_paths("/a", "/b"), read=read, n=n, show_headers=True)
     )
     assert out == expected
