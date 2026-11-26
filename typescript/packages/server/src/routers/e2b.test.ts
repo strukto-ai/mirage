@@ -1128,14 +1128,17 @@ describe('E2B files', () => {
       oversized.client.write(head('file'))
       const mib = Buffer.alloc(1024 * 1024)
       const completed = new AbortController()
-      const largeReply = oversized.reply.finally(() => completed.abort())
-      for (let i = 0; i < 64 && !completed.signal.aborted; i++) {
-        if (oversized.client.write(mib)) continue
-        try {
-          await once(oversized.client, 'drain', { signal: completed.signal })
-        } catch (error) {
-          if (!completed.signal.aborted) throw error
+      const largeReply = oversized.reply.finally(() => {
+        completed.abort()
+      })
+      try {
+        for (let i = 0; i < 64 && !completed.signal.aborted; i++) {
+          if (!oversized.client.write(mib)) {
+            await once(oversized.client, 'drain', { signal: completed.signal })
+          }
         }
+      } catch (error) {
+        if (!completed.signal.aborted) throw error
       }
       const large = await largeReply
       expect(large.status).toBe(413)
