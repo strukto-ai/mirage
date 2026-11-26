@@ -78,20 +78,25 @@ export class BoxAccount {
 
   /** The names the folder `id` holds, sorted. */
   async names(id: string): Promise<string[]> {
-    const listed = await this.run.call<{ entries: { name: string }[] }>(
-      'GET',
-      `/2.0/folders/${id}/items`,
-    )
-    return listed.entries.map((entry) => entry.name).sort()
+    return (await this.entries(id)).map((entry) => entry.name).sort()
+  }
+
+  /** Every row the folder `id`'s listing gives, page by page. */
+  async entries(id: string): Promise<{ id: string; type: string; name: string }[]> {
+    const rows: { id: string; type: string; name: string }[] = []
+    for (;;) {
+      const page = await this.run.call<{
+        total_count: number
+        entries: { id: string; type: string; name: string }[]
+      }>('GET', `/2.0/folders/${id}/items?offset=${String(rows.length)}`)
+      rows.push(...page.entries)
+      if (page.entries.length === 0 || rows.length >= page.total_count) return rows
+    }
   }
 
   /** The row the folder `id`'s listing gives `name`. */
   async child(id: string, name: string): Promise<{ id: string; type: string }> {
-    const listed = await this.run.call<{ entries: { id: string; type: string; name: string }[] }>(
-      'GET',
-      `/2.0/folders/${id}/items`,
-    )
-    const rows = listed.entries.filter((entry) => entry.name === name)
+    const rows = (await this.entries(id)).filter((entry) => entry.name === name)
     if (rows.length !== 1 || rows[0] === undefined)
       throw new Error(`${name} in ${id}: ${String(rows.length)} rows`)
     return rows[0]

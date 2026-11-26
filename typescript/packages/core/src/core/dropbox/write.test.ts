@@ -127,7 +127,7 @@ describe('dropbox write', () => {
     const before = await account.put('/a.txt', ENC.encode('hello'))
     await account.put('/a.txt', ENC.encode('later'))
     await account.run.answerNext('POST', METADATA_ROUTE, 200, before, 2)
-    await account.run.recordRequests()
+    await account.run.recordRequests('dropbox-api-arg')
     await expect(
       replace(account.accessor(), {
         path: spec('/a.txt'),
@@ -135,7 +135,12 @@ describe('dropbox write', () => {
         condition: { kind: 'match', version: before.content_hash },
       }),
     ).rejects.toMatchObject({ code: 'STALE_WRITE' })
-    expect(await account.run.bodies('POST', UPLOAD_ROUTE)).toHaveLength(1)
+    const sent = await account.run.headers('POST', UPLOAD_ROUTE)
+    expect(sent).toHaveLength(1)
+    expect((JSON.parse(sent[0]?.['dropbox-api-arg'] ?? '{}') as { mode: unknown }).mode).toEqual({
+      '.tag': 'update',
+      update: before.rev,
+    })
     expect(text(await account.read('/a.txt'))).toBe('later')
   })
 
@@ -164,6 +169,13 @@ describe('dropbox write', () => {
     await account.mkdir('/Team/data')
     await write(account.accessor('/Team/data'), spec('/note.txt'), new Uint8Array([104]))
     expect(text(await account.read('/Team/data/note.txt'))).toBe('h')
+  })
+
+  // Dropbox-API-Arg is a header, so a name past ASCII travels escaped.
+  it('writes a path past ASCII', async () => {
+    await write(account.accessor(), spec('/你好.txt'), ENC.encode('hi'))
+    expect(await account.names()).toEqual(['你好.txt'])
+    expect(text(await account.read('/你好.txt'))).toBe('hi')
   })
 
   it('creates a file of no bytes', async () => {

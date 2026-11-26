@@ -35,11 +35,12 @@ export type RequestReport = {
 }
 
 // A JSON request's body as parsed; null for any other or one that does not
-// parse.
+// parse. The media type is the part before any `;`, and its name has no case.
 function jsonBody(sent: Record<string, string | string[] | undefined>, raw: Buffer): JsonValue {
   const type = sent['content-type']
   const one = Array.isArray(type) ? type[0] : type
-  if (one === undefined || !one.includes('application/json') || raw.length === 0) return null
+  const media = one?.split(';')[0]?.trim().toLowerCase()
+  if (media !== 'application/json' || raw.length === 0) return null
   try {
     return JSON.parse(raw.toString('utf8')) as JsonValue
   } catch {

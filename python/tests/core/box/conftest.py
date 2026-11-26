@@ -104,14 +104,28 @@ class BoxAccount:
             "PUT", f"/2.0/files/{file_id}", json={"name": name}
         )
 
+    async def entries(self, folder_id: str) -> list[dict[str, Any]]:
+        """Every row a folder's listing gives, page by page.
+
+        Args:
+            folder_id (str): the folder's id.
+        """
+        rows: list[dict[str, Any]] = []
+        while True:
+            page = await self.run.call(
+                "GET", f"/2.0/folders/{folder_id}/items?offset={len(rows)}"
+            )
+            rows.extend(page["entries"])
+            if not page["entries"] or len(rows) >= page["total_count"]:
+                return rows
+
     async def names(self, folder_id: str) -> list[str]:
         """The names a folder holds, sorted.
 
         Args:
             folder_id (str): the folder's id.
         """
-        listed = await self.run.call("GET", f"/2.0/folders/{folder_id}/items")
-        return sorted(entry["name"] for entry in listed["entries"])
+        return sorted(entry["name"] for entry in await self.entries(folder_id))
 
     async def child(self, folder_id: str, name: str) -> dict[str, Any]:
         """The row a folder's listing gives ``name``.
@@ -120,9 +134,9 @@ class BoxAccount:
             folder_id (str): the folder's id.
             name (str): the child's name.
         """
-        listed = await self.run.call("GET", f"/2.0/folders/{folder_id}/items")
-        rows = [e for e in listed["entries"] if e["name"] == name]
-        assert len(rows) == 1, (name, listed["entries"])
+        listed = await self.entries(folder_id)
+        rows = [e for e in listed if e["name"] == name]
+        assert len(rows) == 1, (name, listed)
         return rows[0]
 
     async def read(self, file_id: str) -> bytes:

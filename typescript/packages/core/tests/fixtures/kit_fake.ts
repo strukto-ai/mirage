@@ -106,13 +106,14 @@ export class KitRun {
 
   private send(method: string, path: string, request: RequestOptions): Promise<Response> {
     const json = request.json !== undefined
+    // Header names have no case, so an override replaces the default
+    // rather than joining it.
+    const headers = new Headers(this.tenantHeaders)
+    if (json) headers.set('Content-Type', 'application/json')
+    for (const [name, value] of Object.entries(request.headers ?? {})) headers.set(name, value)
     return fetch(this.url + path, {
       method,
-      headers: {
-        ...this.tenantHeaders,
-        ...(json ? { 'Content-Type': 'application/json' } : {}),
-        ...request.headers,
-      },
+      headers,
       ...(json ? { body: JSON.stringify(request.json) } : {}),
       ...(request.body !== undefined ? { body: request.body as BodyInit } : {}),
     })

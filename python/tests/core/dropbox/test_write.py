@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -90,13 +91,17 @@ async def test_a_replacement_names_the_rev_it_checked(account):
     await account.put("/note.txt", b"later")
     await account.run.answer_next("POST", METADATA_ROUTE, 200, before, times=2)
     path = PathSpec.from_str_path("/note.txt")
-    await account.run.record_requests()
+    await account.run.record_requests("dropbox-api-arg")
     with pytest.raises(StaleWriteError):
         await replace(
             account.accessor(),
             ReplaceRequest(path, b"ours", MatchWrite(before["content_hash"])),
         )
-    assert len(await account.run.bodies("POST", UPLOAD_ROUTE)) == 1
+    (sent,) = await account.run.headers("POST", UPLOAD_ROUTE)
+    assert json.loads(sent["dropbox-api-arg"])["mode"] == {
+        ".tag": "update",
+        "update": before["rev"],
+    }
     assert await account.read("/note.txt") == b"later"
 
 
@@ -130,6 +135,14 @@ async def test_write_uploads_through_subfolder_root(account):
         b"hi",
     )
     assert await account.read("/Team/data/note.txt") == b"hi"
+
+
+@pytest.mark.asyncio
+async def test_write_of_a_path_past_ascii(account):
+    # Dropbox-API-Arg is a header, so a name past ASCII travels escaped.
+    await write(account.accessor(), PathSpec.from_str_path("/你好.txt"), b"hi")
+    assert await account.names() == ["你好.txt"]
+    assert await account.read("/你好.txt") == b"hi"
 
 
 @pytest.mark.asyncio

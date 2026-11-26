@@ -151,9 +151,14 @@ describe('box write ops', () => {
   // refuses the upload and keeps the newer bytes.
   it('sends the etag of the version it checked', async () => {
     const ids = await data()
-    const before = await account.run.call('GET', `/2.0/folders/${ids.data}/items`)
+    const before = await account.run.call<{ entries: { name: string; etag: string }[] }>(
+      'GET',
+      `/2.0/folders/${ids.data}/items`,
+    )
+    const checked = before.entries.find((e) => e.name === 'a.txt')
     await account.uploadVersion(ids.a, ENC.encode('later'))
     await account.run.answerNext('GET', ITEMS_ROUTE, 200, before)
+    await account.run.recordRequests('if-match')
     await expect(
       replace(account.accessor(ids.data), {
         path: spec('/a.txt'),
@@ -161,6 +166,9 @@ describe('box write ops', () => {
         condition: { kind: 'match', version: SHA_HELLO },
       }),
     ).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    expect(await account.run.headers('POST', VERSION_ROUTE)).toEqual([
+      { 'if-match': checked?.etag },
+    ])
     expect(text(await account.read(ids.a))).toBe('later')
   })
 

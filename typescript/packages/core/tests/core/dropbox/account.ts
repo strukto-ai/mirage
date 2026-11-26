@@ -51,7 +51,7 @@ export class DropboxAccount {
     return this.run.call<DropboxAnswer>('POST', '/2/files/upload', {
       body: data,
       headers: {
-        'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite' }),
+        'Dropbox-API-Arg': apiArg({ path, mode: 'overwrite' }),
         'Content-Type': 'application/octet-stream',
       },
     })
@@ -69,18 +69,35 @@ export class DropboxAccount {
 
   /** The names the folder at `path` holds, sorted; '' is the account root. */
   async names(path = ''): Promise<string[]> {
-    const listed = await this.run.call<{ entries: { name: string }[] }>(
-      'POST',
-      '/2/files/list_folder',
-      { json: { path } },
-    )
-    return listed.entries.map((entry) => entry.name).sort()
+    interface Page {
+      entries: { name: string }[]
+      cursor: string
+      has_more: boolean
+    }
+    let page = await this.run.call<Page>('POST', '/2/files/list_folder', { json: { path } })
+    const names = page.entries.map((entry) => entry.name)
+    while (page.has_more) {
+      page = await this.run.call<Page>('POST', '/2/files/list_folder/continue', {
+        json: { cursor: page.cursor },
+      })
+      names.push(...page.entries.map((entry) => entry.name))
+    }
+    return names.sort()
   }
 
   /** The file at `path`'s content, downloaded as a client would. */
   async read(path: string): Promise<Uint8Array> {
     return this.run.read('/2/files/download', 'POST', {
-      headers: { 'Dropbox-API-Arg': JSON.stringify({ path }) },
+      headers: { 'Dropbox-API-Arg': apiArg({ path }) },
     })
   }
+}
+
+// JSON for a header, every character past ASCII as a \u escape: a header
+// value is a ByteString, so fetch refuses one that holds a wider character.
+function apiArg(arg: JsonValue): string {
+  return JSON.stringify(arg).replace(
+    /[\u007f-￿]/g,
+    (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  )
 }

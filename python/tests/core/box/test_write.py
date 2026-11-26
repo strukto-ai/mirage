@@ -140,13 +140,18 @@ async def test_a_replacement_sends_the_etag_of_the_version_it_checked(
     # refuses the upload and keeps the newer bytes.
     ids = await _data(account)
     before = await account.run.call("GET", f"/2.0/folders/{ids['data']}/items")
+    (checked,) = (e for e in before["entries"] if e["name"] == "a.txt")
     await account.upload_version(ids["a.txt"], b"later")
     await account.run.answer_next("GET", ITEMS_ROUTE, 200, before)
+    await account.run.record_requests("if-match")
     with pytest.raises(StaleWriteError):
         await replace(
             account.accessor(ids["data"]),
             ReplaceRequest(_spec("/a.txt"), b"ours", MatchWrite(SHA_HELLO)),
         )
+    assert await account.run.headers("POST", VERSION_ROUTE) == [
+        {"if-match": checked["etag"]}
+    ]
     assert await account.read(ids["a.txt"]) == b"later"
 
 

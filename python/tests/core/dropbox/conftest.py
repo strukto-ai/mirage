@@ -101,10 +101,18 @@ class DropboxAccount:
         Args:
             path (str): the folder's path; empty for the account root.
         """
-        listed = await self.run.call(
+        page = await self.run.call(
             "POST", "/2/files/list_folder", json={"path": path}
         )
-        return sorted(entry["name"] for entry in listed["entries"])
+        names = [entry["name"] for entry in page["entries"]]
+        while page["has_more"]:
+            page = await self.run.call(
+                "POST",
+                "/2/files/list_folder/continue",
+                json={"cursor": page["cursor"]},
+            )
+            names.extend(entry["name"] for entry in page["entries"])
+        return sorted(names)
 
     async def read(self, path: str) -> bytes:
         """A file's content, downloaded as a client would.

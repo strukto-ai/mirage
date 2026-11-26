@@ -139,6 +139,19 @@ export async function runRequestTests(): Promise<void> {
       [{ ...BOARDS, headers: { range: 'bytes=1-3' } }, BOARDS],
       'a start that names headers keeps those a request carried, and no others',
     )
+    await requests('a', 's1', 'POST')
+    for (const type of ['Application/JSON; charset=utf-8', 'application/jsonp']) {
+      await fetch(under('a', '/boards/brd_1/cards'), {
+        method: 'POST',
+        headers: { 'Content-Type': type, 'x-mirage-tenant': 's1' },
+        body: JSON.stringify({ title: type }),
+      })
+    }
+    assert.deepEqual(
+      (await requests('a')).map((r) => r.body),
+      [{ title: 'Application/JSON; charset=utf-8' }, null],
+      'a JSON body is kept whatever the media type is cased, and only JSON is',
+    )
     const refused = await fetch(under('a', REQUESTS_PATH), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-mirage-tenant': 's1' },

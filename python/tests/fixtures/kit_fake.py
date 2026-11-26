@@ -152,7 +152,7 @@ class KitRun:
         """
         listed = await self.call("GET", "/_kit/requests")
         return [
-            dict(parse_qsl(r["query"]))
+            dict(parse_qsl(r["query"], keep_blank_values=True))
             for r in listed["requests"]
             if r["method"] == method and r["route"] == route
         ]
