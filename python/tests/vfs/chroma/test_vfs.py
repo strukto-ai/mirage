@@ -83,3 +83,9 @@ async def test_an_ops_entry_point_burst_under_fresh_fetches_the_tree_once(
         assert fetch.await_count == 1
     finally:
         await ws.close()
+
+
+def test_the_saved_state_redacts_the_key():
+    vfs = build_vfs("chroma", {"collection_name": "docs", "api_key": "k-1"})
+
+    assert vfs.get_state()["config"]["api_key"] == "<REDACTED>"

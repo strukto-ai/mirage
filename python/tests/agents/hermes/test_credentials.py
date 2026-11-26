@@ -112,10 +112,6 @@ REFUSED = {
         "  /h: {vfs: ssh, config: {host: h}}\n",
         "ssh-agent",
     ),
-    "chroma": (
-        "  /c: {vfs: chroma, config: {collection_name: c}}\n",
-        "CHROMA_",
-    ),
     "a google refresh token": (
         "  /g: {vfs: gdrive, config: {refresh_token: '${TOKEN}'}}\n",
         "refresh the OAuth token",
@@ -218,6 +214,8 @@ ALLOWED = {
     "lancedb on s3 with a key pair": "  /l: {vfs: lancedb, config: "
     "{uri: 's3://b/x', storage_options: {aws_access_key_id: '${KEY}', "
     "aws_secret_access_key: '${SECRET}'}}}\n",
+    "chroma with a key": "  /c: {vfs: chroma, config: "
+    "{collection_name: c, api_key: '${KEY}'}}\n",
     "a built-in CLI": "clis:\n  gh: {cli: gh, machine: in_process, "
     "config: {token: '${TOKEN}'}}\n",
     "a docker machine": "machines:\n  d: {provider: docker, container: c}\n",
@@ -231,6 +229,7 @@ def test_a_key_hermes_hands_over_is_allowed(extra):
 
 UNCHECKED_VFS = {
     "airtable",
+    "chroma",
     "databricks_volume",
     "dify",
     "discord",

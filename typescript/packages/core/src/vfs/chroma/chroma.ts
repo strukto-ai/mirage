@@ -22,7 +22,7 @@ import type { DirListing, FileStat, PathSpec, SearchQuery } from '../../types.ts
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { ConfigState, Handed } from '../types.ts'
-import type { RedactedSchema } from '../secrets.ts'
+import { redactedConfigDump, type RedactedSchema } from '../secrets.ts'
 import { ChromaConfig } from './config.ts'
 
 export const VFS_MD = `- Paths are document slugs from the collection's path tree.`
@@ -60,7 +60,7 @@ export class ChromaVFS extends BaseVFS {
   } {
     return {
       type: this.name,
-      config: { ...this.config },
+      config: redactedConfigDump(ChromaConfig, this.config),
       // TypeScript cannot rebuild a config-backed mount from state:
       // `buildMountArgs` substitutes a RAMVFS for anything it was
       // not handed. Saying so out loud turns a silently empty mount

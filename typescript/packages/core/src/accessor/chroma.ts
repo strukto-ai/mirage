@@ -33,11 +33,20 @@ export class ChromaAccessor extends Accessor {
       const mod = (await loadOptionalPeer(() => import(/* @vite-ignore */ spec), {
         feature: 'ChromaVFS',
         packageName: 'chromadb',
-      })) as { ChromaClient: new (o: { host: string; port: number; ssl: boolean }) => ChromaClient }
+      })) as {
+        ChromaClient: new (o: {
+          host: string
+          port: number
+          ssl: boolean
+          headers?: Record<string, string>
+        }) => ChromaClient
+      }
+      const key = this.config.apiKey
       this.client = new mod.ChromaClient({
         host: this.config.host,
         port: this.config.port,
         ssl: this.config.ssl,
+        ...(key !== null ? { headers: { 'x-chroma-token': key } } : {}),
       })
     }
     return this.client

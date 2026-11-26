@@ -20,7 +20,6 @@ ROUTED_SOURCES = frozenset({"env", SOURCE})
 
 AMBIENT_VFS = {
     "ssh": "asyncssh reads ~/.ssh/config and the ssh-agent",
-    "chroma": "chromadb reads CHROMA_* variables and ./.env",
 }
 AMBIENT_MACHINES = {
     "ssh": "asyncssh reads ~/.ssh/config, the ssh-agent and default keys",
