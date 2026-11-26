@@ -124,6 +124,18 @@ describe('dropbox read', () => {
     expect(await downloads()).toEqual([['/Team/data/note.txt', null]])
   })
 
+  it('reads a path past ASCII', async () => {
+    // Dropbox-API-Arg is a header, so a name past ASCII travels escaped, in
+    // the upload that arranges the file and in Mirage's download.
+    await account.put('/你好.txt', ENC.encode('hi'))
+    const accessor = account.accessor()
+    const path = new PathSpec({ virtual: '/你好.txt', directory: '/', vfsPath: '你好.txt' })
+    const entry = await listed(accessor, path)
+    await account.run.recordRequests('dropbox-api-arg', 'range')
+    expect(await read(accessor, path, undefined, entry)).toEqual(ENC.encode('hi'))
+    expect(await downloads()).toEqual([['/你好.txt', null]])
+  })
+
   it('throws EISDIR when path resolves to a folder', async () => {
     await account.mkdir('/docs')
     const accessor = account.accessor()

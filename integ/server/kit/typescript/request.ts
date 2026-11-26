@@ -12,9 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { debuglog } from 'node:util'
 import type { JsonValue } from './types.ts'
 
 export const REQUESTS_PATH = '/_kit/requests'
+
+const debug = debuglog('kit')
 
 // One request as GET and DELETE report it. `route` is the path a route
 // DECLARES (`/2.0/folders/:folder_id/items`), the name a fault plan uses, so
@@ -34,8 +37,9 @@ export type RequestReport = {
   body: JsonValue
 }
 
-// A JSON request's body as parsed; null for any other or one that does not
-// parse. The media type is the part before any `;`, and its name has no case.
+// A JSON request's body as parsed; null for any other, and for one that does
+// not parse, which NODE_DEBUG=kit logs. The media type is the part before any
+// `;`, and its name has no case.
 function jsonBody(sent: Record<string, string | string[] | undefined>, raw: Buffer): JsonValue {
   const type = sent['content-type']
   const one = Array.isArray(type) ? type[0] : type
@@ -43,7 +47,8 @@ function jsonBody(sent: Record<string, string | string[] | undefined>, raw: Buff
   if (media !== 'application/json' || raw.length === 0) return null
   try {
     return JSON.parse(raw.toString('utf8')) as JsonValue
-  } catch {
+  } catch (error) {
+    debug('a JSON request body does not parse: %s', error)
     return null
   }
 }

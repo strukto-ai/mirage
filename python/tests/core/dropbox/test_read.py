@@ -107,6 +107,17 @@ async def test_read_downloads_through_subfolder_root(account):
 
 
 @pytest.mark.asyncio
+async def test_read_of_a_path_past_ascii(account):
+    # Dropbox-API-Arg is a header, so a name past ASCII travels escaped, in
+    # the upload that arranges the file and in Mirage's download.
+    await account.put("/你好.txt", b"hi")
+    path = PathSpec(virtual="/你好.txt", directory="/", vfs_path="你好.txt")
+    await account.run.record_requests("dropbox-api-arg", "range")
+    assert await call(read, readdir, account.accessor(), path) == b"hi"
+    assert await _downloads(account) == [("/你好.txt", None)]
+
+
+@pytest.mark.asyncio
 async def test_read_folder_raises_isadirectory(account):
     await account.mkdir("/docs")
     with pytest.raises(IsADirectoryError):

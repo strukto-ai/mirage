@@ -15,6 +15,14 @@
 import { createHash } from 'node:crypto'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as HashModule from '../../utils/hash.ts'
+import type * as ApiModule from './api.ts'
+
+// The stream goes through to the fake; only the chunk-hash test, which needs
+// boundaries a socket does not promise, sets the chunks itself.
+vi.mock('./api.ts', async () => {
+  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
+  return { ...actual, downloadFileStream: vi.fn(actual.downloadFileStream) }
+})
 
 vi.mock('../../utils/hash.ts', async () => {
   const actual = await vi.importActual<typeof HashModule>('../../utils/hash.ts')
@@ -28,6 +36,7 @@ import { Digest, sha1Hex } from '../../utils/hash.ts'
 import { BoxAccount } from '../../../tests/core/box/account.ts'
 import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { downloadFileStream } from './api.ts'
 import { read, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 
@@ -240,17 +249,23 @@ describe('box read stamps', () => {
 
 describe('box stream stamps', () => {
   it('a drained stream stamps the listed sha1, hashing each chunk as it passes', async () => {
-    // Large enough to arrive in several chunks.
-    const big = Uint8Array.from({ length: 300_000 }, (_, i) => i % 251)
-    const row = await listedThenChanged(big, big)
+    // Box's listing of DATA, then DATA in chunks of 1, 63 and 70 bytes: how a
+    // response splits is the socket's choice, so the test sets it.
+    const row = await listedThenChanged(DATA, DATA)
+    const chunks = [DATA.subarray(0, 1), DATA.subarray(1, 64), DATA.subarray(64)]
+    vi.mocked(downloadFileStream).mockImplementationOnce(async function* () {
+      for (const chunk of chunks) {
+        await Promise.resolve()
+        yield chunk
+      }
+    })
     const update = vi.spyOn(Digest.prototype, 'update')
     const [got, rows] = await recordedStream(row)
-    expect(Buffer.concat(got)).toEqual(Buffer.from(big))
-    expect(rows).toEqual([['read', big.byteLength, sha1(big)]])
+    expect(got).toEqual(chunks)
+    expect(rows).toEqual([['read', DATA.byteLength, sha1(DATA)]])
     // One update per chunk, with that chunk: the stream never buffers itself
     // whole to hash at the end.
-    expect(got.length).toBeGreaterThan(1)
-    expect(update.mock.calls.map(([chunk]) => chunk)).toEqual(got)
+    expect(update.mock.calls.map(([chunk]) => chunk)).toEqual(chunks)
   })
 
   it('a drained stream of other bytes stamps nothing', async () => {

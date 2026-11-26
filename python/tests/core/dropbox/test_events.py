@@ -51,9 +51,11 @@ async def test_each_ping_replays_the_cursor_and_lists_nothing(account):
     # continue from the stored cursor. A path seen before is an UPDATE,
     # or nothing when its content hash did not move; the root is stripped
     # however the server cases it, and the rest keeps the server's casing.
-    # The fake keeps one casing, so Dropbox's pages are answered here.
+    # The fake keeps one casing, so Dropbox's pages are answered here, and
+    # its baseline cursor too, so the first continue's cursor is known.
     await account.mkdir("/team")
     hook = _hook(account)
+    await account.run.answer_next("POST", LATEST_ROUTE, 200, {"cursor": "c1"})
     pages = [
         ([_file("/Team/Docs/A.txt", "h1"), _row("folder", "/TEAM/sub")], "c2"),
         (
@@ -82,7 +84,7 @@ async def test_each_ping_replays_the_cursor_and_lists_nothing(account):
     ]
     (baseline,) = await account.run.bodies("POST", LATEST_ROUTE)
     replayed = await account.run.bodies("POST", CONTINUE_ROUTE)
-    assert [body["cursor"] for body in replayed][1:] == ["c2", "c3"]
+    assert [body["cursor"] for body in replayed] == ["c1", "c2", "c3"]
     assert baseline["path"] == "/team"
     assert json.loads(delta.checkpoint or "")["dropbox"]["seen"] == {
         "Docs/A.txt": "h2"

@@ -71,9 +71,11 @@ describe('DropboxDeltaHook', () => {
   // the stored cursor. A path seen before is an UPDATE, or nothing when its
   // content hash did not move; the root is stripped however the server cases
   // it, and the rest keeps the server's casing. The fake keeps one casing, so
-  // Dropbox's pages are answered here.
+  // Dropbox's pages are answered here, and its baseline cursor too, so the
+  // first continue's cursor is known.
   it('replays the cursor on each ping and lists nothing', async () => {
     await account.mkdir('/team')
+    await account.run.answerNext('POST', LATEST_ROUTE, 200, { cursor: 'c1' })
     const replies = [
       { entries: [file('/Team/Docs/A.txt', 'h1'), row('folder', '/TEAM/sub')], cursor: 'c2' },
       { entries: [file('/team/Docs/A.txt', 'h2'), file('/team/Docs/A.txt', 'h2')], cursor: 'c3' },
@@ -105,10 +107,7 @@ describe('DropboxDeltaHook', () => {
     const baseline = await account.run.bodies('POST', LATEST_ROUTE)
     expect(baseline).toEqual([expect.objectContaining({ path: '/team' })])
     const replayed = await account.run.bodies('POST', CONTINUE_ROUTE)
-    expect(replayed.slice(1).map((body) => (body as { cursor: string }).cursor)).toEqual([
-      'c2',
-      'c3',
-    ])
+    expect(replayed.map((body) => (body as { cursor: string }).cursor)).toEqual(['c1', 'c2', 'c3'])
     expect(saved(delta).dropbox.seen).toEqual({ 'Docs/A.txt': 'h2' })
   })
 
