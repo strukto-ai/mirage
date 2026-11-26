@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import patch
 
 import pytest
 
@@ -83,67 +82,54 @@ def _event(
     return event
 
 
-class FakeBox:
-    """A queue of pending user events behind a stream position."""
-
-    def __init__(self) -> None:
-        self.pending: list[dict] = []
-        self.position = 100
-        self.calls: list[str] = []
-
-    async def events_now(self, tm, stream_type: str) -> str:
-        self.calls.append("now")
-        return str(self.position)
-
-    async def events_since(self, tm, position: str, stream_type: str):
-        self.calls.append(f"since {position}")
-        found, self.pending = self.pending, []
-        self.position += len(found)
-        return found, str(self.position)
-
-
-async def _pull(
-    fake: FakeBox, hook: BoxDeltaHook, root: PathSpec, checkpoint: str | None
-):
-    with (
-        patch("mirage.core.box.events.events_now", fake.events_now),
-        patch("mirage.core.box.events.events_since", fake.events_since),
-    ):
-        return await hook.pull(root, checkpoint)
+EVENTS_ROUTE = "/2.0/events"
 
 
 def _kinds(delta) -> set[tuple[str, FileChangeKind]]:
     return {(c.path.virtual, c.kind) for c in delta.changes}
 
 
+async def _positions(account) -> list[str]:
+    """The stream position each events read since recording asked from."""
+    sent = await account.run.params("GET", EVENTS_ROUTE)
+    return [p["stream_position"] for p in sent]
+
+
 @pytest.mark.asyncio
-async def test_baseline_takes_the_stream_head_and_lists_nothing() -> None:
-    fake = FakeBox()
-    delta = await _pull(fake, BoxDeltaHook(_accessor()), _root(), None)
+async def test_baseline_takes_the_stream_head_and_lists_nothing(account):
+    await account.put("a.txt", b"a")
+    await account.run.record_requests()
+    delta = await BoxDeltaHook(account.accessor()).pull(_root(), None)
     assert delta.changes == ()
-    assert fake.calls == ["now"]
+    assert await _positions(account) == ["now"]
+    assert await account.run.requests() == ["GET /2.0/events"]
 
 
 @pytest.mark.asyncio
-async def test_each_ping_maps_the_events_since_the_last_position() -> None:
+async def test_each_ping_maps_the_events_since_the_last_position(account):
     # The places an event names are remembered in the checkpoint, so a
     # later pull follows an item it saw: an upload of a known file is an
     # UPDATE, its rename a MOVE, and its trash a DELETE where it was.
-    fake = FakeBox()
-    hook = BoxDeltaHook(_accessor("10"))
+    team = await account.mkdir("team")
+    hook = BoxDeltaHook(account.accessor(team))
     root = _root()
-    a = _file("1", "a.txt", "s1", TEAM)
+    delta = await hook.pull(root, None)
+    a: dict[str, str] = {}
+
+    async def put() -> None:
+        a["id"] = await account.put("a.txt", b"a", team)
+
     steps = [
-        [_event("ITEM_UPLOAD", a)],
-        [_event("ITEM_UPLOAD", a, "e2")],
-        [_event("ITEM_RENAME", {**a, "name": "b.txt"})],
-        [_event("ITEM_TRASH", _trashed({**a, "name": "b.txt"}))],
+        put,
+        lambda: account.upload_version(a["id"], b"aa"),
+        lambda: account.rename(a["id"], "b.txt"),
+        lambda: account.run.call("DELETE", f"/2.0/files/{a['id']}"),
     ]
-    delta = await _pull(fake, hook, root, None)
+    await account.run.record_requests()
     got = []
-    for events in steps:
-        fake.pending = events
-        delta = await _pull(fake, hook, root, delta.checkpoint)
+    for step in steps:
+        await step()
+        delta = await hook.pull(root, delta.checkpoint)
         got.append([(c.kind, c.path.virtual) for c in delta.changes])
     assert got == [
         [(FileChangeKind.CREATE, "/box/a.txt")],
@@ -151,38 +137,46 @@ async def test_each_ping_maps_the_events_since_the_last_position() -> None:
         [(FileChangeKind.MOVE, "/box/b.txt")],
         [(FileChangeKind.DELETE, "/box/b.txt")],
     ]
-    assert "list" not in " ".join(fake.calls)
+    asked = {r for r in await account.run.requests() if r.startswith("GET")}
+    assert asked == {"GET /2.0/events"}
 
 
 @pytest.mark.asyncio
-async def test_a_move_out_of_the_event_root_is_a_delete_where_it_was() -> None:
-    fake = FakeBox()
-    hook = BoxDeltaHook(_accessor("10"))
+async def test_a_move_out_of_the_event_root_is_a_delete_where_it_was(account):
+    team = await account.mkdir("team")
+    sub = await account.mkdir("sub", team)
+    hook = BoxDeltaHook(account.accessor(team))
     root = _root("sub")
-    sub = {"type": "folder", "id": "20", "name": "sub"}
-    a = _file("1", "a.txt", "s1", TEAM, sub)
-    delta = await _pull(fake, hook, root, None)
-    fake.pending = [_event("ITEM_UPLOAD", a)]
-    delta = await _pull(fake, hook, root, delta.checkpoint)
-    fake.pending = [_event("ITEM_MOVE", _file("1", "a.txt", "s1", TEAM))]
-    delta = await _pull(fake, hook, root, delta.checkpoint)
+    delta = await hook.pull(root, None)
+    a = await account.put("a.txt", b"a", sub)
+    delta = await hook.pull(root, delta.checkpoint)
+    await account.run.call(
+        "PUT", f"/2.0/files/{a}", json={"parent": {"id": team}}
+    )
+    delta = await hook.pull(root, delta.checkpoint)
     assert _kinds(delta) == {("/box/sub/a.txt", FileChangeKind.DELETE)}
 
 
 @pytest.mark.asyncio
-async def test_events_apply_once_each_in_the_order_they_happened() -> None:
-    fake = FakeBox()
-    hook = BoxDeltaHook(_accessor("10"))
-    a = _file("1", "a.txt", "s1", TEAM)
-    delta = await _pull(fake, hook, _root(), None)
-    fake.pending = [
-        _event(
-            "ITEM_RENAME", {**a, "name": "b.txt"}, "e2", "2026-09-20T10:00:02Z"
-        ),
-        _event("ITEM_UPLOAD", a, "e1", "2026-09-20T10:00:01Z"),
-        _event("ITEM_UPLOAD", a, "e1", "2026-09-20T10:00:01Z"),
-    ]
-    delta = await _pull(fake, hook, _root(), delta.checkpoint)
+async def test_events_apply_once_each_in_the_order_they_happened(account):
+    # Box hands events out of order and more than once: its own upload and
+    # rename, answered rename first with the upload twice.
+    team = await account.mkdir("team")
+    hook = BoxDeltaHook(account.accessor(team))
+    delta = await hook.pull(_root(), None)
+    now = await account.run.call("GET", "/2.0/events?stream_position=now")
+    head = now["next_stream_position"]
+    a = await account.put("a.txt", b"a", team)
+    await account.rename(a, "b.txt")
+    page = await account.run.call("GET", f"/2.0/events?stream_position={head}")
+    upload, renamed = page["entries"]
+    await account.run.answer_next(
+        "GET",
+        EVENTS_ROUTE,
+        200,
+        {**page, "entries": [renamed, upload, upload]},
+    )
+    delta = await hook.pull(_root(), delta.checkpoint)
     assert [(c.kind, c.path.virtual) for c in delta.changes] == [
         (FileChangeKind.CREATE, "/box/a.txt"),
         (FileChangeKind.MOVE, "/box/b.txt"),
@@ -190,18 +184,19 @@ async def test_events_apply_once_each_in_the_order_they_happened() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_position_older_than_the_replay_window_is_unknown() -> None:
+async def test_a_position_older_than_the_replay_window_is_unknown(account):
     # Box replays whatever it still keeps from a stale position, so the
     # root is UNKNOWN and the stream starts again at the present.
-    fake = FakeBox()
-    hook = BoxDeltaHook(_accessor())
-    delta = await _pull(fake, hook, _root(), None)
+    team = await account.mkdir("team")
+    hook = BoxDeltaHook(account.accessor())
+    await account.run.record_requests()
+    delta = await hook.pull(_root(), None)
     state = json.loads(delta.checkpoint or "")
     state["box"]["read"] = "2020-01-01T00:00:00+00:00"
-    fake.pending = [_event("ITEM_UPLOAD", _file("1", "a.txt", "s1", TEAM))]
-    stale = await _pull(fake, hook, _root(), json.dumps(state))
+    await account.put("a.txt", b"a", team)
+    stale = await hook.pull(_root(), json.dumps(state))
     assert _kinds(stale) == {("/box", FileChangeKind.UNKNOWN)}
-    assert fake.calls == ["now", "now"]
+    assert await _positions(account) == ["now", "now"]
 
 
 async def _mapped(hook: BoxEventHook, event_type: str, source: dict):

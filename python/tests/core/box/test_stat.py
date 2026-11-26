@@ -104,28 +104,16 @@ async def test_stat_file_carries_box_metadata(account):
 
 
 @pytest.mark.asyncio
-async def test_stat_folder_is_directory(accessor, index):
-    await index.set_dir(
-        "/",
-        [
-            (
-                "docs",
-                FileStat(
-                    name="docs",
-                    type=FileType.DIRECTORY,
-                    modified="2026-04-01T00:00:00+00:00",
-                    extra={"box_id": "100"},
-                ),
-            )
-        ],
-    )
-    info = await stat(
-        accessor,
+async def test_stat_folder_is_directory(account):
+    docs = await account.mkdir("docs")
+    info = await call(
+        stat,
+        readdir,
+        account.accessor(),
         PathSpec(vfs_path="docs", virtual="/docs", directory="/"),
-        (await index.get("/docs")).entry,
     )
     assert info.type == FileType.DIRECTORY
-    assert info.extra["box_id"] == "100"
+    assert info.extra["box_id"] == docs
 
 
 @pytest.mark.asyncio

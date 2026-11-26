@@ -143,6 +143,14 @@ describe('box stat', () => {
     expect(info.extra.resource_type).toBe('box/file')
   })
 
+  it('stat folder is directory', async () => {
+    const docs = await account.mkdir('docs')
+    const path = new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/' })
+    const info = await listed(account.accessor(), path)
+    expect(info.type).toBe(FileType.DIRECTORY)
+    expect(info.extra.box_id).toBe(docs)
+  })
+
   it('stat missing raises', async () => {
     const ghost = new PathSpec({ vfsPath: 'ghost', virtual: '/ghost', directory: '/' })
     await expect(listed(account.accessor(), ghost)).rejects.toMatchObject({ code: 'ENOENT' })

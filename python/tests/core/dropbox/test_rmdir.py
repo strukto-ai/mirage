@@ -13,96 +13,52 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.core.dropbox.rmdir import rmdir
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
-from tests.core.dropbox.conftest import FakeDropboxRpc
 
-FOLDER = {".tag": "folder", "name": "docs"}
-FILE = {".tag": "file", "name": "a.txt", "size": 1}
-
-
-def make_accessor() -> DropboxAccessor:
-    config = DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
-    return DropboxAccessor(config, DropboxTokenManager(config))
+LIST_ROUTE = "/2/files/list_folder"
+CONTINUE_ROUTE = "/2/files/list_folder/continue"
+DELETE_ROUTE = "/2/files/delete_v2"
 
 
 @pytest.mark.asyncio
-async def test_rmdir_nonempty_raises_enotempty_without_deleting(
-    exact_cloud_paths,
-):
-    with patch(
-        "mirage.core.dropbox.rmdir.get_metadata",
-        new_callable=AsyncMock,
-        return_value=FOLDER,
-    ):
-        with patch(
-            "mirage.core.dropbox.rmdir.list_folder",
-            new_callable=AsyncMock,
-            return_value=[FILE],
-        ):
-            with patch(
-                "mirage.core.dropbox.rmdir.delete_path", new_callable=AsyncMock
-            ) as deleted:
-                with pytest.raises(OSError) as excinfo:
-                    await rmdir(
-                        make_accessor(), PathSpec.from_str_path("/docs")
-                    )
+async def test_rmdir_nonempty_raises_enotempty_without_deleting(account):
+    await account.put("/docs/a.txt", b"a")
+    with pytest.raises(OSError) as excinfo:
+        await rmdir(account.accessor(), PathSpec.from_str_path("/docs"))
     assert excinfo.value.errno == errno.ENOTEMPTY
-    deleted.assert_not_awaited()
+    assert await account.names("/docs") == ["a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rmdir_removes_empty_folder():
-    with patch(
-        "mirage.core.dropbox.rmdir.get_metadata",
-        new_callable=AsyncMock,
-        return_value=FOLDER,
-    ):
-        with patch(
-            "mirage.core.dropbox.rmdir.list_folder",
-            new_callable=AsyncMock,
-            return_value=[],
-        ):
-            with patch(
-                "mirage.core.dropbox.rmdir.delete_path", new_callable=AsyncMock
-            ) as deleted:
-                await rmdir(make_accessor(), PathSpec.from_str_path("/docs"))
-    assert deleted.await_args.args[1] == "/docs"
+async def test_rmdir_removes_empty_folder(account):
+    await account.mkdir("/docs")
+    await rmdir(account.accessor(), PathSpec.from_str_path("/docs"))
+    assert await account.names() == []
 
 
 @pytest.mark.asyncio
-async def test_rmdir_file_raises_enotdir():
-    with patch(
-        "mirage.core.dropbox.rmdir.get_metadata",
-        new_callable=AsyncMock,
-        return_value=FILE,
-    ):
-        with pytest.raises(NotADirectoryError):
-            await rmdir(make_accessor(), PathSpec.from_str_path("/a.txt"))
+async def test_rmdir_file_raises_enotdir(account):
+    await account.put("/a.txt", b"a")
+    with pytest.raises(NotADirectoryError):
+        await rmdir(account.accessor(), PathSpec.from_str_path("/a.txt"))
 
 
 @pytest.mark.asyncio
-async def test_rmdir_probe_is_bounded_to_one_entry(
-    exact_cloud_paths, dropbox_accessor
-):
+async def test_rmdir_probe_is_bounded_to_one_entry(account):
     # The emptiness probe is bounded, not a full listing: `list_folder`
     # follows every continuation cursor, so asking it with a small page
     # size made one request per child to answer a yes/no.
-    rpc = FakeDropboxRpc(entries=[FILE, FILE, FILE], metadata=FOLDER)
-    with patch("mirage.core.dropbox.api.dropbox_rpc", new=rpc):
-        with pytest.raises(OSError) as excinfo:
-            await rmdir(dropbox_accessor, PathSpec.from_str_path("/docs"))
+    for name in ("a", "b", "c"):
+        await account.put(f"/docs/{name}", b"x")
+    await account.run.record_requests()
+    with pytest.raises(OSError) as excinfo:
+        await rmdir(account.accessor(), PathSpec.from_str_path("/docs"))
     assert excinfo.value.errno == errno.ENOTEMPTY
-    assert rpc.list_limits == [1]
-    assert rpc.list_requests == 1
-    assert rpc.deleted == []
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+    listed = await account.run.bodies("POST", LIST_ROUTE)
+    assert [body.get("limit") for body in listed] == [1]
+    assert await account.run.bodies("POST", CONTINUE_ROUTE) == []
+    assert await account.run.bodies("POST", DELETE_ROUTE) == []

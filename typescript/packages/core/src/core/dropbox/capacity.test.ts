@@ -12,45 +12,64 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { CapacityState } from '../../types.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { capacity } from './capacity.ts'
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, dropboxRpc: vi.fn() }
+const USAGE_ROUTE = '/2/users/get_space_usage'
+
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
 })
 
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { CapacityState } from '../../types.ts'
-import { capacity } from './capacity.ts'
-import * as client from './client.ts'
-import type { DropboxTokenManager } from './client.ts'
+afterEach(async () => {
+  await account.run.close()
+})
+
+function quota(total: number, used: number): unknown {
+  return { state: CapacityState.QUOTA, total, used, available: total - used }
+}
 
 describe('dropbox capacity', () => {
+  // The fake's account is a Basic one, with the stored bytes as its use.
+  it('takes an individual allocation as the quota', async () => {
+    const usage = await account.run.call<{ allocation: { allocated: number } }>('POST', USAGE_ROUTE)
+    await account.put('/a.txt', new Uint8Array(300))
+    await account.run.recordRequests()
+    const result = await capacity(account.accessor())
+    expect(await account.run.bodies('POST', USAGE_ROUTE)).toEqual([null])
+    expect(result).toEqual(quota(usage.allocation.allocated, 300))
+  })
+
   it.each([
-    [{ '.tag': 'individual', allocated: 1000 }, 300, 1000],
     [
+      'member cap',
       { '.tag': 'team', used: 900, allocated: 5000, user_within_team_space_allocated: 1000 },
       300,
       1000,
     ],
     [
+      'team pool',
       { '.tag': 'team', used: 900, allocated: 5000, user_within_team_space_allocated: 0 },
       900,
       5000,
     ],
-  ])('takes the allocation that bounds the account (%o)', async (allocation, used, total) => {
-    vi.mocked(client.dropboxRpc).mockResolvedValueOnce({ used: 300, allocation })
-    const accessor = new DropboxAccessor({ tokenManager: {} as DropboxTokenManager })
-    expect(await capacity(accessor)).toEqual({
-      state: CapacityState.QUOTA,
-      total,
-      used,
-      available: total - used,
-    })
-    expect(vi.mocked(client.dropboxRpc).mock.calls.at(-1)?.slice(1)).toEqual([
-      '/users/get_space_usage',
-      null,
-    ])
-  })
+  ])(
+    'takes the allocation that bounds a team account (%s)',
+    async (_name, allocation, used, total) => {
+      await account.run.answerNext('POST', USAGE_ROUTE, 200, { used: 300, allocation })
+      expect(await capacity(account.accessor())).toEqual(quota(total, used))
+    },
+  )
 })

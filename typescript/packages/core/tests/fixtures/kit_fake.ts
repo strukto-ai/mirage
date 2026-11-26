@@ -61,6 +61,13 @@ export async function serve(service: string): Promise<string> {
   )
 }
 
+/** What one request to the fake sends beyond its method and path. */
+interface RequestOptions {
+  json?: JsonValue
+  body?: FormData | Uint8Array
+  headers?: Record<string, string>
+}
+
 /** One run of a kit fake: a world of its own, reached under `url`. */
 export class KitRun {
   readonly name = randomUUID().replaceAll('-', '')
@@ -72,7 +79,7 @@ export class KitRun {
    */
   constructor(
     readonly origin: string,
-    private readonly headers: Record<string, string>,
+    private readonly tenantHeaders: Record<string, string>,
   ) {
     this.url = `${origin}/_run/${this.name}`
   }
@@ -81,32 +88,83 @@ export class KitRun {
   async call<T = JsonValue>(
     method: string,
     path: string,
-    request: { json?: JsonValue; body?: FormData } = {},
+    request: RequestOptions = {},
   ): Promise<T> {
-    const json = request.json !== undefined
-    const res = await fetch(this.url + path, {
-      method,
-      headers: { ...this.headers, ...(json ? { 'Content-Type': 'application/json' } : {}) },
-      ...(json ? { body: JSON.stringify(request.json) } : {}),
-      ...(request.body !== undefined ? { body: request.body } : {}),
-    })
+    const res = await this.send(method, path, request)
     const text = await res.text()
     if (res.status >= 300) throw new Error(`${method} ${path} -> ${String(res.status)} ${text}`)
     return (text === '' ? null : JSON.parse(text)) as T
   }
 
-  /** Start listing the tenant's requests, emptying an earlier list. */
-  async recordRequests(): Promise<void> {
-    await this.call('POST', '/_kit/requests')
+  /** One request to the fake, answered as bytes, redirects followed. */
+  async read(path: string, method = 'GET', request: RequestOptions = {}): Promise<Uint8Array> {
+    const res = await this.send(method, path, request)
+    const body = new Uint8Array(await res.arrayBuffer())
+    if (res.status >= 300) throw new Error(`${method} ${path} -> ${String(res.status)}`)
+    return body
   }
 
-  /** The requests made since the last `recordRequests`, as `METHOD path`. */
+  private send(method: string, path: string, request: RequestOptions): Promise<Response> {
+    const json = request.json !== undefined
+    // Header names have no case, so an override replaces the default
+    // rather than joining it.
+    const headers = new Headers(this.tenantHeaders)
+    if (json) headers.set('Content-Type', 'application/json')
+    for (const [name, value] of Object.entries(request.headers ?? {})) headers.set(name, value)
+    return fetch(this.url + path, {
+      method,
+      headers,
+      ...(json ? { body: JSON.stringify(request.json) } : {}),
+      ...(request.body !== undefined ? { body: request.body as BodyInit } : {}),
+    })
+  }
+
+  /** Start listing the tenant's requests, emptying an earlier list, keeping `headers`. */
+  async recordRequests(...headers: string[]): Promise<void> {
+    await this.call('POST', '/_kit/requests', { json: { headers } })
+  }
+
+  /**
+   * The requests made since the last `recordRequests`, as `METHOD path` and
+   * then `name=value` for each kept header a request carried.
+   */
   async requests(): Promise<string[]> {
-    const listed = await this.call<{ requests: { method: string; path: string }[] }>(
-      'GET',
-      '/_kit/requests',
+    const listed = await this.call<{
+      requests: { method: string; path: string; headers: Record<string, string> }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests.map((r) =>
+      [r.method, r.path, ...Object.entries(r.headers).map(([k, v]) => `${k}=${v}`)].join(' '),
     )
-    return listed.requests.map((r) => `${r.method} ${r.path}`)
+  }
+
+  /** The query of each listed request to `route`, in order. */
+  async params(method: string, route: string): Promise<Record<string, string>[]> {
+    const listed = await this.call<{
+      requests: { method: string; route: string; query: string }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests
+      .filter((r) => r.method === method && r.route === route)
+      .map((r) => Object.fromEntries(new URLSearchParams(r.query)))
+  }
+
+  /** The kept headers of each listed request to `route`, in order. */
+  async headers(method: string, route: string): Promise<Record<string, string>[]> {
+    const listed = await this.call<{
+      requests: { method: string; route: string; headers: Record<string, string> }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests
+      .filter((r) => r.method === method && r.route === route)
+      .map((r) => r.headers)
+  }
+
+  /** The JSON body of each listed request to `route`, in order. */
+  async bodies(method: string, route: string): Promise<JsonValue[]> {
+    const listed = await this.call<{
+      requests: { method: string; route: string; body: JsonValue }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests
+      .filter((r) => r.method === method && r.route === route)
+      .map((r) => r.body)
   }
 
   /** Answer the next `times` requests to `route` with `status`, and `body` when given. */

@@ -12,17 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, eventsNow: vi.fn(), eventsSince: vi.fn() }
-})
-
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { BoxAccessor } from '../../accessor/box.ts'
 import { FileChangeKind, PathSpec, type Delta, type JsonValue } from '../../types.ts'
-import * as api from './api.ts'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import type { BoxEvent, BoxItem } from './api.ts'
 import type { BoxTokenManager } from './client.ts'
 import { BoxDeltaHook, BoxEventHook } from './events.ts'
@@ -84,41 +78,43 @@ function event(
   }
 }
 
-class FakeBox {
-  pending: BoxEvent[] = []
-  position = 100
-  calls: string[] = []
-
-  constructor() {
-    vi.mocked(api.eventsNow).mockImplementation(() => {
-      this.calls.push('now')
-      return Promise.resolve(String(this.position))
-    })
-    vi.mocked(api.eventsSince).mockImplementation((_tm, position) => {
-      this.calls.push(`since ${position}`)
-      const entries = this.pending
-      this.pending = []
-      this.position += entries.length
-      return Promise.resolve({ entries, position: String(this.position) })
-    })
-  }
-}
-
 function pairs(delta: Delta): string[] {
   return delta.changes.map((c) => `${c.kind} ${c.path.virtual}`)
 }
 
-beforeEach(() => {
-  vi.clearAllMocks()
-})
+const EVENTS_ROUTE = '/2.0/events'
 
 describe('BoxDeltaHook', () => {
+  let origin: string
+  let account: BoxAccount
+
+  // Past the 20 s the fixture gives the fake to start, so a slow start fails
+  // with the fixture's message, not the hook's.
+  beforeAll(async () => {
+    origin = await serve('box')
+  }, 30_000)
+
+  beforeEach(() => {
+    account = new BoxAccount(origin)
+  })
+
+  afterEach(async () => {
+    await account.run.close()
+  })
+
+  // The stream position each events read since recording asked from.
+  async function positions(): Promise<string[]> {
+    return (await account.run.params('GET', EVENTS_ROUTE)).map((p) => p.stream_position ?? '')
+  }
+
   // Twin of test_baseline_takes_the_stream_head_and_lists_nothing.
   it('takes the stream head on a baseline and lists nothing', async () => {
-    const fake = new FakeBox()
-    const delta = await new BoxDeltaHook(accessor()).pull(root(), null)
+    await account.put('a.txt', new Uint8Array([97]))
+    await account.run.recordRequests()
+    const delta = await new BoxDeltaHook(account.accessor()).pull(root(), null)
     expect(delta.changes).toEqual([])
-    expect(fake.calls).toEqual(['now'])
+    expect(await positions()).toEqual(['now'])
+    expect(await account.run.requests()).toEqual(['GET /2.0/events'])
   })
 
   // Twin of test_each_ping_maps_the_events_since_the_last_position: the
@@ -126,20 +122,22 @@ describe('BoxDeltaHook', () => {
   // follows an item it saw: an upload of a known file is an UPDATE, its
   // rename a MOVE, and its trash a DELETE where it was.
   it('maps the events since the last position on each ping', async () => {
-    const fake = new FakeBox()
-    const hook = new BoxDeltaHook(accessor('10'))
-    const a = file('1', 'a.txt', 's1', TEAM)
-    const renamed = { ...a, name: 'b.txt' } as BoxItem
-    const steps = [
-      [event('ITEM_UPLOAD', a)],
-      [event('ITEM_UPLOAD', a, { eventId: 'e2' })],
-      [event('ITEM_RENAME', renamed)],
-      [event('ITEM_TRASH', trashed(renamed))],
-    ]
+    const team = await account.mkdir('team')
+    const hook = new BoxDeltaHook(account.accessor(team))
     let delta = await hook.pull(root(), null)
+    let a = ''
+    const steps: (() => Promise<unknown>)[] = [
+      async () => {
+        a = await account.put('a.txt', new Uint8Array([97]), team)
+      },
+      () => account.uploadVersion(a, new Uint8Array([97, 97])),
+      () => account.rename(a, 'b.txt'),
+      () => account.run.call('DELETE', `/2.0/files/${a}`),
+    ]
+    await account.run.recordRequests()
     const got: string[][] = []
-    for (const events of steps) {
-      fake.pending = events
+    for (const step of steps) {
+      await step()
       delta = await hook.pull(root(), delta.checkpoint)
       got.push(pairs(delta))
     }
@@ -149,35 +147,45 @@ describe('BoxDeltaHook', () => {
       ['move /box/b.txt'],
       ['delete /box/b.txt'],
     ])
+    const asked = new Set((await account.run.requests()).filter((r) => r.startsWith('GET')))
+    expect(asked).toEqual(new Set(['GET /2.0/events']))
   })
 
   // Twin of test_a_move_out_of_the_event_root_is_a_delete_where_it_was.
   it('reports a move out of the event root as a delete where it was', async () => {
-    const fake = new FakeBox()
-    const hook = new BoxDeltaHook(accessor('10'))
-    const sub = { type: 'folder' as const, id: '20', name: 'sub' }
+    const team = await account.mkdir('team')
+    const sub = await account.mkdir('sub', team)
+    const hook = new BoxDeltaHook(account.accessor(team))
     let delta = await hook.pull(root('sub'), null)
-    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's1', TEAM, sub))]
+    const a = await account.put('a.txt', new Uint8Array([97]), sub)
     delta = await hook.pull(root('sub'), delta.checkpoint)
-    fake.pending = [event('ITEM_MOVE', file('1', 'a.txt', 's1', TEAM))]
+    await account.run.call('PUT', `/2.0/files/${a}`, { json: { parent: { id: team } } })
     delta = await hook.pull(root('sub'), delta.checkpoint)
     expect(pairs(delta)).toEqual(['delete /box/sub/a.txt'])
   })
 
-  // Twin of test_events_apply_once_each_in_the_order_they_happened.
+  // Twin of test_events_apply_once_each_in_the_order_they_happened. Box hands
+  // events out of order and more than once: its own upload and rename,
+  // answered rename first with the upload twice.
   it('applies events once each in the order they happened', async () => {
-    const fake = new FakeBox()
-    const hook = new BoxDeltaHook(accessor('10'))
-    const a = file('1', 'a.txt', 's1', TEAM)
+    const team = await account.mkdir('team')
+    const hook = new BoxDeltaHook(account.accessor(team))
     let delta = await hook.pull(root(), null)
-    fake.pending = [
-      event('ITEM_RENAME', { ...a, name: 'b.txt' } as BoxItem, {
-        eventId: 'e2',
-        createdAt: '2026-09-20T10:00:02Z',
-      }),
-      event('ITEM_UPLOAD', a, { eventId: 'e1', createdAt: '2026-09-20T10:00:01Z' }),
-      event('ITEM_UPLOAD', a, { eventId: 'e1', createdAt: '2026-09-20T10:00:01Z' }),
-    ]
+    const now = await account.run.call<{ next_stream_position: string }>(
+      'GET',
+      '/2.0/events?stream_position=now',
+    )
+    const a = await account.put('a.txt', new Uint8Array([97]), team)
+    await account.rename(a, 'b.txt')
+    const page = await account.run.call<{ entries: JsonValue[] } & Record<string, JsonValue>>(
+      'GET',
+      `/2.0/events?stream_position=${now.next_stream_position}`,
+    )
+    const [upload, renamed] = page.entries
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, {
+      ...page,
+      entries: [renamed ?? null, upload ?? null, upload ?? null],
+    })
     delta = await hook.pull(root(), delta.checkpoint)
     expect(pairs(delta)).toEqual(['create /box/a.txt', 'move /box/b.txt'])
   })
@@ -186,15 +194,16 @@ describe('BoxDeltaHook', () => {
   // replays whatever it still keeps from a stale position, so the root is
   // UNKNOWN and the stream starts again at the present.
   it('calls a position older than the replay window unknown', async () => {
-    const fake = new FakeBox()
-    const hook = new BoxDeltaHook(accessor())
+    const team = await account.mkdir('team')
+    const hook = new BoxDeltaHook(account.accessor())
+    await account.run.recordRequests()
     const delta = await hook.pull(root(), null)
     const state = JSON.parse(delta.checkpoint ?? '{}') as { box: { read: string } }
     state.box.read = '2020-01-01T00:00:00+00:00'
-    fake.pending = [event('ITEM_UPLOAD', file('1', 'a.txt', 's1', TEAM))]
+    await account.put('a.txt', new Uint8Array([97]), team)
     const stale = await hook.pull(root(), JSON.stringify(state))
     expect(pairs(stale)).toEqual(['unknown /box'])
-    expect(fake.calls).toEqual(['now', 'now'])
+    expect(await positions()).toEqual(['now', 'now'])
   })
 })
 

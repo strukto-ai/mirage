@@ -56,112 +56,85 @@ _LOST = json.loads(
 )
 
 
+ITEMS_ROUTE = "/2.0/folders/:folder_id/items"
+SEARCH_ROUTE = "/2.0/search"
+EVENTS_ROUTE = "/2.0/events"
+
+
 @pytest.fixture
 def tm():
     return BoxTokenManager(BoxConfig(access_token="tok"))
 
 
-@pytest.mark.asyncio
-async def test_list_folder_items_follows_offset_pagination(tm):
-    pages = [
-        {
-            "total_count": 3,
-            "entries": [
-                {"id": "1", "name": "a", "type": "file"},
-                {"id": "2", "name": "b", "type": "file"},
-            ],
-        },
-        {
-            "total_count": 3,
-            "entries": [{"id": "3", "name": "c", "type": "file"}],
-        },
-    ]
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as mock_get:
-        items = await list_folder_items(tm, "0", page_size=2)
-    assert [it["id"] for it in items] == ["1", "2", "3"]
-    assert mock_get.await_count == 2
-    _, second = mock_get.await_args_list[1]
-    assert second["params"]["offset"] == 2
+def _tm(account) -> BoxTokenManager:
+    return account.accessor().token_manager
 
 
 @pytest.mark.asyncio
-async def test_list_folder_items_counts_no_web_link_toward_a_limit(tm):
-    pages = [
-        {
-            "total_count": 4,
-            "entries": [
-                {"id": "1", "name": "a", "type": "web_link"},
-                {"id": "2", "name": "b", "type": "web_link"},
-            ],
-        },
-        {
-            "total_count": 4,
-            "entries": [
-                {"id": "3", "name": "c", "type": "file"},
-                {"id": "4", "name": "d", "type": "file"},
-            ],
-        },
-    ]
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as mock_get:
-        items = await list_folder_items(tm, "0", page_size=2, limit=2)
-    assert [it["id"] for it in items] == ["1", "2", "3", "4"]
-    assert mock_get.await_count == 2
+async def test_list_folder_items_follows_offset_pagination(account):
+    for name in ("a", "b", "c"):
+        await account.put(name, b"x")
+    await account.run.record_requests()
+    items = await list_folder_items(_tm(account), "0", page_size=2)
+    assert [it["name"] for it in items] == ["a", "b", "c"]
+    pages = await account.run.params("GET", ITEMS_ROUTE)
+    assert [page.get("offset") for page in pages] == ["0", "2"]
 
 
 @pytest.mark.asyncio
-async def test_list_folder_items_stops_on_empty_page(tm):
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        return_value={"total_count": 5, "entries": []},
-    ) as mock_get:
-        items = await list_folder_items(tm, "0")
-    assert items == []
-    assert mock_get.await_count == 1
+async def test_list_folder_items_counts_no_web_link_toward_a_limit(account):
+    # Box lists the two web links first, by name; a limit counted them
+    # would stop after that page.
+    await account.web_link("a")
+    await account.web_link("b")
+    await account.put("c", b"x")
+    await account.put("d", b"x")
+    await account.run.record_requests()
+    items = await list_folder_items(_tm(account), "0", page_size=2, limit=2)
+    assert [it["name"] for it in items] == ["a", "b", "c", "d"]
+    assert len(await account.run.params("GET", ITEMS_ROUTE)) == 2
 
 
 @pytest.mark.asyncio
-async def test_search_content_scopes_and_matches_content(tm):
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        return_value={
-            "total_count": 1,
-            "entries": [{"id": "9", "name": "hit", "type": "file"}],
-        },
-    ) as mock_get:
-        items, truncated = await search_content(tm, "needle", "42")
-    assert items[0]["id"] == "9"
+async def test_list_folder_items_stops_on_empty_page(account):
+    await account.run.answer_next(
+        "GET", ITEMS_ROUTE, 200, {"total_count": 5, "entries": []}
+    )
+    await account.run.record_requests()
+    assert await list_folder_items(_tm(account), "0") == []
+    assert len(await account.run.params("GET", ITEMS_ROUTE)) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_content_scopes_and_matches_content(account):
+    # Only a file under the folder, found by its content: the name match
+    # outside the folder and the folder named like the query are not.
+    folder = await account.mkdir("scope")
+    hit = await account.put("hit", b"one needle here", folder)
+    await account.put("needle.txt", b"x")
+    await account.mkdir("needle", folder)
+    await account.run.record_requests()
+    items, truncated = await search_content(_tm(account), "needle", folder)
+    assert [it["id"] for it in items] == [hit]
     assert truncated is False
-    _, kwargs = mock_get.await_args
-    assert kwargs["params"]["ancestor_folder_ids"] == "42"
-    assert kwargs["params"]["content_types"] == "name,file_content"
-    assert kwargs["params"]["type"] == "file"
-    assert kwargs["params"]["fields"] == SEARCH_FIELDS
+    (sent,) = await account.run.params("GET", SEARCH_ROUTE)
+    assert sent["ancestor_folder_ids"] == folder
+    assert sent["content_types"] == "name,file_content"
+    assert sent["type"] == "file"
+    assert sent["fields"] == SEARCH_FIELDS
 
 
 @pytest.mark.asyncio
-async def test_search_content_flags_truncation_at_ceiling(tm):
+async def test_search_content_flags_truncation_at_ceiling(account):
+    # More hits than the fake would hold: Box's own pages of 200.
     page = {
         "total_count": 20_000,
         "entries": [
             {"id": str(i), "name": "f", "type": "file"} for i in range(200)
         ],
     }
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        return_value=page,
-    ):
-        items, truncated = await search_content(tm, "q", "0")
+    await account.run.answer_next("GET", SEARCH_ROUTE, 200, page, times=60)
+    items, truncated = await search_content(_tm(account), "q", "0")
     assert truncated is True
     assert len(items) >= 10_000
 
@@ -191,135 +164,109 @@ async def test_absent_on_404_leaves_every_other_status_a_failure():
 
 
 @pytest.mark.asyncio
-async def test_events_since_reads_until_an_empty_page(tm):
+async def test_events_since_reads_until_an_empty_page(account):
     # Box may return a short page while more events remain, so only an
-    # empty page ends the read.
-    pages = [
-        {
-            "chunk_size": 1,
-            "next_stream_position": 11,
-            "entries": [{"event_id": "a"}],
-        },
-        {
-            "chunk_size": 1,
-            "next_stream_position": "12",
-            "entries": [{"event_id": "b"}],
-        },
-        {"chunk_size": 0, "next_stream_position": "12", "entries": []},
-    ]
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as mock_get:
-        found, position = await events_since(tm, "10", "changes")
-    assert [e["event_id"] for e in found] == ["a", "b"]
-    assert position == "12"
-    positions = [
-        call.kwargs["params"]["stream_position"]
-        for call in mock_get.await_args_list
-    ]
-    assert positions == ["10", "11", "12"]
-    assert (
-        mock_get.await_args_list[0].args[1] == "https://api.box.com/2.0/events"
+    # empty page ends the read: its first page is answered short here.
+    await account.mkdir("x")
+    await account.put("a.txt", b"a")
+    whole = await account.run.call("GET", "/2.0/events?stream_position=0")
+    first = whole["entries"][0]
+    await account.run.answer_next(
+        "GET",
+        EVENTS_ROUTE,
+        200,
+        {"chunk_size": 1, "next_stream_position": 1, "entries": [first]},
     )
-    assert mock_get.await_args_list[0].kwargs["params"]["stream_type"] == (
-        "changes"
-    )
+    await account.run.record_requests()
+    found, position = await events_since(_tm(account), "0", "changes")
+    assert found == whole["entries"]
+    assert position == whole["next_stream_position"]
+    sent = await account.run.params("GET", EVENTS_ROUTE)
+    assert [p["stream_position"] for p in sent] == ["0", "1", "2"]
+    assert {p["stream_type"] for p in sent} == {"changes"}
 
 
 @pytest.mark.asyncio
-async def test_events_now_returns_the_stream_head(tm):
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        return_value={
+async def test_events_now_returns_the_stream_head(account):
+    await account.mkdir("x")
+    await account.run.record_requests()
+    assert await events_now(_tm(account), "changes") == "1"
+    (sent,) = await account.run.params("GET", EVENTS_ROUTE)
+    assert sent["stream_position"] == "now"
+    # Box spells a position as a JSON number. The kit parses JSON in
+    # JavaScript, so the largest it carries exactly is 2**53 - 1.
+    await account.run.answer_next(
+        "GET",
+        EVENTS_ROUTE,
+        200,
+        {
             "chunk_size": 0,
-            "next_stream_position": 1152922976252290886,
+            "next_stream_position": 9007199254740991,
             "entries": [],
         },
-    ) as mock_get:
-        position = await events_now(tm, "changes")
-    assert position == "1152922976252290886"
-    assert mock_get.await_args.kwargs["params"]["stream_position"] == "now"
+    )
+    assert await events_now(_tm(account), "changes") == "9007199254740991"
 
 
 @pytest.mark.asyncio
-async def test_realtime_server_asks_options_events(tm):
-    server = {
-        "type": "realtime_server",
-        "url": "http://2.realtime.services.box.net/subscribe?channel=c",
-        "ttl": "10",
-        "max_retries": "10",
-        "retry_timeout": 610,
-    }
-    with patch(
-        "mirage.core.box.api.box_options",
-        new_callable=AsyncMock,
-        return_value={"chunk_size": 1, "entries": [server]},
-    ) as mock_options:
-        got = await realtime_server(tm)
-    assert got["url"] == server["url"]
-    assert mock_options.await_args.args[1] == "https://api.box.com/2.0/events"
+async def test_realtime_server_asks_options_events(account):
+    answer = await account.run.call("OPTIONS", "/2.0/events")
+    await account.run.record_requests()
+    got = await realtime_server(_tm(account))
+    assert got["url"] == answer["entries"][0]["url"]
+    assert await account.run.requests() == ["OPTIONS /2.0/events"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stuck", [None, "10", 10])
-async def test_events_since_refuses_events_that_do_not_advance(tm, stuck):
+async def test_events_since_refuses_events_that_do_not_advance(account, stuck):
     page = {
         "chunk_size": 1,
         "next_stream_position": stuck,
         "entries": [{"event_id": "a"}],
     }
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        side_effect=[page, page, {"entries": []}],
-    ):
-        with pytest.raises(RuntimeError, match="did not advance"):
-            await events_since(tm, "10", "changes")
+    await account.run.answer_next("GET", EVENTS_ROUTE, 200, page, times=2)
+    await account.run.answer_next("GET", EVENTS_ROUTE, 200, {"entries": []})
+    with pytest.raises(RuntimeError, match="did not advance"):
+        await events_since(_tm(account), "10", "changes")
 
 
 @pytest.mark.asyncio
-async def test_events_since_keeps_its_position_on_an_empty_page(tm):
-    pages = [
+async def test_events_since_keeps_its_position_on_an_empty_page(account):
+    await account.run.answer_next(
+        "GET",
+        EVENTS_ROUTE,
+        200,
         {
             "chunk_size": 1,
             "next_stream_position": "11",
             "entries": [{"event_id": "a"}],
         },
-        {"chunk_size": 0, "entries": []},
-    ]
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ):
-        found, position = await events_since(tm, "10", "changes")
+    )
+    await account.run.answer_next(
+        "GET", EVENTS_ROUTE, 200, {"chunk_size": 0, "entries": []}
+    )
+    found, position = await events_since(_tm(account), "10", "changes")
     assert [e["event_id"] for e in found] == ["a"]
     assert position == "11"
 
 
 @pytest.mark.asyncio
-async def test_events_now_refuses_an_answer_without_a_position(tm):
-    with patch(
-        "mirage.core.box.api.box_get",
-        new_callable=AsyncMock,
-        return_value={"chunk_size": 0, "entries": []},
-    ):
-        with pytest.raises(RuntimeError, match="next_stream_position"):
-            await events_now(tm, "changes")
+async def test_events_now_refuses_an_answer_without_a_position(account):
+    await account.run.answer_next(
+        "GET", EVENTS_ROUTE, 200, {"chunk_size": 0, "entries": []}
+    )
+    with pytest.raises(RuntimeError, match="next_stream_position"):
+        await events_now(_tm(account), "changes")
 
 
 @pytest.mark.asyncio
-async def test_realtime_server_refuses_an_empty_answer(tm):
-    with patch(
-        "mirage.core.box.api.box_options",
-        new_callable=AsyncMock,
-        return_value={"chunk_size": 0},
-    ):
-        with pytest.raises(RuntimeError, match="realtime server"):
-            await realtime_server(tm)
+async def test_realtime_server_refuses_an_empty_answer(account):
+    await account.run.answer_next(
+        "OPTIONS", EVENTS_ROUTE, 200, {"chunk_size": 0}
+    )
+    with pytest.raises(RuntimeError, match="realtime server"):
+        await realtime_server(_tm(account))
 
 
 async def _upload_urls(tm: BoxTokenManager) -> list[str]:

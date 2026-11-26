@@ -12,88 +12,45 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.mkdir import mkdir
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
 
-NOT_FOUND = DropboxApiError("nf", 409, "path/not_found/...")
-
-
-def make_accessor() -> DropboxAccessor:
-    config = DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
-    return DropboxAccessor(config, DropboxTokenManager(config))
+CREATE_ROUTE = "/2/files/create_folder_v2"
 
 
 @pytest.mark.asyncio
-async def test_mkdir_creates_when_parent_exists():
-    async def fake_meta(tm, path):
-        if path == "/docs":
-            raise NOT_FOUND
-        return {".tag": "folder", "name": path.rsplit("/", 1)[1]}
-
-    with patch(
-        "mirage.core.dropbox.mkdir.get_metadata", side_effect=fake_meta
-    ):
-        with patch(
-            "mirage.core.dropbox.mkdir.create_folder", new_callable=AsyncMock
-        ) as created:
-            await mkdir(make_accessor(), PathSpec.from_str_path("/docs"))
-    assert created.await_args.args[1] == "/docs"
+async def test_mkdir_creates_when_parent_exists(account):
+    await mkdir(account.accessor(), PathSpec.from_str_path("/docs"))
+    assert await account.names() == ["docs"]
 
 
 @pytest.mark.asyncio
-async def test_mkdir_reads_a_conflict_on_the_create_as_eexist(
-    exact_cloud_paths,
-):
-    conflict = DropboxApiError("conflict", 409, "path/conflict/folder/...")
-    with patch(
-        "mirage.core.dropbox.mkdir.get_metadata", new_callable=AsyncMock
-    ) as looked:
-        with patch(
-            "mirage.core.dropbox.mkdir.create_folder",
-            new_callable=AsyncMock,
-            side_effect=conflict,
-        ):
-            with pytest.raises(FileExistsError):
-                await mkdir(make_accessor(), PathSpec.from_str_path("/docs"))
-    looked.assert_not_awaited()
+async def test_mkdir_reads_a_conflict_on_the_create_as_eexist(account):
+    # The create is sent and Dropbox's conflict is the answer: the only
+    # lookup is the path spelling check every op makes.
+    await account.mkdir("/docs")
+    await account.run.record_requests()
+    with pytest.raises(FileExistsError):
+        await mkdir(account.accessor(), PathSpec.from_str_path("/docs"))
+    sent = await account.run.bodies("POST", CREATE_ROUTE)
+    assert [body["path"] for body in sent] == ["/docs"]
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parents_is_idempotent_for_existing_dir():
-    with patch(
-        "mirage.core.dropbox.mkdir.get_metadata",
-        new_callable=AsyncMock,
-        return_value={".tag": "folder", "name": "docs"},
-    ):
-        with patch(
-            "mirage.core.dropbox.mkdir.create_folder", new_callable=AsyncMock
-        ) as created:
-            await mkdir(
-                make_accessor(), PathSpec.from_str_path("/docs"), parents=True
-            )
-    created.assert_not_awaited()
+async def test_mkdir_parents_is_idempotent_for_existing_dir(account):
+    await account.mkdir("/docs")
+    await account.run.record_requests()
+    await mkdir(
+        account.accessor(), PathSpec.from_str_path("/docs"), parents=True
+    )
+    assert await account.run.bodies("POST", CREATE_ROUTE) == []
 
 
 @pytest.mark.asyncio
-async def test_mkdir_missing_parent_raises_enoent():
-    with patch(
-        "mirage.core.dropbox.mkdir.get_metadata",
-        new_callable=AsyncMock,
-        side_effect=NOT_FOUND,
-    ):
-        with patch(
-            "mirage.core.dropbox.mkdir.create_folder", new_callable=AsyncMock
-        ) as created:
-            with pytest.raises(FileNotFoundError):
-                await mkdir(make_accessor(), PathSpec.from_str_path("/a/b"))
-    created.assert_not_awaited()
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+async def test_mkdir_missing_parent_raises_enoent(account):
+    await account.run.record_requests()
+    with pytest.raises(FileNotFoundError):
+        await mkdir(account.accessor(), PathSpec.from_str_path("/a/b"))
+    assert await account.run.bodies("POST", CREATE_ROUTE) == []

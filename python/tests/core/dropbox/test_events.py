@@ -13,30 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.events import DropboxDeltaHook
 from mirage.types import FileChangeKind, JsonValue, PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
 
 ROOT = PathSpec(virtual="/m", directory="/m", vfs_path="")
 C, U, D = FileChangeKind.CREATE, FileChangeKind.UPDATE, FileChangeKind.DELETE
+LATEST_ROUTE = "/2/files/list_folder/get_latest_cursor"
+CONTINUE_ROUTE = "/2/files/list_folder/continue"
 
 
-def _hook(root_path: str = "/team") -> DropboxDeltaHook:
-    config = DropboxConfig(
-        client_id="c",
-        client_secret="s",
-        refresh_token="r",
-        root_path=root_path,
-    )
-    return DropboxDeltaHook(
-        DropboxAccessor(config, DropboxTokenManager(config))
-    )
+def _hook(account, root_path: str = "/team") -> DropboxDeltaHook:
+    return DropboxDeltaHook(account.accessor(root_path))
 
 
 def _file(path_display: str, digest: str) -> dict[str, JsonValue]:
@@ -56,13 +46,17 @@ def _pairs(delta) -> list[tuple[FileChangeKind, str]]:
 
 
 @pytest.mark.asyncio
-async def test_each_ping_replays_the_cursor_and_lists_nothing():
+async def test_each_ping_replays_the_cursor_and_lists_nothing(account):
     # A baseline takes a cursor at the present; each pull after it is one
     # continue from the stored cursor. A path seen before is an UPDATE,
     # or nothing when its content hash did not move; the root is stripped
     # however the server cases it, and the rest keeps the server's casing.
-    hook = _hook()
-    replies = [
+    # The fake keeps one casing, so Dropbox's pages are answered here, and
+    # its baseline cursor too, so the first continue's cursor is known.
+    await account.mkdir("/team")
+    hook = _hook(account)
+    await account.run.answer_next("POST", LATEST_ROUTE, 200, {"cursor": "c1"})
+    pages = [
         ([_file("/Team/Docs/A.txt", "h1"), _row("folder", "/TEAM/sub")], "c2"),
         (
             [_file("/team/Docs/A.txt", "h2"), _file("/team/Docs/A.txt", "h2")],
@@ -70,57 +64,49 @@ async def test_each_ping_replays_the_cursor_and_lists_nothing():
         ),
         ([_file("/team/sub/b.txt", "h3"), _row("deleted", "/team/sub")], "c4"),
     ]
-    with (
-        patch(
-            "mirage.core.dropbox.events.latest_cursor",
-            AsyncMock(return_value="c1"),
-        ) as latest,
-        patch(
-            "mirage.core.dropbox.events.continue_folder",
-            AsyncMock(side_effect=replies),
-        ) as replay,
-    ):
-        delta = await hook.pull(ROOT, None)
-        got = []
-        for _ in replies:
-            delta = await hook.pull(ROOT, delta.checkpoint)
-            got.append(_pairs(delta))
+    for entries, cursor in pages:
+        await account.run.answer_next(
+            "POST",
+            CONTINUE_ROUTE,
+            200,
+            {"entries": entries, "cursor": cursor, "has_more": False},
+        )
+    await account.run.record_requests()
+    delta = await hook.pull(ROOT, None)
+    got = []
+    for _ in pages:
+        delta = await hook.pull(ROOT, delta.checkpoint)
+        got.append(_pairs(delta))
     assert got == [
         [(C, "/m/Docs/A.txt"), (C, "/m/sub")],
         [(U, "/m/Docs/A.txt")],
         [(C, "/m/sub/b.txt"), (D, "/m/sub")],
     ]
-    assert [call.args[1] for call in replay.await_args_list] == [
-        "c1",
-        "c2",
-        "c3",
-    ]
-    assert latest.await_count == 1
+    (baseline,) = await account.run.bodies("POST", LATEST_ROUTE)
+    replayed = await account.run.bodies("POST", CONTINUE_ROUTE)
+    assert [body["cursor"] for body in replayed] == ["c1", "c2", "c3"]
+    assert baseline["path"] == "/team"
     assert json.loads(delta.checkpoint or "")["dropbox"]["seen"] == {
         "Docs/A.txt": "h2"
     }
 
 
 @pytest.mark.asyncio
-async def test_a_reset_or_a_root_that_comes_back_reports_the_root():
+async def test_a_reset_or_a_root_that_comes_back_reports_the_root(account):
     # A cursor Dropbox resets, and a root it could not find that is back,
     # both leave the root UNKNOWN with a fresh cursor, never a walk.
-    hook = _hook()
-    reset = DropboxApiError("409", 409, "reset/..")
-    missing = DropboxApiError("409", 409, "path/not_found/..")
-    with (
-        patch(
-            "mirage.core.dropbox.events.latest_cursor",
-            AsyncMock(side_effect=[missing, "c1", "c2"]),
-        ),
-        patch(
-            "mirage.core.dropbox.events.continue_folder",
-            AsyncMock(side_effect=reset),
-        ),
-    ):
-        baseline = await hook.pull(ROOT, None)
-        back = await hook.pull(ROOT, baseline.checkpoint)
-        renewed = await hook.pull(ROOT, back.checkpoint)
+    hook = _hook(account)
+    await account.run.record_requests()
+    baseline = await hook.pull(ROOT, None)
+    await account.mkdir("/team")
+    back = await hook.pull(ROOT, baseline.checkpoint)
+    await account.run.answer_next(
+        "POST", CONTINUE_ROUTE, 409, {"error_summary": "reset/.."}
+    )
+    renewed = await hook.pull(ROOT, back.checkpoint)
     assert json.loads(baseline.checkpoint or "")["dropbox"]["cursor"] == ""
     assert _pairs(back) == _pairs(renewed) == [(FileChangeKind.UNKNOWN, "/m")]
-    assert json.loads(renewed.checkpoint or "")["dropbox"]["cursor"] == "c2"
+    came_back = json.loads(back.checkpoint or "")["dropbox"]["cursor"]
+    cursor = json.loads(renewed.checkpoint or "")["dropbox"]["cursor"]
+    assert len(await account.run.bodies("POST", LATEST_ROUTE)) == 3
+    assert cursor not in ("", came_back)

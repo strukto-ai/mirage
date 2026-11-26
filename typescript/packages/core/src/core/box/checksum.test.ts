@@ -12,65 +12,91 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, getFileInfo: vi.fn() }
-})
-
-import { BoxAccessor } from '../../accessor/box.ts'
+import { createHash } from 'node:crypto'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { recordingScope } from '../../observe/context.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
-import * as api from './api.ts'
-import type { BoxTokenManager } from './client.ts'
+import { PathSpec } from '../../types.ts'
+import type { FileStat } from '../../types.ts'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { checksum } from './checksum.ts'
+import { readdir } from './readdir.ts'
 
-const TM = {} as BoxTokenManager
+const ENC = new TextEncoder()
 const SCOPE = new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/' })
-const accessor = new BoxAccessor({ tokenManager: TM })
+const FILE_ROUTE = '/2.0/files/:file_id'
 
-function listed(sha1 = '0'.repeat(40)): FileStat {
-  return new FileStat({
-    name: 'a.txt',
-    type: FileType.FILE,
-    extra: { box_id: '200', resource_type: 'box/file', sha1 },
-  })
-}
+let origin: string
+let account: BoxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('box')
+}, 30_000)
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  account = new BoxAccount(origin)
 })
 
+afterEach(async () => {
+  await account.run.close()
+})
+
+function sha1(text: string): string {
+  return createHash('sha1').update(text).digest('hex')
+}
+
+// /a.txt and its entry as a listing gave it while it held "hello", after
+// another client has since made it `now`.
+async function listedThenChanged(now?: string): Promise<[string, FileStat | null]> {
+  const id = await account.put('a.txt', ENC.encode('hello'))
+  const entry = await entryAt(readdir, account.accessor(), SCOPE)
+  if (now !== undefined) await account.uploadVersion(id, ENC.encode(now))
+  return [id, entry]
+}
+
 describe('Box checksum', () => {
-  // Mirrors python's test_box_answers_its_live_sha1.
+  // Mirrors python's test_box_answers_its_live_sha1: Box's own answer for
+  // the file now, in upper case.
   it('answers its live sha1', async () => {
-    vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1: 'AB'.repeat(20) } as never)
-    expect(await checksum(accessor, SCOPE, 'sha1', listed())).toBe('ab'.repeat(20))
-    expect(api.getFileInfo).toHaveBeenCalledWith(TM, '200')
+    const [id, entry] = await listedThenChanged('world')
+    const live = await account.fileInfo(id)
+    await account.run.answerNext('GET', FILE_ROUTE, 200, {
+      ...live,
+      sha1: (live.sha1 as string).toUpperCase(),
+    })
+    await account.run.recordRequests()
+    expect(await checksum(account.accessor(), SCOPE, 'sha1', entry)).toBe(sha1('world'))
+    expect(await account.run.requests()).toEqual([`GET /2.0/files/${id}`])
   })
 
   // Mirrors python's test_box_without_a_sha1_reads.
-  it.each([null, ''])('reads a file whose sha1 is %j', async (sha1) => {
-    vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1 } as never)
-    expect(await checksum(accessor, SCOPE, 'sha1', listed())).toBeNull()
+  it.each([null, ''])('reads a file whose sha1 is %j', async (gone) => {
+    const [id, entry] = await listedThenChanged()
+    const live = await account.fileInfo(id)
+    await account.run.answerNext('GET', FILE_ROUTE, 200, { ...live, sha1: gone })
+    expect(await checksum(account.accessor(), SCOPE, 'sha1', entry)).toBeNull()
   })
 
   // Mirrors python's test_box_keeps_no_md5.
   it('keeps no md5', async () => {
-    expect(await checksum(accessor, SCOPE, 'md5', listed())).toBeNull()
-    expect(api.getFileInfo).not.toHaveBeenCalled()
+    const [, entry] = await listedThenChanged()
+    await account.run.recordRequests()
+    expect(await checksum(account.accessor(), SCOPE, 'md5', entry)).toBeNull()
+    expect(await account.run.requests()).toEqual([])
   })
 
   // Mirrors python's test_box_records_the_token_a_read_would.
   it.each([
-    ['ab'.repeat(20), 'ab'.repeat(20)],
-    ['0'.repeat(40), null],
-  ])('records the token a read would, listed %s', async (sha1, token) => {
-    vi.mocked(api.getFileInfo).mockResolvedValue({ id: '200', sha1: 'AB'.repeat(20) } as never)
-    const row = listed(sha1)
-    const [, records] = await recordingScope(() => checksum(accessor, SCOPE, 'sha1', row))
+    ['as listed', undefined, sha1('hello')],
+    ['changed since', 'world', null],
+  ])('records the token a read would, %s', async (_name, now, token) => {
+    const [, entry] = await listedThenChanged(now)
+    const [, records] = await recordingScope(() =>
+      checksum(account.accessor(), SCOPE, 'sha1', entry),
+    )
     expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([['read', '/a.txt', token]])
   })
 })

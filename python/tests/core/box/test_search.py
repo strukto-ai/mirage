@@ -12,81 +12,67 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.box import BoxAccessor
-from mirage.core.box.client import BoxApiError, BoxTokenManager
+from mirage.core.box.api import SEARCH_FIELDS
+from mirage.core.box.readdir import readdir
 from mirage.core.box.search import files_containing
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.vfs.box.config import BoxConfig
+from mirage.types import PathSpec
+from tests.fixtures.handed import entry_at
 
-
-def make_accessor(root_folder_id: str | None = None) -> BoxAccessor:
-    config = BoxConfig(access_token="tok", root_folder_id=root_folder_id)
-    return BoxAccessor(config, BoxTokenManager(config))
+SEARCH_ROUTE = "/2.0/search"
+NEEDLE = b"a needle in it"
 
 
 def mount_root() -> PathSpec:
     return PathSpec(vfs_path="", virtual="/data", directory="/data")
 
 
-def _file(item_id: str, name: str, chain: list[tuple[str, str]]) -> dict:
-    return {
-        "id": item_id,
-        "name": name,
-        "type": "file",
-        "path_collection": {
-            "total_count": len(chain),
-            "entries": [
-                {"type": "folder", "id": cid, "name": cname}
-                for cid, cname in chain
-            ],
-        },
-    }
-
-
-ROOT = [("0", "All Files")]
+async def _scope_of(account) -> str:
+    """The folder the one search since recording was scoped to."""
+    (sent,) = await account.run.params("GET", SEARCH_ROUTE)
+    return sent["ancestor_folder_ids"]
 
 
 @pytest.mark.asyncio
-async def test_hits_are_named_from_their_path_collection():
-    results = [
-        _file("2", "x.txt", ROOT),
-        _file("3", "y.txt", ROOT + [("100", "Sub")]),
-        _file("4", "out.txt", [("7", "Elsewhere")]),
-    ]
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ) as spy:
-        out = await files_containing(make_accessor(), "needle", mount_root())
-    assert spy.await_args.args[2] == "0"
+async def test_hits_are_named_from_their_path_collection(account):
+    # A mount rooted at /data, given Box's answer for the whole account:
+    # the hit in another folder is no path under the mount.
+    data = await account.mkdir("data")
+    await account.put("x.txt", NEEDLE, data)
+    sub = await account.mkdir("Sub", data)
+    await account.put("y.txt", NEEDLE, sub)
+    await account.put("out.txt", NEEDLE, await account.mkdir("Elsewhere"))
+    everywhere = await account.run.call(
+        "GET", f"/2.0/search?query=needle&type=file&fields={SEARCH_FIELDS}"
+    )
+    assert len(everywhere["entries"]) == 3
+    await account.run.answer_next("GET", SEARCH_ROUTE, 200, everywhere)
+    await account.run.record_requests()
+    out = await files_containing(
+        account.accessor(data), "needle", mount_root()
+    )
+    assert await _scope_of(account) == data
     assert out is not None
-    assert [(p.virtual, p.vfs_path) for p in out] == [
-        ("/data/x.txt", "x.txt"),
+    assert sorted((p.virtual, p.vfs_path) for p in out) == [
         ("/data/Sub/y.txt", "Sub/y.txt"),
+        ("/data/x.txt", "x.txt"),
     ]
 
 
 @pytest.mark.asyncio
-async def test_a_subfolder_scope_searches_under_its_folder_id():
+async def test_a_subfolder_scope_searches_under_its_folder_id(account):
+    docs = await account.mkdir("docs")
+    await account.put("in.txt", NEEDLE, docs)
+    await account.put("top.txt", NEEDLE)
     scope = PathSpec(
         vfs_path="docs", virtual="/data/docs", directory="/data/docs"
     )
-    results = [_file("5", "in.txt", ROOT + [("100", "docs")])]
-    row = FileStat(
-        name="docs", type=FileType.DIRECTORY, extra={"box_id": "100"}
-    )
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        return_value=(results, False),
-    ) as spy:
-        out = await files_containing(make_accessor(), "needle", scope, row)
-    assert spy.await_args.args[2] == "100"
+    accessor = account.accessor()
+    row = await entry_at(readdir, accessor, scope)
+    await account.run.record_requests()
+    out = await files_containing(accessor, "needle", scope, row)
+    assert await _scope_of(account) == docs
     assert out is not None
     assert [(p.virtual, p.vfs_path) for p in out] == [
         ("/data/docs/in.txt", "docs/in.txt")
@@ -94,35 +80,37 @@ async def test_a_subfolder_scope_searches_under_its_folder_id():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "answer",
-    [
-        {"side_effect": BoxApiError("boom", 500)},
-        {"return_value": ([_file("2", "x.txt", ROOT)], True)},
-        {"return_value": ([], False)},
-    ],
-    ids=["api-error", "truncated", "no-hit"],
-)
-async def test_an_answer_that_may_miss_a_match_is_none(answer):
+@pytest.mark.parametrize("answer", ["api-error", "truncated", "no-hit"])
+async def test_an_answer_that_may_miss_a_match_is_none(account, answer):
     # No hit is distrusted too: Box indexes a write after it lands.
-    with patch(
-        "mirage.core.box.search.search_content",
-        new_callable=AsyncMock,
-        **answer,
-    ):
-        out = await files_containing(make_accessor(), "needle", mount_root())
+    await account.put("x.txt", NEEDLE)
+    if answer == "api-error":
+        await account.run.answer_next("GET", SEARCH_ROUTE, 500)
+    elif answer == "truncated":
+        page = await account.run.call(
+            "GET", f"/2.0/search?query=needle&fields={SEARCH_FIELDS}"
+        )
+        await account.run.answer_next(
+            "GET",
+            SEARCH_ROUTE,
+            200,
+            {**page, "total_count": 20_000, "entries": page["entries"] * 200},
+            times=60,
+        )
+    query = "absent" if answer == "no-hit" else "needle"
+    out = await files_containing(account.accessor(), query, mount_root())
     assert out is None
 
 
 @pytest.mark.asyncio
-async def test_a_scope_that_is_no_folder_is_none():
+async def test_a_scope_that_is_no_folder_is_none(account):
+    await account.put("a.txt", NEEDLE)
     scope = PathSpec(
         vfs_path="a.txt", virtual="/data/a.txt", directory="/data/a.txt"
     )
-    row = FileStat(name="a.txt", type=FileType.FILE, extra={"box_id": "9"})
-    with patch(
-        "mirage.core.box.search.search_content", new_callable=AsyncMock
-    ) as spy:
-        out = await files_containing(make_accessor(), "needle", scope, row)
+    accessor = account.accessor()
+    row = await entry_at(readdir, accessor, scope)
+    await account.run.record_requests()
+    out = await files_containing(accessor, "needle", scope, row)
     assert out is None
-    spy.assert_not_awaited()
+    assert await account.run.requests() == []

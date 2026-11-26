@@ -15,7 +15,6 @@
 import json
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -35,7 +34,6 @@ from mirage.core.dropbox.api import (
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.errors.types import StaleWriteError
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
 from tests.fixtures.write_context import KeptVersions
 
 _LOST = json.loads(
@@ -48,56 +46,49 @@ _LOST = json.loads(
     ).read_text()
 )
 
-TM = DropboxTokenManager(
-    DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
-)
+LIST_ROUTE = "/2/files/list_folder"
+CONTINUE_ROUTE = "/2/files/list_folder/continue"
+SEARCH_ROUTE = "/2/files/search_v2"
+SEARCH_CONTINUE_ROUTE = "/2/files/search/continue_v2"
+MOVE_ROUTE = "/2/files/move_v2"
+
+
+def _tm(account) -> DropboxTokenManager:
+    return account.accessor().token_manager
 
 
 @pytest.mark.asyncio
-async def test_list_folder_normalizes_root_to_empty_path():
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value={"entries": [], "cursor": "c0", "has_more": False},
-    ) as rpc:
-        await list_folder(TM, "/")
-    assert rpc.await_args.args[2]["path"] == ""
+async def test_list_folder_normalizes_root_to_empty_path(account):
+    await account.run.record_requests()
+    await list_folder(_tm(account), "/")
+    sent = await account.run.bodies("POST", LIST_ROUTE)
+    assert [body["path"] for body in sent] == [""]
 
 
 @pytest.mark.asyncio
-async def test_list_folder_pages_through_continue():
-    pages = [
-        {"entries": [{"name": "a"}], "cursor": "c1", "has_more": True},
-        {"entries": [{"name": "b"}], "cursor": "c2", "has_more": False},
-    ]
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as rpc:
-        out = await list_folder(TM, "/docs")
+async def test_list_folder_pages_through_continue(account):
+    await account.put("/docs/a", b"a")
+    await account.put("/docs/b", b"b")
+    await account.run.record_requests()
+    out = await list_folder(_tm(account), "/docs", page_size=1)
     assert [e["name"] for e in out] == ["a", "b"]
-    continue_call = rpc.await_args_list[1]
-    assert continue_call.args[1] == "/files/list_folder/continue"
-    assert continue_call.args[2] == {"cursor": "c1"}
+    sent = await account.run.bodies("POST", CONTINUE_ROUTE)
+    assert len(sent) == 1 and set(sent[0]) == {"cursor"}
 
 
 @pytest.mark.asyncio
-async def test_continue_folder_pages_through_continue():
-    pages = [
-        {"entries": [{"name": "a"}], "cursor": "c1", "has_more": True},
-        {"entries": [{"name": "b"}], "cursor": "c2", "has_more": False},
-    ]
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as rpc:
-        out, cursor = await continue_folder(TM, "c0")
-    assert [e["name"] for e in out] == ["a", "b"]
-    assert cursor == "c2"
-    assert rpc.await_args_list[0].args[1] == "/files/list_folder/continue"
-    assert rpc.await_args_list[0].args[2] == {"cursor": "c0"}
+async def test_continue_folder_pages_through_continue(account):
+    for name in ("a", "b", "c"):
+        await account.put(f"/docs/{name}", b"x")
+    first = await account.run.call(
+        "POST", LIST_ROUTE, json={"path": "/docs", "limit": 1}
+    )
+    await account.run.record_requests()
+    out, cursor = await continue_folder(_tm(account), first["cursor"])
+    assert [e["name"] for e in out] == ["b", "c"]
+    sent = await account.run.bodies("POST", CONTINUE_ROUTE)
+    assert sent[0] == {"cursor": first["cursor"]}
+    assert cursor not in ("", first["cursor"])
 
 
 def _search_match(tag: str, lower: str, display: str) -> dict:
@@ -115,8 +106,13 @@ def _search_match(tag: str, lower: str, display: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_search_files_pages_dedups_and_skips_folders():
-    pages = [
+async def test_search_files_pages_dedups_and_skips_folders(account):
+    # Dropbox may repeat a match on a later page; pages it never repeats
+    # on the fake are answered here.
+    await account.run.answer_next(
+        "POST",
+        SEARCH_ROUTE,
+        200,
         {
             "matches": [
                 _search_match("file", "/a.txt", "/A.txt"),
@@ -125,6 +121,11 @@ async def test_search_files_pages_dedups_and_skips_folders():
             "has_more": True,
             "cursor": "c1",
         },
+    )
+    await account.run.answer_next(
+        "POST",
+        SEARCH_CONTINUE_ROUTE,
+        200,
         {
             "matches": [
                 _search_match("file", "/a.txt", "/A.txt"),
@@ -132,59 +133,51 @@ async def test_search_files_pages_dedups_and_skips_folders():
             ],
             "has_more": False,
         },
-    ]
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as rpc:
-        out, truncated = await search_files(TM, "needle", path="/docs")
+    )
+    await account.run.record_requests()
+    out, truncated = await search_files(_tm(account), "needle", path="/docs")
     assert out == [("/a.txt", "/A.txt"), ("/b.txt", "/B.txt")]
     assert not truncated
-    first_call = rpc.await_args_list[0]
-    assert first_call.args[1] == "/files/search_v2"
-    assert first_call.args[2]["query"] == "needle"
-    assert first_call.args[2]["options"] == {
+    (first,) = await account.run.bodies("POST", SEARCH_ROUTE)
+    assert first["query"] == "needle"
+    assert first["options"] == {
         "max_results": api.SEARCH_PAGE,
         "file_status": "active",
         "filename_only": False,
         "path": "/docs",
     }
-    continue_call = rpc.await_args_list[1]
-    assert continue_call.args[1] == "/files/search/continue_v2"
-    assert continue_call.args[2] == {"cursor": "c1"}
+    assert await account.run.bodies("POST", SEARCH_CONTINUE_ROUTE) == [
+        {"cursor": "c1"}
+    ]
 
 
 @pytest.mark.asyncio
-async def test_search_files_account_root_omits_path():
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value={"matches": [], "has_more": False},
-    ) as rpc:
-        out, truncated = await search_files(TM, "needle")
+async def test_search_files_account_root_omits_path(account):
+    await account.run.record_requests()
+    out, truncated = await search_files(_tm(account), "needle")
     assert out == []
     assert not truncated
-    assert "path" not in rpc.await_args.args[2]["options"]
+    (first,) = await account.run.bodies("POST", SEARCH_ROUTE)
+    assert "path" not in first["options"]
 
 
 @pytest.mark.asyncio
-async def test_search_files_flags_the_match_ceiling(monkeypatch):
-    monkeypatch.setattr(api, "MAX_SEARCH_MATCHES", 1)
+async def test_search_files_flags_the_match_ceiling(account):
+    # A first page that already holds 10,000 matches, with more to come:
+    # the walk stops there.
     page = {
-        "matches": [_search_match("file", "/a.txt", "/A.txt")],
+        "matches": [
+            _search_match("file", f"/f{i}", f"/F{i}") for i in range(10_000)
+        ],
         "has_more": True,
         "cursor": "c1",
     }
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value=page,
-    ) as rpc:
-        out, truncated = await search_files(TM, "needle")
-    assert out == [("/a.txt", "/A.txt")]
+    await account.run.answer_next("POST", SEARCH_ROUTE, 200, page)
+    await account.run.record_requests()
+    out, truncated = await search_files(_tm(account), "needle")
+    assert len(out) == 10_000
     assert truncated
-    assert rpc.await_count == 1
+    assert await account.run.bodies("POST", SEARCH_CONTINUE_ROUTE) == []
 
 
 @pytest.mark.asyncio
@@ -212,15 +205,27 @@ async def test_search_files_flags_the_match_ceiling(monkeypatch):
         "list-reply",
     ],
 )
-async def test_move_path_reads_only_an_object_as_the_moved_entry(reply, entry):
+async def test_move_path_reads_only_an_object_as_the_moved_entry(
+    account, reply, entry
+):
     # Anything but an object names no kind, so the rename keeps its subtree
-    # drop; the transport reads an empty body as None.
-    with patch(
-        "mirage.core.dropbox.api.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value=reply,
-    ):
-        assert await move_path(TM, "/a", "/b") == entry
+    # drop; the transport reads an empty body as None. Replies posted whole:
+    # answer_next's None is the kit's own body.
+    plan = {
+        "method": "POST",
+        "route": MOVE_ROUTE,
+        "status": 200,
+        "body": reply,
+    }
+    await account.run.call("POST", "/_kit/faults", json={"plans": [plan]})
+    assert await move_path(_tm(account), "/a", "/b") == entry
+
+
+@pytest.mark.asyncio
+async def test_move_path_answers_the_moved_entry(account):
+    await account.put("/a", b"a")
+    moved = await move_path(_tm(account), "/a", "/b")
+    assert moved == await account.metadata("/b")
 
 
 async def _refuse(

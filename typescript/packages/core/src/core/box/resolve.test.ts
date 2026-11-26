@@ -12,56 +12,61 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, listFolderItems: vi.fn() }
-})
-
-import { BoxAccessor } from '../../accessor/box.ts'
-import * as api from './api.ts'
-import type { BoxItem } from './api.ts'
-import type { BoxTokenManager } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { mountRelativeKey, resolveChain, resolveItem } from './resolve.ts'
 
-const FOLDERS: Record<string, BoxItem[]> = {
-  '0': [
-    { type: 'folder', id: '10', name: 'team' },
-    { type: 'file', id: '2', name: 'a.txt' },
-  ],
-  '10': [{ type: 'folder', id: '11', name: 'docs' }],
-  '11': [],
-}
+let origin: string
+let account: BoxAccount
 
-const ACCESSOR = new BoxAccessor({ tokenManager: {} as BoxTokenManager })
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('box')
+}, 30_000)
 
 beforeEach(() => {
-  vi.mocked(api.listFolderItems).mockReset()
-  vi.mocked(api.listFolderItems).mockImplementation((_tm, folderId) =>
-    Promise.resolve(FOLDERS[folderId] ?? []),
-  )
+  account = new BoxAccount(origin)
 })
+
+afterEach(async () => {
+  await account.run.close()
+})
+
+// `team/docs` and `a.txt` at the root.
+async function tree(): Promise<{ team: string; docs: string; a: string }> {
+  const team = await account.mkdir('team')
+  return {
+    team,
+    docs: await account.mkdir('docs', team),
+    a: await account.put('a.txt', new Uint8Array([97])),
+  }
+}
 
 describe('box resolve', () => {
   it('stops the chain at the first missing component', async () => {
-    const chain = await resolveChain(ACCESSOR, ['team', 'gone', 'x'])
-    expect(chain.map((c) => c.id)).toEqual(['10'])
+    const ids = await tree()
+    const chain = await resolveChain(account.accessor(), ['team', 'gone', 'x'])
+    expect(chain.map((c) => c.id)).toEqual([ids.team])
   })
 
   it('never lists a file', async () => {
-    const chain = await resolveChain(ACCESSOR, ['a.txt', 'x'])
-    expect(chain.map((c) => c.id)).toEqual(['2'])
-    expect(vi.mocked(api.listFolderItems).mock.calls.map((c) => c[1])).toEqual(['0'])
+    const ids = await tree()
+    await account.run.recordRequests()
+    const chain = await resolveChain(account.accessor(), ['a.txt', 'x'])
+    expect(chain.map((c) => c.id)).toEqual([ids.a])
+    expect(await account.run.requests()).toEqual(['GET /2.0/folders/0/items'])
   })
 
   it('resolves an item only for the whole path', async () => {
-    expect((await resolveItem(ACCESSOR, ['team', 'docs']))?.id).toBe('11')
-    expect((await resolveItem(ACCESSOR, ['a.txt']))?.id).toBe('2')
-    expect(await resolveItem(ACCESSOR, ['team', 'gone'])).toBeNull()
-    expect(await resolveItem(ACCESSOR, ['a.txt', 'x'])).toBeNull()
-    expect(await resolveItem(ACCESSOR, [])).toBeNull()
+    const ids = await tree()
+    const accessor = account.accessor()
+    expect((await resolveItem(accessor, ['team', 'docs']))?.id).toBe(ids.docs)
+    expect((await resolveItem(accessor, ['a.txt']))?.id).toBe(ids.a)
+    expect(await resolveItem(accessor, ['team', 'gone'])).toBeNull()
+    expect(await resolveItem(accessor, ['a.txt', 'x'])).toBeNull()
+    expect(await resolveItem(accessor, [])).toBeNull()
   })
 
   it('trims a path_collection through the mount root', () => {

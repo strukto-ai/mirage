@@ -12,45 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.rm import rm_r
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
 
-
-def make_accessor(root_path: str = "/") -> DropboxAccessor:
-    config = DropboxConfig(
-        client_id="c",
-        client_secret="s",
-        refresh_token="r",
-        root_path=root_path,
-    )
-    return DropboxAccessor(config, DropboxTokenManager(config))
+DELETE_ROUTE = "/2/files/delete_v2"
 
 
 @pytest.mark.asyncio
-async def test_rm_r_deletes_recursively_in_one_call():
-    with patch(
-        "mirage.core.dropbox.rm.delete_path", new_callable=AsyncMock
-    ) as deleted:
-        await rm_r(make_accessor("/Team"), PathSpec.from_str_path("/docs"))
-    assert deleted.await_args.args[1] == "/Team/docs"
+async def test_rm_r_deletes_recursively_in_one_call(account):
+    await account.put("/Team/docs/sub/a.txt", b"a")
+    await account.run.record_requests()
+    await rm_r(account.accessor("/Team"), PathSpec.from_str_path("/docs"))
+    assert await account.run.bodies("POST", DELETE_ROUTE) == [
+        {"path": "/Team/docs"}
+    ]
+    assert await account.names("/Team") == []
 
 
 @pytest.mark.asyncio
-async def test_rm_r_missing_raises_enoent():
-    with patch(
-        "mirage.core.dropbox.rm.delete_path",
-        new_callable=AsyncMock,
-        side_effect=DropboxApiError("nf", 409, "path_lookup/not_found/..."),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await rm_r(make_accessor(), PathSpec.from_str_path("/ghost"))
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+async def test_rm_r_missing_raises_enoent(account):
+    with pytest.raises(FileNotFoundError):
+        await rm_r(account.accessor(), PathSpec.from_str_path("/ghost"))
