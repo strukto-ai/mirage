@@ -1,0 +1,58 @@
+id = "mirage"
+name = "Mirage"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Run Claude Code or Codex on a Mirage workspace, open its shell, and manage workspaces and asks. Docs: https://docs.mirage.strukto.ai/home/agents/herdr"
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "workspaces"
+title = "Mirage: workspaces"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "mirage", "--entrypoint", "workspaces"]
+
+[[actions]]
+id = "asks"
+title = "Mirage: pending asks"
+contexts = ["workspace"]
+command = ["herdr", "plugin", "pane", "open", "--plugin", "mirage", "--entrypoint", "asks"]
+
+[[panes]]
+id = "workspaces"
+title = "Mirage workspaces"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" workspaces"]
+
+[[panes]]
+id = "asks"
+title = "Mirage asks"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" asks"]
+
+[[panes]]
+id = "agent"
+title = "Mirage agent"
+placement = "split"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" agent"]
+
+[[panes]]
+id = "shell"
+title = "Mirage shell"
+placement = "tab"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" shell"]
+
+[[panes]]
+id = "logs"
+title = "Mirage logs"
+placement = "split"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" logs"]
+
+[[panes]]
+id = "edit"
+title = "Mirage config"
+placement = "split"
+command = ["sh", "-c", "exec bash \"$HERDR_PLUGIN_ROOT/bin/mirage-herdr\" edit"]
