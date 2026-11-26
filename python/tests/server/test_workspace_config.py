@@ -109,6 +109,17 @@ async def test_build_workspace_from_config(tree):
 
 
 @pytest.mark.asyncio
+async def test_on_ask_reaches_the_workspace_ledger(tree):
+    async def answer(decision):
+        return decision
+
+    ws = await build_workspace_from_config(tree / "other.yaml", on_ask=answer)
+    try:
+        assert ws._registry.policies.decisions._on_ask is answer
+    finally:
+        await ws.close()
+
+@pytest.mark.asyncio
 async def test_a_canceled_build_closes_the_mounts_it_made(
     tmp_path, monkeypatch
 ):

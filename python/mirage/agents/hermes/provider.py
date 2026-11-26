@@ -24,8 +24,16 @@ from typing import Any
 from agent.terminal_env_provider import TerminalEnvironmentProvider
 from hermes_cli.plugins_context import PluginContext
 
-from mirage.agents.hermes.constants import BACKEND, SETTING
+from mirage.agents.hermes.ask import make_ask
+from mirage.agents.hermes.constants import (
+    ASK_TIMEOUT,
+    ASK_TOKEN,
+    ASK_URL,
+    BACKEND,
+    SETTING,
+)
 from mirage.agents.hermes.environment import MirageEnvironment
+from mirage.policy import AskHandler
 from mirage.server.workspace_config import build_workspace_from_config
 from mirage.workspace.workspace import Workspace
 
@@ -36,20 +44,36 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
     """hermes' ``mirage`` terminal backend.
 
     Builds the workspace from the YAML the plugin setting names, once
-    per path, and gives each hermes task its own session in it.
+    per path, and gives each hermes task its own session in it. When an
+    ask endpoint is set, the profile's ``ask`` rules are answered by it
+    and hermes' own dangerous-command guard stands down: one line gets
+    one card.
 
     Args:
         config_path (Callable[[], str | None]): Returns the workspace
             YAML's path, read on every call so a changed setting applies.
+        ask_for (Callable[[], AskHandler | None] | None): Returns the
+            handler the ``ask_url`` setting describes, read on every
+            workspace build so a changed setting applies; None means the
+            profile's asks have nobody to answer them.
     """
 
     name = BACKEND
     display_name = "Mirage"
-    skip_container_guards = False
     default_cwd = "/"
 
-    def __init__(self, config_path: Callable[[], str | None]) -> None:
+    @property
+    def skip_container_guards(self) -> bool:
+        """Whether hermes' own guard stands down: yes when we ask."""
+        return self._ask_for() is not None
+
+    def __init__(
+        self,
+        config_path: Callable[[], str | None],
+        ask_for: Callable[[], AskHandler | None] | None = None,
+    ) -> None:
         self._config_path = config_path
+        self._ask_for = ask_for or _no_ask
         self._lock = threading.Lock()
         self._workspaces: dict[Path, Workspace] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -116,7 +140,8 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             workspace = self._workspaces.get(path)
             if workspace is None:
                 workspace = asyncio.run_coroutine_threadsafe(
-                    build_owned_workspace(path), self._owner()
+                    build_owned_workspace(path, on_ask=self._ask_for()),
+                    self._owner(),
                 ).result()
                 self._workspaces[path] = workspace
         return workspace
@@ -148,14 +173,22 @@ class MirageTerminalProvider(TerminalEnvironmentProvider):
             self._loop = self._thread = None
 
 
-async def build_owned_workspace(path: Path) -> Workspace:
+def _no_ask() -> None:
+    return None
+
+
+async def build_owned_workspace(
+    path: Path, on_ask: AskHandler | None = None
+) -> Workspace:
     """Build the workspace a YAML describes and make the running loop its
     owner, so hermes' threads run its lines there.
 
     Args:
         path (Path): The workspace YAML.
+        on_ask (AskHandler | None): Who answers the profile's ``ask``
+            rules; None leaves them pending.
     """
-    workspace = await build_workspace_from_config(path)
+    workspace = await build_workspace_from_config(path, on_ask=on_ask)
     workspace._sync_bridge.observe()
     return workspace
 
@@ -167,5 +200,12 @@ def register(ctx: PluginContext) -> None:
         ctx (PluginContext): The plugin context hermes passes.
     """
     ctx.register_terminal_environment_provider(
-        MirageTerminalProvider(partial(ctx.get_config, SETTING))
+        MirageTerminalProvider(
+            partial(ctx.get_config, SETTING),
+            lambda: make_ask(
+                ctx.get_config(ASK_URL),
+                ctx.get_config(ASK_TOKEN),
+                ctx.get_config(ASK_TIMEOUT),
+            ),
+        )
     )

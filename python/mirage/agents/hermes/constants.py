@@ -15,3 +15,9 @@
 BACKEND = "mirage"
 SESSION_PREFIX = "hermes-"
 SETTING = "config"
+# Where the profile's ``ask`` rules send the line: an endpoint the host
+# runs, the bearer token it wants and how long to wait before denying.
+ASK_URL = "ask_url"
+ASK_TOKEN = "ask_token"
+ASK_TIMEOUT = "ask_timeout"
+DEFAULT_ASK_TIMEOUT = 120.0

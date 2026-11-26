@@ -48,7 +48,18 @@ Hermes installs `mirage-ai` into its own environment. Every command its terminal
 
 - Each Hermes task gets its own sessions in the workspace, closed when the task ends. A background job lives as long as its task.
 - `python3`, `pip` and `git` run on a [machine](/home/setup/machine/overview); add one to the workspace YAML. Hermes' `execute_code` needs one with Python.
-- Hermes' `approvals.mode` still decides which commands ask first, and the workspace's [command rules](/home/configuration/session#command-rules) apply as well.
+- Hermes' `approvals.mode` still decides which commands ask first, and the workspace's [command rules](/home/configuration/session#command-rules) apply as well. With `ask_url` set, the workspace's `ask` rules are answered by that endpoint instead and Hermes' dangerous-command guard stands down, so one line gets one card.
+
+### Asking a person
+
+A workspace whose rules answer `ask` needs someone to answer. Point `ask_url` at an endpoint that shows the line to whoever runs the agent and replies:
+
+```bash
+hermes config set plugins.entries.mirage.settings.ask_url http://127.0.0.1:8765/ask
+hermes config set plugins.entries.mirage.settings.ask_timeout 120
+```
+
+Mirage POSTs `{"id", "session", "command", "argv", "cwd", "paths", "reason"}` and waits for `{"decision": "allow" | "deny", "scope": "once" | "session", "note": ""}`. `scope` defaults to `once`; `session` accepts every line the same rule covers until the session ends. `ask_token`, when set, goes in an `Authorization: Bearer` header. A timeout, a refused request or an answer that cannot be read denies the line, so a missing approver never turns into a silent yes. Proxies are ignored: the endpoint is expected to run beside the agent.
 
 ## MCP
 

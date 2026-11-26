@@ -21,6 +21,13 @@ import pytest
 pytest.importorskip("agent.terminal_env_provider")
 
 from mirage.agents.hermes import MirageTerminalProvider, register
+from mirage.agents.hermes.ask import HttpAsk
+
+import pytest
+
+pytest.importorskip("agent.terminal_env_provider")
+
+from mirage.agents.hermes import MirageTerminalProvider, register
 
 WORKSPACE_YAML = """
 processes: workspace
@@ -70,6 +77,21 @@ def test_hermes_approvals_stay_on(config):
     provider = MirageTerminalProvider(lambda: str(config))
     assert provider.skip_container_guards is False
     assert provider.is_remote is True
+
+
+def test_an_ask_endpoint_stands_hermes_guards_down(config):
+    asks = HttpAsk("http://127.0.0.1:9/ask")
+    provider = MirageTerminalProvider(lambda: str(config), lambda: asks)
+    assert provider.skip_container_guards is True
+
+
+def test_register_wires_the_ask_setting(config):
+    ctx = FakeContext(
+        {"config": str(config), "ask_url": "http://127.0.0.1:9/ask"}
+    )
+    register(ctx)
+    [provider] = ctx.providers
+    assert provider.skip_container_guards is True
 
 
 def test_tasks_share_one_workspace(config):

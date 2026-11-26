@@ -11,5 +11,20 @@ config_schema:
     type: str
     required: true
     description: Path to the Mirage workspace YAML the backend runs in.
+  ask_url:
+    type: str
+    required: false
+    description: >-
+      HTTP endpoint that answers the workspace's `ask` rules. It gets the
+      line as JSON and answers allow or deny; an unreachable endpoint or a
+      timeout denies. Unset leaves asks pending for the host to collect.
+  ask_token:
+    type: str
+    required: false
+    description: Bearer token sent with every ask; unset sends none.
+  ask_timeout:
+    type: float
+    required: false
+    description: Seconds to wait for an answer before denying (default 120).
 license: Apache-2.0
 homepage: https://docs.mirage.strukto.ai/home/agents/hermes

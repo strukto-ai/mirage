@@ -17,6 +17,7 @@ from pathlib import Path
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.config import build_mcp_clis, load_config, resolve_secrets
+from mirage.policy import AskHandler
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.workspace import Workspace
 
@@ -85,11 +86,15 @@ def resolve_workspace_config(
     )
 
 
-async def build_workspace_from_config(config_path: str | Path) -> Workspace:
+async def build_workspace_from_config(
+    config_path: str | Path, *, on_ask: AskHandler | None = None
+) -> Workspace:
     """Build a workspace from a config file, kernel mounts included.
 
     Args:
         config_path (str | Path): path to the YAML config.
+        on_ask (AskHandler | None): who answers the profile's ``ask``
+            rules; None leaves them pending for the host to collect.
 
     Returns:
         Workspace: the constructed workspace.
@@ -97,6 +102,7 @@ async def build_workspace_from_config(config_path: str | Path) -> Workspace:
     config = await resolve_secrets(load_config(config_path))
     kwargs = config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config))
     kwargs["workspace_id"] = kwargs.get("workspace_id") or new_workspace_id()
+    kwargs["on_ask"] = on_ask
     workspace = Workspace(**kwargs)
     try:
         for prefix, (backend, mountpoint) in config.kernel_mounts().items():
