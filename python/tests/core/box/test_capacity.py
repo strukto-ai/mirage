@@ -12,34 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
 from mirage.core.box.capacity import capacity
 from mirage.core.box.constants import UNLIMITED_SPACE
 from mirage.types import CapacityResult, CapacityState
 
+ME_ROUTE = "/2.0/users/me"
 
-@pytest.mark.parametrize(
-    ("amount", "expected"),
-    [
-        (
-            1000,
-            CapacityResult(
-                state=CapacityState.QUOTA, total=1000, used=250, available=750
-            ),
-        ),
-        (UNLIMITED_SPACE, CapacityResult(state=CapacityState.ELASTIC)),
-    ],
-)
+
 @pytest.mark.asyncio
-async def test_the_space_amount_is_the_quota(accessor, amount, expected):
-    with patch(
-        "mirage.core.box.capacity.box_get",
-        new_callable=AsyncMock,
-        return_value={"space_amount": amount, "space_used": 250},
-    ) as get:
-        result = await capacity(accessor)
-    assert get.await_args.args[1].endswith("/users/me")
-    assert result == expected
+async def test_the_space_amount_is_the_quota(account):
+    # The fake's account is a Personal one, with Box's amount and the
+    # stored bytes as its use.
+    me = await account.run.call("GET", ME_ROUTE)
+    await account.put("a.txt", b"x" * 250)
+    await account.run.record_requests()
+    result = await capacity(account.accessor())
+    assert await account.run.requests() == [f"GET {ME_ROUTE}"]
+    total = me["space_amount"]
+    assert result == CapacityResult(
+        state=CapacityState.QUOTA, total=total, used=250, available=total - 250
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unlimited_space_amount_is_elastic(account):
+    await account.run.answer_next(
+        "GET",
+        ME_ROUTE,
+        200,
+        {"type": "user", "space_amount": UNLIMITED_SPACE, "space_used": 250},
+    )
+    assert await capacity(account.accessor()) == CapacityResult(
+        state=CapacityState.ELASTIC
+    )

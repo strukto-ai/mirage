@@ -303,10 +303,12 @@ when one is left unspent; only gws targets wire it today
 
 `/_kit/requests` lists the requests a tenant made, under the same run prefix
 and tenant selectors. `POST` starts the list, emptying what an earlier start
-kept; `GET` lists the requests the tenant made since, in the order they
+kept, and a body of `{"headers": [name, ...]}` names the request headers to
+keep; `GET` lists the requests the tenant made since, in the order they
 arrived, each as its `method`, the declared `route` a fault plan would name,
-and the `path` the client sent (no run prefix, no query); `DELETE` stops the
-list and returns it. Nothing is kept before a start, a faulted request is
+the `path` the client sent (no run prefix), its `query` string, and the
+named `headers` it carried, by lower-case name; `DELETE` stops the list and
+returns it. Nothing is kept before a start, a faulted request is
 listed, a request to `/_kit/` is not, and a reset of the tenant stops the
 list. A snapshot does not carry it.
 

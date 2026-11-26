@@ -474,6 +474,28 @@ async function events(ctx: Ctx<C>): Promise<Reply> {
   }
 }
 
+// Where a client long-polls for a change, as the vendor answers it. The fake
+// serves no long poll at that URL: nothing in Mirage follows it, only a
+// consumer of the event stream would.
+function realtime(ctx: Ctx<C>): Reply {
+  if (!authed(ctx)) return unauthorized()
+  return {
+    status: 200,
+    body: {
+      chunk_size: 1,
+      entries: [
+        {
+          type: 'realtime_server',
+          url: `${ctx.url.origin}${ctx.runPrefix}/subscribe?channel=fake&stream_type=all`,
+          ttl: '10',
+          max_retries: '10',
+          retry_timeout: 610,
+        },
+      ],
+    },
+  }
+}
+
 export function boxRoutes(): KitRoute<C>[] {
   return [
     route('POST', '/oauth2/token', token),
@@ -494,6 +516,7 @@ export function boxRoutes(): KitRoute<C>[] {
     route('GET', '/2.0/search', search),
     route('GET', '/2.0/users/me', me),
     route('GET', '/2.0/events', events),
+    route('OPTIONS', '/2.0/events', realtime),
     route('GET', '/dl/:file_id', dl),
     route('GET', '/rep/:file_id/extracted_text', repText),
   ]

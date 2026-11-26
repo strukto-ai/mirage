@@ -63,6 +63,45 @@ export class BoxAccount {
     return made.entries[0]?.id ?? ''
   }
 
+  /** Upload a new version of the file `id`, as another client would. */
+  async uploadVersion(id: string, data: Uint8Array): Promise<void> {
+    const body = new FormData()
+    body.append('attributes', JSON.stringify({}))
+    body.append('file', new Blob([data as Uint8Array<ArrayBuffer>]), 'version')
+    await this.run.call('POST', `/2.0/files/${id}/content`, { body })
+  }
+
+  /** Rename the file `id` in place, as another client would. */
+  async rename(id: string, name: string): Promise<void> {
+    await this.run.call('PUT', `/2.0/files/${id}`, { json: { name } })
+  }
+
+  /** The names the folder `id` holds, sorted. */
+  async names(id: string): Promise<string[]> {
+    const listed = await this.run.call<{ entries: { name: string }[] }>(
+      'GET',
+      `/2.0/folders/${id}/items`,
+    )
+    return listed.entries.map((entry) => entry.name).sort()
+  }
+
+  /** The row the folder `id`'s listing gives `name`. */
+  async child(id: string, name: string): Promise<{ id: string; type: string }> {
+    const listed = await this.run.call<{ entries: { id: string; type: string; name: string }[] }>(
+      'GET',
+      `/2.0/folders/${id}/items`,
+    )
+    const rows = listed.entries.filter((entry) => entry.name === name)
+    if (rows.length !== 1 || rows[0] === undefined)
+      throw new Error(`${name} in ${id}: ${String(rows.length)} rows`)
+    return rows[0]
+  }
+
+  /** The file `id`'s content, downloaded as a client would. */
+  async read(id: string): Promise<Uint8Array> {
+    return this.run.read(`/2.0/files/${id}/content`)
+  }
+
   /** Create a web link in `parent` and answer its id. */
   async webLink(name: string, parent = '0'): Promise<string> {
     const made = await this.run.call<{ id: string }>('POST', '/2.0/web_links', {

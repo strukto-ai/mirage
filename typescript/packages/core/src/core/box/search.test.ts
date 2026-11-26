@@ -14,108 +14,121 @@
 
 // Mirror of python/tests/core/box/test_search.py.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, searchContent: vi.fn() }
-})
-
-import { BoxAccessor } from '../../accessor/box.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { BoxApiError, type BoxTokenManager } from './client.ts'
-import * as api from './api.ts'
-import type { BoxSearchItem } from './api.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { PathSpec } from '../../types.ts'
+import type { JsonValue } from '../../types.ts'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { readdir } from './readdir.ts'
 import { filesContaining } from './search.ts'
 
-const STUB_TM = {} as BoxTokenManager
-const search = vi.mocked(api.searchContent)
+const SEARCH_ROUTE = '/2.0/search'
+const SEARCH_FIELDS = 'id,name,type,path_collection'
+const NEEDLE = new TextEncoder().encode('a needle in it')
 
-function makeAccessor(rootFolderId?: string): BoxAccessor {
-  return new BoxAccessor({
-    tokenManager: STUB_TM,
-    ...(rootFolderId !== undefined ? { rootFolderId } : {}),
-  })
-}
+let origin: string
+let account: BoxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('box')
+}, 30_000)
+
+beforeEach(() => {
+  account = new BoxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function mountRoot(): PathSpec {
   return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
 }
 
-function file(id: string, name: string, chain: [string, string][]): BoxSearchItem {
-  return {
-    type: 'file',
-    id,
-    name,
-    path_collection: {
-      total_count: chain.length,
-      entries: chain.map(([cid, cname]) => ({ type: 'folder', id: cid, name: cname })),
-    },
-  }
+// The folder the one search since recording was scoped to.
+async function scopeOf(): Promise<string | undefined> {
+  const sent = await account.run.params('GET', SEARCH_ROUTE)
+  expect(sent).toHaveLength(1)
+  return sent[0]?.ancestor_folder_ids
 }
 
-const ROOT: [string, string][] = [['0', 'All Files']]
-
-beforeEach(() => {
-  search.mockReset()
-})
-
 describe('filesContaining', () => {
+  // A mount rooted at /data, given Box's answer for the whole account: the
+  // hit in another folder is no path under the mount.
   it('names each hit from its path_collection', async () => {
-    search.mockResolvedValueOnce({
-      items: [
-        file('2', 'x.txt', ROOT),
-        file('3', 'y.txt', [...ROOT, ['100', 'Sub']]),
-        file('4', 'out.txt', [['7', 'Elsewhere']]),
-      ],
-      truncated: false,
-    })
-    const out = await filesContaining(makeAccessor(), 'needle', mountRoot())
-    expect(search.mock.calls[0]?.[2]).toBe('0')
-    expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([
-      ['/data/x.txt', 'x.txt'],
+    const data = await account.mkdir('data')
+    await account.put('x.txt', NEEDLE, data)
+    const sub = await account.mkdir('Sub', data)
+    await account.put('y.txt', NEEDLE, sub)
+    await account.put('out.txt', NEEDLE, await account.mkdir('Elsewhere'))
+    const everywhere = await account.run.call<{ entries: JsonValue[] }>(
+      'GET',
+      `/2.0/search?query=needle&type=file&fields=${SEARCH_FIELDS}`,
+    )
+    expect(everywhere.entries).toHaveLength(3)
+    await account.run.answerNext('GET', SEARCH_ROUTE, 200, everywhere)
+    await account.run.recordRequests()
+    const out = await filesContaining(account.accessor(data), 'needle', mountRoot())
+    expect(await scopeOf()).toBe(data)
+    expect(out?.map((p) => [p.virtual, p.vfsPath]).sort()).toEqual([
       ['/data/Sub/y.txt', 'Sub/y.txt'],
+      ['/data/x.txt', 'x.txt'],
     ])
   })
 
   it('searches a subfolder scope under its folder id', async () => {
+    const docs = await account.mkdir('docs')
+    await account.put('in.txt', NEEDLE, docs)
+    await account.put('top.txt', NEEDLE)
     const scope = new PathSpec({
       virtual: '/data/docs',
       directory: '/data/docs',
       vfsPath: 'docs',
     })
-    const row = new FileStat({ name: 'docs', type: FileType.DIRECTORY, extra: { box_id: '100' } })
-    search.mockResolvedValueOnce({
-      items: [file('5', 'in.txt', [...ROOT, ['100', 'docs']])],
-      truncated: false,
-    })
-    const out = await filesContaining(makeAccessor(), 'needle', scope, row)
-    expect(search.mock.calls[0]?.[2]).toBe('100')
+    const accessor = account.accessor()
+    const row = await entryAt(readdir, accessor, scope)
+    await account.run.recordRequests()
+    const out = await filesContaining(accessor, 'needle', scope, row)
+    expect(await scopeOf()).toBe(docs)
     expect(out?.map((p) => [p.virtual, p.vfsPath])).toEqual([['/data/docs/in.txt', 'docs/in.txt']])
   })
 
   // No hit is distrusted too: Box indexes a write after it lands.
-  it.each([
-    ['an API failure', () => search.mockRejectedValueOnce(new BoxApiError('boom', 500))],
-    [
-      'a truncated answer',
-      () => search.mockResolvedValueOnce({ items: [file('2', 'x.txt', ROOT)], truncated: true }),
-    ],
-    ['no hit', () => search.mockResolvedValueOnce({ items: [], truncated: false })],
-  ])('is null for %s', async (_name, arrange) => {
-    arrange()
-    expect(await filesContaining(makeAccessor(), 'needle', mountRoot())).toBeNull()
+  it.each(['an API failure', 'a truncated answer', 'no hit'])('is null for %s', async (answer) => {
+    await account.put('x.txt', NEEDLE)
+    if (answer === 'an API failure') await account.run.answerNext('GET', SEARCH_ROUTE, 500)
+    if (answer === 'a truncated answer') {
+      const page = await account.run.call<{ entries: JsonValue[] } & Record<string, JsonValue>>(
+        'GET',
+        `/2.0/search?query=needle&fields=${SEARCH_FIELDS}`,
+      )
+      const entries = Array.from({ length: 200 }, () => page.entries[0] ?? null)
+      await account.run.answerNext(
+        'GET',
+        SEARCH_ROUTE,
+        200,
+        { ...page, total_count: 20_000, entries },
+        60,
+      )
+    }
+    const query = answer === 'no hit' ? 'absent' : 'needle'
+    expect(await filesContaining(account.accessor(), query, mountRoot())).toBeNull()
   })
 
   it('is null for a scope that is no folder', async () => {
+    await account.put('a.txt', NEEDLE)
     const scope = new PathSpec({
       virtual: '/data/a.txt',
       directory: '/data/a.txt',
       vfsPath: 'a.txt',
     })
-    const row = new FileStat({ name: 'a.txt', type: FileType.FILE, extra: { box_id: '9' } })
-    expect(await filesContaining(makeAccessor(), 'needle', scope, row)).toBeNull()
-    expect(search).not.toHaveBeenCalled()
+    const accessor = account.accessor()
+    const row = await entryAt(readdir, accessor, scope)
+    await account.run.recordRequests()
+    expect(await filesContaining(accessor, 'needle', scope, row)).toBeNull()
+    expect(await account.run.requests()).toEqual([])
   })
 })

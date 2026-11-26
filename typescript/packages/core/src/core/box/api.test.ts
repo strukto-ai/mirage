@@ -13,18 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
 
+// Each call goes through to the real client; only the host and session
+// tests below, which a single-origin fake cannot show, stub one call.
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
   return {
     ...actual,
-    boxGet: vi.fn(),
-    boxOptions: vi.fn(),
-    boxPostJson: vi.fn(),
-    boxUploadMultipart: vi.fn(),
-    boxUploadSession: vi.fn(),
+    boxPostJson: vi.fn(actual.boxPostJson),
+    boxUploadMultipart: vi.fn(actual.boxUploadMultipart),
+    boxUploadSession: vi.fn(actual.boxUploadSession),
   }
 })
 
@@ -37,6 +37,9 @@ import { isStaleWrite } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { PathSpec } from '../../types.ts'
+import type { JsonValue } from '../../types.ts'
+import { BoxAccount } from '../../../tests/core/box/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import {
   createFolder,
   eventsNow,
@@ -44,121 +47,184 @@ import {
   listFolderItems,
   realtimeServer,
   refused,
+  searchContent,
   uploadFileVersion,
   uploadNewFile,
 } from './api.ts'
 
-const TM = { apiBase: 'https://api.box.com/2.0' } as BoxTokenManager
+const ITEMS_ROUTE = '/2.0/folders/:folder_id/items'
+const SEARCH_ROUTE = '/2.0/search'
+const EVENTS_ROUTE = '/2.0/events'
 
+let origin: string
+let account: BoxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('box')
+}, 30_000)
+
+// A reset puts each stub back to the real call and drops a one-shot answer
+// a test left unused.
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
+  account = new BoxAccount(origin)
 })
 
-// Twin of test_list_folder_items_counts_no_web_link_toward_a_limit.
-it('counts no web link toward a listing limit', async () => {
-  vi.mocked(client.boxGet)
-    .mockResolvedValueOnce({
-      total_count: 4,
-      entries: [
-        { id: '1', name: 'a', type: 'web_link' },
-        { id: '2', name: 'b', type: 'web_link' },
-      ],
-    })
-    .mockResolvedValueOnce({
-      total_count: 4,
-      entries: [
-        { id: '3', name: 'c', type: 'file' },
-        { id: '4', name: 'd', type: 'file' },
-      ],
-    })
-  const items = await listFolderItems(TM, '0', { pageSize: 2, limit: 2 })
-  expect(items.map((item) => item.id)).toEqual(['1', '2', '3', '4'])
-  expect(vi.mocked(client.boxGet)).toHaveBeenCalledTimes(2)
+afterEach(async () => {
+  await account.run.close()
+})
+
+function tm(): BoxTokenManager {
+  return account.accessor().tokenManager
+}
+
+describe('box listing', () => {
+  it('follows offset pagination', async () => {
+    for (const name of ['a', 'b', 'c']) await account.put(name, new Uint8Array([120]))
+    await account.run.recordRequests()
+    const items = await listFolderItems(tm(), '0', { pageSize: 2 })
+    expect(items.map((item) => item.name)).toEqual(['a', 'b', 'c'])
+    const pages = await account.run.params('GET', ITEMS_ROUTE)
+    expect(pages.map((page) => page.offset)).toEqual(['0', '2'])
+  })
+
+  // Twin of test_list_folder_items_counts_no_web_link_toward_a_limit. Box
+  // lists the two web links first, by name; a limit counted them would stop
+  // after that page.
+  it('counts no web link toward a listing limit', async () => {
+    await account.webLink('a')
+    await account.webLink('b')
+    await account.put('c', new Uint8Array([120]))
+    await account.put('d', new Uint8Array([120]))
+    await account.run.recordRequests()
+    const items = await listFolderItems(tm(), '0', { pageSize: 2, limit: 2 })
+    expect(items.map((item) => item.name)).toEqual(['a', 'b', 'c', 'd'])
+    expect(await account.run.params('GET', ITEMS_ROUTE)).toHaveLength(2)
+  })
+
+  it('stops on an empty page', async () => {
+    await account.run.answerNext('GET', ITEMS_ROUTE, 200, { total_count: 5, entries: [] })
+    await account.run.recordRequests()
+    expect(await listFolderItems(tm(), '0')).toEqual([])
+    expect(await account.run.params('GET', ITEMS_ROUTE)).toHaveLength(1)
+  })
+})
+
+describe('box search', () => {
+  // Only a file under the folder, found by its content: the name match
+  // outside the folder and the folder named like the query are not.
+  it('scopes to the folder and matches content', async () => {
+    const folder = await account.mkdir('scope')
+    const hit = await account.put('hit', new TextEncoder().encode('one needle here'), folder)
+    await account.put('needle.txt', new Uint8Array([120]))
+    await account.mkdir('needle', folder)
+    await account.run.recordRequests()
+    const { items, truncated } = await searchContent(tm(), 'needle', folder)
+    expect(items.map((item) => item.id)).toEqual([hit])
+    expect(truncated).toBe(false)
+    expect(await account.run.params('GET', SEARCH_ROUTE)).toEqual([
+      expect.objectContaining({
+        ancestor_folder_ids: folder,
+        content_types: 'name,file_content',
+        type: 'file',
+        fields: 'id,name,type,path_collection',
+      }),
+    ])
+  })
+
+  // More hits than the fake would hold: Box's own pages of 200.
+  it('flags truncation at the ceiling', async () => {
+    const page = {
+      total_count: 20_000,
+      entries: Array.from({ length: 200 }, (_, i) => ({ id: String(i), name: 'f', type: 'file' })),
+    }
+    await account.run.answerNext('GET', SEARCH_ROUTE, 200, page, 60)
+    const { items, truncated } = await searchContent(tm(), 'q', '0')
+    expect(truncated).toBe(true)
+    expect(items.length).toBeGreaterThanOrEqual(10_000)
+  })
 })
 
 describe('box events api', () => {
   it('reads events until an empty page', async () => {
     // Box may return a short page while more events remain, so only an
-    // empty page ends the read.
-    vi.mocked(client.boxGet)
-      .mockResolvedValueOnce({
-        chunk_size: 1,
-        next_stream_position: 11,
-        entries: [{ event_id: 'a' }],
-      })
-      .mockResolvedValueOnce({
-        chunk_size: 1,
-        next_stream_position: '12',
-        entries: [{ event_id: 'b' }],
-      })
-      .mockResolvedValueOnce({ chunk_size: 0, next_stream_position: '12', entries: [] })
-    const found = await eventsSince(TM, '10', 'changes')
-    expect(found.entries.map((e) => e.event_id)).toEqual(['a', 'b'])
-    expect(found.position).toBe('12')
-    const calls = vi.mocked(client.boxGet).mock.calls
-    expect(calls.map((c) => c[2]?.stream_position)).toEqual(['10', '11', '12'])
-    expect(calls[0]?.[1]).toBe('https://api.box.com/2.0/events')
-    expect(calls[0]?.[2]?.stream_type).toBe('changes')
+    // empty page ends the read: its first page is answered short here.
+    await account.mkdir('x')
+    await account.put('a.txt', new Uint8Array([97]))
+    const whole = await account.run.call<{ entries: JsonValue[]; next_stream_position: string }>(
+      'GET',
+      '/2.0/events?stream_position=0',
+    )
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, {
+      chunk_size: 1,
+      next_stream_position: 1,
+      entries: [whole.entries[0] ?? null],
+    })
+    await account.run.recordRequests()
+    const found = await eventsSince(tm(), '0', 'changes')
+    expect(found.entries).toEqual(whole.entries)
+    expect(found.position).toBe(whole.next_stream_position)
+    const sent = await account.run.params('GET', EVENTS_ROUTE)
+    expect(sent.map((p) => p.stream_position)).toEqual(['0', '1', '2'])
+    expect(new Set(sent.map((p) => p.stream_type))).toEqual(new Set(['changes']))
   })
 
   it('returns the stream head for now', async () => {
-    vi.mocked(client.boxGet).mockResolvedValueOnce({
+    await account.mkdir('x')
+    await account.run.recordRequests()
+    expect(await eventsNow(tm(), 'changes')).toBe('1')
+    expect((await account.run.params('GET', EVENTS_ROUTE))[0]?.stream_position).toBe('now')
+    // Box spells a position as a JSON number. The kit parses JSON in
+    // JavaScript, so the largest it carries exactly is 2**53 - 1.
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, {
       chunk_size: 0,
-      next_stream_position: '1152922976252290886',
+      next_stream_position: 9007199254740991,
       entries: [],
     })
-    expect(await eventsNow(TM, 'changes')).toBe('1152922976252290886')
-    expect(vi.mocked(client.boxGet).mock.calls[0]?.[2]?.stream_position).toBe('now')
+    expect(await eventsNow(tm(), 'changes')).toBe('9007199254740991')
   })
 
   it('asks OPTIONS /events for the long-poll server', async () => {
-    const server = {
-      type: 'realtime_server',
-      url: 'http://2.realtime.services.box.net/subscribe?channel=c',
-      ttl: '10',
-      max_retries: '10',
-      retry_timeout: 610,
-    }
-    vi.mocked(client.boxOptions).mockResolvedValueOnce({ chunk_size: 1, entries: [server] })
-    expect((await realtimeServer(TM)).url).toBe(server.url)
-    expect(vi.mocked(client.boxOptions).mock.calls[0]?.[1]).toBe('https://api.box.com/2.0/events')
+    const answer = await account.run.call<{ entries: { url: string }[] }>('OPTIONS', EVENTS_ROUTE)
+    await account.run.recordRequests()
+    expect((await realtimeServer(tm())).url).toBe(answer.entries[0]?.url)
+    expect(await account.run.requests()).toEqual(['OPTIONS /2.0/events'])
   })
 
   it.each([null, '10', 10])('refuses events that do not advance (%s)', async (stuck) => {
-    vi.mocked(client.boxGet).mockResolvedValueOnce({
-      chunk_size: 1,
-      next_stream_position: stuck,
-      entries: [{ event_id: 'a' }],
-    })
-    await expect(eventsSince(TM, '10', 'changes')).rejects.toThrow('did not advance')
+    const page = { chunk_size: 1, next_stream_position: stuck, entries: [{ event_id: 'a' }] }
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, page, 2)
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, { entries: [] })
+    await expect(eventsSince(tm(), '10', 'changes')).rejects.toThrow('did not advance')
   })
 
   it('keeps its position on an empty page without one', async () => {
-    vi.mocked(client.boxGet)
-      .mockResolvedValueOnce({
-        chunk_size: 1,
-        next_stream_position: '11',
-        entries: [{ event_id: 'a' }],
-      })
-      .mockResolvedValueOnce({ chunk_size: 0, entries: [] })
-    const found = await eventsSince(TM, '10', 'changes')
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, {
+      chunk_size: 1,
+      next_stream_position: '11',
+      entries: [{ event_id: 'a' }],
+    })
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, { chunk_size: 0, entries: [] })
+    const found = await eventsSince(tm(), '10', 'changes')
     expect(found.entries.map((e) => e.event_id)).toEqual(['a'])
     expect(found.position).toBe('11')
   })
 
   it('refuses a stream head without a position', async () => {
-    vi.mocked(client.boxGet).mockResolvedValueOnce({ chunk_size: 0, entries: [] })
-    await expect(eventsNow(TM, 'changes')).rejects.toThrow('next_stream_position')
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, { chunk_size: 0, entries: [] })
+    await expect(eventsNow(tm(), 'changes')).rejects.toThrow('next_stream_position')
   })
 
   it('refuses an OPTIONS answer without a realtime server', async () => {
-    vi.mocked(client.boxOptions).mockResolvedValueOnce({ chunk_size: 0 })
-    await expect(realtimeServer(TM)).rejects.toThrow('realtime server')
+    await account.run.answerNext('OPTIONS', EVENTS_ROUTE, 200, { chunk_size: 0 })
+    await expect(realtimeServer(tm())).rejects.toThrow('realtime server')
   })
 })
 
 async function uploadUrls(tm: BoxTokenManager): Promise<unknown[]> {
-  vi.mocked(client.boxUploadMultipart).mockResolvedValue({})
+  vi.mocked(client.boxUploadMultipart).mockResolvedValueOnce({}).mockResolvedValueOnce({})
   await uploadNewFile(tm, '0', 'a.txt', new Uint8Array([97]))
   await uploadFileVersion(tm, '7', 'a.txt', new Uint8Array([98]))
   return vi.mocked(client.boxUploadMultipart).mock.calls.map((c) => c[1])
@@ -173,7 +239,7 @@ describe('box upload host', () => {
   })
 
   it('keeps folder calls on the api host', async () => {
-    vi.mocked(client.boxPostJson).mockResolvedValue({})
+    vi.mocked(client.boxPostJson).mockResolvedValueOnce({})
     await createFolder(new BoxTokenManager({ accessToken: 'tok' }), '0', 'd')
     expect(vi.mocked(client.boxPostJson).mock.calls[0]?.[1]).toBe('https://api.box.com/2.0/folders')
   })
@@ -245,8 +311,8 @@ describe('box upload protocol', () => {
       const spool = new ByteSpool()
       await spool.append(payload)
       const data = spooled ? spool : payload
-      vi.mocked(client.boxUploadSession).mockResolvedValue({ via: 'session' })
-      vi.mocked(client.boxUploadMultipart).mockResolvedValue({ via: 'multipart' })
+      vi.mocked(client.boxUploadSession).mockResolvedValueOnce({ via: 'session' })
+      vi.mocked(client.boxUploadMultipart).mockResolvedValueOnce({ via: 'multipart' })
       try {
         const reply = versioning
           ? await uploadFileVersion(tm, '7', 'a.txt', data, '"v1"')

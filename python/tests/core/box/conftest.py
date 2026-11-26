@@ -21,7 +21,6 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.box import BoxAccessor
-from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.box.client import BoxTokenManager
 from mirage.vfs.box.config import BoxConfig
 from tests.fixtures.kit_fake import KitRun, serve
@@ -82,6 +81,58 @@ class BoxAccount:
         made = await self.run.call("POST", "/2.0/files/content", data=form)
         return made["entries"][0]["id"]
 
+    async def upload_version(self, file_id: str, data: bytes) -> None:
+        """Upload a new version of a file, as another client would.
+
+        Args:
+            file_id (str): the file's id.
+            data (bytes): its new content.
+        """
+        form = aiohttp.FormData()
+        form.add_field("attributes", json.dumps({}))
+        form.add_field("file", data, filename="version")
+        await self.run.call("POST", f"/2.0/files/{file_id}/content", data=form)
+
+    async def rename(self, file_id: str, name: str) -> None:
+        """Rename a file in place, as another client would.
+
+        Args:
+            file_id (str): the file's id.
+            name (str): its new name.
+        """
+        await self.run.call(
+            "PUT", f"/2.0/files/{file_id}", json={"name": name}
+        )
+
+    async def names(self, folder_id: str) -> list[str]:
+        """The names a folder holds, sorted.
+
+        Args:
+            folder_id (str): the folder's id.
+        """
+        listed = await self.run.call("GET", f"/2.0/folders/{folder_id}/items")
+        return sorted(entry["name"] for entry in listed["entries"])
+
+    async def child(self, folder_id: str, name: str) -> dict[str, Any]:
+        """The row a folder's listing gives ``name``.
+
+        Args:
+            folder_id (str): the folder's id.
+            name (str): the child's name.
+        """
+        listed = await self.run.call("GET", f"/2.0/folders/{folder_id}/items")
+        rows = [e for e in listed["entries"] if e["name"] == name]
+        assert len(rows) == 1, (name, listed["entries"])
+        return rows[0]
+
+    async def read(self, file_id: str) -> bytes:
+        """A file's content, downloaded as a client would.
+
+        Args:
+            file_id (str): the file's id.
+        """
+        return await self.run.read(f"/2.0/files/{file_id}/content")
+
     async def web_link(self, name: str, parent: str = "0") -> str:
         """Create a web link and return its id.
 
@@ -128,14 +179,3 @@ async def account(box_origin: str) -> AsyncIterator[BoxAccount]:
     made = BoxAccount(box_origin)
     yield made
     await made.run.close()
-
-
-@pytest.fixture
-def accessor():
-    config = BoxConfig(access_token="test-token")
-    return BoxAccessor(config, BoxTokenManager(config))
-
-
-@pytest.fixture
-def index():
-    return RAMIndexCacheStore()

@@ -95,18 +95,40 @@ export class KitRun {
     return (text === '' ? null : JSON.parse(text)) as T
   }
 
-  /** Start listing the tenant's requests, emptying an earlier list. */
-  async recordRequests(): Promise<void> {
-    await this.call('POST', '/_kit/requests')
+  /** One GET to the fake, answered as bytes, redirects followed. */
+  async read(path: string): Promise<Uint8Array> {
+    const res = await fetch(this.url + path, { headers: this.headers })
+    const body = new Uint8Array(await res.arrayBuffer())
+    if (res.status >= 300) throw new Error(`GET ${path} -> ${String(res.status)}`)
+    return body
   }
 
-  /** The requests made since the last `recordRequests`, as `METHOD path`. */
+  /** Start listing the tenant's requests, emptying an earlier list, keeping `headers`. */
+  async recordRequests(...headers: string[]): Promise<void> {
+    await this.call('POST', '/_kit/requests', { json: { headers } })
+  }
+
+  /**
+   * The requests made since the last `recordRequests`, as `METHOD path` and
+   * then `name=value` for each kept header a request carried.
+   */
   async requests(): Promise<string[]> {
-    const listed = await this.call<{ requests: { method: string; path: string }[] }>(
-      'GET',
-      '/_kit/requests',
+    const listed = await this.call<{
+      requests: { method: string; path: string; headers: Record<string, string> }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests.map((r) =>
+      [r.method, r.path, ...Object.entries(r.headers).map(([k, v]) => `${k}=${v}`)].join(' '),
     )
-    return listed.requests.map((r) => `${r.method} ${r.path}`)
+  }
+
+  /** The query of each listed request to `route`, in order. */
+  async params(method: string, route: string): Promise<Record<string, string>[]> {
+    const listed = await this.call<{
+      requests: { method: string; route: string; query: string }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests
+      .filter((r) => r.method === method && r.route === route)
+      .map((r) => Object.fromEntries(new URLSearchParams(r.query)))
   }
 
   /** Answer the next `times` requests to `route` with `status`, and `body` when given. */

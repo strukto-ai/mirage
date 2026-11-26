@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl
 
 import aiohttp
 
@@ -100,14 +101,55 @@ class KitRun:
             assert resp.status < 300, text
             return json.loads(text) if text else None
 
-    async def record_requests(self) -> None:
-        """Start listing the tenant's requests, emptying an earlier list."""
-        await self.call("POST", "/_kit/requests")
+    async def read(self, path: str) -> bytes:
+        """One GET to the fake, answered as bytes, redirects followed.
+
+        Args:
+            path (str): the path under the run.
+        """
+        async with self.http.get(self.url + path) as resp:
+            body = await resp.read()
+            assert resp.status < 300, body
+            return body
+
+    async def record_requests(self, *headers: str) -> None:
+        """Start listing the tenant's requests, emptying an earlier list.
+
+        Args:
+            *headers (str): the headers to keep from each request.
+        """
+        await self.call(
+            "POST", "/_kit/requests", json={"headers": list(headers)}
+        )
 
     async def requests(self) -> list[str]:
-        """The requests made since recording started, as ``METHOD path``."""
+        """The requests made since recording started, as ``METHOD path``
+        and then ``name=value`` for each kept header a request carried."""
         listed = await self.call("GET", "/_kit/requests")
-        return [f"{r['method']} {r['path']}" for r in listed["requests"]]
+        return [
+            " ".join(
+                [
+                    r["method"],
+                    r["path"],
+                    *(f"{k}={v}" for k, v in r["headers"].items()),
+                ]
+            )
+            for r in listed["requests"]
+        ]
+
+    async def params(self, method: str, route: str) -> list[dict[str, str]]:
+        """The query of each listed request to ``route``, in order.
+
+        Args:
+            method (str): the HTTP method.
+            route (str): the route as the fake declares it.
+        """
+        listed = await self.call("GET", "/_kit/requests")
+        return [
+            dict(parse_qsl(r["query"]))
+            for r in listed["requests"]
+            if r["method"] == method and r["route"] == route
+        ]
 
     async def answer_next(
         self,

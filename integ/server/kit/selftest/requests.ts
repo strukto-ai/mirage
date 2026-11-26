@@ -20,9 +20,21 @@ import type { RequestReport } from '../typescript/request.ts'
 import { start } from '../typescript/serve.ts'
 import { selftestFake } from './fake.ts'
 
-const CARDS = { method: 'GET', route: '/boards/:board/cards', path: '/boards/brd_1/cards' }
-const BOARDS = { method: 'GET', route: '/boards', path: '/boards' }
-const NEW_CARD = { method: 'POST', route: '/boards/:board/cards', path: '/boards/brd_1/cards' }
+const CARDS = {
+  method: 'GET',
+  route: '/boards/:board/cards',
+  path: '/boards/brd_1/cards',
+  query: '',
+  headers: {},
+}
+const BOARDS = { method: 'GET', route: '/boards', path: '/boards', query: '', headers: {} }
+const NEW_CARD = {
+  method: 'POST',
+  route: '/boards/:board/cards',
+  path: '/boards/brd_1/cards',
+  query: '',
+  headers: {},
+}
 
 export async function runRequestTests(): Promise<void> {
   const started = await start(selftestFake, 0)
@@ -49,8 +61,8 @@ export async function runRequestTests(): Promise<void> {
     await ask('a', '/nowhere')
     assert.deepEqual(
       await requests('a'),
-      [CARDS, BOARDS],
-      'a tenant lists its own routed requests in order, with no query and none to the kit',
+      [{ ...CARDS, query: 'limit=1' }, BOARDS],
+      'a tenant lists its own routed requests in order, the query apart, and none to the kit',
     )
     assert.deepEqual(await requests('a', 's2'), [], 'another tenant started nothing')
 
@@ -63,7 +75,11 @@ export async function runRequestTests(): Promise<void> {
     })
     assert.equal(armed.status, 200)
     assert.equal((await ask('a', '/boards/brd_1/cards')).status, 500)
-    assert.deepEqual(await requests('a'), [CARDS, BOARDS, CARDS], 'a faulted request is listed')
+    assert.deepEqual(
+      await requests('a'),
+      [{ ...CARDS, query: 'limit=1' }, BOARDS, CARDS],
+      'a faulted request is listed',
+    )
 
     assert.deepEqual(await requests('a', 's1', 'POST'), [], 'starting again empties it')
     await ask('a', '/boards')
@@ -98,6 +114,28 @@ export async function runRequestTests(): Promise<void> {
       [NEW_CARD, BOARDS],
       'an upload still sending when a later GET is answered is listed first',
     )
+
+    const named = await fetch(under('a', REQUESTS_PATH), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirage-tenant': 's1' },
+      body: JSON.stringify({ headers: ['Range', 'If-Match'] }),
+    })
+    assert.equal(named.status, 200)
+    await fetch(under('a', '/boards'), {
+      headers: { 'x-mirage-tenant': 's1', range: 'bytes=1-3', 'x-other': 'no' },
+    })
+    await ask('a', '/boards')
+    assert.deepEqual(
+      await requests('a'),
+      [{ ...BOARDS, headers: { range: 'bytes=1-3' } }, BOARDS],
+      'a start that names headers keeps those a request carried, and no others',
+    )
+    const refused = await fetch(under('a', REQUESTS_PATH), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirage-tenant': 's1' },
+      body: JSON.stringify({ headers: 'range' }),
+    })
+    assert.equal(refused.status, 400, 'headers that are not a list of names are refused')
 
     await requests('a', 's1', 'POST')
     await ask('a', '/boards')
