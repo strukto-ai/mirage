@@ -112,6 +112,16 @@ async function answerInstead(fileId: string, change: Record<string, JsonValue>):
   await account.run.answerNext('GET', FILE_ROUTE, 200, { ...answer, sha1: SHA_FAST, ...change })
 }
 
+async function listWithoutSha1(): Promise<string> {
+  await account.put('a.txt', HELLO)
+  const listing = await account.run.call<{
+    entries: (Record<string, JsonValue> & { modified_at: string })[]
+  }>('GET', '/2.0/folders/0/items')
+  for (const row of listing.entries) delete row.sha1
+  await account.run.answerNext('GET', ITEMS_ROUTE, 200, listing)
+  return listing.entries[0]?.modified_at ?? ''
+}
+
 describe('box stat', () => {
   it('stat root fetches folder info', async () => {
     await account.run.recordRequests()
@@ -200,16 +210,6 @@ describe('box stat', () => {
 })
 
 describe('box stat token', () => {
-  async function listWithoutSha1(): Promise<string> {
-    await account.put('a.txt', HELLO)
-    const listing = await account.run.call<{
-      entries: (Record<string, JsonValue> & { modified_at: string })[]
-    }>('GET', '/2.0/folders/0/items')
-    for (const row of listing.entries) delete row.sha1
-    await account.run.answerNext('GET', ITEMS_ROUTE, 200, listing)
-    return listing.entries[0]?.modified_at ?? ''
-  }
-
   // modified_at is no content token: two same-size edits in one second
   // share it, so a file Box gives no sha1 stats with none.
   it('a sha1-less row stats with no token', async () => {

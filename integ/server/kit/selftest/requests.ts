@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import assert from 'node:assert/strict'
+import { request } from 'node:http'
 import { FAULTS_PATH } from '../typescript/fault.ts'
 import { REQUESTS_PATH } from '../typescript/request.ts'
 import type { RequestReport } from '../typescript/request.ts'
@@ -21,6 +22,7 @@ import { selftestFake } from './fake.ts'
 
 const CARDS = { method: 'GET', route: '/boards/:board/cards', path: '/boards/brd_1/cards' }
 const BOARDS = { method: 'GET', route: '/boards', path: '/boards' }
+const NEW_CARD = { method: 'POST', route: '/boards/:board/cards', path: '/boards/brd_1/cards' }
 
 export async function runRequestTests(): Promise<void> {
   const started = await start(selftestFake, 0)
@@ -68,6 +70,34 @@ export async function runRequestTests(): Promise<void> {
     assert.deepEqual(await requests('a', 's1', 'DELETE'), [BOARDS], 'DELETE answers what it kept')
     await ask('a', '/boards')
     assert.deepEqual(await requests('a'), [], 'nothing is kept after a stop')
+
+    await requests('a', 's1', 'POST')
+    const seen = new Promise<void>((resolve) => {
+      started.server.once('request', () => {
+        resolve()
+      })
+    })
+    const upload = request(under('a', '/boards/brd_1/cards'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirage-tenant': 's1' },
+    })
+    const uploaded = new Promise<number>((resolve, reject) => {
+      upload.on('response', (res) => {
+        res.resume()
+        resolve(res.statusCode ?? 0)
+      })
+      upload.on('error', reject)
+    })
+    upload.write('{"title":')
+    await seen
+    await ask('a', '/boards')
+    upload.end('"slow"}')
+    assert.equal(await uploaded, 201)
+    assert.deepEqual(
+      await requests('a'),
+      [NEW_CARD, BOARDS],
+      'an upload still sending when a later GET is answered is listed first',
+    )
 
     await requests('a', 's1', 'POST')
     await ask('a', '/boards')

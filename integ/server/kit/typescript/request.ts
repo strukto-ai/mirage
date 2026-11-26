@@ -33,7 +33,7 @@ export type RequestReport = {
 // of its world. A faulted request is kept too, since the client did make it.
 export class Requests {
   private recording = false
-  private readonly kept: RequestReport[] = []
+  private readonly kept: { arrived: number; request: RequestReport }[] = []
 
   // Starting again empties what an earlier start kept.
   start(): void {
@@ -41,12 +41,19 @@ export class Requests {
     this.kept.length = 0
   }
 
-  note(method: string, route: string, path: string): void {
-    if (this.recording) this.kept.push({ method, route, path })
+  // `arrived` is the server's count of requests when this one's headers were
+  // read. A request is noted only once its body has been read, so an upload
+  // still sending is noted after a GET that came later; it goes back to the
+  // place it arrived in.
+  note(arrived: number, method: string, route: string, path: string): void {
+    if (!this.recording) return
+    let at = this.kept.length
+    while (at > 0 && (this.kept[at - 1]?.arrived ?? 0) > arrived) at--
+    this.kept.splice(at, 0, { arrived, request: { method, route, path } })
   }
 
   report(): RequestReport[] {
-    return this.kept.map((request) => ({ ...request }))
+    return this.kept.map(({ request }) => ({ ...request }))
   }
 
   stop(): void {

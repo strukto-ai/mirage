@@ -365,6 +365,7 @@ async function answer<C extends MinimalClient>(
   url: URL,
   headers: Headers,
   raw: Buffer,
+  arrived: number,
 ): Promise<Reply | null> {
   const { service, tenantKind } = rt.fake.config
   // Stripped FIRST, so every path below is the one the fake declares. A run
@@ -483,9 +484,9 @@ async function answer<C extends MinimalClient>(
   }
   const hit = router.match(method, path)
   if (hit === null) return unrouted(service, method, path)
-  // Before the fault and the handler, so a request is listed in the order it
-  // arrived, whatever answered it.
-  rt.state(run).peek(tenant)?.requests.note(method, hit.spec.path, path)
+  // Before the fault and the handler, so a request is listed whatever
+  // answered it.
+  rt.state(run).peek(tenant)?.requests.note(arrived, method, hit.spec.path, path)
   // Ahead of the run's queue and of the handler: a faulted request touches
   // no row, so it neither waits behind a write nor holds one up while it
   // hangs, and a write route faulted with a 5xx has provably not applied.
@@ -529,7 +530,9 @@ async function answer<C extends MinimalClient>(
 export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server {
   const { service, maxBodyBytes } = rt.fake.config
   const router = rt.router
+  let arrivals = 0
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    const arrived = arrivals++
     const host = req.headers.host ?? '127.0.0.1'
     const url = new URL(req.url ?? '/', `http://${host}`)
     const method = (req.method ?? 'GET').toUpperCase()
@@ -555,7 +558,7 @@ export function createKitServer<C extends MinimalClient>(rt: Runtime<C>): Server
         send(res, { status: 413, body: { error: 'body_too_large', limit } }, false)
         return
       }
-      void answer(rt, router, method, url, req.headers as Headers, Buffer.concat(chunks))
+      void answer(rt, router, method, url, req.headers as Headers, Buffer.concat(chunks), arrived)
         .then((reply) => {
           if (reply === null) res.destroy()
           else send(res, reply, method === 'HEAD')

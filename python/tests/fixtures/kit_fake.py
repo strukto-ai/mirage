@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import select
 import subprocess
 import uuid
 from collections.abc import Iterator
@@ -23,6 +24,8 @@ from typing import Any
 import aiohttp
 
 INTEG = Path(__file__).resolve().parents[3] / "integ"
+START_SECONDS = 20
+STOP_SECONDS = 5
 
 
 @contextmanager
@@ -49,7 +52,9 @@ def serve(service: str) -> Iterator[str]:
     )
     assert process.stdout is not None
     try:
-        name, _, origin = process.stdout.readline().strip().partition("=")
+        ready, _, _ = select.select([process.stdout], [], [], START_SECONDS)
+        line = process.stdout.readline() if ready else ""
+        name, _, origin = line.strip().partition("=")
         if name != f"{service.upper().replace('-', '_')}_URL" or not origin:
             raise RuntimeError(
                 f"{service} fake did not start; run pnpm install and "
@@ -58,7 +63,11 @@ def serve(service: str) -> Iterator[str]:
         yield origin.rstrip("/")
     finally:
         process.terminate()
-        process.wait()
+        try:
+            process.wait(STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
 
 class KitRun:
