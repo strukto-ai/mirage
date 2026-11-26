@@ -96,9 +96,9 @@ Mirage exposes E2B-compatible endpoints for sandboxes, commands, and files.
 Existing E2B SDK clients and tools can switch to Mirage if they let you change
 both E2B URLs and use the supported operations below.
 
-Set `MIRAGE_E2B_PORT=8766` in the server environment before you start the
-single-worker server. Mirage serves E2B on that loopback port. The native HTTP
-API uses the port you configured when you started the server.
+Set `MIRAGE_E2B_PORT=8766` in the server environment before starting the server.
+Mirage serves the E2B-compatible API on that port. The native HTTP API uses
+the port you configured when you started the server.
 
 In the E2B client environment, set both URLs to the E2B port and use the
 server's `MIRAGE_AUTH_TOKEN` as the API key.
@@ -115,12 +115,6 @@ writable, in-memory `/home/user`.
 
 To customize an E2B sandbox, save a Mirage workspace template with `name: base`
 using `mirage api /v1/templates --input ./base.yaml`.
-With the default file store, you can also place `base.yaml` in the server's
-`~/.mirage/resources/template/` directory, or under
-`$MIRAGE_HOME/resources/template/` if you set `MIRAGE_HOME`.
-Mirage checks for it when a sandbox is created and uses the built-in workspace
-if it's absent. Set `env.HOME` to `/home/user` and include a writable mount there
-so shell and SDK-relative file paths agree.
 
 Run this example in the same client environment with the Python E2B SDK installed.
 
