@@ -176,9 +176,19 @@ function use(kind: Kind): void {
     await drive.account.run.recordRequests()
   })
   afterEach(async () => {
-    for (const ws of built.splice(0)) await ws.close()
+    // Each workspace is closed even after one fails to, and the run with
+    // them; the first failure is reported once all of it is torn down.
+    const failed: unknown[] = []
+    for (const ws of built.splice(0)) {
+      try {
+        await ws.close()
+      } catch (err) {
+        failed.push(err)
+      }
+    }
     vi.unstubAllGlobals()
     await drive.account.run.close()
+    if (failed.length > 0) throw failed[0]
   })
 }
 

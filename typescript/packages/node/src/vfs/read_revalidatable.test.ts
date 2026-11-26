@@ -748,6 +748,31 @@ async function requestsTo(run: KitRun, [method, route]: [string, string]): Promi
   return (await run.params(method, route)).length
 }
 
+// Two same-size edits in one second share server_modified on the real
+// service, so only content_hash may tell them apart. The fake's clock moves on
+// every write, so the stamp is set back; the reload stops the request list,
+// which starts again.
+async function dropboxRewrite(
+  dropbox: DropboxAccount,
+  path: string,
+  data: Uint8Array,
+): Promise<void> {
+  const stamp = (await dropbox.metadata(path)).server_modified
+  await dropbox.put(path, data)
+  await dropbox.run.execute('UPDATE DropboxItem SET modified = ? WHERE path = ?', stamp, path)
+  await dropbox.run.recordRequests()
+}
+
+// As dropboxRewrite: modified_at stays, so only sha1 tells the two versions
+// apart.
+async function boxRewrite(box: BoxAccount, path: string, data: Uint8Array): Promise<void> {
+  const id = await box.idOf(path)
+  const stamp = (await box.fileInfo(id)).modified_at
+  await box.write(path, data)
+  await box.run.execute('UPDATE BoxItem SET modified = ? WHERE id = ?', stamp, id)
+  await box.run.recordRequests()
+}
+
 // What is at `path` on a mount, found by listing each folder from the root
 // down, each handed the row its parent's listing named, as the mount finds
 // it. Mirrors python's tests/fixtures/handed.py entry_at.
@@ -849,7 +874,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       accessor,
       key,
       fetches: () => requestsTo(dropbox.run, DROPBOX_DOWNLOAD),
-      rewrite: (next) => dropbox.put(stored, next),
+      rewrite: (next) => dropboxRewrite(dropbox, stored, next),
       readBytes: async (p) => bytesOf(dropboxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
         yield* chunksOf(dropboxVfs.read(p, await handed(p)))
@@ -886,9 +911,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       accessor,
       key,
       fetches: () => requestsTo(box.run, BOX_DOWNLOAD),
-      rewrite: async (next) => {
-        await box.write(stored, next)
-      },
+      rewrite: (next) => boxRewrite(box, stored, next),
       readBytes: async (p) => bytesOf(boxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
         yield* chunksOf(boxVfs.read(p, await handed(p)))
@@ -1389,8 +1412,10 @@ describe('the read-token contract', () => {
     hubs = []
     await Promise.all(graphs.map((graph) => graph.close()))
     graphs = []
-    await Promise.all(runs.map((run) => run.close()))
+    // Detached first, so a close that throws leaves the next test none.
+    const closing = runs
     runs = []
+    await Promise.all(closing.map((run) => run.close()))
   })
 
   /**

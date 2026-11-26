@@ -48,6 +48,15 @@ cd typescript
 pnpm install
 ```
 
+The Box and Dropbox unit tests on both hosts run against the integ fakes, which
+need integ's dependencies and generated Prisma clients:
+
+```bash
+cd integ
+pnpm install
+pnpm run prisma:clients
+```
+
 Examples under `examples/python/` load `.env.development` from the repository
 root. Run them from the root with the Python virtualenv interpreter:
 

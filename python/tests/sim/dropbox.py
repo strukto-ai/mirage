@@ -258,6 +258,9 @@ class FakeDropbox:
             self.dirs.add(dst + d[len(src) :])
             if route == "move":
                 self.dirs.discard(d)
+        parts = dst.strip("/").split("/")
+        for i in range(1, len(parts)):
+            self.dirs.add("/" + "/".join(parts[:i]))
         entry = (
             self._file_entry(dst)
             if dst in self.files

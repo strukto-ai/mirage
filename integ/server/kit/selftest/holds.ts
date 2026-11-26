@@ -174,6 +174,26 @@ export async function runHoldTests(): Promise<void> {
     })
     assert.equal(await raw.text(), text, 'a fault text is sent as written')
     assert.equal(raw.headers.get('content-type'), 'application/json')
+    await kit('a', FAULTS_PATH, 'POST', {
+      plans: [
+        {
+          method: 'GET',
+          route: CARDS[1],
+          status: 200,
+          text,
+          headers: { 'content-type': 'text/plain' },
+        },
+      ],
+    })
+    const typed = await fetch(under('a', '/boards/brd_1/cards'), {
+      headers: { 'x-mirage-tenant': 's1' },
+    })
+    await typed.text()
+    assert.equal(
+      typed.headers.get('content-type'),
+      'text/plain',
+      "a plan's own type replaces the default in any case",
+    )
 
     await kit('a', FAULTS_PATH, 'POST', {
       plans: [

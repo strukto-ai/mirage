@@ -40,6 +40,13 @@ export class DropboxAccount {
     })
   }
 
+  /** What Dropbox answers for `path`. */
+  async metadata(path: string): Promise<{ server_modified: string }> {
+    return this.run.call<{ server_modified: string }>('POST', '/2/files/get_metadata', {
+      json: { path },
+    })
+  }
+
   /** The bytes of the file at `path`; undefined if no file is there. */
   async content(path: string): Promise<Uint8Array | undefined> {
     const res = await this.run.request('POST', '/2/files/download', {

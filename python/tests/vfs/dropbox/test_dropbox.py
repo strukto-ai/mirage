@@ -97,8 +97,12 @@ def _workspace(endpoint: str) -> Workspace:
 
 
 def _routes(requests: list[str]) -> list[str]:
-    """Each request's endpoint name, the token refresh left out."""
-    names = [request.rsplit("/", 1)[-1] for request in requests]
+    """Each request's endpoint name, the token refresh left out.
+
+    The name is taken from the path alone: a kept header follows it on the
+    line, and its value can hold a slash of its own.
+    """
+    names = [request.split(" ")[1].rsplit("/", 1)[-1] for request in requests]
     return [name for name in names if name != "token"]
 
 

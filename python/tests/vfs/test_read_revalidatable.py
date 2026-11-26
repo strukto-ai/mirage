@@ -701,6 +701,33 @@ async def _requests_to(run: KitRun, route: tuple[str, str]) -> int:
     return len(await run.params(*route))
 
 
+async def _dropbox_rewrite(
+    dropbox: DropboxAccount, path: str, data: bytes
+) -> None:
+    # Two same-size edits in one second share server_modified on the real
+    # service, so only content_hash may tell them apart. The fake's clock
+    # moves on every write, so the stamp is set back; the reload stops the
+    # request list, which starts again.
+    stamp = (await dropbox.metadata(path))["server_modified"]
+    await dropbox.put(path, data)
+    await dropbox.run.execute(
+        "UPDATE DropboxItem SET modified = ? WHERE path = ?", stamp, path
+    )
+    await dropbox.run.record_requests()
+
+
+async def _box_rewrite(box: BoxAccount, path: str, data: bytes) -> None:
+    # As _dropbox_rewrite: modified_at stays, so only sha1 tells the two
+    # versions apart.
+    file_id = await box.id_of(path)
+    stamp = (await box.file_info(file_id))["modified_at"]
+    await box.write(path, data)
+    await box.run.execute(
+        "UPDATE BoxItem SET modified = ? WHERE id = ?", stamp, file_id
+    )
+    await box.run.record_requests()
+
+
 @contextmanager
 def _dropbox_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     # Dropbox has no key_prefix; the prefixed shape mounts a root_path
@@ -711,30 +738,38 @@ def _dropbox_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     root = "/" + PREFIX.strip("/") if shape == "prefixed" else "/"
     stored = root.rstrip("/") + "/" + key
     thread = LoopThread()
-    dropbox = thread.run(_account(DropboxAccount, origin))
     try:
-        thread.run(dropbox.put(stored, data))
-        if shape == "prefixed":
-            thread.run(dropbox.put("/" + key, DECOY))
-        thread.run(dropbox.run.record_requests())
-        vfs = build_vfs(
-            "dropbox",
-            {**DROPBOX_CONFIG, "root_path": root, "endpoint": dropbox.run.url},
-        )
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: thread.run(
-                _requests_to(dropbox.run, DROPBOX_DOWNLOAD)
-            ),
-            rewrite=lambda new: thread.run(dropbox.put(stored, new)),
-            reach=[],
-            read_mod=dropbox_read,
-            stream_mod=dropbox_read,
-            readdir=dropbox_readdir,
-        )
+        dropbox = thread.run(_account(DropboxAccount, origin))
+        try:
+            thread.run(dropbox.put(stored, data))
+            if shape == "prefixed":
+                thread.run(dropbox.put("/" + key, DECOY))
+            thread.run(dropbox.run.record_requests())
+            vfs = build_vfs(
+                "dropbox",
+                {
+                    **DROPBOX_CONFIG,
+                    "root_path": root,
+                    "endpoint": dropbox.run.url,
+                },
+            )
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(
+                    _requests_to(dropbox.run, DROPBOX_DOWNLOAD)
+                ),
+                rewrite=lambda new: thread.run(
+                    _dropbox_rewrite(dropbox, stored, new)
+                ),
+                reach=[],
+                read_mod=dropbox_read,
+                stream_mod=dropbox_read,
+                readdir=dropbox_readdir,
+            )
+        finally:
+            thread.run(dropbox.run.close())
     finally:
-        thread.run(dropbox.run.close())
         thread.close()
 
 
@@ -746,27 +781,31 @@ def _box_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     key = KEYS[shape]
     stored = PREFIX + key if shape == "prefixed" else key
     thread = LoopThread()
-    box = thread.run(_account(BoxAccount, origin))
     try:
-        thread.run(box.write(stored, data))
-        if shape == "prefixed":
-            thread.run(box.write(key, DECOY))
-        thread.run(box.run.record_requests())
-        config = {"access_token": TOKEN, "endpoint": box.run.url}
-        if shape == "prefixed":
-            config["root_folder_id"] = thread.run(box.id_of(PREFIX))
-        yield Fake(
-            vfs=build_vfs("box", config),
-            key=key,
-            fetches=lambda: thread.run(_requests_to(box.run, BOX_DOWNLOAD)),
-            rewrite=lambda new: thread.run(box.write(stored, new)),
-            reach=[],
-            read_mod=box_read,
-            stream_mod=box_read,
-            readdir=box_readdir,
-        )
+        box = thread.run(_account(BoxAccount, origin))
+        try:
+            thread.run(box.write(stored, data))
+            if shape == "prefixed":
+                thread.run(box.write(key, DECOY))
+            thread.run(box.run.record_requests())
+            config = {"access_token": TOKEN, "endpoint": box.run.url}
+            if shape == "prefixed":
+                config["root_folder_id"] = thread.run(box.id_of(PREFIX))
+            yield Fake(
+                vfs=build_vfs("box", config),
+                key=key,
+                fetches=lambda: thread.run(
+                    _requests_to(box.run, BOX_DOWNLOAD)
+                ),
+                rewrite=lambda new: thread.run(_box_rewrite(box, stored, new)),
+                reach=[],
+                read_mod=box_read,
+                stream_mod=box_read,
+                readdir=box_readdir,
+            )
+        finally:
+            thread.run(box.run.close())
     finally:
-        thread.run(box.run.close())
         thread.close()
 
 

@@ -128,6 +128,7 @@ class KitRun:
             headers={**headers, SETUP_HEADER: "1"}
         )
         self.changes: list[asyncio.Task[None]] = []
+        self.failed: list[BaseException] = []
 
     async def call(self, method: str, path: str, **request: Any) -> Any:
         """One request to the fake, answered as JSON; None for no body.
@@ -312,7 +313,12 @@ class KitRun:
             done = change()
             if inspect.isawaitable(done):
                 await done
-        except BaseException:
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            # Kept before the release is awaited: the held request may end
+            # the test first, and close() cancels that await.
+            self.failed.append(exc)
             release = {"status": 500}
             raise
         finally:
@@ -354,6 +360,8 @@ class KitRun:
         ) as resp:
             assert resp.status == 204, await resp.text()
         await self.http.close()
+        if self.failed:
+            raise self.failed[0]
         for result in done:
             if isinstance(result, BaseException) and not isinstance(
                 result, asyncio.CancelledError

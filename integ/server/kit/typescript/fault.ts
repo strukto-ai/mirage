@@ -104,7 +104,10 @@ export class Faults {
               ? { error: 'injected_fault', status: plan.status }
               : plan.body,
       }
-      if (plan.text !== undefined) reply.headers = { 'Content-Type': 'application/json' }
+      // The plan's own type replaces the default in whatever case it is
+      // spelled: two keys would both be sent.
+      const typed = Object.keys(plan.headers ?? {}).some((k) => k.toLowerCase() === 'content-type')
+      if (plan.text !== undefined && !typed) reply.headers = { 'Content-Type': 'application/json' }
       if (plan.headers !== undefined) reply.headers = { ...reply.headers, ...plan.headers }
       return { reply, delayMs: plan.delayMs }
     }

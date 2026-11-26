@@ -382,15 +382,18 @@ async function holdsEndpoint<C extends MinimalClient>(
 
 function send(res: ServerResponse, reply: Reply, head: boolean): void {
   const headers: Record<string, string | string[]> = { ...(reply.headers ?? {}) }
+  // A reply's own type in any case stands: a default under another spelling
+  // would be sent beside it.
+  const typed = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
   let payload: Buffer
   if (reply.body === undefined) {
     payload = Buffer.alloc(0)
   } else if (Buffer.isBuffer(reply.body)) {
     payload = reply.body
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/octet-stream'
+    if (!typed) headers['Content-Type'] = 'application/octet-stream'
   } else {
     payload = Buffer.from(JSON.stringify(reply.body), 'utf8')
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json'
+    if (!typed) headers['Content-Type'] = 'application/json'
   }
   // RFC 7230 forbids Content-Length on a 204 or a 304, and every aiohttp fake
   // this kit replaces omitted it there, so a caller diffing the two sees the

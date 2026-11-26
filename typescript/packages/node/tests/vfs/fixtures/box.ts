@@ -129,12 +129,14 @@ export class BoxAccount {
   }
 
   /**
-   * Move or rename the item at `path` to `to`, as another client would,
-   * making the folders missing on the way.
+   * Move or rename the file or folder at `path` to `to`, as another client
+   * would, making the folders missing on the way. The fake has no route
+   * that moves a web link.
    */
   async move(path: string, to: string): Promise<void> {
     const row = await this.rowAt(path)
     if (row === null) throw new Error(`nothing at ${path}`)
+    if (row.type !== 'file' && row.type !== 'folder') throw new Error(`cannot move a ${row.type}`)
     const [parent, name] = placement(to)
     const kind = row.type === 'folder' ? 'folders' : 'files'
     await this.run.call('PUT', `/2.0/${kind}/${row.id}`, {

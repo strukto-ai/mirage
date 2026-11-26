@@ -224,8 +224,9 @@ class BoxAccount:
         return await self.put(name, data, await self.folder_at(parent))
 
     async def move(self, path: str, to: str) -> None:
-        """Move or rename the item at ``path`` to ``to``, as another client
-        would, making the folders missing on the way.
+        """Move or rename the file or folder at ``path`` to ``to``, as
+        another client would, making the folders missing on the way. The
+        fake has no route that moves a web link.
 
         Args:
             path (str): slash-separated names from All Files.
@@ -233,6 +234,7 @@ class BoxAccount:
         """
         row = await self.row_at(path)
         assert row is not None, path
+        assert row["type"] in ("file", "folder"), row
         parent, _, name = to.strip("/").rpartition("/")
         kind = "folders" if row["type"] == "folder" else "files"
         await self.run.call(

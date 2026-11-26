@@ -59,10 +59,14 @@ beforeEach(async () => {
   ws = await workspace()
 })
 
+// The run is closed even when the workspace was never made or fails to close.
 afterEach(async () => {
-  await ws.close()
-  vi.unstubAllGlobals()
-  await dbx.run.close()
+  try {
+    await ws.close()
+  } finally {
+    vi.unstubAllGlobals()
+    await dbx.run.close()
+  }
 })
 
 describe('dropbox listing miss', () => {
