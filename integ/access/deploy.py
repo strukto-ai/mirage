@@ -25,6 +25,7 @@ three keys: a plain one, one bound to the ``guarded`` profile, and one
 never authorized.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -32,8 +33,8 @@ import socket
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +45,8 @@ from loop_lag import LOOP_LAG_ENV
 from loop_turns import LOOP_TURNS_ENV
 from moto.server import ThreadedMotoServer
 from spans import SPANS_ENV
+
+from mirage.concurrency.limiter import settle
 
 ROOT = Path(__file__).resolve().parents[2]
 INTEG = ROOT / "integ"
@@ -387,11 +390,31 @@ def snapshot_store() -> Iterator[SnapshotStore]:
         server.stop()
 
 
-@contextmanager
-def deployed(
+async def _stopped(start: asyncio.Future[None], d: Deployment) -> None:
+    """Stop a deployment once its start has ended, however it ended.
+
+    Args:
+        start (asyncio.Future[None]): the start, on its thread.
+        d (Deployment): the deployment.
+    """
+    await asyncio.wait({start})
+    await asyncio.to_thread(_stop, d)
+
+
+@asynccontextmanager
+async def deployed(
     name: str, host: str, root: Path, issuer: Issuer, store: SnapshotStore
-) -> Iterator[Deployment]:
+) -> AsyncIterator[Deployment]:
     """Run one deployment for the length of the block.
+
+    Its start and stop block for seconds (a TypeScript server takes five
+    to answer), so they run on a thread: the hosts share the caller's
+    loop, and a loop held that long leaves the other host's suites with
+    kept-alive connections older than the server's five second
+    keep-alive, which it closes as their next request arrives. A thread
+    cannot be stopped, so a caller cancelled as the server starts waits
+    for the start to end before it stops what that started, and one
+    cancelled again meanwhile still waits for the stop.
 
     Args:
         name (str): ``dev``, ``token`` or ``jwt``.
@@ -406,8 +429,14 @@ def deployed(
     """
     root.mkdir(parents=True, exist_ok=True)
     d = Deployment(name, host, root, free_port(), free_port(), issuer, store)
+    start = asyncio.ensure_future(asyncio.to_thread(_start, d))
     try:
-        _start(d)
+        await asyncio.shield(start)
         yield d
     finally:
-        _stop(d)
+        stop = asyncio.ensure_future(_stopped(start, d))
+        try:
+            await asyncio.shield(stop)
+        except asyncio.CancelledError:
+            await settle(stop)
+            raise

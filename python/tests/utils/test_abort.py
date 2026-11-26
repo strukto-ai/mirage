@@ -59,6 +59,48 @@ async def test_a_task_that_finishes_first_reports_its_own_outcome():
     assert not cancel.is_set()
 
 
+# The caller of a line that waits wakes on the turn a plain await of the
+# line's task wakes on, where asyncio.wait woke a future of its own first
+# and the caller a turn later, on every line that waits. The counter
+# runs once a turn.
+@pytest.mark.asyncio
+async def test_a_waiting_line_wakes_its_caller_on_the_turn_it_ends():
+    loop = asyncio.get_running_loop()
+    release = asyncio.Event()
+    running: list[asyncio.Task[int]] = []
+    woke: dict[str, int] = {}
+    turns = [0]
+
+    def turn() -> None:
+        turns[0] += 1
+        if len(woke) < 2:
+            loop.call_soon(turn)
+
+    async def line() -> int:
+        task = asyncio.current_task()
+        assert task is not None
+        running.append(task)
+        await release.wait()
+        return 3
+
+    async def caller() -> None:
+        assert await run_cancellable(line(), asyncio.Event()) == 3
+        woke["caller"] = turns[0]
+
+    async def plain() -> None:
+        assert await running[0] == 3
+        woke["plain"] = turns[0]
+
+    called = asyncio.create_task(caller())
+    await asyncio.sleep(0)
+    awaited = asyncio.create_task(plain())
+    turn()
+    await asyncio.sleep(0)
+    release.set()
+    await asyncio.gather(called, awaited)
+    assert woke["caller"] == woke["plain"]
+
+
 @pytest.mark.asyncio
 async def test_a_stalled_task_is_cancelled_and_joined():
     cancel = asyncio.Event()

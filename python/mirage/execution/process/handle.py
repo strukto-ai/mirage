@@ -8,7 +8,7 @@ from dataclasses import replace
 from threading import RLock
 from typing import Any, Protocol, TypeVar, cast
 
-from mirage.concurrency.limiter import owned_task
+from mirage.concurrency.limiter import FirstDone, owned_task
 from mirage.execution.process.types import (
     Process,
     ProcessRunner,
@@ -593,7 +593,8 @@ class ProcessHandle:
             int: the status.
         """
         try:
-            return await asyncio.shield(self.task)
+            await FirstDone([self.task])
+            return self.task.result()
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if self.revoked or (current is not None and current.cancelling()):

@@ -100,6 +100,7 @@ from deploy import (
     snapshot_store,
 )
 from issuer import Issuer
+from loop_turns import QUIET
 from starlette.routing import WebSocketRoute
 
 from mirage.server.app import build_app
@@ -145,8 +146,8 @@ ISOLATION = {
 }
 TURNS_LINES = 10
 TURNS = {
-    "line": ("echo", "loop-turns", 10),
-    "pipe": ("echo hi | cat", "loop-turns-pipe", 19),
+    "line": ("echo", QUIET, 9),
+    "pipe": ("echo hi | cat", f"{QUIET}-pipe", 16),
 }
 
 
@@ -1779,18 +1780,25 @@ def loop_turns(key: str, path: Path, report: Report) -> None:
     writes them as the server stops; the median of each ``quiet_lines``
     line must stay within its ``TURNS`` budget. ``echo`` took 16 before
     the turns spent joining event waiters and on a separate session-load
-    call were cut, then 10, and takes 8 now that the shell execution,
-    the line and its process start eagerly: the rest is the hand-off
-    between the server's loop and the workspace's. The pipeline also
-    closes output and activity streams, which a plain ``echo`` never
-    opens: it took 30, then 15, takes 14, 23 with its output streams'
-    close started a turn late again and 24 with no close started
-    eagerly. A line that outlives the yield interval
-    (2 ms here) also yields, so a loaded runner adds a few turns, up to
-    17 for the pipeline: the budgets leave room for them. A streamed
-    request is left out, since its output crosses to
-    the server's own loop and its turns follow that hand-off more than
-    the line.
+    call were cut, then 10, then 8 once the shell execution, the line
+    and its process started eagerly, and takes 7 now that its wait on
+    itself and its cancel event wakes it as either ends: the rest is
+    the hand-off between the server's loop and the workspace's. The
+    pipeline also closes output and activity streams, which a plain
+    ``echo`` never opens: it took 30, then 15, and takes 14; 17 with
+    each wait for a forked child behind ``asyncio.shield``, 23 with its
+    output streams' close started a turn late again and 24 with no
+    close started eagerly.
+
+    A count is the line's code alone: ``loop_turns.py`` runs a quiet
+    line with no time-driven yield, which would add three turns each
+    time the line outlived two GIL switch intervals, on a loaded runner
+    and not on a quiet one. So a budget is its count and two more for
+    the hand-off, which lands a turn apart now and then, and a line
+    the code makes three turns longer fails here on every run. A
+    streamed request is left out, since its output crosses to the
+    server's own loop and its turns follow that hand-off more than the
+    line.
 
     Args:
         key (str): the server, as ``host/deployment``.
@@ -1870,7 +1878,9 @@ async def main(args: argparse.Namespace) -> int:
             if wanted == {"inapp"}:
                 return
             for name in deployments:
-                with deployed(name, host, scratch / name, issuer, store) as d:
+                async with deployed(
+                    name, host, scratch / name, issuer, store
+                ) as d:
                     server = Server(d, recorder)
                     keys.append(server.key)
                     await through_accesses(
