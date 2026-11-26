@@ -432,3 +432,32 @@ async def test_a_cancelled_first_done_leaves_its_futures_running():
     assert ending.result() is True
     await other
     assert work.result() is True
+
+
+# A cancel's message reaches the waiter's CancelledError, as it does
+# behind asyncio.shield, so a caller that logs why a line stopped still
+# reads it.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [None, "the caller went away"])
+async def test_a_cancelled_first_done_carries_the_cancels_message(message):
+    async def args_of(wait: Any) -> tuple[Any, ...]:
+        try:
+            await wait
+        except asyncio.CancelledError as exc:
+            return exc.args
+        return ("not cancelled",)
+
+    release = asyncio.Event()
+    work = asyncio.ensure_future(release.wait())
+    waiters = [
+        asyncio.ensure_future(args_of(FirstDone([work]))),
+        asyncio.ensure_future(args_of(asyncio.shield(work))),
+    ]
+    await asyncio.sleep(0)
+    for waiter in waiters:
+        waiter.cancel(message)
+    first, shielded = await asyncio.gather(*waiters)
+    assert first == shielded == (() if message is None else (message,))
+    assert not work.done()
+    release.set()
+    assert await work is True

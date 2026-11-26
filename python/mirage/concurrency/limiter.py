@@ -172,6 +172,7 @@ class FirstDone:
         self._wake: Callable[[FirstDone], None] | None = None
         self._context: Context | None = None
         self._left = False
+        self._message: str | None = None
 
     def get_loop(self) -> asyncio.AbstractEventLoop:
         return self._futures[0].get_loop()
@@ -207,7 +208,8 @@ class FirstDone:
         and every future runs on.
 
         Args:
-            msg (str | None): the cancellation's message, unused.
+            msg (str | None): the cancellation's message, which the
+                waiter's ``CancelledError`` carries, as a future's does.
 
         Returns:
             bool: False once a future has ended or the wait was left,
@@ -217,6 +219,7 @@ class FirstDone:
             return False
         wake, self._wake = self._wake, None
         self._left = True
+        self._message = msg
         for future in self._futures:
             future.remove_done_callback(self._ended)
         self.get_loop().call_soon(wake, self, context=self._context)
@@ -224,7 +227,9 @@ class FirstDone:
 
     def result(self) -> None:
         if self._left:
-            raise asyncio.CancelledError
+            if self._message is None:
+                raise asyncio.CancelledError
+            raise asyncio.CancelledError(self._message)
 
     def __await__(self) -> Generator["FirstDone", None, None]:
         if not any(future.done() for future in self._futures):
