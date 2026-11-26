@@ -30,7 +30,9 @@ export MIRAGE_ALLOWED_HOSTS=127.0.0.1,localhost,::1,mirage.example.com
 
 Any other `Host` gets 403 `host_not_allowed`. The servers below, like
 `mirage daemon`, listen on `127.0.0.1` only, so other machines reach them
-through a reverse proxy or tunnel on this one. The server also
+through a reverse proxy or tunnel on this one that passes `Host` on as the
+client sent it, port included, since a browser's `Origin` is checked against
+it. The server also
 refuses a browser page served from any other origin, a page on another port of
 `localhost` included, even when the list is `*`. Other options
 are on the [Python](/python/access/server) and [TypeScript](/typescript/access/server)
