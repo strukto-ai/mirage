@@ -12,60 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.unlink import unlink
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
-
-
-def make_accessor() -> DropboxAccessor:
-    config = DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
-    return DropboxAccessor(config, DropboxTokenManager(config))
 
 
 @pytest.mark.asyncio
-async def test_unlink_deletes_file():
-    with patch(
-        "mirage.core.dropbox.unlink.get_metadata",
-        new_callable=AsyncMock,
-        return_value={".tag": "file", "name": "a.txt"},
-    ):
-        with patch(
-            "mirage.core.dropbox.unlink.delete_path", new_callable=AsyncMock
-        ) as deleted:
-            await unlink(make_accessor(), PathSpec.from_str_path("/a.txt"))
-    assert deleted.await_args.args[1] == "/a.txt"
+async def test_unlink_deletes_file(account):
+    await account.put("/a.txt", b"a")
+    await unlink(account.accessor(), PathSpec.from_str_path("/a.txt"))
+    assert await account.names() == []
 
 
 @pytest.mark.asyncio
-async def test_unlink_folder_raises_eisdir():
-    with patch(
-        "mirage.core.dropbox.unlink.get_metadata",
-        new_callable=AsyncMock,
-        return_value={".tag": "folder", "name": "docs"},
-    ):
-        with patch(
-            "mirage.core.dropbox.unlink.delete_path", new_callable=AsyncMock
-        ) as deleted:
-            with pytest.raises(IsADirectoryError):
-                await unlink(make_accessor(), PathSpec.from_str_path("/docs"))
-    deleted.assert_not_awaited()
+async def test_unlink_folder_raises_eisdir(account):
+    await account.mkdir("/docs")
+    with pytest.raises(IsADirectoryError):
+        await unlink(account.accessor(), PathSpec.from_str_path("/docs"))
+    assert await account.names() == ["docs"]
 
 
 @pytest.mark.asyncio
-async def test_unlink_missing_raises_enoent():
-    with patch(
-        "mirage.core.dropbox.unlink.get_metadata",
-        new_callable=AsyncMock,
-        side_effect=DropboxApiError("nf", 409, "path/not_found/..."),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await unlink(make_accessor(), PathSpec.from_str_path("/ghost"))
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+async def test_unlink_missing_raises_enoent(account):
+    with pytest.raises(FileNotFoundError):
+        await unlink(account.accessor(), PathSpec.from_str_path("/ghost"))

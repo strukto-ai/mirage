@@ -101,13 +101,19 @@ class KitRun:
             assert resp.status < 300, text
             return json.loads(text) if text else None
 
-    async def read(self, path: str) -> bytes:
-        """One GET to the fake, answered as bytes, redirects followed.
+    async def read(
+        self, path: str, method: str = "GET", **request: Any
+    ) -> bytes:
+        """One request to the fake, answered as bytes, redirects followed.
 
         Args:
             path (str): the path under the run.
+            method (str): the HTTP method.
+            **request (Any): what ``aiohttp`` takes for the request.
         """
-        async with self.http.get(self.url + path) as resp:
+        async with self.http.request(
+            method, self.url + path, **request
+        ) as resp:
             body = await resp.read()
             assert resp.status < 300, body
             return body
@@ -147,6 +153,34 @@ class KitRun:
         listed = await self.call("GET", "/_kit/requests")
         return [
             dict(parse_qsl(r["query"]))
+            for r in listed["requests"]
+            if r["method"] == method and r["route"] == route
+        ]
+
+    async def headers(self, method: str, route: str) -> list[dict[str, str]]:
+        """The kept headers of each listed request to ``route``, in order.
+
+        Args:
+            method (str): the HTTP method.
+            route (str): the route as the fake declares it.
+        """
+        listed = await self.call("GET", "/_kit/requests")
+        return [
+            r["headers"]
+            for r in listed["requests"]
+            if r["method"] == method and r["route"] == route
+        ]
+
+    async def bodies(self, method: str, route: str) -> list[Any]:
+        """The JSON body of each listed request to ``route``, in order.
+
+        Args:
+            method (str): the HTTP method.
+            route (str): the route as the fake declares it.
+        """
+        listed = await self.call("GET", "/_kit/requests")
+        return [
+            r["body"]
             for r in listed["requests"]
             if r["method"] == method and r["route"] == route
         ]

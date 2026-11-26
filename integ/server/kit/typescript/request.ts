@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { JsonValue } from './types.ts'
+
 export const REQUESTS_PATH = '/_kit/requests'
 
 // One request as GET and DELETE report it. `route` is the path a route
@@ -19,14 +21,30 @@ export const REQUESTS_PATH = '/_kit/requests'
 // a caller counts every request a route served without knowing the ids;
 // `path` is the one the client sent, with the run prefix stripped; `query`
 // is its query string, without the `?`; `headers` holds those the start
-// named that this request carried, by their lower-case names. A type rather
-// than an interface so it is a JsonValue as it is.
+// named that this request carried, by their lower-case names; `body` is a
+// JSON body as parsed, which is where an RPC API such as Dropbox's puts its
+// arguments, and null for any other. A type rather than an interface so it
+// is a JsonValue as it is.
 export type RequestReport = {
   method: string
   route: string
   path: string
   query: string
   headers: Record<string, string>
+  body: JsonValue
+}
+
+// A JSON request's body as parsed; null for any other or one that does not
+// parse.
+function jsonBody(sent: Record<string, string | string[] | undefined>, raw: Buffer): JsonValue {
+  const type = sent['content-type']
+  const one = Array.isArray(type) ? type[0] : type
+  if (one === undefined || !one.includes('application/json') || raw.length === 0) return null
+  try {
+    return JSON.parse(raw.toString('utf8')) as JsonValue
+  } catch {
+    return null
+  }
 }
 
 export class RequestsBodyError extends Error {}
@@ -78,6 +96,7 @@ export class Requests {
     path: string,
     query: string,
     sent: Record<string, string | string[] | undefined>,
+    raw: Buffer,
   ): void {
     if (!this.recording) return
     const headers: Record<string, string> = {}
@@ -85,9 +104,10 @@ export class Requests {
       const value = sent[name]
       if (value !== undefined) headers[name] = Array.isArray(value) ? value.join(', ') : value
     }
+    const request = { method, route, path, query, headers, body: jsonBody(sent, raw) }
     let at = this.kept.length
     while (at > 0 && (this.kept[at - 1]?.arrived ?? 0) > arrived) at--
-    this.kept.splice(at, 0, { arrived, request: { method, route, path, query, headers } })
+    this.kept.splice(at, 0, { arrived, request })
   }
 
   report(): RequestReport[] {

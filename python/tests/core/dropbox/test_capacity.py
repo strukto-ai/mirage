@@ -12,21 +12,37 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.capacity import capacity
-from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.types import CapacityResult, CapacityState
-from mirage.vfs.dropbox.config import DropboxConfig
+
+USAGE_ROUTE = "/2/users/get_space_usage"
+
+
+def _quota(total: int, used: int) -> CapacityResult:
+    return CapacityResult(
+        state=CapacityState.QUOTA,
+        total=total,
+        used=used,
+        available=total - used,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_individual_allocation_is_the_quota(account):
+    # The fake's account is a Basic one, with the stored bytes as its use.
+    usage = await account.run.call("POST", USAGE_ROUTE)
+    await account.put("/a.txt", b"x" * 300)
+    await account.run.record_requests()
+    result = await capacity(account.accessor())
+    assert await account.run.bodies("POST", USAGE_ROUTE) == [None]
+    assert result == _quota(usage["allocation"]["allocated"], 300)
 
 
 @pytest.mark.parametrize(
     ("allocation", "used", "total"),
     [
-        ({".tag": "individual", "allocated": 1000}, 300, 1000),
         (
             {
                 ".tag": "team",
@@ -48,24 +64,13 @@ from mirage.vfs.dropbox.config import DropboxConfig
             5000,
         ),
     ],
+    ids=["member-cap", "team-pool"],
 )
 @pytest.mark.asyncio
-async def test_the_allocation_that_bounds_the_account_is_the_quota(
-    allocation, used, total
+async def test_the_allocation_that_bounds_a_team_account_is_the_quota(
+    account, allocation, used, total
 ):
-    config = DropboxConfig(client_id="c", client_secret="s", refresh_token="r")
-    with patch(
-        "mirage.core.dropbox.capacity.dropbox_rpc",
-        new_callable=AsyncMock,
-        return_value={"used": 300, "allocation": allocation},
-    ) as rpc:
-        result = await capacity(
-            DropboxAccessor(config, DropboxTokenManager(config))
-        )
-    assert rpc.await_args.args[1:] == ("/users/get_space_usage", None)
-    assert result == CapacityResult(
-        state=CapacityState.QUOTA,
-        total=total,
-        used=used,
-        available=total - used,
+    await account.run.answer_next(
+        "POST", USAGE_ROUTE, 200, {"used": 300, "allocation": allocation}
     )
+    assert await capacity(account.accessor()) == _quota(total, used)

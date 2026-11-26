@@ -12,46 +12,44 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { PathSpec } from '../../types.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { rmdir } from './rmdir.ts'
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, dropboxRpc: vi.fn() }
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
 })
 
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
-import { PathSpec } from '../../types.ts'
-import * as client from './client.ts'
-import type { DropboxTokenManager } from './client.ts'
-import { rmdir } from './rmdir.ts'
-import { FakeDropboxRpc, fileEntry, folderEntry } from '../../../tests/core/dropbox/_test_util.ts'
-
-const STUB_TM = {} as DropboxTokenManager
-
-function makeAccessor(): DropboxAccessor {
-  return new DropboxAccessor({ tokenManager: STUB_TM })
-}
-
-function spec(virtual: string): PathSpec {
-  return PathSpec.fromStrPath(virtual)
-}
+afterEach(async () => {
+  await account.run.close()
+})
 
 describe('dropbox rmdir emptiness probe', () => {
   it('is bounded to one entry', async () => {
     // The probe is bounded, not a full listing: listFolder follows every
     // continuation cursor, so asking it with a small page size made one
     // request per child to answer a yes/no.
-    const fake = new FakeDropboxRpc({
-      entries: [fileEntry('a.txt'), fileEntry('b.txt'), fileEntry('c.txt')],
-      metadata: folderEntry('docs'),
-    })
-    vi.mocked(client.dropboxRpc).mockImplementation(fake.handle)
-    await expect(rmdir(makeAccessor(), spec('/docs'))).rejects.toMatchObject({
+    for (const name of ['a.txt', 'b.txt', 'c.txt']) {
+      await account.put(`/docs/${name}`, new Uint8Array([120]))
+    }
+    await account.run.recordRequests()
+    await expect(rmdir(account.accessor(), PathSpec.fromStrPath('/docs'))).rejects.toMatchObject({
       code: 'ENOTEMPTY',
     })
-    expect(fake.listLimits).toEqual([1])
-    expect(fake.listRequests).toBe(1)
-    expect(fake.deleted).toEqual([])
+    const listed = await account.run.bodies('POST', '/2/files/list_folder')
+    expect(listed.map((body) => (body as { limit?: number }).limit)).toEqual([1])
+    expect(await account.run.bodies('POST', '/2/files/list_folder/continue')).toEqual([])
+    expect(await account.run.bodies('POST', '/2/files/delete_v2')).toEqual([])
   })
 })

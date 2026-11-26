@@ -12,211 +12,135 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.readdir import readdir
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
-from mirage.vfs.dropbox.config import DropboxConfig
 
-
-def make_accessor(root_path: str = "/") -> DropboxAccessor:
-    config = DropboxConfig(
-        client_id="c",
-        client_secret="s",
-        refresh_token="r",
-        root_path=root_path,
-    )
-    return DropboxAccessor(config, DropboxTokenManager(config))
+LIST_ROUTE = "/2/files/list_folder"
+METADATA_ROUTE = "/2/files/get_metadata"
 
 
 @pytest.mark.asyncio
-async def test_readdir_root_marks_folders_with_slash():
-    files = [
-        {
-            ".tag": "folder",
-            "id": "id:folder1",
-            "name": "docs",
-            "path_display": "/docs",
-        },
-        {
-            ".tag": "file",
-            "id": "id:file1",
-            "name": "notes.txt",
-            "path_display": "/notes.txt",
-            "size": 42,
-            "server_modified": "2026-04-01T00:00:00Z",
-        },
-    ]
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder",
-        new_callable=AsyncMock,
-        return_value=files,
-    ) as fake:
-        out = await readdir(
-            make_accessor(),
-            PathSpec(vfs_path="", virtual="/", directory="/"),
-        )
+async def test_readdir_root_marks_folders_with_slash(account):
+    await account.mkdir("/docs")
+    await account.put("/notes.txt", b"x" * 42)
+    await account.run.record_requests()
+    out = await readdir(
+        account.accessor(), PathSpec(vfs_path="", virtual="/", directory="/")
+    )
     assert [(row.name, row.type) for row in out] == [
         ("docs", FileType.DIRECTORY),
         ("notes.txt", FileType.FILE),
     ]
     assert out[1].size == 42
-    assert fake.await_args.args[1] == ""
+    listed = await account.run.bodies("POST", LIST_ROUTE)
+    assert [body["path"] for body in listed] == [""]
 
 
 @pytest.mark.asyncio
-async def test_readdir_scopes_under_subfolder_root():
-    async def fake_list(tm, path):
-        if path == "/Team/data":
-            return [
-                {
-                    ".tag": "folder",
-                    "id": "id:docs",
-                    "name": "docs",
-                    "path_display": "/Team/data/docs",
-                }
-            ]
-        if path == "/Team/data/docs":
-            return [
-                {
-                    ".tag": "file",
-                    "id": "id:n1",
-                    "name": "note.md",
-                    "path_display": "/Team/data/docs/note.md",
-                    "size": 12,
-                }
-            ]
-        raise AssertionError(f"unexpected path={path}")
+async def test_readdir_lists_a_nested_subfolder_by_its_path(account):
+    await account.put("/docs/note.md", b"x" * 12)
+    out = await readdir(
+        account.accessor(),
+        PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
+    )
+    assert [row.name for row in out] == ["note.md"]
 
-    accessor = make_accessor("/Team/data")
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder", side_effect=fake_list
-    ):
-        root = await readdir(
-            accessor, PathSpec(vfs_path="", virtual="/", directory="/")
-        )
-        nested = await readdir(
-            accessor,
-            PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
-        )
+
+@pytest.mark.asyncio
+async def test_readdir_keeps_empty_files_with_size_zero(account):
+    await account.put("/empty.txt", b"")
+    out = await readdir(
+        account.accessor(), PathSpec(vfs_path="", virtual="/", directory="/")
+    )
+    assert [(row.name, row.size) for row in out] == [("empty.txt", 0)]
+
+
+@pytest.mark.asyncio
+async def test_readdir_scopes_under_subfolder_root(account):
+    await account.put("/Team/data/docs/note.md", b"x" * 12)
+    await account.put("/Team/other.txt", b"x")
+    accessor = account.accessor("/Team/data")
+    root = await readdir(
+        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
+    )
+    nested = await readdir(
+        accessor,
+        PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
+    )
     assert [row.name for row in root] == ["docs"]
     assert [row.name for row in nested] == ["note.md"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_honors_mount_prefix():
-    files = [
-        {
-            ".tag": "file",
-            "id": "id:f",
-            "name": "a.txt",
-            "path_display": "/a.txt",
-            "size": 1,
-        }
-    ]
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder",
-        new_callable=AsyncMock,
-        return_value=files,
-    ):
-        out = await readdir(
-            make_accessor(),
-            PathSpec(
-                virtual="/dropbox",
-                directory="/dropbox",
-                vfs_path=mount_key("/dropbox", "/dropbox"),
-            ),
-        )
+async def test_readdir_honors_mount_prefix(account):
+    await account.put("/a.txt", b"x")
+    out = await readdir(
+        account.accessor(),
+        PathSpec(
+            virtual="/dropbox",
+            directory="/dropbox",
+            vfs_path=mount_key("/dropbox", "/dropbox"),
+        ),
+    )
     assert [row.name for row in out] == ["a.txt"]
 
 
-def _metadata(entries: dict[str, str]):
-    async def fake(_tm, path: str):
-        tag = entries.get(path)
-        if tag is None:
-            raise DropboxApiError("path/not_found", 409)
-        return {".tag": tag, "name": path.rsplit("/", 1)[-1]}
-
-    return fake
+@pytest.mark.asyncio
+async def test_readdir_maps_409_to_enoent(account):
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            account.accessor(),
+            PathSpec(vfs_path="missing", virtual="/missing", directory="/missing"),
+        )
 
 
 @pytest.mark.asyncio
-async def test_readdir_maps_409_to_enoent():
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder",
-        new_callable=AsyncMock,
-        side_effect=DropboxApiError("not found", 409),
-    ):
-        with patch(
-            "mirage.core.dropbox.readdir.get_metadata", new=_metadata({})
-        ):
-            with pytest.raises(FileNotFoundError):
-                await readdir(
-                    make_accessor(),
-                    PathSpec(
-                        vfs_path="missing",
-                        virtual="/missing",
-                        directory="/missing",
-                    ),
-                )
+async def test_readdir_of_a_path_no_component_of_which_exists_is_enoent(
+    account,
+):
+    with pytest.raises(FileNotFoundError):
+        await readdir(
+            account.accessor(),
+            PathSpec(
+                vfs_path="nope/deeper",
+                virtual="/nope/deeper",
+                directory="/nope/deeper",
+            ),
+        )
 
 
 @pytest.mark.asyncio
-async def test_readdir_under_a_file_is_enotdir():
+async def test_readdir_under_a_file_is_enotdir(account):
     # list_folder answers path/not_found for `/a.txt/x` exactly as it does
     # for a name that is simply absent, so only the ancestor walk can tell
     # GNU's "Not a directory" from "No such file or directory".
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder",
-        new_callable=AsyncMock,
-        side_effect=DropboxApiError("path/not_found", 409),
-    ):
-        with patch(
-            "mirage.core.dropbox.readdir.get_metadata",
-            new=_metadata({"/a.txt": "file"}),
-        ):
-            with pytest.raises(NotADirectoryError):
-                await readdir(
-                    make_accessor(),
-                    PathSpec(
-                        vfs_path="a.txt/x",
-                        virtual="/a.txt/x",
-                        directory="/a.txt/x",
-                    ),
-                )
+    await account.put("/a.txt", b"a")
+    with pytest.raises(NotADirectoryError):
+        await readdir(
+            account.accessor(),
+            PathSpec(vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt/x"),
+        )
 
 
 @pytest.mark.asyncio
-async def test_readdir_on_a_file_is_enotdir_without_walking():
+@pytest.mark.usefixtures("exact_cloud_paths")
+async def test_readdir_on_a_file_is_enotdir_without_walking(account):
     # The operand is itself a file, so the shortcut in readdir_error settles
-    # it: one metadata call, none for the ancestors above it.
-    seen: list[str] = []
-
-    async def fake(_tm, path: str):
-        seen.append(path)
-        return {".tag": "file", "name": "a.txt"}
-
-    with patch(
-        "mirage.core.dropbox.readdir.list_folder",
-        new_callable=AsyncMock,
-        side_effect=DropboxApiError("path/not_folder", 409),
-    ):
-        with patch("mirage.core.dropbox.readdir.get_metadata", new=fake):
-            with pytest.raises(NotADirectoryError):
-                await readdir(
-                    make_accessor(),
-                    PathSpec(
-                        vfs_path="docs/a.txt",
-                        virtual="/docs/a.txt",
-                        directory="/docs/a.txt",
-                    ),
-                )
-    assert seen == ["/docs/a.txt"]
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+    # it: one metadata call, none for the ancestors above it. The spelling
+    # check, tested on its own, would walk them first, so it is set aside.
+    await account.put("/docs/a.txt", b"a")
+    await account.run.record_requests()
+    with pytest.raises(NotADirectoryError):
+        await readdir(
+            account.accessor(),
+            PathSpec(
+                vfs_path="docs/a.txt",
+                virtual="/docs/a.txt",
+                directory="/docs/a.txt",
+            ),
+        )
+    asked = await account.run.bodies("POST", METADATA_ROUTE)
+    assert [body["path"] for body in asked] == ["/docs/a.txt"]

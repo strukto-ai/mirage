@@ -26,14 +26,23 @@ const CARDS = {
   path: '/boards/brd_1/cards',
   query: '',
   headers: {},
+  body: null,
 }
-const BOARDS = { method: 'GET', route: '/boards', path: '/boards', query: '', headers: {} }
+const BOARDS = {
+  method: 'GET',
+  route: '/boards',
+  path: '/boards',
+  query: '',
+  headers: {},
+  body: null,
+}
 const NEW_CARD = {
   method: 'POST',
   route: '/boards/:board/cards',
   path: '/boards/brd_1/cards',
   query: '',
   headers: {},
+  body: { title: 'slow' },
 }
 
 export async function runRequestTests(): Promise<void> {

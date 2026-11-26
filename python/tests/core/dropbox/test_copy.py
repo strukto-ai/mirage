@@ -12,77 +12,62 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.dropbox import DropboxAccessor
-from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.copy import copy, dir_copy
 from mirage.types import PathSpec
-from mirage.vfs.dropbox.config import DropboxConfig
+
+COPY_ROUTE = "/2/files/copy_v2"
+DELETE_ROUTE = "/2/files/delete_v2"
 
 
-def make_accessor(root_path: str = "/") -> DropboxAccessor:
-    config = DropboxConfig(
-        client_id="c",
-        client_secret="s",
-        refresh_token="r",
-        root_path=root_path,
+def _pairs(bodies: list) -> list[tuple[str, str]]:
+    return [(body["from_path"], body["to_path"]) for body in bodies]
+
+
+@pytest.mark.asyncio
+async def test_copy_maps_paths_under_mount_root(account):
+    await account.put("/Team/a.txt", b"a")
+    await account.run.record_requests()
+    await copy(
+        account.accessor("/Team"),
+        PathSpec.from_str_path("/a.txt"),
+        PathSpec.from_str_path("/b.txt"),
     )
-    return DropboxAccessor(config, DropboxTokenManager(config))
+    assert _pairs(await account.run.bodies("POST", COPY_ROUTE)) == [
+        ("/Team/a.txt", "/Team/b.txt")
+    ]
+    assert await account.read("/Team/b.txt") == b"a"
 
 
 @pytest.mark.asyncio
-async def test_copy_maps_paths_under_mount_root():
-    with patch(
-        "mirage.core.dropbox.copy.copy_path", new_callable=AsyncMock
-    ) as copied:
-        await copy(
-            make_accessor("/Team"),
-            PathSpec.from_str_path("/a.txt"),
-            PathSpec.from_str_path("/b.txt"),
-        )
-    assert copied.await_args.args[1:] == ("/Team/a.txt", "/Team/b.txt")
+async def test_copy_replaces_existing_destination_file(account):
+    # Dropbox refuses a copy onto a file; cp replaces it, so the file goes
+    # and the copy is asked again.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.record_requests()
+    await copy(
+        account.accessor(),
+        PathSpec.from_str_path("/a.txt"),
+        PathSpec.from_str_path("/b.txt"),
+    )
+    deleted = await account.run.bodies("POST", DELETE_ROUTE)
+    assert [body["path"] for body in deleted] == ["/b.txt"]
+    assert len(await account.run.bodies("POST", COPY_ROUTE)) == 2
+    assert await account.read("/b.txt") == b"mine"
 
 
 @pytest.mark.asyncio
-async def test_copy_replaces_existing_destination_file():
-    conflict = DropboxApiError("conflict", 409, "to/conflict/file/...")
-    with patch(
-        "mirage.core.dropbox.copy.copy_path",
-        new_callable=AsyncMock,
-        side_effect=[conflict, None],
-    ) as copied:
-        with patch(
-            "mirage.core.dropbox.copy.get_metadata",
-            new_callable=AsyncMock,
-            return_value={".tag": "file", "name": "b.txt"},
-        ):
-            with patch(
-                "mirage.core.dropbox.copy.delete_path", new_callable=AsyncMock
-            ) as deleted:
-                await copy(
-                    make_accessor(),
-                    PathSpec.from_str_path("/a.txt"),
-                    PathSpec.from_str_path("/b.txt"),
-                )
-    assert deleted.await_args.args[1] == "/b.txt"
-    assert copied.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_dir_copy_copies_the_tree_in_one_request():
-    with patch(
-        "mirage.core.dropbox.copy.copy_path", new_callable=AsyncMock
-    ) as copied:
-        await dir_copy(
-            make_accessor("/Team"),
-            PathSpec.from_str_path("/src"),
-            PathSpec.from_str_path("/dst"),
-        )
-    assert copied.await_count == 1
-    assert copied.await_args.args[1:] == ("/Team/src", "/Team/dst")
-
-
-pytestmark = pytest.mark.usefixtures("exact_cloud_paths")
+async def test_dir_copy_copies_the_tree_in_one_request(account):
+    await account.put("/Team/src/x.txt", b"x")
+    await account.run.record_requests()
+    await dir_copy(
+        account.accessor("/Team"),
+        PathSpec.from_str_path("/src"),
+        PathSpec.from_str_path("/dst"),
+    )
+    assert _pairs(await account.run.bodies("POST", COPY_ROUTE)) == [
+        ("/Team/src", "/Team/dst")
+    ]
+    assert await account.read("/Team/dst/x.txt") == b"x"

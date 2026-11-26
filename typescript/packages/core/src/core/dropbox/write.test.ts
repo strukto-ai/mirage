@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
-import type * as ClientModule from './client.ts'
-import type * as ApiModule from './api.ts'
 
 const H = vi.hoisted(() => ({
   order: [] as string[],
@@ -32,32 +30,14 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
   }
 })
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, dropboxUpload: vi.fn() }
-})
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return {
-    ...actual,
-    getMetadata: vi.fn(),
-    lookup: vi.fn(),
-    createFolder: vi.fn(),
-    deletePath: vi.fn(),
-    movePath: vi.fn(),
-    copyPath: vi.fn(),
-    listFolder: vi.fn(),
-  }
-})
-
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { runWithWriteContext, writeCondition } from '../../cache/context.ts'
 import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
-import * as client from './client.ts'
-import { DropboxApiError, type DropboxTokenManager } from './client.ts'
-import * as api from './api.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DropboxApiError } from './client.ts'
 import { copy } from './copy.ts'
+import { create } from './create.ts'
 import { exists } from './exists.ts'
 import { mkdir } from './mkdir.ts'
 import { rename } from './rename.ts'
@@ -65,56 +45,59 @@ import { rmR } from './rm.ts'
 import { rmdir } from './rmdir.ts'
 import { unlink } from './unlink.ts'
 import { replace, write } from './write.ts'
-import { runWithWriteContext } from '../../cache/context.ts'
 
-const STUB_TM = {} as DropboxTokenManager
+const ENC = new TextEncoder()
+const UPLOAD_ROUTE = '/2/files/upload'
+const METADATA_ROUTE = '/2/files/get_metadata'
+const CREATE_ROUTE = '/2/files/create_folder_v2'
+const DELETE_ROUTE = '/2/files/delete_v2'
 
-function makeAccessor(rootPath?: string): DropboxAccessor {
-  return new DropboxAccessor({
-    tokenManager: STUB_TM,
-    ...(rootPath !== undefined ? { rootPath } : {}),
-  })
-}
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
-function fileEntry(path: string): ApiModule.DropboxEntry {
-  return { '.tag': 'file', id: `id:${path}`, name: path.split('/').pop() ?? '', size: 1 }
-}
-
-function folderEntry(path: string): ApiModule.DropboxEntry {
-  return { '.tag': 'folder', id: `id:${path}`, name: path.split('/').pop() ?? '' }
-}
-
-const NOT_FOUND = new DropboxApiError('nf', 409, 'path/not_found/...')
-
-beforeEach(() => {
-  vi.resetAllMocks()
-})
-
-// Dropbox's upload reply: the stored file's FileMetadata.
-function fileMetadata(): Record<string, unknown> {
-  return {
-    '.tag': 'file',
-    name: 'note.txt',
-    id: 'id:abc',
-    path_display: '/note.txt',
-    server_modified: '2026-01-01T00:00:00Z',
-    size: 5,
-    content_hash: 'h5',
-  }
+function text(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
 }
 
 describe('dropbox write', () => {
+  it('refuses a create-only write it cannot condition', async () => {
+    await account.run.recordRequests()
+    await expect(
+      replace(account.accessor(), {
+        path: spec('/new.txt'),
+        body: ENC.encode('ours'),
+        condition: { kind: 'absent' },
+      }),
+    ).rejects.toMatchObject({ code: 'ENOTSUP' })
+    expect(await account.run.bodies('POST', UPLOAD_ROUTE)).toEqual([])
+    expect(await account.names()).toEqual([])
+  })
+
   it('commits the explicit condition instead of the ambient cached version', async () => {
-    vi.mocked(api.lookup).mockResolvedValue({
-      ...fileEntry('/a.txt'),
-      content_hash: 'live',
-      rev: '7',
-    })
-    const body = new Uint8Array([9])
+    const listed = await account.put('/a.txt', ENC.encode('hello'))
+    const path = spec('/a.txt')
+    async function* body(): AsyncGenerator<Uint8Array> {
+      expect(await writeCondition(path, 'put')).toEqual({ kind: 'match', version: 'cached' })
+      yield ENC.encode('ours')
+    }
     await runWithWriteContext(
       '/',
       {
@@ -125,20 +108,41 @@ describe('dropbox write', () => {
         drop: () => Promise.resolve(),
         keep: () => Promise.resolve(),
       },
-      () =>
-        replace(makeAccessor(), {
-          path: spec('/a.txt'),
-          body,
-          condition: { kind: 'match', version: 'live' },
-        }),
+      async () => {
+        await replace(account.accessor(), {
+          path,
+          body: body(),
+          condition: { kind: 'match', version: listed.content_hash },
+        })
+        expect(await writeCondition(path, 'put')).toEqual({ kind: 'match', version: 'cached' })
+      },
     )
-    expect(client.dropboxUpload).toHaveBeenCalledWith(STUB_TM, '/a.txt', body, '7')
+    expect(text(await account.read('/a.txt'))).toBe('ours')
+  })
+
+  // The path's spelling and the check both read the metadata Dropbox gave
+  // just before another client's upload landed. The upload names the rev that
+  // answer gave, so Dropbox refuses it and keeps the newer bytes.
+  it('names the rev it checked', async () => {
+    const before = await account.put('/a.txt', ENC.encode('hello'))
+    await account.put('/a.txt', ENC.encode('later'))
+    await account.run.answerNext('POST', METADATA_ROUTE, 200, before, 2)
+    await account.run.recordRequests()
+    await expect(
+      replace(account.accessor(), {
+        path: spec('/a.txt'),
+        body: ENC.encode('ours'),
+        condition: { kind: 'match', version: before.content_hash },
+      }),
+    ).rejects.toMatchObject({ code: 'STALE_WRITE' })
+    expect(await account.run.bodies('POST', UPLOAD_ROUTE)).toHaveLength(1)
+    expect(text(await account.read('/a.txt'))).toBe('later')
   })
 
   it('closes an already-started body when create-only is unsupported', async () => {
     const chunk = new Uint8Array([9])
     let closed = false
-    async function* source() {
+    async function* source(): AsyncGenerator<Uint8Array> {
       try {
         yield await Promise.resolve(chunk)
         yield chunk
@@ -148,147 +152,145 @@ describe('dropbox write', () => {
     }
     const body = source()
     await body.next()
+    await account.run.recordRequests()
     await expect(
-      replace(makeAccessor(), {
-        path: spec('/a.txt'),
-        body,
-        condition: { kind: 'absent' },
-      }),
+      replace(account.accessor(), { path: spec('/a.txt'), body, condition: { kind: 'absent' } }),
     ).rejects.toMatchObject({ code: 'ENOTSUP' })
     expect(closed).toBe(true)
-    expect(client.dropboxUpload).not.toHaveBeenCalled()
+    expect(await account.run.bodies('POST', UPLOAD_ROUTE)).toEqual([])
   })
 
   it('uploads through the subfolder mount root', async () => {
-    await write(makeAccessor('/Team/data'), spec('/note.txt'), new Uint8Array([104]))
-    expect(client.dropboxUpload).toHaveBeenCalledWith(
-      STUB_TM,
-      '/Team/data/note.txt',
-      new Uint8Array([104]),
-      null,
-    )
+    await account.mkdir('/Team/data')
+    await write(account.accessor('/Team/data'), spec('/note.txt'), new Uint8Array([104]))
+    expect(text(await account.read('/Team/data/note.txt'))).toBe('h')
+  })
+
+  it('creates a file of no bytes', async () => {
+    await create(account.accessor(), spec('/new.txt'))
+    expect(await account.read('/new.txt')).toEqual(new Uint8Array(0))
   })
 })
 
 describe('dropbox mkdir', () => {
   it('creates a folder when the parent exists', async () => {
-    vi.mocked(api.getMetadata).mockImplementation((_tm, p) =>
-      p === '/docs' ? Promise.reject(NOT_FOUND) : Promise.resolve(folderEntry(p)),
-    )
-    await mkdir(makeAccessor(), spec('/docs'))
-    expect(api.createFolder).toHaveBeenCalledWith(STUB_TM, '/docs')
+    await mkdir(account.accessor(), spec('/docs'))
+    expect(await account.names()).toEqual(['docs'])
   })
 
+  // The create is sent and Dropbox's conflict is the answer: the only
+  // lookup is the path spelling check every op makes.
   it('reads a conflict on the create as EEXIST, with no lookup first', async () => {
-    vi.mocked(api.createFolder).mockRejectedValue(
-      new DropboxApiError('conflict', 409, 'path/conflict/folder/...'),
-    )
-    await expect(mkdir(makeAccessor(), spec('/docs'))).rejects.toMatchObject({ code: 'EEXIST' })
-    expect(api.getMetadata).not.toHaveBeenCalled()
+    await account.mkdir('/docs')
+    await account.run.recordRequests()
+    await expect(mkdir(account.accessor(), spec('/docs'))).rejects.toMatchObject({ code: 'EEXIST' })
+    expect(await account.run.bodies('POST', CREATE_ROUTE)).toEqual([
+      expect.objectContaining({ path: '/docs' }),
+    ])
   })
 
   it('is idempotent for an existing dir with parents', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/docs'))
-    await mkdir(makeAccessor(), spec('/docs'), true)
-    expect(api.createFolder).not.toHaveBeenCalled()
+    await account.mkdir('/docs')
+    await account.run.recordRequests()
+    await mkdir(account.accessor(), spec('/docs'), true)
+    expect(await account.run.bodies('POST', CREATE_ROUTE)).toEqual([])
   })
 
   it('rejects a missing parent without parents', async () => {
-    vi.mocked(api.getMetadata).mockRejectedValue(NOT_FOUND)
-    await expect(mkdir(makeAccessor(), spec('/a/b'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(api.createFolder).not.toHaveBeenCalled()
+    await account.run.recordRequests()
+    await expect(mkdir(account.accessor(), spec('/a/b'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await account.run.bodies('POST', CREATE_ROUTE)).toEqual([])
   })
 })
 
 describe('dropbox unlink', () => {
   it('deletes a file', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/a.txt'))
-    await unlink(makeAccessor(), spec('/a.txt'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/a.txt', null)
+    await account.put('/a.txt', ENC.encode('a'))
+    await unlink(account.accessor(), spec('/a.txt'))
+    expect(await account.names()).toEqual([])
   })
 
   it('refuses a folder with EISDIR', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/docs'))
-    await expect(unlink(makeAccessor(), spec('/docs'))).rejects.toMatchObject({ code: 'EISDIR' })
-    expect(api.deletePath).not.toHaveBeenCalled()
+    await account.mkdir('/docs')
+    await expect(unlink(account.accessor(), spec('/docs'))).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
+    expect(await account.names()).toEqual(['docs'])
+  })
+
+  it('refuses a missing path with ENOENT', async () => {
+    await expect(unlink(account.accessor(), spec('/ghost'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
 describe('dropbox rmdir', () => {
   it('fails ENOTEMPTY instead of recursively deleting', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/docs'))
-    vi.mocked(api.listFolder).mockResolvedValue([fileEntry('/docs/a.txt')])
-    await expect(rmdir(makeAccessor(), spec('/docs'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
-    expect(api.deletePath).not.toHaveBeenCalled()
+    await account.put('/docs/a.txt', ENC.encode('a'))
+    await expect(rmdir(account.accessor(), spec('/docs'))).rejects.toMatchObject({
+      code: 'ENOTEMPTY',
+    })
+    expect(await account.names('/docs')).toEqual(['a.txt'])
   })
 
   it('removes an empty folder', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/docs'))
-    vi.mocked(api.listFolder).mockResolvedValue([])
-    await rmdir(makeAccessor(), spec('/docs'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/docs')
+    await account.mkdir('/docs')
+    await rmdir(account.accessor(), spec('/docs'))
+    expect(await account.names()).toEqual([])
   })
 
   it('refuses a file with ENOTDIR', async () => {
-    vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/a.txt'))
-    await expect(rmdir(makeAccessor(), spec('/a.txt'))).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await account.put('/a.txt', ENC.encode('a'))
+    await expect(rmdir(account.accessor(), spec('/a.txt'))).rejects.toMatchObject({
+      code: 'ENOTDIR',
+    })
   })
 })
 
 describe('dropbox rmR', () => {
   it('deletes recursively in one call', async () => {
-    await rmR(makeAccessor(), spec('/docs'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/docs')
+    await account.put('/docs/sub/a.txt', ENC.encode('a'))
+    await account.run.recordRequests()
+    await rmR(account.accessor(), spec('/docs'))
+    expect(await account.run.bodies('POST', DELETE_ROUTE)).toEqual([{ path: '/docs' }])
+    expect(await account.names()).toEqual([])
   })
 
   it('maps a missing path to ENOENT', async () => {
-    vi.mocked(api.deletePath).mockRejectedValue(
-      new DropboxApiError('nf', 409, 'path_lookup/not_found/...'),
-    )
-    await expect(rmR(makeAccessor(), spec('/ghost'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(rmR(account.accessor(), spec('/ghost'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('dropbox rename', () => {
   it('replaces an existing destination file like GNU mv', async () => {
-    vi.mocked(api.movePath)
-      .mockRejectedValueOnce(new DropboxApiError('conflict', 409, 'to/conflict/file/...'))
-      .mockResolvedValueOnce({})
-    vi.mocked(api.getMetadata).mockResolvedValue(fileEntry('/b.txt'))
-    await rename(makeAccessor(), spec('/a.txt'), spec('/b.txt'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/b.txt', null)
-    expect(api.movePath).toHaveBeenCalledTimes(2)
+    await account.put('/a.txt', ENC.encode('mine'))
+    await account.put('/b.txt', ENC.encode('theirs'))
+    await rename(account.accessor(), spec('/a.txt'), spec('/b.txt'))
+    expect(await account.names()).toEqual(['b.txt'])
+    expect(text(await account.read('/b.txt'))).toBe('mine')
   })
 
   it('replaces an empty dir destination like rename(2)', async () => {
-    vi.mocked(api.movePath)
-      .mockRejectedValueOnce(new DropboxApiError('conflict', 409, 'to/conflict/folder/...'))
-      .mockResolvedValueOnce({})
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/dst'))
-    vi.mocked(api.listFolder).mockResolvedValue([])
-    await rename(makeAccessor(), spec('/src'), spec('/dst'))
-    expect(api.deletePath).toHaveBeenCalledWith(STUB_TM, '/dst', null)
-    expect(api.movePath).toHaveBeenCalledTimes(2)
+    await account.put('/src/x.txt', ENC.encode('x'))
+    await account.mkdir('/dst')
+    await rename(account.accessor(), spec('/src'), spec('/dst'))
+    expect(await account.names()).toEqual(['dst'])
+    expect(await account.names('/dst')).toEqual(['x.txt'])
   })
 
   it('keeps the error for a non-empty dir destination', async () => {
-    vi.mocked(api.movePath).mockRejectedValue(
-      new DropboxApiError('conflict', 409, 'to/conflict/folder/...'),
-    )
-    vi.mocked(api.getMetadata).mockResolvedValue(folderEntry('/dst'))
-    vi.mocked(api.listFolder).mockResolvedValue([fileEntry('/dst/keep.txt')])
-    await expect(rename(makeAccessor(), spec('/src'), spec('/dst'))).rejects.toBeInstanceOf(
-      DropboxApiError,
-    )
-    expect(api.deletePath).not.toHaveBeenCalled()
-    expect(api.movePath).toHaveBeenCalledTimes(1)
+    await account.mkdir('/src')
+    await account.put('/dst/keep.txt', ENC.encode('k'))
+    await expect(
+      rename(account.accessor(), spec('/src'), spec('/dst')),
+    ).rejects.toBeInstanceOf(DropboxApiError)
+    expect(await account.names()).toEqual(['dst', 'src'])
+    expect(await account.names('/dst')).toEqual(['keep.txt'])
   })
 
   it('maps a missing source to ENOENT', async () => {
-    vi.mocked(api.movePath).mockRejectedValue(
-      new DropboxApiError('nf', 409, 'from_lookup/not_found/...'),
-    )
-    await expect(rename(makeAccessor(), spec('/ghost'), spec('/b'))).rejects.toMatchObject({
+    await expect(rename(account.accessor(), spec('/ghost'), spec('/b'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
@@ -296,20 +298,27 @@ describe('dropbox rename', () => {
 
 describe('dropbox copy', () => {
   it('copies server-side under the mount root', async () => {
-    await copy(makeAccessor('/Team'), spec('/a.txt'), spec('/b.txt'))
-    expect(api.copyPath).toHaveBeenCalledWith(STUB_TM, '/Team/a.txt', '/Team/b.txt')
+    await account.put('/Team/a.txt', ENC.encode('a'))
+    await copy(account.accessor('/Team'), spec('/a.txt'), spec('/b.txt'))
+    expect(text(await account.read('/Team/b.txt'))).toBe('a')
+    expect(await account.names('/Team')).toEqual(['a.txt', 'b.txt'])
   })
 })
 
 describe('dropbox exists', () => {
   it('is true for the mount root without an API call', async () => {
-    expect(await exists(makeAccessor(), spec('/'))).toBe(true)
-    expect(api.getMetadata).not.toHaveBeenCalled()
+    await account.run.recordRequests()
+    expect(await exists(account.accessor(), spec('/'))).toBe(true)
+    expect(await account.run.requests()).toEqual([])
   })
 
   it('maps 409 to false', async () => {
-    vi.mocked(api.getMetadata).mockRejectedValue(NOT_FOUND)
-    expect(await exists(makeAccessor(), spec('/ghost'))).toBe(false)
+    expect(await exists(account.accessor(), spec('/ghost'))).toBe(false)
+  })
+
+  it('maps a found path to true', async () => {
+    await account.put('/a.txt', ENC.encode('a'))
+    expect(await exists(account.accessor(), spec('/a.txt'))).toBe(true)
   })
 })
 
@@ -318,20 +327,26 @@ describe('dropbox write records the upload reply', () => {
     H.order = []
   })
 
-  async function writeRecorded(reply: unknown): Promise<unknown[][]> {
-    vi.mocked(client.dropboxUpload).mockResolvedValue(reply as never)
-    const [, records] = await recordingScope(() =>
-      write(makeAccessor(), spec('/note.txt'), new TextEncoder().encode('hello')),
-    )
-    return records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])
-  }
-
+  // Dropbox's own upload reply with its content_hash replaced by 'h5', a
+  // token no local hash produces; or a reply with no body.
   it.each([
-    ['agrees', fileMetadata(), 'h5'],
-    ['empty reply', null, null],
-  ])('records the reply token (%s)', async (_name, reply, token) => {
-    // 'h5' is a token no local hash produces.
-    expect(await writeRecorded(reply)).toEqual([['write', '/note.txt', 5, token, null]])
+    ['agrees', 'h5'],
+    ['empty reply', null],
+  ])('records the reply token (%s)', async (_name, token) => {
+    const reply = await account.put('/other.txt', ENC.encode('hello'))
+    await account.run.answerNext(
+      'POST',
+      UPLOAD_ROUTE,
+      200,
+      token === null ? null : { ...reply, content_hash: token },
+    )
+    H.order = []
+    const [, records] = await recordingScope(() =>
+      write(account.accessor(), spec('/note.txt'), ENC.encode('hello')),
+    )
+    expect(records.map((r) => [r.op, r.path, r.bytes, r.fingerprint, r.revision])).toEqual([
+      ['write', '/note.txt', 5, token, null],
+    ])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record'])

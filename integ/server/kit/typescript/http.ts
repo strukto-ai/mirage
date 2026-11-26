@@ -495,7 +495,7 @@ async function answer<C extends MinimalClient>(
   // answered it.
   rt.state(run)
     .peek(tenant)
-    ?.requests.note(arrived, method, hit.spec.path, path, url.search.slice(1), headers)
+    ?.requests.note(arrived, method, hit.spec.path, path, url.search.slice(1), headers, raw)
   // Ahead of the run's queue and of the handler: a faulted request touches
   // no row, so it neither waits behind a write nor holds one up while it
   // hangs, and a write route faulted with a 5xx has provably not applied.

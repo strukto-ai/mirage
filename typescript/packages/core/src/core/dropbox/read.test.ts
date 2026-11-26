@@ -12,108 +12,121 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type * as PathsModule from './paths.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return {
-    ...actual,
-    dropboxDownload: vi.fn(),
-    dropboxDownloadStream: vi.fn(),
-    dropboxUpload: vi.fn(),
-  }
-})
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, listFolder: vi.fn() }
-})
-
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
 import { captureRead, runWithWriteContext } from '../../cache/context.ts'
 import type { WriteContext } from '../../cache/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
-import * as client from './client.ts'
-import type { DropboxTokenManager } from './client.ts'
-import * as api from './api.ts'
-import { read, readStream } from './read.ts'
-import { DropboxVFS } from '../../vfs/dropbox/dropbox.ts'
-import { readdir } from './readdir.ts'
+import type { JsonValue } from '../../types.ts'
 import { recordingScope } from '../../observe/context.ts'
+import { DropboxVFS } from '../../vfs/dropbox/dropbox.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import type { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { read, readStream } from './read.ts'
+import { readdir } from './readdir.ts'
 
-const STUB_TM = {} as DropboxTokenManager
-
-function makeAccessor(): DropboxAccessor {
-  return new DropboxAccessor({ tokenManager: STUB_TM })
-}
-
+const ENC = new TextEncoder()
+const DOWNLOAD_ROUTE = '/2/files/download'
+const LIST_ROUTE = '/2/files/list_folder'
+const DATA = ENC.encode('0123456789')
 // The row a listing names for a file: Dropbox downloads by path, so it only
 // says a file is there.
 const NOTE = new FileStat({ name: 'note.txt', type: FileType.FILE })
+const NOTE_PATH = new PathSpec({ virtual: '/note.txt', directory: '/', vfsPath: 'note.txt' })
+const A = new PathSpec({ virtual: '/a.txt', directory: '/', vfsPath: 'a.txt' })
+const UNDER_PREFIX = new PathSpec({
+  virtual: '/dropbox/note.txt',
+  directory: '/dropbox',
+  vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
+})
+
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 // What the mount hands a read at `path`, found by listing as it would.
 async function listed(accessor: DropboxAccessor, path: PathSpec): Promise<FileStat | null> {
   return (await handedAt((a, p) => readdir(a, p), accessor, path)).entry ?? null
 }
 
+// Each download since recording: the path it named and its Range.
+async function downloads(): Promise<[string, string | null][]> {
+  const sent = await account.run.headers('POST', DOWNLOAD_ROUTE)
+  return sent.map((h) => [
+    (JSON.parse(h['dropbox-api-arg'] ?? '{}') as { path: string }).path,
+    h.range ?? null,
+  ])
+}
+
+// /a.txt holding DATA under a listing that lags the bytes: Dropbox's own
+// listing with a stale content_hash, for every listing the read makes.
+// Answers the hash of DATA.
+async function lagging(): Promise<string> {
+  const stored = await account.put('/a.txt', DATA)
+  const listing = await account.run.call<{ entries: Record<string, JsonValue>[] }>(
+    'POST',
+    LIST_ROUTE,
+    { json: { path: '' } },
+  )
+  for (const entry of listing.entries) entry.content_hash = 'stale'
+  await account.run.answerNext('POST', LIST_ROUTE, 200, listing, 10)
+  return stored.content_hash
+}
+
 describe('dropbox read', () => {
   it('downloads a file by stripping prefix and using path-based API', async () => {
-    vi.mocked(api.listFolder).mockResolvedValue([
-      {
-        '.tag': 'file',
-        id: 'id:1',
-        name: 'note.txt',
-        path_display: '/note.txt',
-        size: 5,
-      },
-    ])
-    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([104, 105, 33]), null])
+    await account.put('/note.txt', ENC.encode('hi!'))
+    const accessor = account.accessor()
+    const entry = await listed(accessor, UNDER_PREFIX)
+    await account.run.recordRequests('dropbox-api-arg', 'range')
+    expect(await read(accessor, UNDER_PREFIX, undefined, entry)).toEqual(ENC.encode('hi!'))
+    expect(await downloads()).toEqual([['/note.txt', null]])
+  })
 
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/dropbox/note.txt',
-      directory: '/dropbox',
-      vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
-    })
-    const data = await read(accessor, path, undefined, await listed(accessor, path))
-    expect(data).toEqual(new Uint8Array([104, 105, 33]))
-    expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/note.txt', undefined)
+  it('asks Dropbox for the range of a ranged read', async () => {
+    await account.put('/note.txt', ENC.encode('hi!'))
+    const accessor = account.accessor()
+    const entry = await listed(accessor, NOTE_PATH)
+    await account.run.recordRequests('dropbox-api-arg', 'range')
+    const got = await read(accessor, NOTE_PATH, { offset: 1, size: 2 }, entry)
+    expect(got).toEqual(ENC.encode('i!'))
+    expect(await downloads()).toEqual([['/note.txt', 'bytes=1-2']])
+  })
+
+  it('carries the range for a handed row', async () => {
+    await account.put('/note.txt', ENC.encode('hi!'))
+    await account.run.recordRequests('dropbox-api-arg', 'range')
+    await read(account.accessor(), NOTE_PATH, { offset: 1, size: 2 }, NOTE)
+    expect(await downloads()).toEqual([['/note.txt', 'bytes=1-2']])
   })
 
   it('downloads through the subfolder mount root', async () => {
-    vi.mocked(api.listFolder).mockResolvedValue([
-      {
-        '.tag': 'file',
-        id: 'id:1',
-        name: 'note.txt',
-        path_display: '/Team/data/note.txt',
-        size: 5,
-      },
-    ])
-    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([104, 105]), null])
-
-    const accessor = new DropboxAccessor({ tokenManager: STUB_TM, rootPath: 'Team/data' })
-    const path = new PathSpec({
-      virtual: '/dropbox/note.txt',
-      directory: '/dropbox',
-      vfsPath: mountKey('/dropbox/note.txt', '/dropbox'),
-    })
-    const data = await read(accessor, path, undefined, await listed(accessor, path))
-    expect(data).toEqual(new Uint8Array([104, 105]))
-    expect(client.dropboxDownload).toHaveBeenCalledWith(STUB_TM, '/Team/data/note.txt', undefined)
+    await account.put('/Team/data/note.txt', ENC.encode('hi'))
+    const accessor = account.accessor('Team/data')
+    const entry = await listed(accessor, UNDER_PREFIX)
+    await account.run.recordRequests('dropbox-api-arg', 'range')
+    expect(await read(accessor, UNDER_PREFIX, undefined, entry)).toEqual(ENC.encode('hi'))
+    expect(await downloads()).toEqual([['/Team/data/note.txt', null]])
   })
 
   it('throws EISDIR when path resolves to a folder', async () => {
-    vi.mocked(api.listFolder).mockResolvedValue([
-      { '.tag': 'folder', id: 'id:f', name: 'docs', path_display: '/docs' },
-    ])
-
-    const accessor = makeAccessor()
+    await account.mkdir('/docs')
+    const accessor = account.accessor()
     const path = new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' })
     const entry = await listed(accessor, path)
     await expect(
@@ -123,66 +136,54 @@ describe('dropbox read', () => {
       // IsADirectoryError(virtual) carries.
     ).rejects.toMatchObject({ code: 'EISDIR', virtualPath: '/docs' })
   })
+
+  it('throws ENOENT for a missing file', async () => {
+    const accessor = account.accessor()
+    const path = new PathSpec({ vfsPath: 'missing.txt', virtual: '/missing.txt', directory: '/' })
+    await expect(read(accessor, path, undefined, await listed(accessor, path))).rejects.toMatchObject(
+      { code: 'ENOENT' },
+    )
+  })
 })
 
 describe('dropbox read stamps content_hash', () => {
   // The listing that resolved the entry lags the bytes: the token must come
-  // from the download's own Dropbox-API-Result, never the row.
-  const LISTING = [
-    {
-      '.tag': 'file' as const,
-      id: 'id:1',
-      name: 'note.txt',
-      path_display: '/note.txt',
-      size: 10,
-      content_hash: 'stale',
-    },
-  ]
-  const HEADER = JSON.stringify({ name: 'note.txt', content_hash: 'fresh' })
-  const spec = new PathSpec({ virtual: '/note.txt', directory: '/', vfsPath: 'note.txt' })
-
-  // A ranged read is answered 206 and still carries Dropbox-API-Result.
+  // from the download's own Dropbox-API-Result, never the row. A ranged read
+  // is answered 206 and still carries Dropbox-API-Result.
   it.each([
-    ['full', undefined],
-    ['ranged', { offset: 2, size: 3 }],
-  ] as const)('%s records the download token', async (_id, window) => {
-    vi.mocked(api.listFolder).mockResolvedValue(LISTING)
-    vi.mocked(client.dropboxDownload).mockResolvedValue([new Uint8Array([1, 2, 3]), HEADER])
-    const accessor = makeAccessor()
-    const entry = await listed(accessor, spec)
-    const [data, records] = await recordingScope(() => read(accessor, spec, window, entry))
-    expect(data).toEqual(new Uint8Array([1, 2, 3]))
-    expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
+    ['full', undefined, DATA],
+    ['ranged', { offset: 2, size: 3 }, ENC.encode('234')],
+  ] as const)('%s records the download token', async (_id, window, expected) => {
+    const whole = await lagging()
+    const accessor = account.accessor()
+    const entry = await listed(accessor, A)
+    const [data, records] = await recordingScope(() => read(accessor, A, window, entry))
+    expect(data).toEqual(expected)
+    expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([
+      ['read', expected.byteLength, whole],
+    ])
   })
 
   // Outside a shell line (FUSE, a programmatic read) there is no recorder,
   // and the stream must still stream.
   it.each([true, false])('a stream records the token its response names (%s)', async (line) => {
-    vi.mocked(api.listFolder).mockResolvedValue(LISTING)
-    vi.mocked(client.dropboxDownloadStream).mockImplementation(
-      async function* (_tm, _path, onResponse) {
-        await Promise.resolve()
-        onResponse?.({ 'dropbox-api-result': HEADER })
-        yield new Uint8Array([1, 2])
-        yield new Uint8Array([3])
-      },
-    )
-    const accessor = makeAccessor()
-    const entry = await listed(accessor, spec)
-    const drain = async (): Promise<number[]> => {
-      const out: number[] = []
-      for await (const c of readStream(accessor, spec, entry)) {
-        out.push(c.byteLength)
-      }
-      return out
+    const whole = await lagging()
+    const accessor = account.accessor()
+    const entry = await listed(accessor, A)
+    const drain = async (): Promise<Uint8Array> => {
+      const out: Uint8Array[] = []
+      for await (const c of readStream(accessor, A, entry)) out.push(c)
+      return new Uint8Array(Buffer.concat(out))
     }
     if (!line) {
-      expect(await drain()).toEqual([2, 1])
+      expect(await drain()).toEqual(DATA)
       return
     }
-    const [sizes, records] = await recordingScope(drain)
-    expect(sizes).toEqual([2, 1])
-    expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([['read', 3, 'fresh']])
+    const [bytes, records] = await recordingScope(drain)
+    expect(bytes).toEqual(DATA)
+    expect(records.map((r) => [r.op, r.bytes, r.fingerprint])).toEqual([
+      ['read', DATA.byteLength, whole],
+    ])
   })
 
   // A miss says the listed file is no longer there, which the mount reads as
@@ -193,27 +194,21 @@ describe('dropbox read stamps content_hash', () => {
     [409, 'path/restricted_content/..', { status: 409 }],
     [500, 'path/not_found/..', { status: 500 }],
   ] as const)('maps only a listed read %s %s to ENOENT', async (status, summary, raised) => {
-    vi.mocked(client.dropboxDownload).mockRejectedValue(
-      new client.DropboxApiError('refused', status, summary),
-    )
-    await expect(read(makeAccessor(), spec, undefined, NOTE)).rejects.toMatchObject(raised)
+    await account.run.answerNext('POST', DOWNLOAD_ROUTE, status, { error_summary: summary })
+    await expect(read(account.accessor(), A, undefined, NOTE)).rejects.toMatchObject(raised)
   })
 
   // A truncate without a listing reads the exact existing file before rewriting.
   it('rewrites an exactly spelled file for a truncate with no row', async () => {
-    const result = JSON.stringify({ '.tag': 'file', name: 'N', content_hash: 'h' })
-    vi.mocked(client.dropboxDownload).mockResolvedValue([
-      new TextEncoder().encode('abcdef'),
-      result,
-    ])
-    const vfs = new DropboxVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
+    await account.put('/N', ENC.encode('abcdef'))
+    const vfs = new DropboxVFS({
+      clientId: 'c',
+      clientSecret: 's',
+      refreshToken: 'unit',
+      endpoint: account.run.url,
+    })
     await vfs.truncate(new PathSpec({ virtual: '/N', directory: '/', vfsPath: 'N' }), 4)
-    expect(client.dropboxUpload).toHaveBeenCalledWith(
-      vfs.accessor.tokenManager,
-      '/N',
-      new TextEncoder().encode('abcd'),
-      null,
-    )
+    expect(await account.read('/N')).toEqual(ENC.encode('abcd'))
   })
 })
 
@@ -228,23 +223,14 @@ describe('dropbox read publishes its token on a conditional mount', () => {
   }
 
   it.each([
-    ['whole', true, undefined, ['h1']],
-    ['ranged', true, { offset: 2, size: 3 }, []],
-    ['unconditional', false, undefined, []],
-  ] as const)('%s', async (_name, conditional, options, published) => {
-    vi.mocked(client.dropboxDownload).mockResolvedValue([
-      new Uint8Array([104, 105]),
-      JSON.stringify({ content_hash: 'h1' }),
-    ])
-    const path = new PathSpec({ virtual: '/a.txt', directory: '/', vfsPath: 'a.txt' })
+    ['whole', true, undefined, true],
+    ['ranged', true, { offset: 2, size: 3 }, false],
+    ['unconditional', false, undefined, false],
+  ] as const)('%s', async (_name, conditional, options, whole) => {
+    const stored = await account.put('/a.txt', DATA)
     const [, tokens] = await runWithWriteContext('/', conditional ? context : null, () =>
-      captureRead(path.virtual, () => read(makeAccessor(), path, options, NOTE)),
+      captureRead(A.virtual, () => read(account.accessor(), A, options, NOTE)),
     )
-    expect(tokens).toEqual(published)
+    expect(tokens).toEqual(whole ? [stored.content_hash] : [])
   })
 })
-
-vi.mock('./paths.ts', async (original) => ({
-  ...(await original<typeof PathsModule>()),
-  checkPath: vi.fn().mockResolvedValue(null),
-}))
