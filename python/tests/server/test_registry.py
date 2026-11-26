@@ -442,9 +442,8 @@ async def test_a_drain_deadline_counts_a_capture_it_waits_behind():
 
 @pytest.mark.asyncio
 async def test_a_request_in_flight_holds_the_idle_exit_until_it_is_answered():
-    # A grace of zero exits the moment the countdown starts, so the event
-    # shows when it does. The CLI checks /v1/health and then creates: a
-    # daemon that exited between the two refused the create.
+    # A grace of zero runs out the moment the last workspace goes, so the
+    # event shows when the exit comes.
     registry = WorkspaceRegistry(idle_grace_seconds=0)
     registry.request_began()
     await registry.remove(registry.add(_ws(), "w").id)
@@ -457,14 +456,25 @@ async def test_a_request_in_flight_holds_the_idle_exit_until_it_is_answered():
 
 
 @pytest.mark.asyncio
-async def test_a_daemon_that_never_held_a_workspace_counts_no_grace():
+async def test_a_workspace_made_by_a_request_in_flight_cancels_the_idle_exit():
     registry = WorkspaceRegistry(idle_grace_seconds=0)
     registry.request_began()
-    registry.request_ended()
-    assert not registry.exit_event.is_set()
-    entry = registry.add(_ws(), "w")
-    registry.request_began()
+    await registry.remove(registry.add(_ws(), "w").id)
+    entry = registry.add(_ws(), "v")
     registry.request_ended()
     assert not registry.exit_event.is_set()
     await registry.remove(entry.id)
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_answered_requests_do_not_put_off_the_idle_exit():
+    # A client that polls /v1/health while it waits for the daemon to go
+    # sees it go: only a request still in flight holds the exit.
+    registry = WorkspaceRegistry(idle_grace_seconds=0.1)
+    await registry.remove(registry.add(_ws(), "w").id)
+    for _ in range(6):
+        registry.request_began()
+        registry.request_ended()
+        await asyncio.sleep(0.05)
     assert registry.exit_event.is_set()

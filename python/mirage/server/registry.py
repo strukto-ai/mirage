@@ -335,9 +335,9 @@ class WorkspaceRegistry:
 
     Owns the lifecycle for each workspace inside the daemon process:
     register on create, drop on delete, and trip an idle-shutdown
-    event once the registry has emptied and answered no request for
-    ``idle_grace_seconds``. A request in flight holds the countdown,
-    so a client the daemon just answered reaches it with the next.
+    event when the registry has been empty for ``idle_grace_seconds``.
+    The exit waits for the requests in flight, and a workspace one of
+    them makes cancels it.
 
     Threading: the underlying ``dict`` is mutated only from the FastAPI
     server loop (the same loop the registry is constructed on), so no
@@ -415,20 +415,21 @@ class WorkspaceRegistry:
             exit_event if exit_event is not None else asyncio.Event()
         )
         self._idle_task: asyncio.Task[Any] | None = None
-        # The last workspace has gone, so the daemon counts down to its
-        # idle exit whenever no request is in flight.
-        self._emptied = False
         self._requests = 0
+        # The grace ran out with requests in flight: exit once they are
+        # answered, unless one of them made a workspace.
+        self._idle_due = False
 
     def request_began(self) -> None:
-        """Hold the idle countdown while a request runs."""
+        """Count a request in flight, which an idle exit waits for."""
         self._requests += 1
-        self._cancel_idle_timer()
 
     def request_ended(self) -> None:
-        """Count down again once the last request in flight is answered."""
+        """Count a request answered, and exit if the grace ran out while
+        it was in flight."""
         self._requests -= 1
-        self._idle_if_empty()
+        if self._idle_due and not self._requests:
+            self._exit_when_idle()
 
     async def refusal(
         self, config: dict[str, JsonValue], account: str | None
@@ -910,7 +911,6 @@ class WorkspaceRegistry:
             entry.programs = ScriptPolicy(_Programs(self._programs))
             ws.policies.add(entry.programs)
         self._entries[wid] = entry
-        self._emptied = False
         self._cancel_idle_timer()
         return entry
 
@@ -965,8 +965,7 @@ class WorkspaceRegistry:
             del self._removals[entry.id]
             self._entries.pop(entry.id, None)
             if not self._entries:
-                self._emptied = True
-                self._idle_if_empty()
+                self._start_idle_timer()
         return entry
 
     async def stop(self, workspace_id: str) -> WorkspaceEntry:
@@ -1010,8 +1009,7 @@ class WorkspaceRegistry:
         finally:
             del self._removals[entry.id]
             if not self._entries:
-                self._emptied = True
-                self._idle_if_empty()
+                self._start_idle_timer()
         return entry
 
     async def close_all(self) -> None:
@@ -1031,13 +1029,18 @@ class WorkspaceRegistry:
         self._cancel_idle_timer()
         await self._admission_programs.close()
 
-    def _idle_if_empty(self) -> None:
-        if self._emptied and not self._entries and not self._requests:
-            self._start_idle_timer()
+    def _exit_when_idle(self) -> None:
+        self._idle_due = False
+        if self._entries:
+            return
+        if self._requests:
+            self._idle_due = True
+            return
+        self.exit_event.set()
 
     def _start_idle_timer(self) -> None:
         if self.idle_grace_seconds <= 0:
-            self.exit_event.set()
+            self._exit_when_idle()
             return
         if self._idle_task is not None and not self._idle_task.done():
             return
@@ -1047,14 +1050,14 @@ class WorkspaceRegistry:
         if self._idle_task is not None and not self._idle_task.done():
             self._idle_task.cancel()
         self._idle_task = None
+        self._idle_due = False
 
     async def _idle_wait(self) -> None:
         try:
             await asyncio.sleep(self.idle_grace_seconds)
         except asyncio.CancelledError:
             return
-        if not self._entries:
-            self.exit_event.set()
+        self._exit_when_idle()
 
 
 def _workspace_context(

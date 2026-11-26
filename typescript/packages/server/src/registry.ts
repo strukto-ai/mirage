@@ -291,10 +291,10 @@ export class WorkspaceRegistry {
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
-  // The last workspace has gone, so the daemon counts down to its idle exit
-  // whenever no request is in flight.
-  private emptied = false
   private requests = 0
+  // The grace ran out with requests in flight: exit once they are answered,
+  // unless one of them made a workspace.
+  private idleDue = false
   accountsRequired: boolean
   private readonly owners: RecordClient | null
   private readonly configs: RecordClient | null
@@ -699,7 +699,6 @@ export class WorkspaceRegistry {
       ws.policies.add(entry.programs)
     }
     this.entries.set(wid, entry)
-    this.emptied = false
     this.cancelIdleTimer()
     return entry
   }
@@ -740,10 +739,7 @@ export class WorkspaceRegistry {
       this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
       this.entries.delete(entry.id)
-      if (this.entries.size === 0) {
-        this.emptied = true
-        this.idleIfEmpty()
-      }
+      if (this.entries.size === 0) this.startIdleTimer()
     }
     return entry
   }
@@ -776,10 +772,7 @@ export class WorkspaceRegistry {
       await stop(entry)
     } finally {
       this.removals.delete(entry.id)
-      if (this.entries.size === 0) {
-        this.emptied = true
-        this.idleIfEmpty()
-      }
+      if (this.entries.size === 0) this.startIdleTimer()
     }
     return entry
   }
@@ -807,32 +800,37 @@ export class WorkspaceRegistry {
     await this.admissionPrograms.close()
   }
 
-  /** Hold the idle countdown while a request runs. */
+  /** Count a request in flight, which an idle exit waits for. */
   requestBegan(): void {
     this.requests += 1
-    this.cancelIdleTimer()
   }
 
-  /** Count down again once the last request in flight is answered. */
+  /** Count a request answered, and exit if the grace ran out while it was in flight. */
   requestEnded(): void {
     this.requests -= 1
-    this.idleIfEmpty()
+    if (this.idleDue && this.requests === 0) this.exitWhenIdle()
   }
 
-  private idleIfEmpty(): void {
-    if (this.emptied && this.entries.size === 0 && this.requests === 0) this.startIdleTimer()
+  private exitWhenIdle(): void {
+    this.idleDue = false
+    if (this.entries.size > 0 || this.onIdleExit === null) return
+    if (this.requests > 0) {
+      this.idleDue = true
+      return
+    }
+    this.onIdleExit()
   }
 
   private startIdleTimer(): void {
     if (this.onIdleExit === null) return
     if (this.idleGraceSeconds <= 0) {
-      this.onIdleExit()
+      this.exitWhenIdle()
       return
     }
     if (this.idleTimer !== null) return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      if (this.entries.size === 0 && this.onIdleExit !== null) this.onIdleExit()
+      this.exitWhenIdle()
     }, this.idleGraceSeconds * 1000)
   }
 
@@ -841,6 +839,7 @@ export class WorkspaceRegistry {
       clearTimeout(this.idleTimer)
       this.idleTimer = null
     }
+    this.idleDue = false
   }
 }
 

@@ -328,9 +328,9 @@ function listenTogether(app: FastifyInstance, e2b: FastifyInstance, port: number
 }
 
 /**
- * Hold the daemon's idle countdown while a request runs, so a client the
- * daemon just answered reaches it with its next request. Installed ahead of
- * every other hook, since a hook that answers skips the ones after it.
+ * Count each request in flight, so the daemon's idle exit waits for it to be
+ * answered. Installed ahead of every other hook, since a hook that answers
+ * skips the ones after it.
  */
 function idleExitHold(app: FastifyInstance, registry: WorkspaceRegistry): void {
   app.addHook('onRequest', (_request, reply, done) => {

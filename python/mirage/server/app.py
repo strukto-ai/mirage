@@ -432,8 +432,8 @@ class LenientJson:
 
 
 class IdleExitHold:
-    """Hold the daemon's idle countdown while a request runs, so a client
-    the daemon just answered reaches it with its next request.
+    """Count each request in flight, so the daemon's idle exit waits for
+    it to be answered.
 
     Args:
         app (ASGIApp): the app behind.

@@ -42,11 +42,21 @@ export class DaemonUnreachable extends Error {
   override readonly name = 'DaemonUnreachable'
 }
 
+/** Whether a fetch failed because nothing accepted its connection. */
+function refused(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false
+  const cause: unknown = err.cause
+  return cause instanceof Error && (cause as NodeJS.ErrnoException).code === 'ECONNREFUSED'
+}
+
 export class DaemonClient {
   readonly settings: DaemonSettings
   private refreshing: Promise<string> | undefined
   /** The last login token this client sent. */
   held = ''
+  // A local daemon this client may start: one that exited idle after
+  // answering it is started again for the next request.
+  private maySpawn = false
 
   constructor(settings: DaemonSettings) {
     this.settings = settings
@@ -94,10 +104,31 @@ export class DaemonClient {
     return h
   }
 
+  /**
+   * Send a request to the daemon. A daemon this client may start can exit
+   * idle between two of its requests. A connection it refused carried
+   * nothing, so the daemon is started again and a request whose body can be
+   * sent twice goes once more.
+   */
   async request(
     method: string,
     path: string,
     init: RequestInit & { timeoutMs?: number | null } = {},
+  ): Promise<Response> {
+    try {
+      return await this.send(method, path, init)
+    } catch (err) {
+      const resendable = init.body === undefined || typeof init.body === 'string'
+      if (!this.maySpawn || !resendable || !refused(err)) throw err
+    }
+    await this.ensureRunning()
+    return this.send(method, path, init)
+  }
+
+  private async send(
+    method: string,
+    path: string,
+    init: RequestInit & { timeoutMs?: number | null },
   ): Promise<Response> {
     const { timeoutMs = 60_000, ...rest } = init
     const headers: Record<string, string> = {
@@ -198,6 +229,7 @@ export class DaemonClient {
       if (await this.isReachable(REMOTE_PROBE_TIMEOUT_SECONDS * 1000)) return
       throw new DaemonUnreachable(`daemon not reachable at ${this.settings.url}`)
     }
+    this.maySpawn ||= allowSpawn
     if (await this.isReachable()) return
     if (await this.listening()) {
       const deadline = Date.now() + timeoutMs

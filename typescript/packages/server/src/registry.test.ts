@@ -225,44 +225,59 @@ describe('WorkspaceRegistry', () => {
     vi.useRealTimers()
   })
 
-  // A grace of zero exits the moment the countdown starts, so the count of
-  // exits shows when it does. The CLI checks /v1/health and then creates: a
-  // daemon that exited between the two refused the create.
-  it('holds the idle exit while a request is in flight', async () => {
-    let exits = 0
-    const r = new WorkspaceRegistry({
-      idleGraceSeconds: 0,
+  // A grace of zero runs out the moment the last workspace goes, so the count
+  // of exits shows when the exit comes.
+  const exiting = (graceSeconds: number) => {
+    const seen = { exits: 0 }
+    const registry = new WorkspaceRegistry({
+      idleGraceSeconds: graceSeconds,
       onIdleExit: () => {
-        exits += 1
+        seen.exits += 1
       },
     })
+    return { registry, seen }
+  }
+  const ram = () => new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+
+  it('holds the idle exit while a request is in flight', async () => {
+    const { registry: r, seen } = exiting(0)
     r.requestBegan()
-    await r.remove(r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })).id)
-    expect(exits).toBe(0)
+    await r.remove(r.add(ram()).id)
+    expect(seen.exits).toBe(0)
     r.requestBegan()
     r.requestEnded()
-    expect(exits).toBe(0)
+    expect(seen.exits).toBe(0)
     r.requestEnded()
-    expect(exits).toBe(1)
+    expect(seen.exits).toBe(1)
   })
 
-  it('counts no grace for a daemon that never held a workspace', async () => {
-    let exits = 0
-    const r = new WorkspaceRegistry({
-      idleGraceSeconds: 0,
-      onIdleExit: () => {
-        exits += 1
-      },
-    })
+  it('cancels the idle exit for a workspace a request in flight made', async () => {
+    const { registry: r, seen } = exiting(0)
     r.requestBegan()
+    await r.remove(r.add(ram()).id)
+    const entry = r.add(ram())
     r.requestEnded()
-    expect(exits).toBe(0)
-    const entry = r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }))
-    r.requestBegan()
-    r.requestEnded()
-    expect(exits).toBe(0)
+    expect(seen.exits).toBe(0)
     await r.remove(entry.id)
-    expect(exits).toBe(1)
+    expect(seen.exits).toBe(1)
+  })
+
+  // A client that polls /v1/health while it waits for the daemon to go sees
+  // it go: only a request still in flight holds the exit.
+  it('does not put off the idle exit for requests already answered', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registry: r, seen } = exiting(0.1)
+      await r.remove(r.add(ram()).id)
+      for (let i = 0; i < 6; i++) {
+        r.requestBegan()
+        r.requestEnded()
+        await vi.advanceTimersByTimeAsync(50)
+      }
+      expect(seen.exits).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

@@ -66,7 +66,7 @@ Arguments of `build_app`. The Default column names the environment variable or `
     | `ssh_config` | from the `ssh_*` settings | The SSH server, opened with the app; off unless a port is set. |
     | `snapshot_store` | `None` | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
     | `state_root` | under `$MIRAGE_HOME` | Where live state is kept. |
-    | `on_idle_exit` | `None` | Called when the last workspace has been gone and no request has been in flight for `idle_grace_seconds` (30), or on `POST /v1/daemon/shutdown`. `None` keeps serving. |
+    | `on_idle_exit` | `None` | Called when the last workspace has been gone `idle_grace_seconds` (30) and the requests in flight are answered, or on `POST /v1/daemon/shutdown`. `None` keeps serving. |
     | `pid_file` | `None` | A file that holds the process id while the app runs. |
   </Accordion>
 </AccordionGroup>
@@ -84,7 +84,7 @@ By default the daemon is one process, and one thread holds every workspace. With
 
 ## Started by the CLI
 
-The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last running workspace stops or is deleted and its last request is answered, and tunes the interpreter as it starts. Its other settings are on the [Server](/home/configuration/server) page.
+The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last running workspace stops or is deleted, once the requests in flight are answered, and tunes the interpreter as it starts. Its other settings are on the [Server](/home/configuration/server) page.
 
 <Accordion title="The interpreter tuning, for an app run with build_app">
   The CLI's daemon tunes the garbage collector and sets the GIL switch interval to 1 ms, so a busy line makes other sessions wait 2 ms turns instead of 10 ms. An app run with `build_app` does not get this. Add the same lines at startup:
