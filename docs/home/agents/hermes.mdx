@@ -4,6 +4,9 @@ description: Run Hermes Agent's terminal and file tools in a Mirage workspace, o
 icon: /images/hermes-logo.svg
 ---
 
+<img noZoom src="/images/hermes-banner-light.png" alt="Mirage and Hermes Agent" className="block dark:hidden w-full rounded-xl" />
+<img noZoom src="/images/hermes-banner-dark.png" alt="Mirage and Hermes Agent" className="hidden dark:block w-full rounded-xl" />
+
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) runs its terminal and file tools on a terminal backend. Mirage reaches it three ways:
 
 | Way | Hermes runs | Mirage sees |
@@ -50,6 +53,26 @@ Hermes installs `mirage-ai` into its own environment. Every command its terminal
 - `python3`, `pip` and `git` run on a [machine](/home/setup/machine/overview); add one to the workspace YAML. Hermes' `execute_code` needs one with Python.
 - Hermes' `approvals.mode` still decides which commands ask first, and the workspace's [command rules](/home/configuration/session#command-rules) apply as well.
 
+### Keys
+
+The terminal backend takes every key from the active Hermes profile. Workspaces are kept apart by YAML path and key values, so two profiles with different keys never share one. Set the key in Hermes and name it in the YAML:
+
+```bash
+hermes config set GITHUB_TOKEN ghp_...
+```
+
+```yaml /Users/me/workspace.yaml
+processes: workspace
+mounts:
+  /tmp: { vfs: ram, mode: write }
+  /github:
+    vfs: github
+    mode: read
+    config: { token: "${GITHUB_TOKEN}", owner: strukto-ai, repo: mirage }
+```
+
+`${NAME}`, a `{from: env, key: NAME}` [pointer](/home/service-credentials) and an `env:` entry with `from: env` all read `NAME` from the profile. A YAML that would reach a key any other way is refused, with each place named; [Limitations](#limitations) lists them.
+
 ## MCP
 
 ```yaml ~/.hermes/config.yaml
@@ -81,3 +104,32 @@ hermes config set terminal.cwd /tmp/mirage-demo
 ```
 
 Hermes' commands run on your computer in `/tmp/mirage-demo`, and each file they read or write goes through the workspace.
+
+## Limitations
+
+These apply to the terminal backend. With MCP or FUSE the workspace runs in the Mirage CLI, outside Hermes, and none of them apply.
+
+A Hermes plugin may take keys only from the Hermes profile, so the backend refuses a workspace YAML that would reach one any other way. These work once the YAML holds the key:
+
+| In the YAML | Needs | Otherwise it reads |
+| --- | --- | --- |
+| An S3 or S3-compatible mount or `store:` group | a key pair, and no `aws_profile` | `~/.aws` |
+| An `e2b`, `daytona` or `boxd` machine | `api_key` | its SDK's environment variable |
+| A `postgres` dsn | a password | `PGPASSWORD` or `~/.pgpass` |
+| A `mongodb` or `gridfs` uri using `MONGODB-AWS` | an access key in the uri | `~/.aws` |
+| A `lancedb` `db://` uri | `api_key` | `LANCEDB_API_KEY` |
+| A `lancedb` `s3://` uri | a key pair in `storage_options` | `~/.aws` |
+| A policy program's `env` | `${NAME}`, not a key pointer | the process environment |
+
+These are not available:
+
+| Not available | Because |
+| --- | --- |
+| An `ssh` mount or machine | the ssh library reads `~/.ssh/config` and the ssh-agent, even with a key in the YAML |
+| A `kubernetes` machine | `kubectl` signs in from `~/.kube/config` |
+| A `lancedb` uri on another cloud, such as `gs://` or `az://` | it signs in with that cloud's own login |
+| A Google, Box or Dropbox mount, or the `gws` CLI, with a `refresh_token` or `client_secret` | Mirage would renew the OAuth token itself, which a Hermes plugin may not |
+| A `secrets:` block, or `from: dotenv`, `1password` or `aws-sm` in any `env:` block, including a session profile's | it is a key store other than Hermes |
+| A backend, CLI or runtime named by a `module:Class` reference, or one outside Mirage's own list | the backend cannot vouch for what that code reads |
+
+A Google or Box mount works with a short-lived `access_token` until it expires.

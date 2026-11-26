@@ -16,13 +16,14 @@ import asyncio
 import logging
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from functools import partial
 from typing import TextIO
 
 from tools.environments.base import BaseEnvironment
 
 from mirage.agents.hermes.constants import SESSION_PREFIX
+from mirage.agents.hermes.credentials import SCOPE
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.tools.io_text import decision_line
@@ -103,6 +104,8 @@ class MirageEnvironment(BaseEnvironment):
         cwd (str): Directory the first command starts in.
         timeout (int): Default command timeout in seconds.
         task_id (str): hermes task the sessions belong to.
+        secrets (Mapping[str, str]): The keys hermes gave the workspace
+            YAML, which its ``env:`` entries read when a line asks.
 
     Raises:
         ValueError: the workspace does not grant ``processes: workspace``.
@@ -111,10 +114,17 @@ class MirageEnvironment(BaseEnvironment):
     _stdin_mode = "payload"
 
     def __init__(
-        self, workspace: Workspace, *, cwd: str, timeout: int, task_id: str
+        self,
+        workspace: Workspace,
+        *,
+        cwd: str,
+        timeout: int,
+        task_id: str,
+        secrets: Mapping[str, str],
     ) -> None:
         super().__init__(cwd=cwd, timeout=timeout)
         self._ws = workspace
+        self._secrets = secrets
         self._ws._sync_bridge.attach()
         self._prefix = f"{SESSION_PREFIX}{task_id}-{self._session_id}-"
         self._lock = threading.Lock()
@@ -132,6 +142,7 @@ class MirageEnvironment(BaseEnvironment):
         self.init_session()
 
     async def _create_session(self, session_id: str) -> SessionState:
+        SCOPE.set(self._secrets)
         return self._ws.create_session(session_id)
 
     def _open_session(self) -> SessionState:
@@ -172,6 +183,7 @@ class MirageEnvironment(BaseEnvironment):
         cancel = asyncio.Event()
 
         async def run(session_id: str, process: LineProcess) -> int:
+            SCOPE.set(self._secrets)
             execution = await self._ws.shell(
                 cmd_string,
                 session_id=session_id,

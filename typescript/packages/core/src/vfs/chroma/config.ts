@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
+import { secretStr } from '../secrets.ts'
 
 export const ChromaConfig = z.object({
   host: z
@@ -28,6 +29,13 @@ export const ChromaConfig = z.object({
     .boolean()
     .default(false)
     .meta({ description: 'Connect over HTTPS instead of HTTP.', default: false }),
+  apiKey: secretStr()
+    .refine((value) => value.trim() !== '', 'Chroma apiKey cannot be empty')
+    .nullable()
+    .default(null)
+    .describe(
+      'Chroma API key, sent in the `x-chroma-token` header as Chroma Cloud expects. Unset sends no key.',
+    ),
   collectionName: z
     .string()
     .trim()

@@ -16,7 +16,12 @@ import os
 from pathlib import Path
 
 from mirage.concurrency.limiter import run_blocking
-from mirage.config import build_mcp_clis, load_config, resolve_secrets
+from mirage.config import (
+    WorkspaceConfig,
+    build_mcp_clis,
+    load_config,
+    resolve_secrets,
+)
 from mirage.utils.ids import new_workspace_id
 from mirage.workspace.workspace import Workspace
 
@@ -85,16 +90,24 @@ def resolve_workspace_config(
     )
 
 
-async def build_workspace_from_config(config_path: str | Path) -> Workspace:
+async def build_workspace_from_config(
+    config_path: str | Path | WorkspaceConfig,
+) -> Workspace:
     """Build a workspace from a config file, kernel mounts included.
 
     Args:
-        config_path (str | Path): path to the YAML config.
+        config_path (str | Path | WorkspaceConfig): path to the YAML
+            config, or a config already loaded from one.
 
     Returns:
         Workspace: the constructed workspace.
     """
-    config = await resolve_secrets(load_config(config_path))
+    loaded = (
+        config_path
+        if isinstance(config_path, WorkspaceConfig)
+        else load_config(config_path)
+    )
+    config = await resolve_secrets(loaded)
     kwargs = config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config))
     kwargs["workspace_id"] = kwargs.get("workspace_id") or new_workspace_id()
     workspace = Workspace(**kwargs)

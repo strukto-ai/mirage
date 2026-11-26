@@ -15,3 +15,35 @@
 BACKEND = "mirage"
 SESSION_PREFIX = "hermes-"
 SETTING = "config"
+SOURCE = "hermes"
+ROUTED_SOURCES = frozenset({"env", SOURCE})
+
+AMBIENT_VFS = {
+    "ssh": "asyncssh reads ~/.ssh/config and the ssh-agent",
+}
+AMBIENT_MACHINES = {
+    "ssh": "asyncssh reads ~/.ssh/config, the ssh-agent and default keys",
+    "kubernetes": "kubectl reads ~/.kube/config",
+}
+KEYED_MACHINES = frozenset({"e2b", "daytona", "boxd"})
+OAUTH_VFS = frozenset(
+    {
+        "gdrive",
+        "gmail",
+        "gcal",
+        "gdocs",
+        "gsheets",
+        "gslides",
+        "box",
+        "dropbox",
+    }
+)
+OAUTH_CLIS = frozenset({"gws"})
+REFRESH_FIELDS = ("refresh_token", "client_secret")
+OUTSIDE = (
+    "code outside Mirage's own list, whose keys the plugin cannot vouch for"
+)
+LOCAL_SCHEMES = frozenset({"", "file", "db"})
+LANCE_S3_KEYS = ("aws_access_key_id", "aws_secret_access_key")
+MONGO_VFS = frozenset({"mongodb", "gridfs"})
+AWS_MECHANISM = "MONGODB-AWS"

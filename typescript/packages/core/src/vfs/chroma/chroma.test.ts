@@ -92,3 +92,10 @@ describe('chroma stat through a mount', () => {
     }
   })
 })
+
+describe('chroma saved state', () => {
+  it('redacts the key', () => {
+    const vfs = new ChromaVFS({ collectionName: 'docs', apiKey: 'k-1' })
+    expect(vfs.getState().config.apiKey).toBe('<REDACTED>')
+  })
+})

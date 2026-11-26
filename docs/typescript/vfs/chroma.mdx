@@ -47,6 +47,9 @@ file and position with keys other than `page_slug` and `chunk_index` sets
 <ResponseField name="ssl" type={"boolean"} default={"false"}>
   Connect over HTTPS instead of HTTP.
 </ResponseField>
+<ResponseField name="apiKey" type={"string"} default={"null"} post={["secret"]}>
+  Chroma API key, sent in the `x-chroma-token` header as Chroma Cloud expects. Unset sends no key.
+</ResponseField>
 <ResponseField name="collectionName" type={"string"} required>
   Name of the existing Chroma collection to mount.
 </ResponseField>
@@ -56,6 +59,8 @@ file and position with keys other than `page_slug` and `chunk_index` sets
 <ResponseField name="chunkIndexField" type={"string"} default={"'chunk_index'"}>
   Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`.
 </ResponseField>
+
+Fields marked secret are redacted in snapshots.
 {/* generated: config-table chroma end */}
 
 ## Layout

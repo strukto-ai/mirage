@@ -446,7 +446,9 @@ jobs:
             | tar xz -C "$RUNNER_TEMP/hermes" --strip-components 1
           uv sync --frozen --project "$RUNNER_TEMP/hermes"
           HERMES_PYTHON="$RUNNER_TEMP/hermes/.venv/bin/python"
-          uv pip install --python "$HERMES_PYTHON" . pytest
+          # hermes resolves a plugin inside its own locked versions, so a pin mirage-ai cannot meet fails here.
+          uv export --frozen --project "$RUNNER_TEMP/hermes" --all-extras --no-hashes --no-emit-project -o "$RUNNER_TEMP/hermes-pins.txt"
+          uv pip install --python "$HERMES_PYTHON" -c "$RUNNER_TEMP/hermes-pins.txt" . pytest
           "$HERMES_PYTHON" -c "import agent.terminal_env_provider, tools.environments.base, mirage.agents.hermes"
           "$HERMES_PYTHON" - <<'PY'
           import importlib.util
@@ -455,6 +457,21 @@ jobs:
           plugin = importlib.util.module_from_spec(spec)
           spec.loader.exec_module(plugin)
           assert callable(plugin.register)
+          PY
+          # hermes' catalog gate on the plugin folder, called the way hermes' own plugin-validate action calls it.
+          "$HERMES_PYTHON" -I -m hermes_cli.main plugins validate ../plugins/hermes
+          # That gate reads the plugin folder only, and the backend's code ships in mirage-ai, so hermes' public-API check runs on that code here.
+          "$HERMES_PYTHON" - <<'PY'
+          from pathlib import Path
+
+          from hermes_cli.plugin_validate_private_imports import (
+              private_attribute_findings,
+              private_import_findings,
+          )
+
+          backend = Path("mirage/agents/hermes")
+          found = private_import_findings(backend) + private_attribute_findings(backend)
+          assert not found, found
           PY
           "$HERMES_PYTHON" -m pytest tests/agents/hermes -p no:cacheprovider -rs
 
