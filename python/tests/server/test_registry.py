@@ -481,8 +481,8 @@ async def test_answered_requests_do_not_put_off_the_idle_exit():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("made", [False, True])
-async def test_a_create_still_building_holds_the_idle_exit(made):
+@pytest.mark.parametrize("ends", ["empty", "raises", "made"])
+async def test_a_create_still_building_holds_the_idle_exit(ends):
     # A client that went away leaves its create building: the exit waits
     # for it, and goes unless it made a workspace.
     registry = WorkspaceRegistry(idle_grace_seconds=0)
@@ -493,7 +493,9 @@ async def test_a_create_still_building_holds_the_idle_exit(made):
         async with registry.creating("v", "config") as admitted:
             assert admitted
             await gate.wait()
-            if made:
+            if ends == "raises":
+                raise RuntimeError("the build failed")
+            if ends == "made":
                 registry.add(_ws(), "v")
 
     building = asyncio.create_task(build())
@@ -501,5 +503,9 @@ async def test_a_create_still_building_holds_the_idle_exit(made):
     await registry.remove(entry.id)
     assert not registry.exit_event.is_set()
     gate.set()
-    await building
-    assert registry.exit_event.is_set() is not made
+    if ends == "raises":
+        with pytest.raises(RuntimeError):
+            await building
+    else:
+        await building
+    assert registry.exit_event.is_set() is (ends != "made")

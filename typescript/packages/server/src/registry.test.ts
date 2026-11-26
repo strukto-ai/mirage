@@ -264,7 +264,7 @@ describe('WorkspaceRegistry', () => {
 
   // A client that went away leaves its create building: the exit waits for
   // it, and goes unless it made a workspace.
-  it.each([false, true])('waits for a create still building (made: %s)', async (made) => {
+  it.each(['empty', 'throws', 'made'])('waits for a create still building (%s)', async (ends) => {
     const { registry: r, seen } = exiting(0)
     const entry = r.add(ram())
     let release!: () => void
@@ -274,13 +274,15 @@ describe('WorkspaceRegistry', () => {
     const building = r.creating('v', 'config', async (admitted) => {
       expect(admitted).toBe(true)
       await gate
-      if (made) r.add(ram(), 'v')
+      if (ends === 'throws') throw new Error('the build failed')
+      if (ends === 'made') r.add(ram(), 'v')
     })
     await r.remove(entry.id)
     expect(seen.exits).toBe(0)
     release()
-    await building
-    expect(seen.exits).toBe(made ? 0 : 1)
+    if (ends === 'throws') await expect(building).rejects.toThrow('the build failed')
+    else await building
+    expect(seen.exits).toBe(ends === 'made' ? 0 : 1)
   })
 
   // A client that polls /v1/health while it waits for the daemon to go sees
