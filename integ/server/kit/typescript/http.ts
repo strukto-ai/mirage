@@ -31,6 +31,8 @@ import {
 } from './errors.ts'
 import { FAULTS_PATH, parseFaultBody } from './fault.ts'
 import type { Faults } from './fault.ts'
+import { REQUESTS_PATH } from './request.ts'
+import type { Requests } from './request.ts'
 import { Router } from './route.ts'
 import type { Ctx } from './route.ts'
 import { DEFAULT_FIXTURE, DEFAULT_FIXTURE_ROOT } from './fixture.ts'
@@ -299,6 +301,26 @@ function faultsEndpoint<C extends MinimalClient>(
   return { status: 200, body: { plans: faults.report() } }
 }
 
+// The list of requests every kit fake keeps, on the tenant the request
+// resolves to exactly as an API request would. POST starts it, emptying what
+// an earlier start kept; GET lists the requests the tenant made since, in
+// the order they arrived; DELETE stops it and answers that same list. A
+// /reset of the tenant stops it too. A request to /_kit/ itself is never
+// listed.
+function requestsEndpoint(requests: Requests, method: string): Reply {
+  if (method === 'GET') return { status: 200, body: { requests: requests.report() } }
+  if (method === 'DELETE') {
+    const kept = requests.report()
+    requests.stop()
+    return { status: 200, body: { requests: kept } }
+  }
+  if (method !== 'POST') {
+    return { status: 405, body: { error: 'method_not_allowed', method, path: REQUESTS_PATH } }
+  }
+  requests.start()
+  return { status: 200, body: { requests: [] } }
+}
+
 function send(res: ServerResponse, reply: Reply, head: boolean): void {
   const headers: Record<string, string | string[]> = { ...(reply.headers ?? {}) }
   let payload: Buffer
@@ -454,8 +476,16 @@ async function answer<C extends MinimalClient>(
       faultsEndpoint(router, rt.state(run).of(tenant).faults, method, raw),
     )
   }
+  if (path === REQUESTS_PATH) {
+    return router.run(run, method !== 'GET', () =>
+      requestsEndpoint(rt.state(run).of(tenant).requests, method),
+    )
+  }
   const hit = router.match(method, path)
   if (hit === null) return unrouted(service, method, path)
+  // Before the fault and the handler, so a request is listed in the order it
+  // arrived, whatever answered it.
+  rt.state(run).peek(tenant)?.requests.note(method, hit.spec.path, path)
   // Ahead of the run's queue and of the handler: a faulted request touches
   // no row, so it neither waits behind a write nor holds one up while it
   // hangs, and a write route faulted with a 5xx has provably not applied.

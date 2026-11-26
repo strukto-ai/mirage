@@ -174,12 +174,13 @@ jobs:
       # fakes import Prisma clients generated into the gitignored
       # integ/generated/. Without this every one of those imports is TS2307 and
       # the types they carry degrade to implicit any, which reads as dozens of
-      # unrelated errors in files nobody touched. That makes this the
-      # typechecking leg's step and nobody else's: no example consumes the
-      # generated clients, since all 25 truth files spell their command
+      # unrelated errors in files nobody touched. The core legs need the
+      # clients too: a service's unit tests start its integ fake
+      # (tests/fixtures/kit_fake.ts), which imports one. No example consumes
+      # them, since all 25 truth files spell their command
       # `pnpm -C examples/typescript exec tsx ...`.
       - name: Generate integ Prisma clients
-        if: matrix.typecheck
+        if: matrix.typecheck || startsWith(matrix.leg, 'core-')
         working-directory: integ
         run: pnpm run prisma:clients
 

@@ -324,6 +324,22 @@ async function main(): Promise<void> {
       String(next.sha1),
     )
 
+    // A download answers a redirect, and the id it names exists only in the
+    // run that made it.
+    const inRun = `${fake.endpoint}/_run/own`
+    const there = await fetch(`${inRun}/2.0/files/content`, {
+      method: 'POST',
+      headers: AUTH,
+      body: form({ name: 'c.txt', parent: { id: '0' } }, 'run'),
+    })
+    const thereFile = ((await json(there)).entries as Record<string, unknown>[])[0] ?? {}
+    const fetched = await download(inRun, String(thereFile.id))
+    check(
+      'a download under a run stays in that run',
+      fetched.status === 200 && (await fetched.text()) === 'run',
+      String(fetched.status),
+    )
+
     process.stdout.write(`box selftest: ${String(checks)} checks passed\n`)
   } finally {
     await fake.stop()

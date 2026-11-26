@@ -26,6 +26,10 @@ permissions:
       - .github/workflows/test_python.yml
       - .github/actions/setup-uv/action.yml
       - .github/actions/setup-rust/action.yml
+      # The unit tests start the integ fakes (integ/server/), which are
+      # installed from this lockfile by this action.
+      - typescript/pnpm-lock.yaml
+      - .github/actions/setup-node-pnpm/action.yml
       # README files under these trees are prose that nothing loads, so a
       # change to one alone runs nothing. integ/fixtures/** is not listed:
       # the fake hubs serve the READMEs there as fixture content.
@@ -80,6 +84,8 @@ jobs:
               - '.github/workflows/test_python.yml'
               - '.github/actions/setup-uv/action.yml'
               - '.github/actions/setup-rust/action.yml'
+              - 'typescript/pnpm-lock.yaml'
+              - '.github/actions/setup-node-pnpm/action.yml'
               # README files under these trees are prose that nothing loads, so a
               # change to one alone runs nothing. integ/fixtures/** is not listed:
               # the fake hubs serve the READMEs there as fixture content.
@@ -190,6 +196,24 @@ jobs:
           if grep -E 'Unclosed client session|Unclosed connector' "$RUNNER_TEMP/cache-cleanup.log"; then
             exit 1
           fi
+
+      # A service's unit tests run against its integ fake (integ/server/),
+      # which tests/fixtures/kit_fake.py starts with tsx. The fakes import
+      # no mirage package, so nothing is built: --ignore-scripts skips
+      # core's Rust and wasm prepare hook, as the integ battery's own
+      # install does when it is handed built packages.
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: "24"
+
+      - name: Install the integ fakes' dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Generate integ Prisma clients
+        working-directory: integ
+        run: pnpm run prisma:clients
 
       - name: Run pytest (main suite)
         working-directory: python

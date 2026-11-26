@@ -15,6 +15,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { Clock } from './clock.ts'
 import { Faults } from './fault.ts'
+import { Requests } from './request.ts'
 import { Minter } from './mint.ts'
 import { ClientPool } from './db.ts'
 import type { ClientCtor, MinimalClient } from './db.ts'
@@ -91,11 +92,13 @@ export interface Fake<C extends MinimalClient> {
 // from, so that host's next id repeated one it had already handed out, and
 // `clock.setEpoch()` rebased its timestamps backwards mid-run. A tenant is one
 // caller's whole world, so its clock and its minter are its own. Its armed
-// fault plans are too, and a reset forgets them with the rest.
+// fault plans and the requests it is keeping are too, and a reset forgets
+// them with the rest.
 export interface TenantState {
   clock: Clock
   minter: Minter
   faults: Faults
+  requests: Requests
 }
 
 // Per-run mutable state: the tenants living in one SQLite file. A run is still
@@ -123,6 +126,7 @@ export class RunState {
       clock: new Clock(),
       minter: new Minter(this.sharing, this.format),
       faults: new Faults(),
+      requests: new Requests(),
     }
     this.tenants.set(tenant, made)
     return made
@@ -138,6 +142,7 @@ export class RunState {
     st.clock.setEpoch(epoch)
     st.minter.reset()
     st.faults.clear()
+    st.requests.stop()
     this.seeded.delete(tenant)
   }
 
