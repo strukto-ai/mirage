@@ -2727,7 +2727,12 @@ impl Stream for Rg {
             begin.pipe,
         )?);
         self.ending = false;
-        self.input = Some(Input::new(begin, &self.config));
+        // The last input's finished search carries its automata's states
+        // and its tables over, so a tree of small files builds them once.
+        let scratch = self.input.take().and_then(|input| input.scratch);
+        let mut input = Input::new(begin, &self.config);
+        input.scratch = scratch;
+        self.input = Some(input);
         Ok(())
     }
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {

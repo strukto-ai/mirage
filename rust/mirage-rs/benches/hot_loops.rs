@@ -32,6 +32,11 @@ fn main() {
         ("rg-c", "rg", json!({"pattern":"theta","count_only":true})),
         ("rg-print", "rg", json!({"pattern":"theta"})),
         (
+            "rg-regex",
+            "rg",
+            json!({"pattern":"[0-9]+,theta,.* in row"}),
+        ),
+        (
             "uniq",
             "uniq",
             json!({"count":false,"repeated":false,"unique":false,"typed":[],"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}),
