@@ -42,7 +42,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { activeRecords, lostPaths, recordingScope } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpLedger, OpRecord, Recorder } from '../../observe/record.ts'
+import type { OpLog, OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { JobOutput, Terminal } from '../../shell/console/index.ts'
@@ -151,7 +151,7 @@ export interface ExecuteEnv {
   registry: MountRegistry
   dispatcher: Dispatcher
   observer: Observer
-  records: OpLedger
+  records: OpLog
   jobTable: JobTable
   lineTable: LineTable
   runtimes: Runtimes

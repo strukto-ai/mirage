@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { OpLedger, OpRecord, RecordIndex } from './record.ts'
+import { OpLog, OpRecord, RecordIndex } from './record.ts'
 import { ExecutionNode } from '../workspace/types.ts'
 
 describe('OpRecord', () => {
@@ -220,7 +220,7 @@ describe('RecordIndex.newestVersion', () => {
   })
 })
 
-describe('OpLedger', () => {
+describe('OpLog', () => {
   it('drops the oldest records that change no pin', () => {
     const rec = (op: string, source = 'disk', fingerprint: string | null = null): OpRecord =>
       new OpRecord({
@@ -232,17 +232,17 @@ describe('OpLedger', () => {
         durationMs: 0,
         fingerprint,
       })
-    const ledger = new OpLedger(4)
+    const log = new OpLog(4)
     const [stamp, gone, kept] = [rec('read', 's3', 'etag'), rec('unlink'), rec('read')]
-    ledger.add([rec('read'), stamp, rec('stat', 'ram'), gone, kept])
-    expect(ledger.records).toHaveLength(5)
+    log.add([rec('read'), stamp, rec('stat', 'ram'), gone, kept])
+    expect(log.records).toHaveLength(5)
     const newest = [rec('read'), rec('readdir')]
-    ledger.add(newest)
+    log.add(newest)
     const held = [stamp, gone, kept, ...newest]
-    expect(ledger.records).toHaveLength(held.length)
-    ledger.records.forEach((r, i) => {
+    expect(log.records).toHaveLength(held.length)
+    log.records.forEach((r, i) => {
       expect(r).toBe(held[i])
     })
-    expect([ledger.networkBytes, ledger.cacheBytes]).toEqual([60, 10])
+    expect([log.networkBytes, log.cacheBytes]).toEqual([60, 10])
   })
 })

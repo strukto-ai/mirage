@@ -46,7 +46,7 @@ from mirage.io.network import run_with_network
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
-from mirage.observe.record import OpLedger, OpRecord
+from mirage.observe.record import OpLog, OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
@@ -159,7 +159,7 @@ class ExecuteEnv:
         registry (MountRegistry): mounts, policies and decisions.
         dispatcher (Dispatcher): the dispatcher.
         observer (Observer): records each typed line.
-        records (OpLedger): the workspace's op ledger.
+        records (OpLog): the workspace's op log.
         job_table (JobTable): the workspace's jobs.
         line_table (LineTable): the lines its sessions read.
         runtimes (Runtimes): the runtimes a whole line may run in.
@@ -181,7 +181,7 @@ class ExecuteEnv:
     registry: MountRegistry
     dispatcher: Dispatcher
     observer: Observer
-    records: OpLedger
+    records: OpLog
     job_table: JobTable
     line_table: LineTable
     runtimes: Runtimes

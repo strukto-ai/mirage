@@ -35,7 +35,7 @@ TRACE_CONTENT_MAX_BYTES = 16 * 1024
 # fast lines arrive: 8 MiB keeps thousands of lines with their calls.
 RAM_LOG_BYTES = 8 * 1024 * 1024
 
-# The most records a workspace's op ledger holds of those no snapshot
+# The most records a workspace's op log holds of those no snapshot
 # reads. Past it the oldest go first, down to three quarters of it: a
 # few megabytes, however many files a long-lived workspace reads.
-LEDGER_RECORDS = 16 * 1024
+OP_LOG_RECORDS = 16 * 1024

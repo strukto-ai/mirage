@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CONTENT_CHANGING_OPS,
-  OpLedger,
+  OpLog,
   OpRecord,
   RETRACT_FINGERPRINT_OPS,
   STAMP_FINGERPRINT_OPS,
@@ -524,10 +524,10 @@ describe('installFingerprints under DriftPolicy.OFF', () => {
   })
 })
 
-describe('a ledger past its cap', () => {
-  it('pins what the whole log pins', () => {
+describe('an op log past its cap', () => {
+  it('pins what every record pins', () => {
     const registry = makeRegistry([makeMount('/s3/', true)])
-    const log = [
+    const records = [
       opRecord('read', '/s3/a', 'fp-a', null, 1),
       opRecord('read', '/s3/a', null, null, 2),
       opRecord('stat', '/s3/a', null, null, 3),
@@ -543,11 +543,11 @@ describe('a ledger past its cap', () => {
         opRecord('read', `/s3/n${String(i)}`, null, null, 12 + i),
       ),
     ]
-    const ledger = new OpLedger(4)
-    for (const rec of log) ledger.add([rec])
-    expect(ledger.records.length).toBeLessThanOrEqual(8 + 4)
-    const pins = captureFingerprints(ledger.records, registry)
-    expect(pins).toEqual(captureFingerprints(log, registry))
+    const log = new OpLog(4)
+    for (const rec of records) log.add([rec])
+    expect(log.records.length).toBeLessThanOrEqual(8 + 4)
+    const pins = captureFingerprints(log.records, registry)
+    expect(pins).toEqual(captureFingerprints(records, registry))
     expect(pins.map((entry) => entry.path)).toEqual(['/s3/a', '/s3/d', '/s3/e'])
   })
 })

@@ -26,7 +26,7 @@ from mirage.execution.types import ProcessId
 from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     LostPaths,
-    OpLedger,
+    OpLog,
     OpRecord,
     Recorder,
     RecordIndex,
@@ -85,12 +85,12 @@ def line_version(
 
 
 def fresh_recorder(
-    ledger: OpLedger | None = None, clock: Clock | None = None
+    ledger: OpLog | None = None, clock: Clock | None = None
 ) -> Recorder:
     """An empty recorder, for a line or a call outside one.
 
     Args:
-        ledger (OpLedger | None): the workspace ledger a line hands
+        ledger (OpLog | None): the workspace ledger a line hands
             its records to, None for a file call's own.
         clock (Clock | None): the workspace clock its ops are timed and
             stamped on; None is the system clock.
@@ -118,7 +118,7 @@ class RecordingScope:
     Args:
         active (bool): False joins the enclosing scope instead of
             opening a new one.
-        ledger (OpLedger | None): the workspace ledger the line
+        ledger (OpLog | None): the workspace ledger the line
             hands its records to, which a file call of that workspace
             made on the line joins.
         clock (Clock | None): the workspace clock the line's ops are
@@ -128,7 +128,7 @@ class RecordingScope:
     def __init__(
         self,
         active: bool = True,
-        ledger: OpLedger | None = None,
+        ledger: OpLog | None = None,
         clock: Clock | None = None,
     ) -> None:
         self.records: list[OpRecord] = []

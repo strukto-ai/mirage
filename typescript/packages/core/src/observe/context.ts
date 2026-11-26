@@ -20,7 +20,7 @@ import {
 } from '../context/session_context.ts'
 import {
   LostPaths,
-  type OpLedger,
+  type OpLog,
   OpRecord,
   RecordIndex,
   STAMP_FINGERPRINT_OPS,
@@ -137,7 +137,7 @@ export function activeRecords(): readonly OpRecord[] | undefined {
  */
 export async function recordingScope<T>(
   fn: () => Promise<T>,
-  ledger: OpLedger | null = null,
+  ledger: OpLog | null = null,
   clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
   const state: Recorder = { records: [], mountId: null, ledger, clock }

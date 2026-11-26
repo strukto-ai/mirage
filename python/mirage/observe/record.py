@@ -15,7 +15,7 @@
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from mirage.observe.constants import LEDGER_RECORDS
+from mirage.observe.constants import OP_LOG_RECORDS
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
 
@@ -157,19 +157,19 @@ def changes_pin(rec: OpRecord) -> bool:
     )
 
 
-class OpLedger:
-    """A workspace's op ledger: every record a snapshot pins a path by,
+class OpLog:
+    """A workspace's op log: every record a snapshot pins a path by,
     and the newest of the rest, which only account for an op.
 
     It holds at most ``max_records`` of those: past it the oldest go
     first, down to three quarters of it, and the bytes they moved stay
-    in the totals. Mirrors TypeScript's ``OpLedger``.
+    in the totals. Mirrors TypeScript's ``OpLog``.
 
     Args:
         max_records (int): the most records it holds that change no pin.
     """
 
-    def __init__(self, max_records: int = LEDGER_RECORDS) -> None:
+    def __init__(self, max_records: int = OP_LOG_RECORDS) -> None:
         self.records: list[OpRecord] = []
         self.max_records = max_records
         self._unpinned = 0
@@ -371,7 +371,7 @@ class Recorder:
         lost (LostPaths): The line's lost paths.
         index (RecordIndex): The line's version index over ``sink``.
         mount_id (str | None): Identity of the mounted instance serving reads.
-        ledger (OpLedger | None): the workspace ledger a line hands
+        ledger (OpLog | None): the workspace ledger a line hands
             its records to when it ends; None for a file call's own
             recorder, which no other call joins.
         clock (Clock): the workspace clock every op recorded here is
@@ -382,5 +382,5 @@ class Recorder:
     lost: LostPaths
     index: RecordIndex
     mount_id: str | None = None
-    ledger: OpLedger | None = None
+    ledger: OpLog | None = None
     clock: Clock = field(default_factory=SystemClock)

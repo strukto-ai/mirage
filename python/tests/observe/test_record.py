@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.observe import OpRecord
-from mirage.observe.record import OpLedger, RecordIndex
+from mirage.observe.record import OpLog, RecordIndex
 from mirage.workspace.types import ExecutionNode
 
 
@@ -191,7 +191,7 @@ def test_the_index_reads_each_record_once():
     assert index.newest_version("/b") is None
 
 
-def test_the_ledger_drops_the_oldest_records_that_change_no_pin():
+def test_the_op_log_drops_the_oldest_records_that_change_no_pin():
     def rec(op: str, source: str = "disk", fingerprint: str | None = None):
         return OpRecord(
             op=op,
@@ -203,13 +203,13 @@ def test_the_ledger_drops_the_oldest_records_that_change_no_pin():
             fingerprint=fingerprint,
         )
 
-    ledger = OpLedger(max_records=4)
+    log = OpLog(max_records=4)
     stamp, gone, kept = rec("read", "s3", "etag"), rec("unlink"), rec("read")
-    ledger.add([rec("read"), stamp, rec("stat", "ram"), gone, kept])
-    assert len(ledger.records) == 5
+    log.add([rec("read"), stamp, rec("stat", "ram"), gone, kept])
+    assert len(log.records) == 5
     newest = [rec("read"), rec("readdir")]
-    ledger.add(newest)
-    assert [id(r) for r in ledger.records] == [
+    log.add(newest)
+    assert [id(r) for r in log.records] == [
         id(r) for r in (stamp, gone, kept, *newest)
     ]
-    assert (ledger.network_bytes, ledger.cache_bytes) == (60, 10)
+    assert (log.network_bytes, log.cache_bytes) == (60, 10)

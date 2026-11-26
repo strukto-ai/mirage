@@ -15,7 +15,7 @@
 import { VFSName } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
 import { underPath } from '../utils/key_prefix.ts'
-import { LEDGER_RECORDS } from './constants.ts'
+import { OP_LOG_RECORDS } from './constants.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -202,14 +202,14 @@ export function changesPin(rec: OpRecord): boolean {
 }
 
 /**
- * A workspace's op ledger: every record a snapshot pins a path by, and the
+ * A workspace's op log: every record a snapshot pins a path by, and the
  * newest of the rest, which only account for an op.
  *
  * It holds at most `maxRecords` of those: past it the oldest go first, down
  * to three quarters of it, and the bytes they moved stay in the totals.
- * Mirrors Python's `OpLedger`.
+ * Mirrors Python's `OpLog`.
  */
-export class OpLedger {
+export class OpLog {
   readonly records: OpRecord[] = []
   readonly maxRecords: number
   private unpinned = 0
@@ -217,7 +217,7 @@ export class OpLedger {
   private droppedCacheBytes = 0
 
   /** @param maxRecords the most records it holds that change no pin. */
-  constructor(maxRecords: number = LEDGER_RECORDS) {
+  constructor(maxRecords: number = OP_LOG_RECORDS) {
     this.maxRecords = maxRecords
   }
 
@@ -271,7 +271,7 @@ export class OpLedger {
 export interface Recorder {
   records: OpRecord[]
   mountId: string | null
-  ledger: OpLedger | null
+  ledger: OpLog | null
   clock: Clock
 }
 

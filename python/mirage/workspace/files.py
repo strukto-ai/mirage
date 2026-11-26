@@ -35,7 +35,7 @@ from mirage.observe.context import (
     fresh_recorder,
     record,
 )
-from mirage.observe.record import OpLedger, OpRecord, Recorder
+from mirage.observe.record import OpLog, OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -138,7 +138,7 @@ class Files:
         observer: Any | None = None,
         session_id: str | None = None,
         bind: SessionBind | None = None,
-        records: OpLedger | None = None,
+        records: OpLog | None = None,
         follow: FollowOperands | None = None,
         ledger: bool = True,
         clock: Clock | None = None,
@@ -151,7 +151,7 @@ class Files:
         self._bind = bind
         self._follow = follow
         self._ledger = ledger
-        self._records = records if records is not None else OpLedger()
+        self._records = records if records is not None else OpLog()
 
     @property
     def session_id(self) -> str | None:
@@ -1073,7 +1073,7 @@ class WorkspaceFiles(Files):
         """The op ledger: every facade op lands here, and the executor
         appends each shell line's ops too, so this is the one
         workspace-wide account. It holds every record a snapshot pins a
-        path by and the newest of the rest (``OpLedger``)."""
+        path by and the newest of the rest (``OpLog``)."""
         return self._records.records
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:

@@ -14,7 +14,7 @@
 
 import { type ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
-import { OpLedger, type OpRecord, type Recorder } from '../observe/record.ts'
+import { OpLog, type OpRecord, type Recorder } from '../observe/record.ts'
 import { finishRecord, OpTimer, record } from '../observe/context.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
@@ -44,7 +44,7 @@ export interface FilesOptions {
   // dispatch serves an op that kept the caller's ambient session.
   dispatchAs?: ((owner: SessionAccess) => CallerDispatchFn) | null
   sessionId?: string | null
-  records?: OpLedger
+  records?: OpLog
   // The line's operand resolution a command's globs give their matches.
   follow?: FollowOperands | null
   // Record each op on the ledger; false where the dispatcher does the accounting.
@@ -161,7 +161,7 @@ export class Files {
   /** The session this facade runs as; null for the workspace's default. */
   readonly sessionId: string | null
   /** The op ledger this facade records on; `WorkspaceFiles.records` reads it. */
-  protected readonly recorded: OpLedger
+  protected readonly recorded: OpLog
   private readonly follow: FollowOperands | null
   private readonly ledger: boolean
   private readonly clock: Clock
@@ -195,7 +195,7 @@ export class Files {
     this.dispatchAs = options.dispatchAs ?? null
     this.caller = options.caller ?? null
     this.sessionId = options.sessionId ?? null
-    this.recorded = options.records ?? new OpLedger()
+    this.recorded = options.records ?? new OpLog()
     this.follow = options.follow ?? null
     this.ledger = options.ledger ?? true
     this.served = options.served
@@ -787,7 +787,7 @@ export class WorkspaceFiles extends Files {
    * The op ledger: every facade op lands here, and the executor appends each
    * shell line's ops too, so this is the one workspace-wide account (Python's
    * `WorkspaceFiles.records`). It holds every record a snapshot pins a path
-   * by and the newest of the rest (`OpLedger`).
+   * by and the newest of the rest (`OpLog`).
    */
   get records(): OpRecord[] {
     return this.recorded.records
