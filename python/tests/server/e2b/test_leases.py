@@ -6,7 +6,6 @@ from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,
     NATIVE,
-    TEMPLATE,
     TOKEN,
     sandbox_headers,
     server,
@@ -15,9 +14,10 @@ from tests.server.routers.e2b_test_support import (
 
 @pytest.mark.asyncio
 async def test_reconnect_only_extends_and_expiry_removes_workspace(tmp_path):
-    async with server(
-        tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN, max_workspaces=1
-    ) as (app, client):
+    async with server(tmp_path, auth_config=TOKEN, max_workspaces=1) as (
+        app,
+        client,
+    ):
         created = await client.post(CREATE, headers=KEY, json={"timeout": 1})
         wid = created.json()["sandboxID"]
         connect = f"{CREATE}/{wid}/connect"
@@ -56,7 +56,7 @@ async def test_native_stop_retires_the_lease_without_another_request(tmp_path):
 
 @pytest.mark.asyncio
 async def test_health_and_timeout_follow_the_same_workspace_lease(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         app,
         client,
     ):

@@ -234,7 +234,7 @@ async def test_a_signal_drains_before_the_servers_handler_stops_it(
 async def test_without_a_graceful_timeout_the_servers_handlers_stay(
     monkeypatch,
 ):
-    app = build_app(idle_grace_seconds=10.0, e2b_template="")
+    app = build_app(idle_grace_seconds=10.0, e2b_port=False)
     installed = {}
     monkeypatch.setattr(signal, "signal", installed.__setitem__)
     assert app_module._drain_on_signals(app) == {}

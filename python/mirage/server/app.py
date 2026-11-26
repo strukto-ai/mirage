@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import FrameType
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -53,7 +53,7 @@ from mirage.server.daemon_config import (
     validate_daemon_table,
 )
 from mirage.server.e2b.leases import Sandboxes
-from mirage.server.env import ENV_E2B_PORT, ENV_E2B_TEMPLATE
+from mirage.server.env import ENV_E2B_PORT
 from mirage.server.errors import (
     WorkspaceMissing,
     register_error_handlers,
@@ -428,7 +428,6 @@ async def _e2b_http_error(request: Request, exc: Exception) -> JSONResponse:
 
 def _build_e2b_app(
     native: FastAPI,
-    template: str | None,
     verifier: CredentialVerifier,
     buckets: RateLimitBuckets,
     proxies: Sequence[str],
@@ -438,7 +437,6 @@ def _build_e2b_app(
     app.state.state_root = native.state.state_root
     app.state.resources = native.state.resources
     app.state.e2b = native.state.e2b
-    app.state.e2b_template = template
     app.add_exception_handler(StarletteHTTPException, _e2b_http_error)
     app.add_middleware(LenientJson, raw_request=e2b.is_data_request)
     app.add_middleware(
@@ -485,8 +483,7 @@ def build_app(
     max_line_seconds: float | None = None,
     max_env: str | int | None = None,
     resource_store: ResourceStore | None = None,
-    e2b_template: str | None = None,
-    e2b_port: int | None = None,
+    e2b_port: int | Literal[False] | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -585,13 +582,10 @@ def build_app(
             (default) reads ``$MIRAGE_RESOURCE_STORE`` or the
             ``resource_store`` config key, else files under the mirage
             home.
-        e2b_template (str | None): the saved template approved for local
-            sandbox creation. Defaults to a nonblank
-            ``$MIRAGE_E2B_TEMPLATE`` or the built-in base. An empty
-            string disables the sandbox listener.
-        e2b_port (int | None): the port for E2B HTTP on 127.0.0.1.
-            Defaults to ``$MIRAGE_E2B_PORT``. Without a port, only the
-            native API is served.
+        e2b_port (int | Literal[False] | None): the E2B HTTP port on
+            127.0.0.1. ``None`` (default) reads ``$MIRAGE_E2B_PORT``,
+            enabling the listener when set. ``False`` disables the listener
+            regardless of the environment.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -601,11 +595,7 @@ def build_app(
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     register_error_handlers(app)
     app.add_exception_handler(WorkspaceMissing, answer_missing)
-    if e2b_template is not None:
-        e2b_template = e2b_template.strip()
-    port = resolve_e2b_port(e2b_port) if e2b_template != "" else None
-    if e2b_template is None:
-        e2b_template = os.environ.get(ENV_E2B_TEMPLATE, "").strip()
+    port = None if e2b_port is False else resolve_e2b_port(e2b_port)
     app.add_middleware(LenientJson)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)
@@ -657,9 +647,7 @@ def build_app(
     app.state.e2b_app = (
         None
         if port is None
-        else _build_e2b_app(
-            app, e2b_template or None, verifier, buckets, proxies
-        )
+        else _build_e2b_app(app, verifier, buckets, proxies)
     )
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None

@@ -53,6 +53,7 @@ const RPC_PATHS: ReadonlySet<string> = new Set([
 ])
 
 const BASE_TEMPLATE = 'base'
+const BASE_WORKSPACE_TEMPLATE = 'e2b-base'
 const DEFAULT_TIMEOUT = 300
 const ENVD_VERSION = '0.5.6'
 const Timeout = z.number().int().positive().default(DEFAULT_TIMEOUT)
@@ -201,10 +202,10 @@ function unsupportedLifecycle(reply: RouteReply, message: string): RouteReply {
   return reply.status(501).send({ code: 501, message })
 }
 
-function present(lease: SandboxLease, template: string) {
+function present(lease: SandboxLease) {
   return {
     sandboxID: lease.entry.id,
-    templateID: template,
+    templateID: BASE_TEMPLATE,
     clientID: lease.entry.id,
     envdVersion: ENVD_VERSION,
     envdAccessToken: lease.accessToken,
@@ -350,15 +351,10 @@ function downloadOf(
 
 export function router(
   app: RouteApp,
-  deps: WorkspaceRoutesDeps & {
-    resources: ResourceStore
-    template: string | undefined
-    sandboxes: Sandboxes
-  },
+  deps: WorkspaceRoutesDeps & { resources: ResourceStore; sandboxes: Sandboxes },
 ): void {
   const { sandboxes } = deps
   registerProcess(app, sandboxes, deps.registry)
-  const template = deps.template ?? BASE_TEMPLATE
   app.post(CREATE, { bodyLimit: MAX_REQUEST_PART }, async (req, reply) => {
     const input = CreateSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
     if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox create request')
@@ -370,25 +366,24 @@ export function router(
     if (unsupported !== undefined) {
       return unsupportedLifecycle(reply, `sandbox create option is unsupported: ${unsupported}`)
     }
-    if (templateID !== BASE_TEMPLATE && templateID !== template) {
+    if (templateID !== BASE_TEMPLATE) {
       throw new HttpError('not_found', 'sandbox template not found')
     }
-    let config: Record<string, JsonValue> = {
-      mode: 'read',
-      mounts: { '/home/user': { vfs: 'ram', mode: 'write' } },
-      env: { HOME: '/home/user' },
-    }
-    if (deps.template !== undefined) {
-      try {
-        config = (await deps.resources.getTemplate(deps.template)).config
-      } catch (error) {
-        if (error instanceof ResourceError) throw storeRefusal(error)
-        throw error
+    let config: Record<string, JsonValue>
+    try {
+      config = (await deps.resources.getTemplate(BASE_WORKSPACE_TEMPLATE)).config
+    } catch (error) {
+      if (!(error instanceof ResourceError)) throw error
+      if (error.code !== 'not_found') throw storeRefusal(error)
+      config = {
+        mode: 'read',
+        mounts: { '/home/user': { vfs: 'ram', mode: 'write' } },
+        env: { HOME: '/home/user' },
       }
     }
     const entry = await createEphemeralWorkspace(deps, req, reply, config)
     void reply.status(201)
-    return present(sandboxes.add(entry, envVars, timeout), template)
+    return present(sandboxes.add(entry, envVars, timeout))
   })
   app.post<{ Params: SandboxParams }>(CONNECT, { bodyLimit: MAX_REQUEST_PART }, (req, reply) => {
     const input = ConnectSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
@@ -402,7 +397,7 @@ export function router(
     }
     const lease = sandboxes.reconnect(req.params.id, req.account, timeout)
     if (lease === null) throw missingSandbox()
-    return present(lease, template)
+    return present(lease)
   })
   app.post<{ Params: SandboxParams }>(
     SET_TIMEOUT,

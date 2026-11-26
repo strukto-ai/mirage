@@ -41,6 +41,7 @@ from mirage.utils.ids import new_workspace_id
 logger = logging.getLogger(__name__)
 
 BASE_TEMPLATE = "base"
+BASE_WORKSPACE_TEMPLATE = "e2b-base"
 DEFAULT_TIMEOUT = 300
 ENVD_VERSION = "0.5.6"
 FILES = "/files"
@@ -261,10 +262,10 @@ def sandbox_workspace(scope: Scope) -> str | None:
     return None
 
 
-def _present(lease: Sandbox, template: str) -> dict[str, str]:
+def _present(lease: Sandbox) -> dict[str, str]:
     return {
         "sandboxID": lease.entry.id,
-        "templateID": template,
+        "templateID": BASE_TEMPLATE,
         "clientID": lease.entry.id,
         "envdVersion": ENVD_VERSION,
         "envdAccessToken": lease.access_token,
@@ -303,19 +304,22 @@ async def create_sandbox(
         return unsupported_lifecycle(
             f"sandbox create option is unsupported: {unsupported}"
         )
-    override: str | None = request.app.state.e2b_template
-    template = override or BASE_TEMPLATE
-    if req.template not in (BASE_TEMPLATE, template):
+    if req.template != BASE_TEMPLATE:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox template not found")
-    if override is None:
-        written: dict[str, Any] = {
+    try:
+        config, written = await template_config(
+            request, BASE_WORKSPACE_TEMPLATE
+        )
+    except HttpError as exc:
+        if exc.code != ErrorCode.NOT_FOUND:
+            raise
+        logger.debug("using the built-in E2B base because %s", exc.message)
+        written = {
             "mode": "read",
             "mounts": {"/home/user": {"vfs": "ram", "mode": "write"}},
             "env": {"HOME": "/home/user"},
         }
         config = check_config(written)
-    else:
-        config, written = await template_config(request, override)
     entry = await open_workspace(
         request, response, new_workspace_id(), config, written, ephemeral=True
     )
@@ -323,7 +327,7 @@ async def create_sandbox(
         await request.app.state.registry.remove(entry.id)
         raise HttpError(ErrorCode.SHUTTING_DOWN, "server is shutting down")
     sandboxes: Sandboxes = request.app.state.e2b
-    return _present(sandboxes.add(entry, req.env_vars, req.timeout), template)
+    return _present(sandboxes.add(entry, req.env_vars, req.timeout))
 
 
 @router.post("/v2/sandboxes/{sandbox_id}/connect", response_model=None)
@@ -341,7 +345,7 @@ async def connect_sandbox(
     lease = sandboxes.reconnect(sandbox_id, request.state.account, req.timeout)
     if lease is None:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox not found")
-    return _present(lease, request.app.state.e2b_template or BASE_TEMPLATE)
+    return _present(lease)
 
 
 @router.post("/sandboxes/{sandbox_id}/timeout", status_code=204)

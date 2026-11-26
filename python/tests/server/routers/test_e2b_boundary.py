@@ -10,7 +10,6 @@ from tests.server.routers.e2b_test_support import (
     NATIVE,
     PROCESS,
     SECRET,
-    TEMPLATE,
     TOKEN,
     account_key,
     data_headers,
@@ -145,7 +144,7 @@ async def test_verified_sandbox_routes_share_the_native_workspace_limit(
 async def test_files_list_to_requested_depth_without_following_symlinks(
     tmp_path,
 ):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -198,7 +197,7 @@ async def test_move_reuses_workspace_rename(tmp_path):
     resources = memory_resource_store()
     await resources.create_template(
         TemplateInput(
-            name=TEMPLATE,
+            name="e2b-base",
             config={
                 "mounts": {
                     "/home/user": {"vfs": "ram", "mode": "write"},
@@ -210,7 +209,6 @@ async def test_move_reuses_workspace_rename(tmp_path):
     async with server(
         tmp_path,
         auth_config=TOKEN,
-        e2b_template=TEMPLATE,
         resource_store=resources,
     ) as (_, client):
         headers = await sandbox_headers(client)

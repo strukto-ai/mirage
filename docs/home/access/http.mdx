@@ -110,9 +110,17 @@ export E2B_API_KEY='replace-with-your-token'
 ```
 
 If the integration passes URLs or a key in code, update those values there.
-Use `base` if it specifies a template.
-Each sandbox gets a workspace with a writable, in-memory `/home/user`.
-To use a saved workspace template, set `MIRAGE_E2B_TEMPLATE` to its name on the server.
+Use `base` if it specifies a template. The built-in `base` workspace has a
+writable, in-memory `/home/user`.
+
+To customize `base`, name the workspace template `e2b-base` and register it with
+`mirage api /v1/templates --input ./e2b-base.yaml`.
+With the default file store, place `e2b-base.yaml` in the server's
+`~/.mirage/resources/template/` directory, or under
+`$MIRAGE_HOME/resources/template/` if you set `MIRAGE_HOME`.
+Mirage checks for it when a sandbox is created and uses the built-in workspace
+if it's absent. Set `env.HOME` to `/home/user` and include a writable mount there
+so shell and SDK-relative file paths agree.
 
 Run this example in the same client environment with the Python E2B SDK installed.
 

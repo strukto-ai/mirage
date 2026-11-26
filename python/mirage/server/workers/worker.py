@@ -199,7 +199,7 @@ class ThreadWorker(Worker):
         app = build_app(
             max_workspaces=sys.maxsize,
             forwarded_allow_ips=["*"],
-            e2b_template="",
+            e2b_port=False,
         )
         self._server = uvicorn.Server(
             uvicorn.Config(app, uds=self.socket, log_level="warning")

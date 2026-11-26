@@ -125,7 +125,7 @@ else:
         # A process worker: as many workspaces as the daemon sends it, the
         # daemon keeping the cap, idle exit and pid file.
         threading.Thread(target=_watch_daemon, daemon=True).start()
-        app = build_app(max_workspaces=sys.maxsize, e2b_template="")
+        app = build_app(max_workspaces=sys.maxsize, e2b_port=False)
     else:
         app = build_app(
             idle_grace_seconds=_idle_grace,

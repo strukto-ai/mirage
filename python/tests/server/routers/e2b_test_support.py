@@ -7,13 +7,10 @@ from unittest.mock import patch
 import jwt
 from httpx import ASGITransport, AsyncClient
 
-from mirage.resources.memory import memory_resource_store
-from mirage.resources.types import TemplateInput
 from mirage.server import app as app_module
 from mirage.server.app import build_app
 from mirage.server.auth import AuthConfig, AuthMode
 
-TEMPLATE = "approved"
 KEY = {"X-API-Key": "server-key"}
 TOKEN = AuthConfig(mode=AuthMode.TOKEN, bearer_token=KEY["X-API-Key"])
 CREATE = "/v2/sandboxes"
@@ -24,17 +21,6 @@ NATIVE = "http://native"
 
 @asynccontextmanager
 async def server(tmp_path, *, resource_store=None, e2b_port=8766, **kwargs):
-    if resource_store is None:
-        resource_store = memory_resource_store()
-        await resource_store.create_template(
-            TemplateInput(
-                name=TEMPLATE,
-                config={
-                    "mounts": {"/home/user": {"vfs": "ram", "mode": "WRITE"}},
-                    "store": {"type": "disk", "root": str(tmp_path / "named")},
-                },
-            )
-        )
     app = build_app(
         state_root=tmp_path / "daemon",
         resource_store=resource_store,

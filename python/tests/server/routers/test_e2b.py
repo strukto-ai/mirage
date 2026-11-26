@@ -15,7 +15,6 @@ from tests.server.routers.e2b_test_support import (
     NATIVE,
     PROCESS,
     SECRET,
-    TEMPLATE,
     TOKEN,
     account_key,
     data_headers,
@@ -29,8 +28,8 @@ from tests.server.routers.e2b_test_support import (
 
 @pytest.mark.asyncio
 async def test_api_key_scope_and_explicit_disable(tmp_path, monkeypatch):
-    monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", TEMPLATE)
-    async with server(tmp_path, e2b_template="") as (_, client):
+    monkeypatch.setenv("MIRAGE_E2B_PORT", "08766")
+    async with server(tmp_path, e2b_port=False) as (_, client):
         assert (await client.post(CREATE, headers=KEY)).status_code == 404
         assert (await client.get("/health")).status_code == 404
         assert (
@@ -38,8 +37,10 @@ async def test_api_key_scope_and_explicit_disable(tmp_path, monkeypatch):
                 "/sandboxes/missing/timeout", headers=KEY, json={"timeout": 1}
             )
         ).status_code == 404
-    monkeypatch.delenv("MIRAGE_E2B_TEMPLATE")
-    monkeypatch.delenv("MIRAGE_E2B_PORT", raising=False)
+    async with server(tmp_path, e2b_port=None) as (app, client):
+        assert app.state.e2b_port == 8766
+        assert (await client.post(CREATE, headers=KEY)).status_code == 401
+    monkeypatch.delenv("MIRAGE_E2B_PORT")
     async with server(tmp_path, e2b_port=None) as (app, client):
         assert app.state.e2b_app is None
         assert (await client.post(CREATE, headers=KEY)).status_code == 404
@@ -71,30 +72,84 @@ async def test_api_key_scope_and_explicit_disable(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_environment_override_uses_the_saved_template(
+async def test_base_uses_the_default_saved_template_file(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", f" {TEMPLATE} ")
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv("MIRAGE_RESOURCE_STORE", raising=False)
+    path = tmp_path / "resources" / "template" / "e2b-base.yaml"
+    path.parent.mkdir(parents=True)
     async with server(tmp_path, auth_config=TOKEN) as (_, client):
+        path.write_text(
+            "name: e2b-base\n"
+            "config:\n"
+            "  mounts:\n"
+            "    /home/user:\n"
+            "      vfs: ram\n"
+            "      mode: write\n"
+            "    /saved:\n"
+            "      vfs: ram\n"
+        )
+        reserved = await client.post(
+            CREATE, headers=KEY, json={"templateID": "e2b-base"}
+        )
+        assert reserved.status_code == 404
+        assert reserved.json()["code"] == 404
+
         created = await client.post(CREATE, headers=KEY)
         assert created.status_code == 201, created.text
-        assert created.json()["templateID"] == TEMPLATE
-    async with server(
-        tmp_path, auth_config=TOKEN, resource_store=memory_resource_store()
-    ) as (_, client):
-        missing = await client.post(CREATE, headers=KEY)
-        assert missing.status_code == 404
-        assert missing.json()["code"] == 404
+        sandbox = created.json()
+        assert sandbox["templateID"] == "base"
+        wid = sandbox["sandboxID"]
+        detail = await client.get(
+            f"{NATIVE}/v1/workspaces/{wid}",
+            headers={"Authorization": "Bearer server-key"},
+        )
+        assert detail.status_code == 200, detail.text
+        assert "/saved/" in [
+            mount["prefix"] for mount in detail.json()["mounts"]
+        ]
+
+        path.unlink()
+        connected = await client.post(f"{CREATE}/{wid}/connect", headers=KEY)
+        assert connected.status_code == 200
+        assert connected.json() == sandbox
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "name: e2b-base\nconfig: [\n",
+        "name: e2b-base\nconfig:\n  mounts: 123\n",
+    ],
+    ids=["malformed-record", "invalid-config"],
+)
+@pytest.mark.asyncio
+async def test_invalid_saved_base_refuses_creation(
+    tmp_path, monkeypatch, content
+):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv("MIRAGE_RESOURCE_STORE", raising=False)
+    path = tmp_path / "resources" / "template" / "e2b-base.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(content)
+
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
+        response = await client.post(CREATE, headers=KEY)
+        assert response.status_code == 400, response.text
+        assert response.json()["code"] == 400
+        assert not app.state.registry.list()
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
+async def test_lifecycle_respects_capacity_and_owner(tmp_path):
     auth = AuthConfig(
         mode=AuthMode.JWT, jwt=JWTConfig(algorithm="HS256", key=SECRET)
     )
-    async with server(
-        tmp_path, e2b_template=TEMPLATE, auth_config=auth, max_workspaces=1
-    ) as (app, client):
+    async with server(tmp_path, auth_config=auth, max_workspaces=1) as (
+        app,
+        client,
+    ):
         alice_key = account_key("alice")
         alice = {"X-API-Key": alice_key}
         bob = {"X-API-Key": account_key("bob")}
@@ -112,7 +167,7 @@ async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
         assert response.status_code == 201, response.text
         created = response.json()
         wid = created["sandboxID"]
-        assert created["templateID"] == TEMPLATE
+        assert created["templateID"] == "base"
         assert created["clientID"]
         assert created["envdVersion"] == "0.5.6"
         assert created["envdAccessToken"]
@@ -146,9 +201,7 @@ async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
         assert (
             await client.get(f"{NATIVE}/v1/workspaces/{wid}", headers=native)
         ).status_code == 404
-        created_again = await client.post(
-            CREATE, headers=alice, json={"templateID": TEMPLATE}
-        )
+        created_again = await client.post(CREATE, headers=alice)
         assert created_again.status_code == 201
         live_at_shutdown = created_again.json()["sandboxID"]
         assert live_at_shutdown != wid
@@ -158,7 +211,7 @@ async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
         )
         assert list(tmp_path.iterdir()) == []
 
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=auth) as (
+    async with server(tmp_path, auth_config=auth) as (
         _,
         client,
     ):
@@ -178,7 +231,7 @@ async def test_lifecycle_uses_template_capacity_and_owner(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lifecycle_validates_sdk_input(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -203,7 +256,6 @@ class DenyCreation(Policy):
 async def test_lifecycle_respects_workspace_admission(tmp_path):
     async with server(
         tmp_path,
-        e2b_template=TEMPLATE,
         auth_config=TOKEN,
         policies=[DenyCreation()],
     ) as (app, client):
@@ -216,21 +268,14 @@ async def test_lifecycle_respects_workspace_admission(tmp_path):
         assert not app.state.registry.list()
 
 
-@pytest.mark.parametrize("template_env", [None, "  "])
 @pytest.mark.asyncio
-async def test_builtin_base_has_a_fresh_writable_ram_mount(
-    tmp_path, monkeypatch, template_env
-):
+async def test_builtin_base_has_a_fresh_writable_ram_mount(tmp_path):
     resources = memory_resource_store()
-    if template_env is None:
-        monkeypatch.delenv("MIRAGE_E2B_TEMPLATE", raising=False)
-    else:
-        monkeypatch.setenv("MIRAGE_E2B_TEMPLATE", template_env)
-        await resources.create_template(
-            TemplateInput(
-                name="base", config={"mounts": {"/other": {"vfs": "ram"}}}
-            )
+    await resources.create_template(
+        TemplateInput(
+            name="base", config={"mounts": {"/other": {"vfs": "ram"}}}
         )
+    )
     async with server(
         tmp_path, auth_config=TOKEN, resource_store=resources
     ) as (_, client):
@@ -287,7 +332,7 @@ async def test_builtin_base_has_a_fresh_writable_ram_mount(
 async def test_process_streams_both_outputs_and_uses_per_call_environment(
     tmp_path,
 ):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -330,7 +375,7 @@ async def test_process_streams_both_outputs_and_uses_per_call_environment(
 
 @pytest.mark.asyncio
 async def test_process_requires_the_addressed_sandbox_token(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -418,7 +463,7 @@ async def test_revocation_replies_while_the_request_body_is_incomplete(
 
 @pytest.mark.asyncio
 async def test_process_checks_lease_again_after_the_upload(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -439,7 +484,7 @@ async def test_process_checks_lease_again_after_the_upload(tmp_path):
 
 @pytest.mark.asyncio
 async def test_process_rejects_wrong_media_and_malformed_framing(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -469,7 +514,7 @@ async def test_process_rejects_wrong_media_and_malformed_framing(tmp_path):
 
 @pytest.mark.asyncio
 async def test_process_refuses_new_commands_while_draining(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         app,
         client,
     ):
@@ -503,7 +548,7 @@ async def test_process_refuses_new_commands_while_draining(tmp_path):
 
 @pytest.mark.asyncio
 async def test_process_enforces_connect_deadline(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -537,7 +582,7 @@ async def test_process_enforces_connect_deadline(tmp_path):
 async def test_process_streams_before_completion_and_cancels_on_disconnect(
     tmp_path,
 ):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         app,
         client,
     ):
@@ -615,7 +660,6 @@ class DenyTouch(Policy):
 async def test_process_respects_workspace_command_policy(tmp_path):
     async with server(
         tmp_path,
-        e2b_template=TEMPLATE,
         auth_config=TOKEN,
         policies=[DenyTouch()],
     ) as (_, client):
@@ -636,7 +680,7 @@ async def test_process_respects_workspace_command_policy(tmp_path):
 
 @pytest.mark.asyncio
 async def test_files_follow_the_same_live_lease_and_virtual_paths(tmp_path):
-    async with server(tmp_path, auth_config=TOKEN, e2b_template=TEMPLATE) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):
@@ -817,7 +861,7 @@ async def test_file_request_finishing_its_body_after_kill_is_refused(tmp_path):
 
 @pytest.mark.asyncio
 async def test_files_protect_the_mount_a_directory_resolves_to(tmp_path):
-    async with server(tmp_path, e2b_template=TEMPLATE, auth_config=TOKEN) as (
+    async with server(tmp_path, auth_config=TOKEN) as (
         _,
         client,
     ):

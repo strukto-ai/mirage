@@ -23,13 +23,7 @@ import {
   type MirageApp,
 } from '../app.ts'
 import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
-import {
-  ENV_DAEMON_PORT,
-  ENV_E2B_PORT,
-  ENV_E2B_TEMPLATE,
-  ENV_IDLE_GRACE_SECONDS,
-  ENV_WORKER_SOCKET,
-} from '../env.ts'
+import { ENV_DAEMON_PORT, ENV_E2B_PORT, ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET } from '../env.ts'
 import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validation.ts'
 import { pidFilePath, mirageHome } from '../paths.ts'
 import { resolveGracefulTimeout, resolveMaxWorkspaces } from '../registry.ts'
@@ -52,11 +46,9 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
   const port = Number(env[ENV_DAEMON_PORT] ?? configPort ?? DEFAULT_PORT)
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
   const e2bPort = resolveE2bPort(undefined, env)
-  const e2bTemplate = env[ENV_E2B_TEMPLATE]?.trim() ?? ''
   const opts: Omit<BuildAppOptions, 'onIdleExit'> = {
     idleGraceSeconds,
     ...(e2bPort === undefined ? {} : { e2bPort }),
-    ...(e2bTemplate === '' ? {} : { e2bTemplate }),
   }
   return { port, opts }
 }
@@ -69,7 +61,7 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
  */
 async function serveWorker(socket: string): Promise<void> {
   const { opts } = buildDaemonOpts(process.env)
-  const app = buildApp({ ...opts, maxWorkspaces: Number.MAX_SAFE_INTEGER, e2bTemplate: '' })
+  const app = buildApp({ ...opts, maxWorkspaces: Number.MAX_SAFE_INTEGER, e2bPort: false })
   let exiting = false
   const stop = (): void => {
     if (exiting) return

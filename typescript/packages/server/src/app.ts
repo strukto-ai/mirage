@@ -88,7 +88,7 @@ import {
 import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
-import { ENV_E2B_PORT, ENV_E2B_TEMPLATE } from './env.ts'
+import { ENV_E2B_PORT } from './env.ts'
 import { Sandboxes } from './e2b/leases.ts'
 import { CONNECT_STREAM } from './e2b/process.ts'
 import {
@@ -194,10 +194,8 @@ export interface BuildAppOptions {
    * config key, else files under the mirage home.
    */
   resourceStore?: ResourceStore
-  /** Loopback HTTP port for E2B. Undefined reads `MIRAGE_E2B_PORT`. */
-  e2bPort?: number
-  /** Saved workspace template for E2B. Defaults to `MIRAGE_E2B_TEMPLATE` or the built-in base. */
-  e2bTemplate?: string
+  /** Loopback HTTP port for E2B. Undefined reads `MIRAGE_E2B_PORT`. False disables the listener. */
+  e2bPort?: number | false
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -370,9 +368,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
   const check = authenticator(authConfig)
-  const configuredTemplate = options.e2bTemplate?.trim()
-  const e2bPort = configuredTemplate === '' ? undefined : resolveE2bPort(options.e2bPort)
-  const e2bTemplate = configuredTemplate ?? process.env[ENV_E2B_TEMPLATE]?.trim()
+  const e2bPort = options.e2bPort === false ? undefined : resolveE2bPort(options.e2bPort)
   const stateRoot = stateRootPath(options.stateRoot)
   const host: ServerHost = {
     Workspace,
@@ -491,7 +487,6 @@ export function buildApp(options: BuildAppOptions = {}) {
       host,
       resources,
       snapshotStore: options.snapshotStore,
-      template: e2bTemplate === '' ? undefined : e2bTemplate,
       sandboxes,
     })
     listenTogether(app, e2b, port)

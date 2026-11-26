@@ -186,7 +186,7 @@ it('shares the native workspace limit with verified sandbox routes', async () =>
 it('moves entries through the workspace filesystem', async () => {
   const resourceStore = memoryResourceStore()
   await resourceStore.createTemplate({
-    name: 'approved',
+    name: 'e2b-base',
     description: null,
     config: {
       mounts: {
@@ -195,7 +195,7 @@ it('moves entries through the workspace filesystem', async () => {
       },
     },
   })
-  const { app } = await setup({ e2bTemplate: 'approved', resourceStore })
+  const { app } = await setup({ resourceStore })
   const headers = dataHeaders(await create(app))
   await runCommand(app, headers, 'printf value > old')
   const cross = await e2bListener(app).inject({
