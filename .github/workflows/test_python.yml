@@ -458,6 +458,21 @@ jobs:
           spec.loader.exec_module(plugin)
           assert callable(plugin.register)
           PY
+          # hermes' catalog gate on the plugin folder, called the way hermes' own plugin-validate action calls it.
+          "$HERMES_PYTHON" -I -m hermes_cli.main plugins validate ../plugins/hermes
+          # That gate reads the plugin folder only, and the backend's code ships in mirage-ai, so hermes' public-API check runs on that code here.
+          "$HERMES_PYTHON" - <<'PY'
+          from pathlib import Path
+
+          from hermes_cli.plugin_validate_private_imports import (
+              private_attribute_findings,
+              private_import_findings,
+          )
+
+          backend = Path("mirage/agents/hermes")
+          found = private_import_findings(backend) + private_attribute_findings(backend)
+          assert not found, found
+          PY
           "$HERMES_PYTHON" -m pytest tests/agents/hermes -p no:cacheprovider -rs
 
       # Informational: a fresh advisory reports without failing the job.

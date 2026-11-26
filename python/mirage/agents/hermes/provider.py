@@ -23,7 +23,7 @@ from typing import Any
 
 from agent.secret_scope import current_secret_scope_home, get_secret
 from agent.terminal_env_provider import TerminalEnvironmentProvider
-from hermes_cli.plugins_context import PluginContext
+from hermes_cli.plugins import PluginContext
 
 from mirage.agents.hermes.constants import (
     BACKEND,
