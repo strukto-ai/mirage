@@ -66,7 +66,7 @@ async function listAsks(
   }>,
 ): Promise<AskList> {
   // The workspace's asks: pending by default, every decision under
-  // all=true. The ledger already serves both views from one store,
+  // all=true. The decisions already serve both views from one store,
   // so the entry point only picks which query to run. A mistyped
   // session filter is the caller's error, answered in the sessions
   // router's voice rather than as a 500.

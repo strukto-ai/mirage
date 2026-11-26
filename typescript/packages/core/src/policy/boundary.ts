@@ -24,7 +24,7 @@ import type { VfsCall } from '../vfs/types.ts'
 /** The POSIX policy boundary for dispatched filesystem operations: the
  * ordered builtin and user policies, the owning mount prefix, its
  * configured mode (the authorization ceiling), the session whose grants
- * govern the op, the approval ledger a path rule that asks is put to
+ * govern the op, the decisions a path rule that asks is put to
  * where no line is running, and who makes the op (without one, the gates
  * read the async context's). Mirrors Python's Boundary. */
 export class Boundary {

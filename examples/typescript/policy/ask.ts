@@ -45,7 +45,7 @@ const ROLE = SessionProfile(
 );
 
 /**
- * The host answering inline: the ledger awaits this while the line
+ * The host answering inline: the decisions await this while the line
  * waits, the way a tool-approval prompt works. ALLOW at ONCE passes this
  * line only; SESSION would pass every rm for the rest of the session.
  */

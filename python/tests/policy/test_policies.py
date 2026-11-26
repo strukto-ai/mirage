@@ -567,8 +567,8 @@ async def test_a_deny_anywhere_in_the_chain_outranks_an_ask():
 
 
 @pytest.mark.asyncio
-async def test_an_op_ask_with_no_ledger_refuses_like_a_deny():
-    # An entry point that cannot put the question (no ledger) refuses it, in
+async def test_an_op_ask_with_no_decisions_refuses_like_a_deny():
+    # An entry point that cannot put the question (no decisions) refuses it, in
     # the deny voice, with the reason on the record.
     policies = Policies([AskOnOps()])
     with pytest.raises(PolicyDenied) as info:

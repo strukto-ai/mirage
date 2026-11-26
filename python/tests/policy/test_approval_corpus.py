@@ -93,7 +93,7 @@ async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
             scope=Scope(value.get("scope", "once")),
         )
 
-    ledger = Decisions(sessions, answer if "answers" in case else None)
+    decisions = Decisions(sessions, answer if "answers" in case else None)
     rules = tuple(
         CommandRule(reason=reason, commands=("git push",))
         for reason in case.get("rules", ["first"])
@@ -134,27 +134,27 @@ async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
                 else None
             )
             action = (
-                await ledger.resolve(ctx, ask, claimant=claimant)
+                await decisions.resolve(ctx, ask, claimant=claimant)
                 if op == "resolve"
-                else ledger.held(ctx, ask, claimant)
+                else decisions.held(ctx, ask, claimant)
             )
         elif op == "answer":
-            records = ledger.list("s")
-            await ledger.answer(
+            records = decisions.list("s")
+            await decisions.answer(
                 records[step.get("record", 0)].id,
                 Outcome(step["outcome"]),
                 Scope(step.get("scope", "once")),
             )
         elif op == "split":
-            holders[step["target"]] = ledger.split(
+            holders[step["target"]] = decisions.split(
                 "s", holders[step["holder"]], occurrences[step["at"]]
             )
         elif op == "hand_up":
-            ledger.hand_up("s", holders[step["holder"]])
+            decisions.hand_up("s", holders[step["holder"]])
         elif op == "release":
-            ledger.release("s", holders[step["holder"]])
+            decisions.release("s", holders[step["holder"]])
         elif op == "revoke":
-            await ledger.revoke("s", holders[step["holder"]])
+            await decisions.revoke("s", holders[step["holder"]])
         else:
             raise AssertionError(f"unknown approval corpus operation {op}")
         outcome: dict[str, str] = {"kind": "ok"}
@@ -171,7 +171,7 @@ async def observations(case: dict[str, Any]) -> list[dict[str, Any]]:
                 outcome = {"kind": "abandoned"}
             else:
                 outcome = {"kind": "allow"}
-        records = ledger.list("s")
+        records = decisions.list("s")
         observed: dict[str, Any] = {
             "result": outcome,
             "records": [_record(record) for record in records],
@@ -238,7 +238,7 @@ async def test_main_saved_grant_hydrates_and_checks_without_store_io() -> None:
     await sessions.ensure_loaded()
     assert (store.reads, store.writes) == (1, 1)
     baseline = (store.reads, store.writes)
-    ledger = Decisions(sessions)
+    decisions = Decisions(sessions)
     ctx = CommandContext(
         command="git", argv=("push",), paths=(), cwd="/repo", session_id="s"
     )
@@ -246,8 +246,8 @@ async def test_main_saved_grant_hydrates_and_checks_without_store_io() -> None:
         "first", rule=CommandRule(reason="first", commands=("git push",))
     )
     for _ in range(3):
-        assert await ledger.resolve(ctx, ask) is None
-        assert ledger.held(ctx, ask) is None
+        assert await decisions.resolve(ctx, ask) is None
+        assert decisions.held(ctx, ask) is None
     await sessions.flush()
     assert (store.reads, store.writes) == baseline
     assert sessions.get("s").to_dict()["decisions"] == saved["decisions"]

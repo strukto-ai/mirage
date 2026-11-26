@@ -51,7 +51,7 @@ const RECENT_DAYS = 5
 // remove needs a human, but only inside /tmp: the `mounts` section gives
 // /tmp a tree of its own, so the run's own /redis cleanup is not caught
 // by it. Nothing here composes an approval channel, so an asked line has
-// nobody to reach and waits in the ledger instead.
+// nobody to reach and waits among the decisions instead.
 const ROLE = SessionProfile(
   {
     commands: {
@@ -175,7 +175,7 @@ async function runFromSlack(ctx: Context, channel: string): Promise<void> {
 }
 
 // allow / ask / deny — the role above, enforced. A denied line is refused
-// at 126; an asked line has nobody to ask, so it waits in the ledger for
+// at 126; an asked line has nobody to ask, so it waits among the decisions for
 // a host to answer; and `explain` says what a line would do without
 // running it or raising a question against it.
 async function permissions(ctx: Context): Promise<void> {

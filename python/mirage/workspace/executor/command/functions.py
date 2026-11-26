@@ -87,8 +87,8 @@ async def run_shell_function(
 
     The value's ``job_table`` is the job plane for a body statement
     ending in ``&``; its ``handed`` holds the approval claims a job
-    inherits and its registry's ``decisions`` the ledger that holds
-    them; its ``sink`` is where each statement writes as it finishes
+    inherits and its registry's ``decisions`` hold them for it; its
+    ``sink`` is where each statement writes as it finishes
     (None returns the body's output). The body runs on one value of its
     own, on the function's hand-off, so its commands, its jobs and its
     ERR and RETURN actions are all judged under that hand-off; an action

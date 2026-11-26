@@ -287,7 +287,7 @@ export interface Walked {
 
 /**
  * One command's explanation and where the command stands. The
- * occurrence is what the pass hands the ledger beside the explanation:
+ * occurrence is what the pass hands the decisions beside the explanation:
  * a grant claimed for the command is bound to it, so the gate that runs
  * the same occurrence finds it and no other reader does. `stated` says
  * whether the gate will read the command in the words the pass read:
@@ -310,7 +310,7 @@ export interface Judged {
   /**
    * The context the chain was shown, absent for a command refused before
    * it, so the pass that admits the line before placement can put the
-   * command's question to the ledger without asking the chain again.
+   * command's question to the decisions without asking the chain again.
    */
   readonly ctx?: CommandContext
   /**
@@ -1628,7 +1628,7 @@ export async function prejudgeLine(
 }
 
 /**
- * One judged command put through the ledger, as the gate puts it. A command
+ * One judged command put through the decisions, as the gate puts it. A command
  * refused before any policy was asked (`Judged.ctx` absent) stands as
  * judged. Otherwise the chain's answer the judgment recorded is the gate's,
  * and its Ask is answered from the session's grants or the host and claimed
@@ -1779,7 +1779,7 @@ export async function offLineRefusal(
  * ask's settled record is read without being spent (`Decisions.held`), so
  * the gate that then runs the line consumes the same answer, in its own
  * voice and behind the line's redirections; an unanswered rule is raised
- * through the same ledger the gate reads, so the answer lands exactly once
+ * through the same decisions the gate reads, so the answer lands exactly once
  * and the gate does not ask again.
  */
 async function verdictRefuses(
@@ -1853,7 +1853,7 @@ function soleLiteralCommand(
 
 /**
  * Whether one walked command is refused on its text, resolving an
- * unanswered ask through the ledger the gate reads. `line` says the
+ * unanswered ask through the decisions the gate reads. `line` says the
  * command is the whole line, which runs nothing at all once a tree's root
  * refuses it.
  */
@@ -1912,7 +1912,7 @@ async function commandRefused(
  * an effect: contacting a secret store for a line the host then
  * refuses would do a piece of exactly what was refused. A settled
  * answer is read without being spent; an unanswered rule is put to the
- * host now, through the same ledger the gate reads, so the answer
+ * host now, through the same decisions the gate reads, so the answer
  * lands exactly once -- an approval keeps the node and the gate
  * consumes the grant, while a denial or a question left waiting drops
  * it, and the line still runs into the gate, which refuses in place

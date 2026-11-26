@@ -499,15 +499,15 @@ async def test_a_view_reports_the_lifetime_its_listings_get(kind):
         await store.close()
 
 
-def _gone_ledger() -> tuple[
+def _evicted() -> tuple[
     list[Evicted], Callable[[list[Evicted]], Awaitable[None]]
 ]:
-    ledger: list[Evicted] = []
+    evicted: list[Evicted] = []
 
     async def on_gone(gone: list[Evicted]) -> None:
-        ledger.extend(gone)
+        evicted.extend(gone)
 
-    return ledger, on_gone
+    return evicted, on_gone
 
 
 def _child(name: str, kind: str = "file") -> FileStat:
@@ -520,7 +520,7 @@ def _child(name: str, kind: str = "file") -> FileStat:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["ram", "fake-redis", "redis"])
 async def test_the_view_hands_each_dropped_child_to_cleanup(kind):
-    ledger, on_gone = _gone_ledger()
+    evicted, on_gone = _evicted()
     async with _store(kind, 600) as store:
         view = IndexView(
             store, RAMFileCacheStore(), "/data", _owns_all, on_gone=on_gone
@@ -529,7 +529,7 @@ async def test_the_view_hands_each_dropped_child_to_cleanup(kind):
             "/data", [("a", _child("a")), ("sub", _child("sub", "folder"))]
         )
         await view.set_dir("/data", [])
-        assert ledger == [
+        assert evicted == [
             Evicted("/data/a", folder=False),
             Evicted("/data/sub", folder=True),
         ]
@@ -537,7 +537,7 @@ async def test_the_view_hands_each_dropped_child_to_cleanup(kind):
 
 @pytest.mark.asyncio
 async def test_a_window_hands_nothing_to_cleanup():
-    ledger, on_gone = _gone_ledger()
+    evicted, on_gone = _evicted()
     view = IndexView(
         RAMIndexCacheStore(),
         RAMFileCacheStore(),
@@ -547,14 +547,14 @@ async def test_a_window_hands_nothing_to_cleanup():
     )
     await view.set_dir("/data", [("a", _child("a"))])
     await view.set_dir("/data", [], window=True)
-    assert ledger == []
+    assert evicted == []
 
 
 @pytest.mark.asyncio
 async def test_cleanup_skips_a_key_the_mount_no_longer_owns():
     # A nested mount took /data/n after the parent listed it: its bytes and
     # overlay are that mount's now.
-    ledger, on_gone = _gone_ledger()
+    evicted, on_gone = _evicted()
     owned = {"/data", "/data/a", "/data/n"}
     view = IndexView(
         RAMIndexCacheStore(),
@@ -569,14 +569,14 @@ async def test_cleanup_skips_a_key_the_mount_no_longer_owns():
     assert await view.set_dir("/data", []) == [
         Evicted("/data/a", folder=False)
     ]
-    assert ledger == [Evicted("/data/a", folder=False)]
+    assert evicted == [Evicted("/data/a", folder=False)]
 
 
 @pytest.mark.asyncio
 async def test_cleanup_rechecks_ownership_after_the_write():
     # The mount table can change between the fenced write and the cleanup
     # that follows it; the second check is the one that counts.
-    ledger, on_gone = _gone_ledger()
+    evicted, on_gone = _evicted()
     owned = {"/data", "/data/a"}
     store = RAMIndexCacheStore()
     view = IndexView(
@@ -596,7 +596,7 @@ async def test_cleanup_rechecks_ownership_after_the_write():
 
     store.set_dir = mount_then_write
     await view.set_dir("/data", [])
-    assert ledger == []
+    assert evicted == []
 
 
 @pytest.mark.asyncio
@@ -620,7 +620,7 @@ async def test_cleanup_runs_after_the_fence():
 
 @pytest.mark.asyncio
 async def test_report_gone_hands_owned_keys_to_cleanup():
-    ledger, on_gone = _gone_ledger()
+    evicted, on_gone = _evicted()
     view = IndexView(
         RAMIndexCacheStore(),
         RAMFileCacheStore(),
@@ -631,7 +631,7 @@ async def test_report_gone_hands_owned_keys_to_cleanup():
     await view.report_gone(
         [Evicted("/data/a", folder=False), Evicted("/data/n", folder=True)]
     )
-    assert ledger == [Evicted("/data/a", folder=False)]
+    assert evicted == [Evicted("/data/a", folder=False)]
 
 
 @pytest.mark.asyncio

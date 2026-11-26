@@ -404,7 +404,7 @@ def _root(prefix: str) -> PathSpec:
     return PathSpec(virtual=prefix, directory=prefix, vfs_path="")
 
 
-def _ledgered(store: RAMIndexCacheStore) -> tuple[list[Evicted], IndexView]:
+def _recording(store: RAMIndexCacheStore) -> tuple[list[Evicted], IndexView]:
     gone: list[Evicted] = []
 
     async def on_gone(children: list[Evicted]) -> None:
@@ -433,7 +433,7 @@ async def test_a_relisting_reports_what_left_the_repository(removed, reported):
     files = {"d1/a.txt": b"a", "d1/b.txt": b"b", "top.txt": b"t"}
     with serve(FakeGitHub(files=dict(files))) as gh:
         accessor = _served_accessor(gh)
-        gone, index = _ledgered(RAMIndexCacheStore())
+        gone, index = _recording(RAMIndexCacheStore())
         await _relist(accessor, index)
         assert gone == []
         for path in removed:

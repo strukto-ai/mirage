@@ -590,7 +590,7 @@ export class Workspace {
     )
     this.registry.policies.add(this.scriptPolicy)
     for (const entry of options.policies ?? []) this.registry.policies.add(entry)
-    // The approval ledger an Ask is taken to (design 3.9): grants live on
+    // The decisions an Ask is taken to (design 3.9): grants live on
     // the sessions, the host answers through `onAsk` (or just records
     // the question when none is wired) and reads `ws.decisions`.
     this.registry.policies.decisions = new Decisions(this.sessionManager, options.onAsk ?? null)
@@ -3336,7 +3336,7 @@ export class Session {
     return this.ws.getSession(this.sessionId)
   }
 
-  /** The workspace's approval ledger, which this session's asked commands and ops are recorded in. */
+  /** The workspace's decisions, which this session's asked commands and ops are recorded in. */
   get decisions(): Decisions {
     return this.ws.decisions
   }

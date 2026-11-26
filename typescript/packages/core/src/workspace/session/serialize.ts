@@ -152,7 +152,7 @@ export function scriptsFromDict(data: Record<string, ScriptJSON[]>): ProfileScri
   )
 }
 
-/** A ledger record as the session record stores it (the Python spelling). */
+/** A decision record as the session record stores it (the Python spelling). */
 export interface DecisionJSON {
   id: string
   session_id: string

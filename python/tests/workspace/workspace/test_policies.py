@@ -872,7 +872,7 @@ async def test_a_bare_deny_refuses_with_the_default_reason():
 
 
 # A per-command judge: deny cat under /data/sealed/ with a computed
-# reason, take shred to the approval ledger, stay silent otherwise. A
+# reason, take shred to the decisions, stay silent otherwise. A
 # program returns its answer, and None is silence.
 JUDGE = """
 def pre_command(ctx):

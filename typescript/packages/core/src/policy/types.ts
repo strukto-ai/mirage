@@ -184,14 +184,14 @@ export interface Ruling {
  * Go on only with a host approval. Every method may answer one.
  * `PermissionsPolicy` returns one for an ask leaf of a command tree, a custom
  * policy for a coded condition, and both route to the workspace's
- * decision ledger (`Decisions`). A Deny from any policy outranks it: the
+ * decisions (`Decisions`). A Deny from any policy outranks it: the
  * chain keeps looking past an Ask for a Deny, so an approval can never
  * re-open a refusal. A later Ask's rules are appended to the first one's
  * `rules`, so every Ask a method's chain answers is put to the host. A pre
  * method holds what it guards
  * until the host says yes; a post method holds back what came back, and
  * the approved rerun repeats the action. `rule` is the document rule
- * that asked, absent for a coded condition, for which the ledger keys a
+ * that asked, absent for a coded condition, for which the decisions key a
  * session answer on what was asked about. Mirrors the Python Ask.
  */
 export interface Ask {
@@ -240,7 +240,7 @@ export enum Scope {
 /**
  * One asked line, and the answer to it once a host gives one.
  *
- * The ledger's entry, and the only shape the permissions layer keeps
+ * An entry of the decisions, and the only shape the permissions layer keeps
  * about an ask. It is written when a rule asks and rewritten when a
  * host answers, so listing what is waiting and reading what was settled
  * are the same query over the same records rather than two stores that
@@ -276,7 +276,7 @@ export interface Decision {
  *
  * The pass computes one from the line's parse and the gate from the
  * node it runs, by one rule (`workspace/node/occurrence`), and the
- * ledger only compares them: a grant a pass claims is bound to the
+ * decisions only compare them: a grant a pass claims is bound to the
  * occurrence it judged, and offered to a reader at that occurrence
  * alone. So a word that expands at run time into the same command as a
  * literal spelling elsewhere on the line (`$S && cat secret`) cannot
@@ -349,13 +349,13 @@ export interface HandOff {
   readonly origin: Occurrence | null
 }
 
-/** The ledger owning a hand-off, compared only by identity. */
+/** The decisions owning a hand-off, compared only by identity. */
 export abstract class DecisionOwner {
   declare protected readonly decisionOwner: undefined
 }
 
 /**
- * Who reads the ledger: one command of one line. A judging pass and the
+ * Who reads the decisions: one command of one line. A judging pass and the
  * gate that runs the line name themselves the same way, so a grant the
  * pass claimed for a command is found by the gate for that command and
  * by no other reader. Mirrors the Python Claimant.
@@ -377,21 +377,21 @@ export interface Pending {
 
 /**
  * The question was abandoned: the run that raised it was killed while
- * the host was still deciding, so the ledger stopped waiting.
+ * the host was still deciding, so the decisions stopped waiting.
  *
  * The record is left waiting, and whatever the host eventually answers
  * is dropped rather than recorded — an answer banked against a run that
  * no longer exists would be taken by the next identical line with
  * nobody asked. The entry point turns this into the same abort every other
- * killed wait raises; the ledger states the fact in its own vocabulary
- * because execution is not its to know about.
+ * killed wait raises; the decisions state the fact in their own vocabulary
+ * because execution is not theirs to know about.
  */
 export interface Abandoned {
   kind: 'abandoned'
 }
 
 /**
- * The session questions the approval ledger asks. The SessionManager
+ * The session questions the decisions ask. The SessionManager
  * satisfies it structurally, so the dispatcher reads and writes a session's
  * grants by id without this package importing the workspace, and always
  * on the registered session rather than the fork a line may be running

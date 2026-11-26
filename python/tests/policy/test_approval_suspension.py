@@ -58,7 +58,7 @@ async def test_approval_state_is_visible_at_each_suspension() -> None:
         prompting.set()
         return await answer
 
-    ledger = Decisions(sessions, prompt)
+    decisions = Decisions(sessions, prompt)
     ctx = CommandContext(
         command="git", argv=("push",), paths=(), cwd="/repo", session_id="s"
     )
@@ -70,36 +70,36 @@ async def test_approval_state_is_visible_at_each_suspension() -> None:
         Claimant(HandOff(), occurrence),
         Claimant(HandOff(), occurrence),
     )
-    running = asyncio.create_task(ledger.resolve(ctx, ask, claimant=first))
+    running = asyncio.create_task(decisions.resolve(ctx, ask, claimant=first))
     try:
         await asyncio.wait_for(sessions.saving[0].wait(), 5)
-        assert len(ledger.pending("s")) == 1
+        assert len(decisions.pending("s")) == 1
         assert not prompting.is_set()
-        pending = ledger.held(ctx, ask, other)
+        pending = decisions.held(ctx, ask, other)
         assert isinstance(pending, Pending)
-        assert pending.id == ledger.pending("s")[0].id
+        assert pending.id == decisions.pending("s")[0].id
 
         sessions.resume[0].set()
         await asyncio.wait_for(prompting.wait(), 5)
-        assert isinstance(ledger.held(ctx, ask, other), Pending)
+        assert isinstance(decisions.held(ctx, ask, other), Pending)
         assert sessions.flushes == 1
 
         answer.set_result(
             dataclasses.replace(
-                ledger.pending("s")[0],
+                decisions.pending("s")[0],
                 outcome=Outcome.ALLOW,
                 scope=Scope.ONCE,
             )
         )
         await asyncio.wait_for(sessions.saving[1].wait(), 5)
-        assert ledger.held(ctx, ask, first) is None
-        assert isinstance(ledger.held(ctx, ask, other), Pending)
-        assert ledger.pending("s") == ()
+        assert decisions.held(ctx, ask, first) is None
+        assert isinstance(decisions.held(ctx, ask, other), Pending)
+        assert decisions.pending("s") == ()
 
         sessions.resume[1].set()
         assert await asyncio.wait_for(running, 5) is None
-        await ledger.revoke("s", first.line)
-        assert ledger.list("s") == ()
+        await decisions.revoke("s", first.line)
+        assert decisions.list("s") == ()
         assert sessions.flushes == 3
     finally:
         for resume in sessions.resume:

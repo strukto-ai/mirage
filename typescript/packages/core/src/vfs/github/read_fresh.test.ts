@@ -41,7 +41,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// create fetches the repository and its whole tree; the ledgers count what
+// create fetches the repository and its whole tree; the decisions count what
 // happens after that.
 async function vfsOf(): Promise<GitHubVFS> {
   const vfs = await GitHubVFS.create({

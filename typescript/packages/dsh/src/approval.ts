@@ -101,7 +101,7 @@ export function approverOf(ctx: Context): Approver | null {
  * ordinary name stays bare, and only a word a shell would read as
  * something else is dressed.
  *
- * @param record the ledger record being asked about.
+ * @param record the decision record being asked about.
  * @returns the prompt text.
  */
 export function approvalReason(record: Decision): string {
@@ -122,8 +122,8 @@ export function approvalReason(record: Decision): string {
  *   * `allowed-once` is dsh's only yes and grants exactly the line that
  *     asked, so it maps to ALLOW at ONCE and never SESSION. Widening one
  *     nod into a standing grant is the one thing the human did not
- *     consent to; a host that wants SESSION answers writes them to the
- *     ledger itself (`ws.decisions.answer`), the surface built for it.
+ *     consent to; a host that wants SESSION answers writes them into the
+ *     decisions themselves (`ws.decisions.answer`), the surface built for it.
  *   * `rejected` is an explicit refusal.
  *   * `cancelled` is a refusal too: the human was shown the prompt and
  *     dismissed it, which is an answer rather than the absence of one.
@@ -138,13 +138,13 @@ export function approvalReason(record: Decision): string {
  *
  * The run's own signal rides along, so a prompt raised for a line whose
  * run is then killed or times out is dismissed with it rather than left
- * on somebody's screen for a command that no longer exists. The ledger
- * stops waiting either way — it bounds the wait by the same signal — but
+ * on somebody's screen for a command that no longer exists. The decisions
+ * stop waiting either way (they bound the wait by the same signal), but
  * only the channel can take its prompt down.
  *
  * With no approver on the context the handler answers null, which is
- * mirage's "nobody has answered yet": the ask stays pending in the
- * ledger. That is deliberate, and it is why the service installs this
+ * mirage's "nobody has answered yet": the ask stays pending among the
+ * decisions. That is deliberate, and it is why the service installs this
  * unconditionally rather than only under a composed approver — the two
  * are the same answer to mirage (`onAsk` unset and a null return both
  * render pending), and installing always is what lets an approver

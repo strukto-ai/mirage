@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "append_lands_on_the_one_ledger",
+      "id": "append_lands_on_the_one_op_log",
       "backends": [
         "ram",
         "disk",

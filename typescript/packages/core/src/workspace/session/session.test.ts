@@ -475,7 +475,7 @@ describe('the command trees round-trip through the record', () => {
   })
 })
 
-describe('ledger records round-trip through the record', () => {
+describe('decision records round-trip through the record', () => {
   it('writes the Python spelling and reads it back', () => {
     const rule = {
       reason: 'sign-off',

@@ -49,7 +49,7 @@
 # refusal, since rewriting an `ask` rule as a `deny` would change what
 # the document says. A question never outlives the run that raised it:
 # the run's abort signal goes to the channel with the request and bounds
-# the ledger's wait, so a line still unanswered when its timeout expires
+# the decisions' wait, so a line still unanswered when its timeout expires
 # comes back as the kill, and a yes arriving after that is dropped
 # rather than banked for the next identical line.
 #

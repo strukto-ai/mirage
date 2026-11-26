@@ -416,17 +416,17 @@ describe('S3 cache consistency (mocked)', () => {
         expect(DEC.decode(result.stdout)).toBe(
           `${first}/f.txt:${version(first)}\n${second}/f.txt:${version(second)}\n`,
         )
-        const ledger = (Bucket: string): number[] => [
+        const sends = (Bucket: string): number[] => [
           mock.commandCalls(ListObjectsV2Command, { Bucket }),
           mock.commandCalls(HeadObjectCommand, { Bucket }),
           mock.commandCalls(GetObjectCommand, { Bucket }),
         ]
         // Any send here means the fresh mount's policy reached the bounded one.
-        expect(ledger('bounded-bkt')).toEqual([0, 0, 0])
+        expect(sends('bounded-bkt')).toEqual([0, 0, 0])
         // The fresh leg re-lists its folder once (Task 1.2: fresh checks
         // listings too), pays its gate probe and one refetch; a missing HEAD
         // means it was served without a check.
-        expect(ledger('fresh-bkt')).toEqual([1, 1, 1])
+        expect(sends('fresh-bkt')).toEqual([1, 1, 1])
         expect(
           ws.records
             .slice(mark)
@@ -437,7 +437,7 @@ describe('S3 cache consistency (mocked)', () => {
         const single = await ws.shell(`cat ${bounded}/f.txt`)
         expect(DEC.decode(single.stdout)).toBe('v1\n')
         // v2 or any send here means the operand probe read another policy.
-        expect([...ledger('fresh-bkt'), ...ledger('bounded-bkt')]).toEqual([0, 0, 0, 0, 0, 0])
+        expect([...sends('fresh-bkt'), ...sends('bounded-bkt')]).toEqual([0, 0, 0, 0, 0, 0])
       } finally {
         await ws.close()
       }

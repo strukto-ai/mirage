@@ -170,7 +170,7 @@ export class MountRegistry {
   // like runtimeBindings so the executor reaches them without new
   // threading.
   readonly policies = new Policies([], new MountRootPolicy(this))
-  /** The approval ledger an Ask is taken to, which the policies hold
+  /** The decisions an Ask is taken to, which the policies hold
    * (`Policies.decisions`) so a session write reaches it too. */
   get decisions(): Decisions {
     return this.policies.decisions

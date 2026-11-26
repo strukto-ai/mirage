@@ -718,7 +718,7 @@ def explain_notes(
 
     Args:
         predicted (tuple[int, str] | None): what explain foresaw.
-        recorded (int): questions the ledger gained during explain.
+        recorded (int): questions the decisions gained during explain.
         exit_code (int): what the run exited with.
         out (str): the run's stdout.
         err (str): the run's stderr.

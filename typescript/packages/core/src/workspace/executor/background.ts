@@ -593,7 +593,7 @@ export async function handleBackground(
   jobTable: JobTable,
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
-  // The line's hand-off and the ledger it lives in. The claims the
+  // The line's hand-off and the decisions it lives in. The claims the
   // line's pass made for the commands inside the job leave that
   // hand-off for one of the job's own before the job starts
   // (`Decisions.split`): its gates run after the line has returned, and

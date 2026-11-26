@@ -590,7 +590,7 @@ async function subshellEnded(
  * lets the subshell honor an `exec` redirect the way the program loop does;
  * the subshell is a child shell, so the redirect it installs is discarded
  * when the body ends. `deps.handed` is the line's hand-off, for a background
- * job to borrow, with the registry's `decisions` as its ledger. `deps.sink`
+ * job to borrow, and the registry's `decisions` hold it. `deps.sink`
  * takes each statement's output as it finishes; the body is a shell of its
  * own, which routes what it wrote to its terminal through a copy, so a
  * program nested in it (`$( )`, `eval`) leaves that to it. `deps.executeFn`

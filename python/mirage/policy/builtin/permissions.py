@@ -38,7 +38,7 @@ class PermissionsPolicy(Policy):
 
     ``pre_command`` renders one ``decide`` call, which is where the
     law lives: the leaf that decided refuses the line, or takes it to
-    the approval ledger when it asks. A tree judges lines only; what
+    the decisions when it asks. A tree judges lines only; what
     every entry point must keep from a path is a hide.
 
     Args:

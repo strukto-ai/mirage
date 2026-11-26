@@ -10,7 +10,7 @@ class VersionedVFS(RAMVFS):
     """A RAM mount whose listing version and folder stat a test controls.
 
     ``index_ttl`` is positive so a ``fresh`` mount keeps listings for the
-    gate to check. ``stats`` is the ledger of every stat the backend was
+    gate to check. ``stats`` is the list of every stat the backend was
     sent, ``sent`` is set as each one arrives, and a stat waits on ``hold``
     when one is given, so a test orders concurrent checks with events.
     """

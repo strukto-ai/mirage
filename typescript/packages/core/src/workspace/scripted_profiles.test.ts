@@ -12,7 +12,7 @@ import { commandTree } from '../policy/profile.ts'
 // python/tests/workspace/workspace/test_policies.py.
 
 // A per-command judge: deny cat under /data/sealed/ with a computed
-// reason, take shred to the approval ledger, stay silent otherwise. A
+// reason, take shred to the decisions, stay silent otherwise. A
 // program returns its answer, and None is silence.
 const JUDGE = `
 def pre_command(ctx):
@@ -160,7 +160,7 @@ describe('profile policies', () => {
     }
   }, 120000)
 
-  it('takes an ask it computed to the approval ledger', async () => {
+  it('takes an ask it computed to the decisions', async () => {
     const ws = build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })

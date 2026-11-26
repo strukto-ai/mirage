@@ -1109,7 +1109,7 @@ describe('applyStateDict and the deployment', () => {
     }
   })
 
-  // The ask ledger was written into the snapshot and dropped by the load,
+  // The decisions were written into the snapshot and dropped by the load,
   // so a host answering a pending ask by id after a reload found nothing.
   it('a load keeps the ask decisions its tables recorded', async () => {
     const source = new Workspace(

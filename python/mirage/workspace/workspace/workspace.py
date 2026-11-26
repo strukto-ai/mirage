@@ -588,7 +588,7 @@ class Workspace:
         self._registry.policies.add(self._script_policy)
         for entry in policies or []:
             self._registry.policies.add(entry)
-        # The ledger an Ask is taken to (design 3.9): records live on
+        # The decisions an Ask is taken to (design 3.9): records live on
         # the sessions, the host answers through `on_ask` (or just
         # records the question when none is wired) and reads
         # `ws.decisions`.
@@ -4326,7 +4326,7 @@ class Session:
 
     @property
     def decisions(self) -> Decisions:
-        """The workspace's approval ledger, which this session's asked
+        """The workspace's decisions, which this session's asked
         commands and ops are recorded in."""
         return self._ws.decisions
 

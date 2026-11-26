@@ -637,7 +637,7 @@ async def test_a_checkout_keeps_the_live_mount_caps_and_adds_the_tables():
         await target.close()
 
 
-# The ask ledger was written into the snapshot and dropped by the load, so
+# The decisions were written into the snapshot and dropped by the load, so
 # a host answering a pending ask by id after a reload found nothing.
 @pytest.mark.asyncio
 async def test_a_load_keeps_the_ask_decisions_its_tables_recorded():

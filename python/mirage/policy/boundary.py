@@ -32,7 +32,7 @@ class Boundary:
         policies (Policies): ordered builtin and user policies.
         prefix (str): owning mount prefix.
         mode (MountMode | None): configured authorization ceiling.
-        decisions (Decisions | None): the approval ledger a path rule
+        decisions (Decisions | None): the decisions a path rule
             that asks is put to where no line is running.
         caller (Caller): who makes the operation; its session's grants
             govern it.
