@@ -4,6 +4,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from itertools import count
+from time import monotonic
 
 from fastapi import Response
 from starlette.requests import ClientDisconnect
@@ -23,8 +24,10 @@ _process_ids = count(1)
 
 
 async def _open_process(
-    lease: Sandbox, command: StartCommand
+    lease: Sandbox, command: StartCommand, deadline: float | None
 ) -> tuple[int, LiveProcess]:
+    if deadline is not None and deadline <= monotonic():
+        raise TimeoutError
     if (
         not lease.entry.accepting_jobs
         or lease.expires_at <= asyncio.get_running_loop().time()
@@ -60,15 +63,19 @@ async def _close_process(process: LiveProcess) -> None:
 
 
 async def _events(
-    lease: Sandbox, command: StartCommand
+    lease: Sandbox, command: StartCommand, deadline: float | None
 ) -> AsyncGenerator[bytes, None]:
-    if (
-        not lease.entry.accepting_jobs
-        or lease.expires_at <= asyncio.get_running_loop().time()
-    ):
+    loop = asyncio.get_running_loop()
+    if not lease.entry.accepting_jobs or lease.expires_at <= loop.time():
         raise MirageAbortError()
+    # Carry the cutoff across loops on the process-wide monotonic clock.
+    cutoff = (
+        None if deadline is None else monotonic() + (deadline - loop.time())
+    )
     runner = lease.entry.runner
-    opening = asyncio.create_task(runner.call(_open_process(lease, command)))
+    opening = asyncio.create_task(
+        runner.call(_open_process(lease, command, cutoff))
+    )
     try:
         pid, process = await asyncio.shield(opening)
         yield encode_message({"start": {"pid": pid}})
@@ -148,7 +155,9 @@ class ProcessResponse(Response):
         try:
             async with (
                 timeout,
-                aclosing(_events(self._lease, self._command)) as events,
+                aclosing(
+                    _events(self._lease, self._command, self._deadline)
+                ) as events,
             ):
                 async for frame in events:
                     await send(
@@ -159,7 +168,10 @@ class ProcessResponse(Response):
                         }
                     )
         except TimeoutError:
-            if timeout.expired():
+            if timeout.expired() or (
+                self._deadline is not None
+                and self._deadline <= asyncio.get_running_loop().time()
+            ):
                 terminal = end_stream(
                     "deadline_exceeded", constants.DEADLINE_MESSAGE
                 )

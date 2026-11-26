@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from unittest.mock import patch
 
 import pytest
 
@@ -592,6 +593,35 @@ async def test_process_enforces_connect_deadline(tmp_path):
         )
         assert (
             envelopes(response.content)[-2][1]["event"]["end"]["exitCode"] == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_process_does_not_start_after_its_deadline(tmp_path):
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
+        headers = await sandbox_headers(client)
+        lease = app.state.e2b.live(headers["e2b-sandbox-id"])
+        runner = lease.entry.runner
+        dispatch = runner.call
+
+        async def delayed(coro):
+            await asyncio.sleep(0.15)
+            return await dispatch(coro)
+
+        with (
+            patch.object(runner, "call", side_effect=delayed) as call,
+            patch.object(runner.ws, "shell", wraps=runner.ws.shell) as shell,
+        ):
+            response = await client.post(
+                PROCESS,
+                content=start_body("touch late"),
+                headers={**headers, "connect-timeout-ms": "100"},
+            )
+            call.assert_awaited()
+            shell.assert_not_called()
+        assert response.status_code == 200
+        assert envelopes(response.content)[-1][1]["error"]["code"] == (
+            "deadline_exceeded"
         )
 
 
