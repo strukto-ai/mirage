@@ -12,32 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Mirror of python/tests/core/dropbox/test_search.py.
-
-import type * as PathsModule from './paths.ts'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, searchFiles: vi.fn() }
-})
-
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
-import { DropboxApiError, type DropboxTokenManager } from './client.ts'
-import * as api from './api.ts'
+import type { JsonValue } from '../../types.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { filesContaining } from './search.ts'
 
-const STUB_TM = {} as DropboxTokenManager
-const search = vi.mocked(api.searchFiles)
+const SEARCH_ROUTE = '/2/files/search_v2'
+const NEEDLE = new TextEncoder().encode('a needle in it')
 
-function makeAccessor(rootPath?: string): DropboxAccessor {
-  return new DropboxAccessor({
-    tokenManager: STUB_TM,
-    ...(rootPath !== undefined ? { rootPath } : {}),
-  })
-}
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function mountRoot(): PathSpec {
   return new PathSpec({ virtual: '/data', directory: '/data', vfsPath: '' })
@@ -47,61 +47,61 @@ function subdir(): PathSpec {
   return new PathSpec({ virtual: '/data/docs', directory: '/data/docs', vfsPath: 'docs' })
 }
 
-beforeEach(() => {
-  search.mockReset()
-})
+// The virtual paths a search names, and the path it was scoped to.
+async function ask(scope: PathSpec, rootPath?: string): Promise<[string[] | null, string]> {
+  await account.run.recordRequests()
+  const out = await filesContaining(account.accessor(rootPath), 'needle', [scope])
+  const [sent] = (await account.run.bodies('POST', SEARCH_ROUTE)) as {
+    options: { path?: string }
+  }[]
+  return [out === null ? null : out.map((p) => p.virtual).sort(), sent?.options.path ?? '']
+}
 
-async function ask(
-  paths: [string, string][],
-  scope: PathSpec,
-  rootPath?: string,
-  truncated = false,
-): Promise<[string[] | null, unknown]> {
-  search.mockResolvedValueOnce({ paths, truncated })
-  const out = await filesContaining(makeAccessor(rootPath), 'needle', [scope])
-  return [out === null ? null : out.map((p) => p.virtual), search.mock.calls[0]?.[2]]
+function match(i: number): JsonValue {
+  const path = `/f${String(i)}.txt`
+  return {
+    match_type: { '.tag': 'content' },
+    metadata: {
+      '.tag': 'metadata',
+      metadata: { '.tag': 'file', name: path.slice(1), path_lower: path, path_display: path },
+    },
+  }
 }
 
 describe('filesContaining', () => {
   it('names each hit from its display path', async () => {
-    const paths: [string, string][] = [
-      ['/x.txt', '/x.txt'],
-      ['/sub/y.txt', '/Sub/Y.txt'],
-    ]
-    expect(await ask(paths, mountRoot())).toEqual([
-      ['/data/x.txt', '/data/Sub/Y.txt'],
-      { path: '' },
-    ])
+    await account.put('/x.txt', NEEDLE)
+    await account.put('/Sub/Y.txt', NEEDLE)
+    expect(await ask(mountRoot())).toEqual([['/data/Sub/Y.txt', '/data/x.txt'], ''])
   })
 
+  // Dropbox answers each hit's path_lower beside its display case; the root
+  // comes off the lowered one.
   it('strips the root path case-insensitively', async () => {
-    const paths: [string, string][] = [['/team/sub/a.txt', '/Team/Sub/A.txt']]
-    expect(await ask(paths, mountRoot(), '/Team')).toEqual([['/data/Sub/A.txt'], { path: '/Team' }])
+    await account.put('/Team/Sub/A.txt', NEEDLE)
+    expect(await ask(mountRoot(), '/Team')).toEqual([['/data/Sub/A.txt'], '/Team'])
   })
 
+  // A search scoped to /docs, given Dropbox's answer for the whole account:
+  // the hit under /other is no path in the scope.
   it('drops hits outside the scope', async () => {
-    const paths: [string, string][] = [
-      ['/docs/in.txt', '/docs/in.txt'],
-      ['/other/out.txt', '/other/out.txt'],
-    ]
-    expect(await ask(paths, subdir())).toEqual([['/data/docs/in.txt'], { path: '/docs' }])
+    await account.put('/docs/in.txt', NEEDLE)
+    await account.put('/other/out.txt', NEEDLE)
+    const everywhere = await account.run.call<{ matches: JsonValue[] }>('POST', SEARCH_ROUTE, {
+      json: { query: 'needle' },
+    })
+    expect(everywhere.matches).toHaveLength(2)
+    await account.run.answerNext('POST', SEARCH_ROUTE, 200, everywhere)
+    expect(await ask(subdir())).toEqual([['/data/docs/in.txt'], '/docs'])
   })
 
   // No hit is distrusted too: Dropbox indexes a write after it lands.
-  it.each<[string, [string, string][], boolean]>([
-    ['a truncated answer', [['/x.txt', '/x.txt']], true],
-    ['no hit', [], false],
-  ])('is null for %s', async (_name, paths, truncated) => {
-    expect((await ask(paths, mountRoot(), undefined, truncated))[0]).toBeNull()
-  })
-
-  it('is null for an API failure', async () => {
-    search.mockRejectedValueOnce(new DropboxApiError('boom', 500))
-    expect(await filesContaining(makeAccessor(), 'needle', [mountRoot()])).toBeNull()
+  it.each(['a truncated answer', 'no hit', 'an API failure'])('is null for %s', async (answer) => {
+    if (answer === 'a truncated answer') {
+      const matches = Array.from({ length: 10_000 }, (_, i) => match(i))
+      await account.run.answerNext('POST', SEARCH_ROUTE, 200, { matches, has_more: false })
+    }
+    if (answer === 'an API failure') await account.run.answerNext('POST', SEARCH_ROUTE, 500)
+    expect(await filesContaining(account.accessor(), 'needle', [mountRoot()])).toBeNull()
   })
 })
-
-vi.mock('./paths.ts', async (original) => ({
-  ...(await original<typeof PathsModule>()),
-  checkPath: vi.fn().mockResolvedValue(null),
-}))

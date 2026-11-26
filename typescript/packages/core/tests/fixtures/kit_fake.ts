@@ -158,11 +158,12 @@ export class KitRun {
 
   /** The JSON body of each listed request to `route`, in order. */
   async bodies(method: string, route: string): Promise<JsonValue[]> {
-    const listed = await this.call<{ requests: { method: string; route: string; body: JsonValue }[] }>(
-      'GET',
-      '/_kit/requests',
-    )
-    return listed.requests.filter((r) => r.method === method && r.route === route).map((r) => r.body)
+    const listed = await this.call<{
+      requests: { method: string; route: string; body: JsonValue }[]
+    }>('GET', '/_kit/requests')
+    return listed.requests
+      .filter((r) => r.method === method && r.route === route)
+      .map((r) => r.body)
   }
 
   /** Answer the next `times` requests to `route` with `status`, and `body` when given. */

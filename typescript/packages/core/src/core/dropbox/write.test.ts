@@ -282,9 +282,9 @@ describe('dropbox rename', () => {
   it('keeps the error for a non-empty dir destination', async () => {
     await account.mkdir('/src')
     await account.put('/dst/keep.txt', ENC.encode('k'))
-    await expect(
-      rename(account.accessor(), spec('/src'), spec('/dst')),
-    ).rejects.toBeInstanceOf(DropboxApiError)
+    await expect(rename(account.accessor(), spec('/src'), spec('/dst'))).rejects.toBeInstanceOf(
+      DropboxApiError,
+    )
     expect(await account.names()).toEqual(['dst', 'src'])
     expect(await account.names('/dst')).toEqual(['keep.txt'])
   })

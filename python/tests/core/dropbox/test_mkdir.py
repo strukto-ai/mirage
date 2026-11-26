@@ -42,7 +42,9 @@ async def test_mkdir_reads_a_conflict_on_the_create_as_eexist(account):
 async def test_mkdir_parents_is_idempotent_for_existing_dir(account):
     await account.mkdir("/docs")
     await account.run.record_requests()
-    await mkdir(account.accessor(), PathSpec.from_str_path("/docs"), parents=True)
+    await mkdir(
+        account.accessor(), PathSpec.from_str_path("/docs"), parents=True
+    )
     assert await account.run.bodies("POST", CREATE_ROUTE) == []
 
 

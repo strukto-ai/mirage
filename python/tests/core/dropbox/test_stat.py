@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
 from mirage.core.dropbox.client import DropboxApiError
@@ -22,100 +20,68 @@ from mirage.core.dropbox.readdir import readdir
 from mirage.core.dropbox.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.core.dropbox.conftest import FakeDropboxRpc
 from tests.fixtures.handed import call
 
-# The default seam for this file is the JSON-RPC transport
-# (`mirage.core.dropbox.api.dropbox_rpc`): `list_folder`, `get_metadata`
-# and the token refresh all funnel through it, so one FakeDropboxRpc patch
-# makes stat hermetic with no live api.dropboxapi.com call and no token to
-# seed. The two error-propagation tests that assert "the collaborator
-# raised X" patch the collaborator directly instead, since the transport
-# fake only ever raises a 409.
-RPC = "mirage.core.dropbox.api.dropbox_rpc"
-
-FILE_ENTRY = {
-    ".tag": "file",
-    "id": "id:a",
-    "name": "a.txt",
-    "path_display": "/a.txt",
-    "size": 5,
-    "server_modified": "2026-04-01T00:00:00Z",
-    "content_hash": "hash-a",
-}
-
-FOLDER_ENTRY = {
-    ".tag": "folder",
-    "id": "id:docs",
-    "name": "docs",
-    "path_display": "/docs",
-}
+METADATA_ROUTE = "/2/files/get_metadata"
+LIST_ROUTE = "/2/files/list_folder"
+A = PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/")
 
 
-# Stateless transport fakes for the error-path tests. They capture nothing
-# from a test body, so they live at module scope (a nested function is for
-# closures only).
-async def _meta_500(_tm, _endpoint, _body):
-    raise DropboxApiError("boom", 500)
+async def _asked(account) -> list[str]:
+    """The path each get_metadata since recording asked for."""
+    sent = await account.run.bodies("POST", METADATA_ROUTE)
+    return [body["path"] for body in sent]
 
 
 @pytest.mark.asyncio
-async def test_stat_mount_root_is_directory(dropbox_accessor):
-    rpc = FakeDropboxRpc()
-    with patch(RPC, new=rpc):
-        out = await stat(
-            dropbox_accessor,
-            PathSpec(vfs_path="", virtual="/", directory="/"),
-        )
+async def test_stat_mount_root_is_directory(account):
+    await account.run.record_requests()
+    out = await stat(
+        account.accessor(), PathSpec(vfs_path="", virtual="/", directory="/")
+    )
     assert out.type == FileType.DIRECTORY
     assert out.name == "/"
-    assert rpc.list_requests == 0
+    assert await account.run.requests() == []
 
 
 @pytest.mark.asyncio
-async def test_stat_file_from_api(dropbox_accessor):
+async def test_stat_file_from_api(account):
     # Dropbox addresses by path: stat is one get_metadata.
-    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
-    with patch(RPC, new=rpc):
-        out = await stat(dropbox_accessor, PathSpec.from_str_path("/a.txt"))
-    assert out.type == FileType.FILE
+    stored = await account.put("/a.txt", b"hello")
+    out = await stat(account.accessor(), PathSpec.from_str_path("/a.txt"))
+    assert out.content == ContentType.TEXT
     assert out.name == "a.txt"
     assert out.size == 5
-    assert out.content == ContentType.TEXT
-    assert out.modified == "2026-04-01T00:00:00Z"
-    assert out.fingerprint == "hash-a"
-    assert out.extra["dropbox_id"] == "id:a"
+    assert out.modified == stored["server_modified"]
+    assert out.fingerprint == stored["content_hash"]
+    assert out.extra["dropbox_id"] == stored["id"]
     assert out.extra["resource_type"] == "dropbox/file"
 
 
 @pytest.mark.asyncio
-async def test_stat_folder_from_api(dropbox_accessor):
-    rpc = FakeDropboxRpc(metadata=FOLDER_ENTRY)
-    with patch(RPC, new=rpc):
-        out = await stat(dropbox_accessor, PathSpec.from_str_path("/docs"))
+async def test_stat_folder_from_api(account):
+    made = await account.mkdir("/docs")
+    out = await stat(account.accessor(), PathSpec.from_str_path("/docs"))
     assert out.type == FileType.DIRECTORY
     assert out.name == "docs"
     assert out.size is None
-    assert out.extra["dropbox_id"] == "id:docs"
+    assert out.extra["dropbox_id"] == made["id"]
 
 
 @pytest.mark.asyncio
-async def test_stat_missing_is_enoent(dropbox_accessor):
-    rpc = FakeDropboxRpc(metadata=None)
-    with patch(RPC, new=rpc):
-        with pytest.raises(FileNotFoundError) as excinfo:
-            await stat(dropbox_accessor, PathSpec.from_str_path("/ghost.txt"))
-    assert excinfo.value.filename == "/ghost.txt"
+async def test_stat_missing_is_enoent(account):
+    with pytest.raises(FileNotFoundError) as caught:
+        await stat(account.accessor(), PathSpec.from_str_path("/ghost.txt"))
+    assert "/ghost.txt" in str(caught.value)
 
 
 @pytest.mark.asyncio
-async def test_stat_non_409_propagates(dropbox_accessor):
-    # A rate-limit or server error is not absence: it must surface, not
-    # collapse into ENOENT.
-    with patch(RPC, new=_meta_500):
-        with pytest.raises(DropboxApiError) as excinfo:
-            await stat(dropbox_accessor, PathSpec.from_str_path("/a.txt"))
-    assert excinfo.value.status == 500
+async def test_stat_non_409_propagates(account):
+    # A rate-limit or server error is not absence: it must surface.
+    await account.run.answer_next("POST", METADATA_ROUTE, 500)
+    with pytest.raises(DropboxApiError) as caught:
+        await stat(account.accessor(), PathSpec.from_str_path("/a.txt"))
+    assert caught.value.status == 500
 
 
 _FALLBACK_CASES = [
@@ -130,19 +96,12 @@ _FALLBACK_CASES = [
         "id:x",
         3,
         "2026-01-02T00:00:00Z",
-        None,
     ),
     (
-        {
-            ".tag": "file",
-            "id": "id:x",
-            "name": "f.txt",
-            "size": 3,
-        },
+        {".tag": "file", "id": "id:x", "name": "f.txt", "size": 3},
         "id:x",
         3,
         "",
-        None,
     ),
     (
         {
@@ -154,190 +113,93 @@ _FALLBACK_CASES = [
         "/d/f.txt",
         3,
         "",
-        None,
     ),
+    ({".tag": "file", "name": "f.txt", "size": 3}, "f.txt", 3, ""),
+    ({".tag": "file", "id": "id:x", "name": "f.txt"}, "id:x", None, ""),
     (
-        {
-            ".tag": "file",
-            "name": "f.txt",
-            "size": 3,
-        },
-        "f.txt",
-        3,
-        "",
-        None,
-    ),
-    (
-        {
-            ".tag": "file",
-            "id": "id:x",
-            "name": "f.txt",
-        },
+        {".tag": "file", "id": "id:x", "name": "f.txt", "size": "big"},
         "id:x",
         None,
         "",
-        None,
-    ),
-    (
-        {
-            ".tag": "file",
-            "id": "id:x",
-            "name": "f.txt",
-            "size": "big",
-        },
-        "id:x",
-        None,
-        "",
-        None,
     ),
 ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "entry, dropbox_id, size, modified, fingerprint", _FALLBACK_CASES
-)
+@pytest.mark.parametrize("entry, dropbox_id, size, modified", _FALLBACK_CASES)
 async def test_stat_entry_field_fallbacks(
-    dropbox_accessor, entry, dropbox_id, size, modified, fingerprint
+    account, entry, dropbox_id, size, modified
 ):
     # stat_from_entry's fallbacks: server_modified→client_modified→"",
     # id→path_display→name, no content_hash is no token, and a
-    # non-int/absent size renders as None
-    # (the unknown-size machinery, never a fabricated number).
-    rpc = FakeDropboxRpc(metadata=entry)
-    with patch(RPC, new=rpc):
-        out = await stat(dropbox_accessor, PathSpec.from_str_path("/f.txt"))
+    # non-int/absent size renders as None (the unknown-size machinery,
+    # never a fabricated number). Answers the fake never gives.
+    await account.run.answer_next("POST", METADATA_ROUTE, 200, entry, times=5)
+    out = await stat(account.accessor(), PathSpec.from_str_path("/f.txt"))
     assert out.extra["dropbox_id"] == dropbox_id
     assert out.size == size
     assert out.modified == modified
-    assert out.fingerprint == fingerprint
+    assert out.fingerprint is None
 
 
 @pytest.mark.asyncio
-async def test_stat_under_mount_prefix(dropbox_accessor):
+async def test_stat_under_mount_prefix(account):
     # Every other test runs on an unprefixed mount; this pins the prefix
     # arithmetic of the path get_metadata is asked for.
-    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
-    with patch(RPC, new=rpc):
-        out = await stat(
-            dropbox_accessor,
-            PathSpec(
-                virtual="/dropbox/a.txt",
-                directory="/dropbox",
-                vfs_path=mount_key("/dropbox/a.txt", "/dropbox"),
-            ),
-        )
-    assert out.type == FileType.FILE
+    await account.put("/a.txt", b"hello")
+    await account.run.record_requests()
+    out = await stat(
+        account.accessor(),
+        PathSpec(
+            virtual="/dropbox/a.txt",
+            directory="/dropbox",
+            vfs_path=mount_key("/dropbox/a.txt", "/dropbox"),
+        ),
+    )
+    assert out.content == ContentType.TEXT
     assert out.name == "a.txt"
     assert out.size == 5
-    assert rpc.metadata_paths == ["/a.txt"]
+    assert await _asked(account) == ["/a.txt"]
 
 
 @pytest.mark.asyncio
-async def test_stat_size_matches_read_for_every_file(dropbox_accessor):
+async def test_stat_size_matches_read_for_every_file(account):
     # The fskit invariant behind sizes_always_known: the size stat serves
     # from the listing must equal the byte length a read delivers, 0-byte
-    # files included. Listings go through the transport seam; the content
-    # channel (dropbox_download) does not pass through dropbox_rpc, so it
-    # keeps its own download seam.
-    contents = {
-        "/a.txt": b"hello",
-        "/empty.txt": b"",
-        "/docs/b.bin": b"abc",
-    }
-    tree = {
-        "": [
-            {
-                ".tag": "folder",
-                "id": "id:docs",
-                "name": "docs",
-                "path_display": "/docs",
-            },
-            {
-                ".tag": "file",
-                "id": "id:a",
-                "name": "a.txt",
-                "path_display": "/a.txt",
-                "size": 5,
-                "server_modified": "2026-04-01T00:00:00Z",
-            },
-            {
-                ".tag": "file",
-                "id": "id:empty",
-                "name": "empty.txt",
-                "path_display": "/empty.txt",
-                "size": 0,
-                "server_modified": "2026-04-01T00:00:00Z",
-            },
-        ],
-        "/docs": [
-            {
-                ".tag": "file",
-                "id": "id:b",
-                "name": "b.bin",
-                "path_display": "/docs/b.bin",
-                "size": 3,
-                "server_modified": "2026-04-01T00:00:00Z",
-            }
-        ],
-    }
-
-    entries = {e["path_display"]: e for kids in tree.values() for e in kids}
-
-    async def _rpc(_tm, endpoint, body):
-        if endpoint == "/files/list_folder":
-            return {
-                "entries": tree[body["path"]],
-                "cursor": "c",
-                "has_more": False,
-            }
-        if endpoint == "/files/get_metadata":
-            return entries[body["path"]]
-        raise AssertionError(f"unexpected endpoint {endpoint}")
-
-    async def _download(_tm, path, _range=None):
-        return contents[path], None
-
+    # files included.
+    await account.put("/a.txt", b"hello")
+    await account.put("/empty.txt", b"")
+    await account.put("/docs/b.bin", b"abc")
+    accessor = account.accessor()
     files: list[str] = []
-    with (
-        patch(RPC, new=_rpc),
-        patch(
-            "mirage.core.dropbox.read.dropbox_download", side_effect=_download
-        ),
-    ):
-        stack = ["/"]
-        while stack:
-            current = stack.pop()
-            listing = await readdir(
-                dropbox_accessor, PathSpec.from_str_path(current)
-            )
-            for child in listing:
-                trimmed = current.rstrip("/") + "/" + child.name
-                spec = PathSpec.from_str_path(trimmed)
-                info = await stat(dropbox_accessor, spec)
-                if info.type == FileType.DIRECTORY:
-                    stack.append(trimmed)
-                    continue
-                assert info.size is not None, trimmed
-                body = await call(read, readdir, dropbox_accessor, spec)
-                assert info.size == len(body), trimmed
-                files.append(trimmed)
+    stack = ["/"]
+    while stack:
+        current = stack.pop()
+        listing = await readdir(accessor, PathSpec.from_str_path(current))
+        for child in listing:
+            trimmed = f"{current.rstrip('/')}/{child.name}"
+            spec = PathSpec.from_str_path(trimmed)
+            info = await stat(accessor, spec)
+            if info.type == FileType.DIRECTORY:
+                stack.append(trimmed)
+                continue
+            assert info.size is not None, trimmed
+            data = await call(read, readdir, accessor, spec)
+            assert info.size == len(data), trimmed
+            files.append(trimmed)
     assert sorted(files) == ["/a.txt", "/docs/b.bin", "/empty.txt"]
 
 
 @pytest.mark.asyncio
-async def test_stat_asks_one_lookup(dropbox_accessor):
+async def test_stat_asks_one_lookup(account):
     # One get_metadata, never a listing of the parent: the mount keeps
     # listings and answers a listed path itself.
-    rpc = FakeDropboxRpc(entries=[FILE_ENTRY], metadata=FILE_ENTRY)
-    with patch(RPC, new=rpc):
-        out = await stat(
-            dropbox_accessor,
-            PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-        )
-    assert out.fingerprint == "hash-a"
-    assert rpc.list_requests == 0
-    assert rpc.metadata_paths == ["/a.txt"]
+    stored = await account.put("/a.txt", b"hello")
+    await account.run.record_requests()
+    out = await stat(account.accessor(), A)
+    assert out.fingerprint == stored["content_hash"]
+    assert await account.run.bodies("POST", LIST_ROUTE) == []
+    assert await _asked(account) == ["/a.txt"]
 
 
 @pytest.mark.asyncio
@@ -352,27 +214,22 @@ async def test_stat_asks_one_lookup(dropbox_accessor):
     ids=["not-found", "not-folder", "restricted", "5xx"],
 )
 async def test_stat_from_api_reads_only_a_miss_as_enoent(
-    dropbox_accessor, status, summary, raised
+    account, status, summary, raised
 ):
     # A restricted file exists, so a fresh probe must not hear ENOENT and
     # drop its overlay; a 5xx body naming not_found is a relay's.
-    async def refuse(_tm, _endpoint, _body):
-        raise DropboxApiError("refused", status, summary)
-
-    with patch(RPC, new=refuse):
-        with pytest.raises(raised):
-            await stat(
-                dropbox_accessor,
-                PathSpec(vfs_path="a.txt", virtual="/a.txt", directory="/"),
-            )
+    await account.run.answer_next(
+        "POST", METADATA_ROUTE, status, {"error_summary": summary}
+    )
+    with pytest.raises(raised):
+        await stat(account.accessor(), A)
 
 
 @pytest.mark.asyncio
-async def test_stat_from_api_answer_in_another_case_is_enoent(
-    dropbox_accessor,
-):
-    # get_metadata matches case-insensitively where a listing is exact.
-    rpc = FakeDropboxRpc(metadata=FILE_ENTRY)
-    with patch(RPC, new=rpc):
-        with pytest.raises(FileNotFoundError):
-            await stat(dropbox_accessor, PathSpec.from_str_path("/A.TXT"))
+async def test_stat_from_api_answer_in_another_case_is_enoent(account):
+    # get_metadata matches case-insensitively where a listing is exact:
+    # Dropbox answers /A.TXT with a.txt.
+    stored = await account.put("/a.txt", b"hello")
+    await account.run.answer_next("POST", METADATA_ROUTE, 200, stored, times=5)
+    with pytest.raises(FileNotFoundError):
+        await stat(account.accessor(), PathSpec.from_str_path("/A.TXT"))

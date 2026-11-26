@@ -140,9 +140,9 @@ describe('dropbox read', () => {
   it('throws ENOENT for a missing file', async () => {
     const accessor = account.accessor()
     const path = new PathSpec({ vfsPath: 'missing.txt', virtual: '/missing.txt', directory: '/' })
-    await expect(read(accessor, path, undefined, await listed(accessor, path))).rejects.toMatchObject(
-      { code: 'ENOENT' },
-    )
+    await expect(
+      read(accessor, path, undefined, await listed(accessor, path)),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 

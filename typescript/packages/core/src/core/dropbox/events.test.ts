@@ -12,37 +12,46 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as ApiModule from './api.ts'
-
-vi.mock('./api.ts', async () => {
-  const actual = await vi.importActual<typeof ApiModule>('./api.ts')
-  return { ...actual, latestCursor: vi.fn(), continueFolder: vi.fn() }
-})
-
-import { DropboxAccessor } from '../../accessor/dropbox.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Delta, FileChangeKind, PathSpec } from '../../types.ts'
-import * as api from './api.ts'
-import type { DropboxEntry } from './api.ts'
-import { DropboxApiError, type DropboxTokenManager } from './client.ts'
+import type { JsonValue } from '../../types.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { DropboxDeltaHook } from './events.ts'
 
 const ROOT = new PathSpec({ virtual: '/m', directory: '/m', vfsPath: '' })
 const C = FileChangeKind.CREATE
 const U = FileChangeKind.UPDATE
 const D = FileChangeKind.DELETE
+const LATEST_ROUTE = '/2/files/list_folder/get_latest_cursor'
+const CONTINUE_ROUTE = '/2/files/list_folder/continue'
+
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function hook(): DropboxDeltaHook {
-  return new DropboxDeltaHook(
-    new DropboxAccessor({ tokenManager: {} as DropboxTokenManager, rootPath: '/team' }),
-  )
+  return new DropboxDeltaHook(account.accessor('/team'))
 }
 
-function file(pathDisplay: string, digest: string): DropboxEntry {
+function file(pathDisplay: string, digest: string): JsonValue {
   return { '.tag': 'file', name: '', path_display: pathDisplay, content_hash: digest }
 }
 
-function row(tag: 'folder' | 'deleted', pathDisplay: string): DropboxEntry {
+function row(tag: 'folder' | 'deleted', pathDisplay: string): JsonValue {
   return { '.tag': tag, name: '', path_display: pathDisplay }
 }
 
@@ -61,16 +70,19 @@ describe('DropboxDeltaHook', () => {
   // takes a cursor at the present; each pull after it is one continue from
   // the stored cursor. A path seen before is an UPDATE, or nothing when its
   // content hash did not move; the root is stripped however the server cases
-  // it, and the rest keeps the server's casing.
+  // it, and the rest keeps the server's casing. The fake keeps one casing, so
+  // Dropbox's pages are answered here.
   it('replays the cursor on each ping and lists nothing', async () => {
-    vi.mocked(api.latestCursor).mockReset().mockResolvedValue('c1')
+    await account.mkdir('/team')
     const replies = [
       { entries: [file('/Team/Docs/A.txt', 'h1'), row('folder', '/TEAM/sub')], cursor: 'c2' },
       { entries: [file('/team/Docs/A.txt', 'h2'), file('/team/Docs/A.txt', 'h2')], cursor: 'c3' },
       { entries: [file('/team/sub/b.txt', 'h3'), row('deleted', '/team/sub')], cursor: 'c4' },
     ]
-    const replay = vi.mocked(api.continueFolder).mockReset()
-    for (const reply of replies) replay.mockResolvedValueOnce(reply)
+    for (const reply of replies) {
+      await account.run.answerNext('POST', CONTINUE_ROUTE, 200, { ...reply, has_more: false })
+    }
+    await account.run.recordRequests()
     const target = hook()
     let delta = await target.pull(ROOT, null)
     const got: [string, string][][] = []
@@ -90,8 +102,13 @@ describe('DropboxDeltaHook', () => {
         [D, '/m/sub'],
       ],
     ])
-    expect(replay.mock.calls.map((call) => call[1])).toEqual(['c1', 'c2', 'c3'])
-    expect(api.latestCursor).toHaveBeenCalledTimes(1)
+    const baseline = await account.run.bodies('POST', LATEST_ROUTE)
+    expect(baseline).toEqual([expect.objectContaining({ path: '/team' })])
+    const replayed = await account.run.bodies('POST', CONTINUE_ROUTE)
+    expect(replayed.slice(1).map((body) => (body as { cursor: string }).cursor)).toEqual([
+      'c2',
+      'c3',
+    ])
     expect(saved(delta).dropbox.seen).toEqual({ 'Docs/A.txt': 'h2' })
   })
 
@@ -99,21 +116,17 @@ describe('DropboxDeltaHook', () => {
   // Dropbox resets, and a root it could not find that is back, both leave the
   // root UNKNOWN with a fresh cursor, never a walk.
   it('reports the root after a reset or a root that comes back', async () => {
-    vi.mocked(api.latestCursor)
-      .mockReset()
-      .mockRejectedValueOnce(new DropboxApiError('409', 409, 'path/not_found/..'))
-      .mockResolvedValueOnce('c1')
-      .mockResolvedValueOnce('c2')
-    vi.mocked(api.continueFolder)
-      .mockReset()
-      .mockRejectedValue(new DropboxApiError('409', 409, 'reset/..'))
     const target = hook()
+    await account.run.recordRequests()
     const baseline = await target.pull(ROOT, null)
+    await account.mkdir('/team')
     const back = await target.pull(ROOT, baseline.checkpoint)
+    await account.run.answerNext('POST', CONTINUE_ROUTE, 409, { error_summary: 'reset/..' })
     const renewed = await target.pull(ROOT, back.checkpoint)
     expect(saved(baseline).dropbox.cursor).toBe('')
     expect(pairs(back)).toEqual([[FileChangeKind.UNKNOWN, '/m']])
     expect(pairs(renewed)).toEqual([[FileChangeKind.UNKNOWN, '/m']])
-    expect(saved(renewed).dropbox.cursor).toBe('c2')
+    expect(await account.run.bodies('POST', LATEST_ROUTE)).toHaveLength(3)
+    expect(['', saved(back).dropbox.cursor]).not.toContain(saved(renewed).dropbox.cursor)
   })
 })

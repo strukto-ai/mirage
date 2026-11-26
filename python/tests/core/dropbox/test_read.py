@@ -59,9 +59,7 @@ async def _lagging(account) -> str:
     own listing with a stale content_hash, for every listing the read makes.
     Returns the hash of DATA."""
     stored = await account.put("/a.txt", DATA)
-    listing = await account.run.call(
-        "POST", LIST_ROUTE, json={"path": ""}
-    )
+    listing = await account.run.call("POST", LIST_ROUTE, json={"path": ""})
     for entry in listing["entries"]:
         entry["content_hash"] = "stale"
     await account.run.answer_next("POST", LIST_ROUTE, 200, listing, times=10)

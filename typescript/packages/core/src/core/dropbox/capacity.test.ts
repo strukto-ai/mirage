@@ -44,10 +44,7 @@ function quota(total: number, used: number): unknown {
 describe('dropbox capacity', () => {
   // The fake's account is a Basic one, with the stored bytes as its use.
   it('takes an individual allocation as the quota', async () => {
-    const usage = await account.run.call<{ allocation: { allocated: number } }>(
-      'POST',
-      USAGE_ROUTE,
-    )
+    const usage = await account.run.call<{ allocation: { allocated: number } }>('POST', USAGE_ROUTE)
     await account.put('/a.txt', new Uint8Array(300))
     await account.run.recordRequests()
     const result = await capacity(account.accessor())
@@ -68,8 +65,11 @@ describe('dropbox capacity', () => {
       900,
       5000,
     ],
-  ])('takes the allocation that bounds a team account (%s)', async (_name, allocation, used, total) => {
-    await account.run.answerNext('POST', USAGE_ROUTE, 200, { used: 300, allocation })
-    expect(await capacity(account.accessor())).toEqual(quota(total, used))
-  })
+  ])(
+    'takes the allocation that bounds a team account (%s)',
+    async (_name, allocation, used, total) => {
+      await account.run.answerNext('POST', USAGE_ROUTE, 200, { used: 300, allocation })
+      expect(await capacity(account.accessor())).toEqual(quota(total, used))
+    },
+  )
 })

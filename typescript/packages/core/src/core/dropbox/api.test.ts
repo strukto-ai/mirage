@@ -12,18 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Mirror of the search_files cases in python/tests/core/dropbox/test_api.py.
+// Mirror of python/tests/core/dropbox/test_api.py.
 
 import { readFileSync } from 'node:fs'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
-
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, dropboxRpc: vi.fn() }
-})
-
-import * as client from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import { runWithWriteContext } from '../../cache/context.ts'
 import type { Measured } from '../../cache/types.ts'
@@ -31,19 +23,47 @@ import { keptVersions } from '../../test-utils.ts'
 import { isStaleWrite } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { PathSpec } from '../../types.ts'
+import type { JsonValue } from '../../types.ts'
+import { DropboxAccount } from '../../../tests/core/dropbox/account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import {
   MAX_SEARCH_MATCHES,
   SEARCH_PAGE,
   continueFolder,
+  listFolder,
   movePath,
-  searchFiles,
   refused,
+  searchFiles,
 } from './api.ts'
 
-const TM = {} as DropboxTokenManager
-const rpc = vi.mocked(client.dropboxRpc)
+const LIST_ROUTE = '/2/files/list_folder'
+const CONTINUE_ROUTE = '/2/files/list_folder/continue'
+const SEARCH_ROUTE = '/2/files/search_v2'
+const SEARCH_CONTINUE_ROUTE = '/2/files/search/continue_v2'
+const MOVE_ROUTE = '/2/files/move_v2'
 
-function searchMatch(tag: string, lower: string, display: string): Record<string, unknown> {
+let origin: string
+let account: DropboxAccount
+
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
+beforeAll(async () => {
+  origin = await serve('dropbox')
+}, 30_000)
+
+beforeEach(() => {
+  account = new DropboxAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
+function tm(): DropboxTokenManager {
+  return account.accessor().tokenManager
+}
+
+function searchMatch(tag: string, lower: string, display: string): JsonValue {
   return {
     match_type: { '.tag': 'filename' },
     metadata: {
@@ -53,85 +73,107 @@ function searchMatch(tag: string, lower: string, display: string): Record<string
   }
 }
 
-beforeEach(() => {
-  rpc.mockReset()
+describe('listFolder', () => {
+  it('normalizes the root to the empty path', async () => {
+    await account.run.recordRequests()
+    await listFolder(tm(), '/')
+    const sent = await account.run.bodies('POST', LIST_ROUTE)
+    expect(sent.map((body) => (body as { path: string }).path)).toEqual([''])
+  })
+
+  it('pages through continue', async () => {
+    await account.put('/docs/a', new Uint8Array([97]))
+    await account.put('/docs/b', new Uint8Array([98]))
+    await account.run.recordRequests()
+    const out = await listFolder(tm(), '/docs', { pageSize: 1 })
+    expect(out.map((e) => e.name)).toEqual(['a', 'b'])
+    const sent = await account.run.bodies('POST', CONTINUE_ROUTE)
+    expect(sent).toHaveLength(1)
+    expect(Object.keys(sent[0] as object)).toEqual(['cursor'])
+  })
 })
 
 describe('searchFiles', () => {
+  // Dropbox may repeat a match on a later page; pages it never repeats on
+  // the fake are answered here.
   it('pages, dedups across pages, and skips folders', async () => {
-    rpc
-      .mockResolvedValueOnce({
-        matches: [searchMatch('file', '/a.txt', '/A.txt'), searchMatch('folder', '/dir', '/Dir')],
-        has_more: true,
-        cursor: 'c1',
-      })
-      .mockResolvedValueOnce({
-        matches: [searchMatch('file', '/a.txt', '/A.txt'), searchMatch('file', '/b.txt', '/B.txt')],
-        has_more: false,
-      })
-    const out = await searchFiles(TM, 'needle', { path: '/docs' })
+    await account.run.answerNext('POST', SEARCH_ROUTE, 200, {
+      matches: [searchMatch('file', '/a.txt', '/A.txt'), searchMatch('folder', '/dir', '/Dir')],
+      has_more: true,
+      cursor: 'c1',
+    })
+    await account.run.answerNext('POST', SEARCH_CONTINUE_ROUTE, 200, {
+      matches: [searchMatch('file', '/a.txt', '/A.txt'), searchMatch('file', '/b.txt', '/B.txt')],
+      has_more: false,
+    })
+    await account.run.recordRequests()
+    const out = await searchFiles(tm(), 'needle', { path: '/docs' })
     expect(out.paths).toEqual([
       ['/a.txt', '/A.txt'],
       ['/b.txt', '/B.txt'],
     ])
     expect(out.truncated).toBe(false)
-    expect(rpc.mock.calls[0]?.[1]).toBe('/files/search_v2')
-    expect(rpc.mock.calls[0]?.[2]).toEqual({
-      query: 'needle',
-      options: {
-        max_results: SEARCH_PAGE,
-        file_status: 'active',
-        filename_only: false,
-        path: '/docs',
+    expect(await account.run.bodies('POST', SEARCH_ROUTE)).toEqual([
+      {
+        query: 'needle',
+        options: {
+          max_results: SEARCH_PAGE,
+          file_status: 'active',
+          filename_only: false,
+          path: '/docs',
+        },
       },
-    })
-    expect(rpc.mock.calls[1]?.[1]).toBe('/files/search/continue_v2')
-    expect(rpc.mock.calls[1]?.[2]).toEqual({ cursor: 'c1' })
+    ])
+    expect(await account.run.bodies('POST', SEARCH_CONTINUE_ROUTE)).toEqual([{ cursor: 'c1' }])
   })
 
   it('omits the path option for the account root', async () => {
-    rpc.mockResolvedValueOnce({ matches: [], has_more: false })
-    const out = await searchFiles(TM, 'needle')
+    await account.run.recordRequests()
+    const out = await searchFiles(tm(), 'needle')
     expect(out).toEqual({ paths: [], truncated: false })
-    const options = (rpc.mock.calls[0]?.[2] as { options: Record<string, unknown> }).options
-    expect('path' in options).toBe(false)
+    const [first] = (await account.run.bodies('POST', SEARCH_ROUTE)) as {
+      options: Record<string, unknown>
+    }[]
+    expect('path' in (first?.options ?? {})).toBe(false)
   })
 
+  // A first page that already holds 10,000 matches, with more to come: the
+  // walk stops there.
   it('flags the 10,000-match ceiling as truncated', async () => {
     const matches = Array.from({ length: MAX_SEARCH_MATCHES }, (_, i) =>
       searchMatch('file', `/f${String(i)}.txt`, `/f${String(i)}.txt`),
     )
-    rpc.mockResolvedValueOnce({ matches, has_more: true, cursor: 'c1' })
-    const out = await searchFiles(TM, 'needle')
+    await account.run.answerNext('POST', SEARCH_ROUTE, 200, {
+      matches,
+      has_more: true,
+      cursor: 'c1',
+    })
+    await account.run.recordRequests()
+    const out = await searchFiles(tm(), 'needle')
     expect(out.paths).toHaveLength(MAX_SEARCH_MATCHES)
     expect(out.truncated).toBe(true)
-    expect(rpc).toHaveBeenCalledTimes(1)
+    expect(await account.run.bodies('POST', SEARCH_CONTINUE_ROUTE)).toEqual([])
   })
 })
 
 describe('continueFolder', () => {
   it('pages through continue', async () => {
-    rpc
-      .mockResolvedValueOnce({
-        entries: [{ '.tag': 'file', name: 'a' }],
-        cursor: 'c1',
-        has_more: true,
-      })
-      .mockResolvedValueOnce({
-        entries: [{ '.tag': 'file', name: 'b' }],
-        cursor: 'c2',
-        has_more: false,
-      })
-    const out = await continueFolder(TM, 'c0')
-    expect(out.entries.map((e) => e.name)).toEqual(['a', 'b'])
-    expect(out.cursor).toBe('c2')
-    expect(rpc.mock.calls[0]?.[1]).toBe('/files/list_folder/continue')
-    expect(rpc.mock.calls[0]?.[2]).toEqual({ cursor: 'c0' })
+    for (const name of ['a', 'b', 'c']) await account.put(`/docs/${name}`, new Uint8Array([120]))
+    const first = await account.run.call<{ cursor: string }>('POST', LIST_ROUTE, {
+      json: { path: '/docs', limit: 1 },
+    })
+    await account.run.recordRequests()
+    const out = await continueFolder(tm(), first.cursor)
+    expect(out.entries.map((e) => e.name)).toEqual(['b', 'c'])
+    expect((await account.run.bodies('POST', CONTINUE_ROUTE))[0]).toEqual({ cursor: first.cursor })
+    expect(['', first.cursor]).not.toContain(out.cursor)
   })
 })
 
 describe('movePath', () => {
   const entry = { '.tag': 'file', name: 'b' }
+  // Anything but an object names no kind, so the rename keeps its subtree
+  // drop; the transport reads an empty body as null.
   it.each([
     ['the moved entry', { metadata: entry }, entry],
     ['an empty body', null, {}],
@@ -139,11 +181,16 @@ describe('movePath', () => {
     ['null metadata', { metadata: null }, {}],
     ['string metadata', { metadata: 'b' }, {}],
     ['array metadata', { metadata: [] }, {}],
-  ])('reads %s', async (_label, reply, moved) => {
-    // Anything but an object names no kind, so the rename keeps its
-    // subtree drop; the transport reads an empty body as null.
-    rpc.mockResolvedValueOnce(reply)
-    expect(await movePath(TM, '/a', '/b')).toEqual(moved)
+  ] as [string, JsonValue, JsonValue][])('reads %s', async (_label, reply, moved) => {
+    await account.run.answerNext('POST', MOVE_ROUTE, 200, reply)
+    expect(await movePath(tm(), '/a', '/b')).toEqual(moved)
+  })
+
+  it('answers the moved entry Dropbox names', async () => {
+    await account.put('/a', new Uint8Array([97]))
+    const moved = await movePath(tm(), '/a', '/b')
+    const meta = await account.run.call('POST', '/2/files/get_metadata', { json: { path: '/b' } })
+    expect(moved).toEqual(meta)
   })
 })
 

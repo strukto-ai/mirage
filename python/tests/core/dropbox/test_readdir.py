@@ -93,7 +93,9 @@ async def test_readdir_maps_409_to_enoent(account):
     with pytest.raises(FileNotFoundError):
         await readdir(
             account.accessor(),
-            PathSpec(vfs_path="missing", virtual="/missing", directory="/missing"),
+            PathSpec(
+                vfs_path="missing", virtual="/missing", directory="/missing"
+            ),
         )
 
 
@@ -121,7 +123,9 @@ async def test_readdir_under_a_file_is_enotdir(account):
     with pytest.raises(NotADirectoryError):
         await readdir(
             account.accessor(),
-            PathSpec(vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt/x"),
+            PathSpec(
+                vfs_path="a.txt/x", virtual="/a.txt/x", directory="/a.txt/x"
+            ),
         )
 
 

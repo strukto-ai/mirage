@@ -145,7 +145,12 @@ async def test_write_records_the_reply_token(account, token):
     # token no local hash produces; or a reply with no body.
     reply = await account.put("/other.txt", b"hello")
     body = None if token is None else {**reply, "content_hash": token}
-    plan = {"method": "POST", "route": UPLOAD_ROUTE, "status": 200, "body": body}
+    plan = {
+        "method": "POST",
+        "route": UPLOAD_ROUTE,
+        "status": 200,
+        "body": body,
+    }
     await account.run.call("POST", "/_kit/faults", json={"plans": [plan]})
     scope = RecordingScope()
     try:
