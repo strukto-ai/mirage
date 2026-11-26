@@ -1,0 +1,72 @@
+---
+title: LobeHub
+description: Give LobeHub's agents Mirage's tools as a custom MCP connector, on desktop or the web.
+icon: /images/lobehub-logo.svg
+---
+
+[LobeHub](https://github.com/lobehub/lobehub) connects its agents to MCP servers as connectors. Mirage reaches it two ways:
+
+| Way | LobeHub app | Workspace |
+| --- | --- | --- |
+| [STDIO](#stdio) | desktop | the one you name, on the Mirage server on your computer |
+| [Streamable HTTP](#streamable-http) | desktop and web | a workspace on a Mirage server LobeHub can reach |
+
+LobeHub keeps its own tools. Mirage sees only the calls to its seven tools.
+
+## Install
+
+<CodeGroup>
+```bash uv
+uv tool install mirage-ai
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+STDIO needs the [LobeHub](https://lobehub.com) desktop app; the web app needs only a Mirage server it can reach.
+
+## Workspace
+
+```yaml workspace.yaml
+mounts:
+  /data: { vfs: ram, mode: write }
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+## STDIO
+
+In LobeHub, open **Settings → Connectors**, choose **Add custom connector**, and select **Import JSON config**:
+
+```json
+{
+  "mcpServers": {
+    "mirage": { "command": "mirage", "args": ["mcp", "-w", "demo"] }
+  }
+}
+```
+
+Or pick the **STDIO** type, fill **Command** with `mirage`, and add `mcp`, `-w` and `demo` as three **Arguments**. The connector is available once **Test connection** passes.
+
+`mirage mcp` starts the Mirage server when it is not running and sends your saved [login](/home/access/cli#log-in) or the local token file. On macOS and Linux, LobeHub starts it with only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM` and `USER`, with `PATH` taken from your login shell; to pass `MIRAGE_TOKEN`, add it under **MCP server env vars**.
+
+## Streamable HTTP
+
+Add a custom connector of the **Streamable HTTP** type:
+
+| Field | Value |
+| --- | --- |
+| **Streamable HTTP Endpoint URL** | `https://mirage.example.com/v1/workspaces/demo/mcp` |
+| **Auth type** | **API Key** |
+| **API Key** | your Mirage [token](/home/access/http#configure-authentication) |
+
+Create `demo` on that server: run the [Workspace](#workspace) commands after [`mirage login https://mirage.example.com`](/home/access/cli#log-in), or, on a server with a shared token, `mirage login https://mirage.example.com --token -` with the same key. Then `mirage context use local` points the CLI, and the STDIO connector, back at your computer. LobeHub sends the key as `Authorization: Bearer`. An imported JSON config carries only the URL, so set the key in the form.
+
+The web app connects from LobeHub's server, which refuses private and loopback addresses: give it a public URL. A self-hosted LobeHub reaches a Mirage server on its own network when `SSRF_ALLOW_PRIVATE_IP_ADDRESS` or `SSRF_ALLOW_IP_ADDRESS_LIST` allows it. The desktop app connects from your computer, so it also reaches `http://127.0.0.1:8765/v1/workspaces/demo/mcp` with the token in `~/.mirage/auth_token`.
+
+## Use it
+
+Open the agent's **Agent Settings → Connectors**, select `mirage`, and save. Each tool runs on **Allow**, **Ask** or **Deny**.
