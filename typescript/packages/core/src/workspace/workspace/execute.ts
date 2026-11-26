@@ -42,7 +42,7 @@ import { IOResult, materialize } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
 import { activeRecords, lostPaths, recordingScope } from '../../observe/context.ts'
 import type { Observer } from '../../observe/observer.ts'
-import type { OpRecord, Recorder } from '../../observe/record.ts'
+import type { OpLedger, OpRecord, Recorder } from '../../observe/record.ts'
 import { Channel } from '../../shell/console/types.ts'
 import type { JobConsole } from '../../shell/console/job_console.ts'
 import { JobOutput, Terminal } from '../../shell/console/index.ts'
@@ -151,7 +151,7 @@ export interface ExecuteEnv {
   registry: MountRegistry
   dispatcher: Dispatcher
   observer: Observer
-  records: OpRecord[]
+  records: OpLedger
   jobTable: JobTable
   lineTable: LineTable
   runtimes: Runtimes
@@ -1455,7 +1455,7 @@ async function runOnLineRuntime(
       killed,
     )
   } catch (error) {
-    for (const item of lineRecords) env.records.push(item)
+    env.records.add(lineRecords)
     if (isLine) {
       const aborted = killed?.aborted === true
       const failed = failureResult(aborted ? makeAbortError(killed) : error)
@@ -1464,7 +1464,7 @@ async function runOnLineRuntime(
     }
     throw error
   }
-  for (const item of lineRecords) env.records.push(item)
+  env.records.add(lineRecords)
   const carried = result.decision ?? nested.latest
   hold(carried)
   recordStatus(targetSession, result.exitCode)
@@ -1842,7 +1842,7 @@ async function runParsedLine(
   // observer op events. The command event's exit_code says whether the
   // line that emitted them succeeded. Internal evals (record:false) have
   // an empty opRecords here: their ops were accounted by the line above.
-  for (const record of opRecords) env.records.push(record)
+  env.records.add(opRecords)
   // bash adds a line to history only when it is non-empty
   // (anything before its newline): a blank line is skipped, while a
   // whitespace-only or comment-only line is kept.

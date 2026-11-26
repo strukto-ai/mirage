@@ -49,7 +49,7 @@ import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '.
 import { HISTFILESIZE } from '../../core/history/constants.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
 import { Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { OpLedger, type OpRecord } from '../../observe/record.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { RoutePolicy } from '../../policy/builtin/route.ts'
@@ -314,6 +314,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
+  private readonly opLedger = new OpLedger()
   readonly vfs: WorkspaceFiles
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
@@ -682,6 +683,7 @@ export class Workspace {
       },
       {
         clock: this.clock,
+        records: this.opLedger,
         bind: (sessionId, run) => this.bindSession(sessionId, run),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
@@ -2575,7 +2577,7 @@ export class Workspace {
       registry: this.registry,
       dispatcher: this.dispatcher,
       observer: this.observer,
-      records: this.records,
+      records: this.opLedger,
       jobTable: this.jobTable,
       lineTable: this.lineTable,
       runtimes: this.runtimeWorld,

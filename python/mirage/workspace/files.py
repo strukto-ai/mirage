@@ -35,7 +35,7 @@ from mirage.observe.context import (
     fresh_recorder,
     record,
 )
-from mirage.observe.record import OpRecord, Recorder
+from mirage.observe.record import OpLedger, OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -138,7 +138,7 @@ class Files:
         observer: Any | None = None,
         session_id: str | None = None,
         bind: SessionBind | None = None,
-        records: list[OpRecord] | None = None,
+        records: OpLedger | None = None,
         follow: FollowOperands | None = None,
         ledger: bool = True,
         clock: Clock | None = None,
@@ -151,7 +151,7 @@ class Files:
         self._bind = bind
         self._follow = follow
         self._ledger = ledger
-        self._records: list[OpRecord] = records if records is not None else []
+        self._records = records if records is not None else OpLedger()
 
     @property
     def session_id(self) -> str | None:
@@ -529,7 +529,7 @@ class Files:
             return
         records = list(own.sink)
         own.sink.clear()
-        self._records.extend(records)
+        self._records.add(records)
         if self._observer is not None:
             session = self._session_for(seen)
             for rec in records:
@@ -1072,8 +1072,9 @@ class WorkspaceFiles(Files):
     def records(self) -> list[OpRecord]:
         """The op ledger: every facade op lands here, and the executor
         appends each shell line's ops too, so this is the one
-        workspace-wide account."""
-        return self._records
+        workspace-wide account. It holds every record a snapshot pins a
+        path by and the newest of the rest (``OpLedger``)."""
+        return self._records.records
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
         """Mounts the session sees whose files cannot be sized without
@@ -1125,12 +1126,12 @@ class WorkspaceFiles(Files):
     @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
-        return sum(r.bytes for r in self.records if not r.is_cache)
+        return self._records.network_bytes
 
     @property
     def cache_bytes(self) -> int:
         """Total bytes served from cache."""
-        return sum(r.bytes for r in self.records if r.is_cache)
+        return self._records.cache_bytes
 
     def is_mounted(self, path: str) -> bool:
         """Check if a path is under a mount someone made.

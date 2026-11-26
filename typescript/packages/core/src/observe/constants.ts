@@ -40,3 +40,8 @@ export const TRACE_CONTENT_MAX_BYTES = 16 * 1024
 // first, down to three quarters of it, so trimming stays rare however fast
 // lines arrive: 8 MiB keeps thousands of lines with their calls.
 export const RAM_LOG_BYTES = 8 * 1024 * 1024
+
+// The most records a workspace's op ledger holds of those no snapshot
+// reads. Past it the oldest go first, down to three quarters of it: a few
+// megabytes, however many files a long-lived workspace reads.
+export const LEDGER_RECORDS = 16 * 1024

@@ -23,6 +23,7 @@ from mirage.observe.record import (
     RETRACT_FINGERPRINT_OPS,
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
+    OpLedger,
     OpRecord,
 )
 from mirage.types import FileStat, FileType
@@ -455,3 +456,27 @@ def test_a_drift_check_offers_no_hints():
     )
     asyncio.run(check_drift(lambda _p: mount, "/m/a.txt", "t"))
     assert seen == [None]
+
+
+def test_a_ledger_past_its_cap_pins_what_the_whole_log_pins():
+    log = [
+        _rec("read", "/s3/a", "fp-a", timestamp=1),
+        _rec("read", "/s3/a", timestamp=2),
+        _rec("stat", "/s3/a", timestamp=3),
+        _rec("write", "/s3/b", "fp-b", timestamp=4),
+        _rec("append", "/s3/b", timestamp=5),
+        _rec("read", "/s3/c", revision="rev-c", timestamp=6),
+        _rec("readdir", "/s3", timestamp=7),
+        _rec("write", "/s3/d", timestamp=8),
+        _rec("read", "/s3/d", "fp-d", timestamp=9),
+        _rec("rm_r", "/s3/c", timestamp=10),
+        _rec("read", "/s3/e", "fp-e", timestamp=11),
+    ]
+    log += [_rec("read", f"/s3/n{i}", timestamp=12 + i) for i in range(20)]
+    ledger = OpLedger(max_records=4)
+    for rec in log:
+        ledger.add([rec])
+    assert len(ledger.records) <= 8 + 4
+    pins = capture_fingerprints(*_log(ledger.records))
+    assert pins == capture_fingerprints(*_log(log))
+    assert _paths(pins) == ["/s3/a", "/s3/d", "/s3/e"]

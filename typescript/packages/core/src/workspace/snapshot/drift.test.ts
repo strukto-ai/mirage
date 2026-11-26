@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CONTENT_CHANGING_OPS,
+  OpLedger,
   OpRecord,
   RETRACT_FINGERPRINT_OPS,
   STAMP_FINGERPRINT_OPS,
@@ -520,5 +521,33 @@ describe('installFingerprints under DriftPolicy.OFF', () => {
     )
     expect(evicted).toEqual(['/d/a.txt', '/d/b.txt'])
     expect(drift.pending).toBe(false)
+  })
+})
+
+describe('a ledger past its cap', () => {
+  it('pins what the whole log pins', () => {
+    const registry = makeRegistry([makeMount('/s3/', true)])
+    const log = [
+      opRecord('read', '/s3/a', 'fp-a', null, 1),
+      opRecord('read', '/s3/a', null, null, 2),
+      opRecord('stat', '/s3/a', null, null, 3),
+      opRecord('write', '/s3/b', 'fp-b', null, 4),
+      opRecord('append', '/s3/b', null, null, 5),
+      opRecord('read', '/s3/c', null, 'rev-c', 6),
+      opRecord('readdir', '/s3', null, null, 7),
+      opRecord('write', '/s3/d', null, null, 8),
+      opRecord('read', '/s3/d', 'fp-d', null, 9),
+      opRecord('rm_r', '/s3/c', null, null, 10),
+      opRecord('read', '/s3/e', 'fp-e', null, 11),
+      ...Array.from({ length: 20 }, (_, i) =>
+        opRecord('read', `/s3/n${String(i)}`, null, null, 12 + i),
+      ),
+    ]
+    const ledger = new OpLedger(4)
+    for (const rec of log) ledger.add([rec])
+    expect(ledger.records.length).toBeLessThanOrEqual(8 + 4)
+    const pins = captureFingerprints(ledger.records, registry)
+    expect(pins).toEqual(captureFingerprints(log, registry))
+    expect(pins.map((entry) => entry.path)).toEqual(['/s3/a', '/s3/d', '/s3/e'])
   })
 })

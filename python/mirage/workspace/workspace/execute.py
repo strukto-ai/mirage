@@ -46,7 +46,7 @@ from mirage.io.network import run_with_network
 from mirage.io.types import ByteSource
 from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
-from mirage.observe.record import OpRecord
+from mirage.observe.record import OpLedger, OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
@@ -159,7 +159,7 @@ class ExecuteEnv:
         registry (MountRegistry): mounts, policies and decisions.
         dispatcher (Dispatcher): the dispatcher.
         observer (Observer): records each typed line.
-        records (list[OpRecord]): the workspace's op log.
+        records (OpLedger): the workspace's op ledger.
         job_table (JobTable): the workspace's jobs.
         line_table (LineTable): the lines its sessions read.
         runtimes (Runtimes): the runtimes a whole line may run in.
@@ -181,7 +181,7 @@ class ExecuteEnv:
     registry: MountRegistry
     dispatcher: Dispatcher
     observer: Observer
-    records: list[OpRecord]
+    records: OpLedger
     job_table: JobTable
     line_table: LineTable
     runtimes: Runtimes
@@ -1723,7 +1723,7 @@ async def run_prepared_line(
             effective_session._expand_aliases_marks.clear()
         reset_caller(session_token)
         await ws.sessions.end_line(session_id, parent is None)
-        ws.records.extend(scope.records)
+        ws.records.add(scope.records)
         if recorded:
             await _end_record(
                 ws,

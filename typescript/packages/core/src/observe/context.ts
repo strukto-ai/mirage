@@ -18,7 +18,14 @@ import {
   liveCallers,
   bindCaller,
 } from '../context/session_context.ts'
-import { LostPaths, OpRecord, RecordIndex, STAMP_FINGERPRINT_OPS, type Recorder } from './record.ts'
+import {
+  LostPaths,
+  type OpLedger,
+  OpRecord,
+  RecordIndex,
+  STAMP_FINGERPRINT_OPS,
+  type Recorder,
+} from './record.ts'
 import type { ProcessId } from '../execution/types.ts'
 import type { PathSpec } from '../types.ts'
 import { SystemClock, type Clock } from '../utils/clock.ts'
@@ -130,7 +137,7 @@ export function activeRecords(): readonly OpRecord[] | undefined {
  */
 export async function recordingScope<T>(
   fn: () => Promise<T>,
-  ledger: OpRecord[] | null = null,
+  ledger: OpLedger | null = null,
   clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
   const state: Recorder = { records: [], mountId: null, ledger, clock }
