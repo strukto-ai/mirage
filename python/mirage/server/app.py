@@ -523,7 +523,8 @@ def build_app(
             daemon passes one that stops its process.
         allowed_hosts (list[str] | None): host allowlist for the
             ``Host`` header. ``None`` (default) reads
-            ``$MIRAGE_ALLOWED_HOSTS`` (CSV) or falls back to
+            ``$MIRAGE_ALLOWED_HOSTS`` (CSV), then the ``allowed_hosts``
+            key in ``config.toml`` ``[daemon]``, or falls back to
             loopback-only (``127.0.0.1``, ``localhost``, ``::1``).
             Pass ``["*"]`` to skip the Host comparison (only safe
             behind a trusted reverse proxy). Browser requests from

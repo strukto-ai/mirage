@@ -160,7 +160,7 @@ def is_cross_origin(
 
 
 class HostHeaderMiddleware:
-    """ASGI middleware that 400s requests with disallowed Host headers
+    """ASGI middleware that 403s requests with disallowed Host headers
     and browser requests from another origin.
 
     Replaces Starlette's TrustedHostMiddleware so we can log on
