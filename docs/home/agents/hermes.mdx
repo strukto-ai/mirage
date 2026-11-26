@@ -4,6 +4,9 @@ description: Run Hermes Agent's terminal and file tools in a Mirage workspace, o
 icon: /images/hermes-logo.svg
 ---
 
+<img noZoom src="/images/hermes-banner-light.png" alt="Mirage and Hermes Agent" className="block dark:hidden w-full rounded-xl" />
+<img noZoom src="/images/hermes-banner-dark.png" alt="Mirage and Hermes Agent" className="hidden dark:block w-full rounded-xl" />
+
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) runs its terminal and file tools on a terminal backend. Mirage reaches it three ways:
 
 | Way | Hermes runs | Mirage sees |
@@ -68,24 +71,7 @@ mounts:
     config: { token: "${GITHUB_TOKEN}", owner: strukto-ai, repo: mirage }
 ```
 
-`${NAME}`, a `{from: env, key: NAME}` [pointer](/home/service-credentials) and an `env:` entry with `from: env` all read `NAME` from the profile. A YAML that would reach a key any other way is refused, with each place named:
-
-| Refused | Because it reads |
-| --- | --- |
-| A `secrets:` block, or `from: dotenv`, `1password` or `aws-sm` in any `env:` block, including a session profile's | a key store other than Hermes |
-| A key pointer in a policy program's `env` (write `${NAME}` there instead) | the process environment |
-| A backend, CLI or runtime named by a `module:Class` reference, or one outside Mirage's own list | whatever that code reads |
-| An S3 or S3-compatible mount or `store:` group without a key pair, or with `aws_profile` | `~/.aws` |
-| An `ssh` mount or machine | `~/.ssh/config` and the ssh-agent |
-| A `kubernetes` machine | `~/.kube/config` |
-| An `e2b`, `daytona` or `boxd` machine without `api_key` | its SDK's environment variable |
-| A `postgres` dsn without a password | `PGPASSWORD` or `~/.pgpass` |
-| A `chroma` mount | `CHROMA_*` variables and `./.env` |
-| A `mongodb` or `gridfs` uri using `MONGODB-AWS` without a key | `~/.aws` |
-| A `lancedb` `db://` uri without `api_key`, or any other cloud uri unless it is `s3://` with a key pair in `storage_options` | `LANCEDB_API_KEY` or the cloud's own login |
-| A Google, Box or Dropbox mount, or the `gws` CLI, with a `refresh_token` or `client_secret` | no file, but Mirage would refresh the OAuth token itself, which a Hermes plugin may not |
-
-A Google or Box mount works with a short-lived `access_token` until it expires.
+`${NAME}`, a `{from: env, key: NAME}` [pointer](/home/service-credentials) and an `env:` entry with `from: env` all read `NAME` from the profile. A YAML that would reach a key any other way is refused, with each place named; [Limitations](#limitations) lists them.
 
 ## MCP
 
@@ -118,3 +104,32 @@ hermes config set terminal.cwd /tmp/mirage-demo
 ```
 
 Hermes' commands run on your computer in `/tmp/mirage-demo`, and each file they read or write goes through the workspace.
+
+## Limitations
+
+These apply to the terminal backend. With MCP or FUSE the workspace runs in the Mirage CLI, outside Hermes, and none of them apply.
+
+A Hermes plugin may take keys only from the Hermes profile, so the backend refuses a workspace YAML that would reach one any other way. These work once the YAML holds the key:
+
+| In the YAML | Needs | Otherwise it reads |
+| --- | --- | --- |
+| An S3 or S3-compatible mount or `store:` group | a key pair, and no `aws_profile` | `~/.aws` |
+| An `e2b`, `daytona` or `boxd` machine | `api_key` | its SDK's environment variable |
+| A `postgres` dsn | a password | `PGPASSWORD` or `~/.pgpass` |
+| A `mongodb` or `gridfs` uri using `MONGODB-AWS` | an access key in the uri | `~/.aws` |
+| A `lancedb` `db://` uri | `api_key` | `LANCEDB_API_KEY` |
+| A `lancedb` `s3://` uri | a key pair in `storage_options` | `~/.aws` |
+| A policy program's `env` | `${NAME}`, not a key pointer | the process environment |
+
+These are not available:
+
+| Not available | Because |
+| --- | --- |
+| An `ssh` mount or machine | the ssh library reads `~/.ssh/config` and the ssh-agent, even with a key in the YAML |
+| A `kubernetes` machine | `kubectl` signs in from `~/.kube/config` |
+| A `lancedb` uri on another cloud, such as `gs://` or `az://` | it signs in with that cloud's own login |
+| A Google, Box or Dropbox mount, or the `gws` CLI, with a `refresh_token` or `client_secret` | Mirage would renew the OAuth token itself, which a Hermes plugin may not |
+| A `secrets:` block, or `from: dotenv`, `1password` or `aws-sm` in any `env:` block, including a session profile's | it is a key store other than Hermes |
+| A backend, CLI or runtime named by a `module:Class` reference, or one outside Mirage's own list | the backend cannot vouch for what that code reads |
+
+A Google or Box mount works with a short-lived `access_token` until it expires.
