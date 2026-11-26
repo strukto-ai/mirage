@@ -1181,6 +1181,28 @@ impl Job {
     }
 }
 
+/// How far `--trim` has read into one line's leading whitespace, so the -o
+/// pieces of a line read it once between them.
+#[derive(Clone, Copy, Default)]
+struct LineTrim {
+    line: usize,
+    read_to: usize,
+}
+
+impl LineTrim {
+    /// Where the trim of a piece on the line that starts at `line` reads on
+    /// from.
+    fn resume(&mut self, line: usize) -> usize {
+        if self.line != line {
+            *self = Self {
+                line,
+                read_to: line,
+            };
+        }
+        self.read_to
+    }
+}
+
 struct RegionJob {
     data: Arc<Vec<u8>>,
     matches: Arc<Matches>,
@@ -1200,6 +1222,9 @@ struct RegionJob {
     rendered_prefix_at: usize,
     rendered_prefix_lines: usize,
     rendered_line_at: usize,
+    trim: LineTrim,
+    /// The piece in hand trims on from `trim`, and moves it on when done.
+    trimming: bool,
     stage: u8,
 }
 
@@ -1231,6 +1256,8 @@ impl RegionJob {
             rendered_prefix_at: 0,
             rendered_prefix_lines: 0,
             rendered_line_at: 0,
+            trim: LineTrim::default(),
+            trimming: false,
             stage: 0,
         }
     }
@@ -1266,6 +1293,9 @@ impl RegionJob {
         if let Some(printed) = self.printed.as_mut() {
             if !printed.poll(config, label, pieces, budget) {
                 return false;
+            }
+            if std::mem::take(&mut self.trimming) {
+                self.trim.read_to = printed.trim_at;
             }
             self.printed = None;
             return false;
@@ -1472,11 +1502,13 @@ impl RegionJob {
                 // A trim takes a line's leading whitespace, so one starts
                 // where the replacement's first line does in the text
                 // around it, and a piece that begins further in keeps its
-                // own.
-                printed.trim_at = if config.trim && self.replacement_at == start {
-                    self.rendered_line_at
-                } else {
+                // own. The pieces of one line read its whitespace once.
+                printed.trim_at = if !config.trim {
                     self.replacement_at
+                } else if self.replacement_at == start {
+                    self.trim.resume(self.rendered_line_at)
+                } else {
+                    self.trim.resume(self.replacement_at)
                 };
                 printed.omit_empty = true;
                 printed.terminated = false;
@@ -1491,6 +1523,7 @@ impl RegionJob {
                 // A line of the replacement that holds nothing prints no
                 // piece.
                 if !printed.range.is_empty() {
+                    self.trimming = config.trim;
                     self.printed = Some(printed);
                 }
                 if self.replacement_end >= end {
@@ -1526,9 +1559,10 @@ impl RegionJob {
             printed.range = begin..end;
             // A trim takes the line's leading whitespace, not the piece's:
             // a piece that begins past it keeps its own, and one that lies
-            // within it prints nothing.
+            // within it prints nothing. The pieces of one line read its
+            // whitespace once.
             printed.trim_at = if config.trim {
-                record.content.start
+                self.trim.resume(record.content.start)
             } else {
                 begin
             };
@@ -1541,6 +1575,7 @@ impl RegionJob {
             // A line the match holds nothing of but its terminator prints
             // no piece.
             if begin < end {
+                self.trimming = config.trim;
                 self.printed = Some(printed);
             }
             if index >= last_line {
@@ -1926,6 +1961,17 @@ impl Input {
             finalized: false,
             done: config.max_count == Some(0),
             multi: None,
+        }
+    }
+    /// A search of `data` on the last finished search's automata and
+    /// tables, when one is held, so a tree of small files builds them once.
+    fn search_of(&mut self, program: &Program, data: Vec<u8>, all: bool) -> Box<Search> {
+        match self.scratch.take() {
+            Some(mut scratch) => {
+                scratch.reset(data, all);
+                scratch
+            }
+            None => Box::new(program.start(data, all)),
         }
     }
     /// Whether nothing is pending or queued, so a read can become the
@@ -2675,7 +2721,7 @@ impl Rg {
                 if input.finishing {
                     let data = input.pending.take();
                     input.tally.searched = data.len() as u64;
-                    input.search = Some(Box::new(program.start(data, true)));
+                    input.search = Some(input.search_of(program, data, true));
                     continue;
                 }
                 break;
@@ -2743,12 +2789,7 @@ impl Rg {
             input.scan = 0;
             input.record_end = None;
             let all = config.needs_every_match();
-            input.search = Some(if let Some(mut scratch) = input.scratch.take() {
-                scratch.reset(data, all);
-                scratch
-            } else {
-                Box::new(program.start(data, all))
-            });
+            input.search = Some(input.search_of(program, data, all));
         }
         Ok(())
     }
@@ -4208,6 +4249,50 @@ mod tests {
             json!({"pattern":"\\s+","only_matching":true,"trim":true}),
         );
         assert_eq!(out, b"\n\n\n\n\n");
+    }
+
+    #[test]
+    fn the_pieces_of_a_line_read_its_leading_whitespace_once_between_them() {
+        // Each piece inside the indent would read it again from the line's
+        // start: 20,000 one-space pieces, 200 million bytes.
+        let data = [b" ".repeat(20_000), b"x  y\n\t\t\tz\n".to_vec()].concat();
+        for (extra, expected) in [
+            (json!({}), b" \n \n".as_slice()),
+            (json!({"line_numbers":true}), b"1: \n1: \n"),
+            (json!({"replace":" "}), b" \n \n \n \n \n \n \n"),
+        ] {
+            let mut config = json!({
+                "pattern":"\\s","multiline":true,"only_matching":true,"trim":true
+            });
+            let more = extra.as_object().unwrap().clone();
+            config.as_object_mut().unwrap().extend(more);
+            let (out, _, calls) = run(&data, config);
+            assert_eq!(out, expected, "{extra}");
+            assert!(calls < 100, "{extra}: {calls} calls");
+        }
+    }
+
+    #[test]
+    fn a_multiline_search_kept_across_inputs_finds_each_ones_own_matches() {
+        let config = json!({"pattern":"a\\nb","multiline":true,"line_numbers":true});
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut out = Vec::new();
+        for data in [
+            b"a\nb\nc\n".as_slice(),
+            b"x\na\nb\n",
+            b"none\n",
+            b"ab\na\nb a\nb\n",
+        ] {
+            stream
+                .begin(br#"{"name":"<stdin>","label":null,"binary_mode":"text"}"#)
+                .unwrap();
+            stream.feed(data, &mut out).unwrap();
+            stream.finish(&mut out).unwrap();
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+            }
+        }
+        assert_eq!(out, b"1:a\n2:b\n2:a\n3:b\n2:a\n3:b a\n4:b\n");
     }
 
     #[test]

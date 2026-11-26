@@ -724,7 +724,10 @@ impl Walk {
         while self.at < stop {
             state = match dfa.next_state(cache, state, hay[self.at]) {
                 Ok(state) => state,
-                Err(_) => return Walked::GaveUp,
+                Err(_) => {
+                    *budget -= self.at - begin;
+                    return Walked::GaveUp;
+                }
             };
             if state.is_tagged() {
                 // A match state comes one byte late: the match ended before
@@ -735,6 +738,7 @@ impl Walk {
                     *budget -= self.at + 1 - begin;
                     return Walked::Done(self.found);
                 } else if state.is_quit() {
+                    *budget -= self.at + 1 - begin;
                     return Walked::Quit;
                 } else if idles && state.is_start() && self.found.is_none() {
                     *budget -= self.at + 1 - begin;
@@ -789,7 +793,10 @@ impl Walk {
         while self.at > stop {
             state = match dfa.next_state(cache, state, hay[self.at - 1]) {
                 Ok(state) => state,
-                Err(_) => return Walked::GaveUp,
+                Err(_) => {
+                    *budget -= begin - self.at;
+                    return Walked::GaveUp;
+                }
             };
             if state.is_tagged() {
                 if state.is_match() {
@@ -798,6 +805,7 @@ impl Walk {
                     *budget -= begin + 1 - self.at;
                     return Walked::Done(self.found);
                 } else if state.is_quit() {
+                    *budget -= begin + 1 - self.at;
                     return Walked::Quit;
                 }
             }
@@ -1995,6 +2003,39 @@ mod tests {
         while !search.step(&program, &mut 3) {}
         assert_eq!(search.matches(), [found(0, 2), found(3, 6)]);
         assert!(!search.quit);
+    }
+
+    #[test]
+    fn an_automaton_that_quits_pays_for_the_bytes_it_read() {
+        // A warm automaton builds no state on the way to the byte it quits
+        // at, so the bytes it read are all the NFA's budget must lose.
+        let program = rg_matcher::Program::with_options(
+            &[r"\b\w+q".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let ahead = [vec![b'x'; 40], "é xq".as_bytes().to_vec()].concat();
+        let mut search = program.start(ahead.clone(), true);
+        while !search.step(&program, &mut 16_384) {}
+        assert!(search.quit);
+        assert_eq!(search.matches(), [rg_matcher::Match { start: 43, end: 45 }]);
+        let behind = ["é".as_bytes().to_vec(), vec![b'x'; 40], b"q".to_vec()].concat();
+        for (haystack, phase, read) in [
+            (&ahead, rg_matcher::Phase::Forward, 41),
+            (&behind, rg_matcher::Phase::Reverse { end: 43 }, 42),
+        ] {
+            for warm in [false, true] {
+                search.reset(haystack.clone(), true);
+                search.phase = phase;
+                let mut budget = 1_000;
+                search.locate(&program, &mut budget);
+                assert!(search.quit);
+                assert_eq!(search.at, search.from);
+                if warm {
+                    assert_eq!(budget, 1_000 - read);
+                }
+            }
+        }
     }
 
     #[test]
