@@ -203,16 +203,19 @@ def test_the_op_log_drops_the_oldest_records_that_change_no_pin():
             fingerprint=fingerprint,
         )
 
+    # It trims once it took more than half of what its last trim kept.
     log = OpLog(max_records=4)
     stamp, gone, kept = rec("read", "s3", "etag"), rec("unlink"), rec("read")
     log.add([rec("read"), stamp, rec("stat", "ram"), gone, kept])
     assert len(log.records) == 5
-    newest = [rec("read"), rec("readdir")]
-    log.add(newest)
+    newest = [rec("read"), rec("readdir"), rec("stat")]
+    log.add(newest[:2])
+    assert len(log.records) == 7
+    log.add(newest[2:])
     assert [id(r) for r in log.records] == [
-        id(r) for r in (stamp, gone, kept, *newest)
+        id(r) for r in (stamp, gone, *newest)
     ]
-    assert (log.network_bytes, log.cache_bytes) == (60, 10)
+    assert (log.network_bytes, log.cache_bytes) == (70, 10)
 
 
 # A later stamp of a path overrules the earlier ones of the same mount, a

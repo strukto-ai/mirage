@@ -232,18 +232,21 @@ describe('OpLog', () => {
         durationMs: 0,
         fingerprint,
       })
+    // It trims once it took more than half of what its last trim kept.
     const log = new OpLog(4)
     const [stamp, gone, kept] = [rec('read', 's3', 'etag'), rec('unlink'), rec('read')]
     log.add([rec('read'), stamp, rec('stat', 'ram'), gone, kept])
     expect(log.records).toHaveLength(5)
-    const newest = [rec('read'), rec('readdir')]
-    log.add(newest)
-    const held = [stamp, gone, kept, ...newest]
+    const newest = [rec('read'), rec('readdir'), rec('stat')]
+    log.add(newest.slice(0, 2))
+    expect(log.records).toHaveLength(7)
+    log.add(newest.slice(2))
+    const held = [stamp, gone, ...newest]
     expect(log.records).toHaveLength(held.length)
     log.records.forEach((r, i) => {
       expect(r).toBe(held[i])
     })
-    expect([log.networkBytes, log.cacheBytes]).toEqual([60, 10])
+    expect([log.networkBytes, log.cacheBytes]).toEqual([70, 10])
   })
 
   // A later stamp of a path overrules the earlier ones of the same mount, a

@@ -194,23 +194,25 @@ class OpLog:
     pin a snapshot takes, and the newest of the rest, which only account
     for an op.
 
-    It holds at most ``max_records`` of the rest: past it the oldest go
-    first, down to three quarters of it. A record a later one overrules
-    (``_settles``) goes with them, or once ``max_records`` more that
-    change a pin arrived, so reading a file again adds no record for
-    good. The bytes a dropped record moved stay in the totals. A
-    snapshot takes the same pins from what is left, in an order that
-    can differ. Mirrors TypeScript's ``OpLog``.
+    It trims itself each time it took a quarter of ``max_records`` more,
+    or half of what its last trim kept where that is more, so the work
+    of a trim stays in step with what arrived. A trim lets go of every
+    record a later one overrules (``_settles``), so reading a file again
+    adds no record for good, and of the oldest of the rest once more
+    than ``max_records`` of them are held, down to three quarters of it.
+    The bytes a dropped record moved stay in the totals. A snapshot
+    takes the same pins from what is left, in an order that can differ.
+    Mirrors TypeScript's ``OpLog``.
 
     Args:
-        max_records (int): the most records it holds that change no pin.
+        max_records (int): the most records it keeps that change no pin.
     """
 
     def __init__(self, max_records: int = OP_LOG_RECORDS) -> None:
         self.records: list[OpRecord] = []
         self.max_records = max_records
-        self._unpinned = 0
-        self._settling = 0
+        self._taken = 0
+        self._kept = 0
         self._network_bytes = 0
         self._cache_bytes = 0
 
@@ -220,31 +222,28 @@ class OpLog:
         Args:
             records (Iterable[OpRecord]): what it recorded, oldest first.
         """
-        held = len(self.records)
-        self.records.extend(records)
-        unpinned = sum(not changes_pin(rec) for rec in self.records[held:])
-        self._unpinned += unpinned
-        self._settling += len(self.records) - held - unpinned
-        if max(self._unpinned, self._settling) <= self.max_records:
+        taken = list(records)
+        self.records.extend(taken)
+        self._taken += len(taken)
+        if self._taken <= max(self.max_records // 4, self._kept // 2):
             return
+        settled = [_settles(rec) for rec in self.records]
         last: dict[tuple[str, str, str | None], tuple[int, int]] = {}
         for at, rec in enumerate(self.records):
             when = (rec.timestamp, at)
-            for pin in _settles(rec):
+            for pin in settled[at]:
                 last[pin] = max(last.get(pin, when), when)
+        unpinned = sum(not pins for pins in settled)
         excess = 0
-        if self._unpinned > self.max_records:
-            excess = self._unpinned - self.max_records * 3 // 4
+        if unpinned > self.max_records:
+            excess = unpinned - self.max_records * 3 // 4
         kept: list[OpRecord] = []
-        self._unpinned = self._settling = 0
         for at, rec in enumerate(self.records):
-            settled = _settles(rec)
-            if settled:
-                dropped = last[settled[0]] != (rec.timestamp, at)
+            if settled[at]:
+                dropped = last[settled[at][0]] != (rec.timestamp, at)
             else:
                 dropped = excess > 0
                 excess -= dropped
-                self._unpinned += not dropped
             if not dropped:
                 kept.append(rec)
             elif rec.is_cache:
@@ -252,6 +251,8 @@ class OpLog:
             else:
                 self._network_bytes += rec.bytes
         self.records[:] = kept
+        self._taken = 0
+        self._kept = len(kept)
 
     @property
     def network_bytes(self) -> int:

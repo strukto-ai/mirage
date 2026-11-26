@@ -476,7 +476,7 @@ def test_an_op_log_past_its_cap_pins_what_every_record_pins():
     log = OpLog(max_records=4)
     for rec in records:
         log.add([rec])
-    assert len(log.records) <= 8 + 4
+    assert len(log.records) < len(records) // 2
     pins = capture_fingerprints(*_log(log.records))
     assert pins == capture_fingerprints(*_log(records))
     assert _paths(pins) == ["/s3/a", "/s3/d", "/s3/e"]
