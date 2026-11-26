@@ -34,15 +34,15 @@ Other command groups: `session`, `daemon`, plus
 
 ## Environment variables
 
-| Variable                    | Default                   | Purpose                                                                           |
-| --------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
-| `MIRAGE_DAEMON_URL`         | `http://127.0.0.1:8765`   | Daemon address the CLI connects to                                                |
-| `MIRAGE_TOKEN`              | (none)                    | Bearer token the CLI sends to the daemon                                          |
-| `MIRAGE_AUTH_MODE`          | `local`                   | Daemon auth mode: `local`, `token`, or `jwt`                                      |
-| `MIRAGE_AUTH_TOKEN`         | (auto-minted in `local`)  | Token the daemon accepts                                                          |
+| Variable                    | Default                   | Purpose                                                                                                         |
+| --------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `MIRAGE_DAEMON_URL`         | `http://127.0.0.1:8765`   | Daemon address the CLI connects to                                                                              |
+| `MIRAGE_TOKEN`              | (none)                    | Bearer token the CLI sends to the daemon                                                                        |
+| `MIRAGE_AUTH_MODE`          | `local`                   | Daemon auth mode: `local`, `token`, or `jwt`                                                                    |
+| `MIRAGE_AUTH_TOKEN`         | (auto-minted in `local`)  | Token the daemon accepts                                                                                        |
 | `MIRAGE_IDLE_GRACE_SECONDS` | `30`                      | Seconds the daemon waits after its last workspace is removed and its last request answered before shutting down |
-| `MIRAGE_ALLOWED_HOSTS`      | `127.0.0.1,localhost,::1` | Daemon Host-header allowlist (CSV; `*` disables the check)                        |
-| `MIRAGE_DAEMON_PORT`        | `8765`                    | Port the spawned daemon binds                                                     |
+| `MIRAGE_ALLOWED_HOSTS`      | `127.0.0.1,localhost,::1` | Daemon Host-header allowlist (CSV; `*` disables the check)                                                      |
+| `MIRAGE_DAEMON_PORT`        | `8765`                    | Port the spawned daemon binds                                                                                   |
 
 Like docker's `data-root` and git's `GIT_DIR`, `MIRAGE_HOME` is the
 single configurable root; its layout is fixed (`daemon.pid`, `repos/`,
