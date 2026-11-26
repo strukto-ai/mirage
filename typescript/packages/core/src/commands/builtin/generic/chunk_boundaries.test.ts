@@ -120,22 +120,28 @@ it.each<[string, Uint8Array]>([
   ['gzip -c | gunzip -c', TEXT],
   ['bzip2 -c | bzip2 -dc', TEXT],
   ['xz -c | xz -dc', TEXT],
-])('%s output does not depend on where stdin is cut', async (line, data) => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-  try {
-    const io = await ws.shell(line, { stdin: data })
-    const whole = [io.exitCode, io.stdout, io.stderr]
-    expect(io.exitCode, io.stderrText).toBe(0)
-    const cuts: number[][] = []
-    for (let at = 0; at <= data.length; at++) cuts.push([at])
-    cuts.push(Array.from({ length: data.length - 1 }, (_, i) => i + 1))
-    for (const cut of cuts) {
-      const pieces = await ws.shell(line, { stdin: splitSource(data, ...cut) })
-      expect([pieces.exitCode, pieces.stdout, pieces.stderr], `cut at ${cut.join(',')}`).toEqual(
-        whole,
-      )
+])(
+  '%s output does not depend on where stdin is cut',
+  async (line, data) => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(line, { stdin: data })
+      const whole = [io.exitCode, io.stdout, io.stderr]
+      expect(io.exitCode, io.stderrText).toBe(0)
+      const cuts: number[][] = []
+      for (let at = 0; at <= data.length; at++) cuts.push([at])
+      cuts.push(Array.from({ length: data.length - 1 }, (_, i) => i + 1))
+      for (const cut of cuts) {
+        const pieces = await ws.shell(line, { stdin: splitSource(data, ...cut) })
+        expect([pieces.exitCode, pieces.stdout, pieces.stderr], `cut at ${cut.join(',')}`).toEqual(
+          whole,
+        )
+      }
+    } finally {
+      await ws.close()
     }
-  } finally {
-    await ws.close()
-  }
-})
+  },
+  // One compression per cut: xz -c took 5.1 s on a runner sharing its cores
+  // with the other shard, 0.5 s on a desk.
+  30_000,
+)

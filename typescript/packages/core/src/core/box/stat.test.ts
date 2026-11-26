@@ -41,9 +41,11 @@ const TRASH = { type: 'folder', id: '1', name: 'Trash' }
 let origin: string
 let account: BoxAccount
 
+// Past the 20 s the fixture gives the fake to start, so a slow start fails
+// with the fixture's message, not the hook's.
 beforeAll(async () => {
   origin = await serve('box')
-})
+}, 30_000)
 
 beforeEach(() => {
   account = new BoxAccount(origin)

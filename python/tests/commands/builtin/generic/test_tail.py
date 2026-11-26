@@ -50,6 +50,10 @@ async def _stream(parts):
         yield part
 
 
+async def _drain(gen):
+    return b"".join([c async for c in gen])
+
+
 def _paths(*names: str) -> list[PathSpec]:
     return [
         PathSpec(
@@ -108,11 +112,11 @@ async def test_tail_writes_the_last_lines_in_one_piece():
 async def test_tail_counts_what_it_keeps_against_the_memory_budget():
     memory = MemoryBudget(8, lambda: 0)
     parts = [b"ab\n", b"cd\n", b"ef\n", b"gh"]
-    out = await run_with_memory(memory, materialize(tail(_stream(parts), n=1)))
+    out = await run_with_memory(memory, _drain(tail(_stream(parts), n=1)))
     assert out == b"gh"
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, materialize(tail(_stream([b"abcd", b"efgh", b"i"]), n=1))
+            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), n=1))
         )
 
 
@@ -121,7 +125,7 @@ async def test_tail_c_counts_its_window_against_the_memory_budget():
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, materialize(tail(_stream([b"abcd", b"efgh", b"i"]), c=100))
+            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), c=100))
         )
 
 

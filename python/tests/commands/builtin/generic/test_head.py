@@ -328,10 +328,14 @@ async def test_head_minus_counts_its_window_against_the_memory_budget(kwargs):
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, materialize(head_stream(_four_lines(), **kwargs))
+            memory, _drain(head_stream(_four_lines(), **kwargs))
         )
 
 
 async def _four_lines():
     for part in (b"ab\n", b"cd\n", b"ef\n", b"gh\n"):
         yield part
+
+
+async def _drain(gen):
+    return b"".join([c async for c in gen])
