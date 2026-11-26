@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { runFaultTests } from './faults.ts'
+import { runHoldTests } from './holds.ts'
 import { runRequestTests } from './requests.ts'
 import { runSnapshotTests } from './snapshot.ts'
 import { runLifecycleTests } from './runs.ts'
@@ -1121,4 +1122,5 @@ await main()
 await runLifecycleTests()
 await runFaultTests()
 await runRequestTests()
+await runHoldTests()
 await runSnapshotTests()

@@ -13,15 +13,25 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
+import pytest_asyncio
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from mirage import Mount, MountMode, PathSpec, Workspace
 from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
 from mirage.vfs.registry import build_vfs
-from tests.fixtures import dropbox_api
-from tests.fixtures.dropbox_api import FakeDropbox, serve
+from tests.core.dropbox.conftest import TOKEN, DropboxAccount
+from tests.fixtures.kit_fake import KitRun
+
+FOLDED = ("path", "from_path", "to_path")
+WRITES = ("upload", "delete_v2", "move_v2", "copy_v2", "create_folder_v2")
 
 
 def make_vfs(**overrides) -> DropboxVFS:
@@ -66,17 +76,30 @@ def test_invalid_root_path_rejected():
         make_vfs(root_path="/a/../b")
 
 
-def _workspace(dbx: FakeDropbox) -> Workspace:
+@pytest_asyncio.fixture
+async def dropbox(dropbox_origin: str) -> AsyncIterator[DropboxAccount]:
+    made = DropboxAccount(dropbox_origin)
+    yield made
+    await made.run.close()
+
+
+def _workspace(endpoint: str) -> Workspace:
     vfs = build_vfs(
         "dropbox",
         {
             "client_id": "c",
             "client_secret": "s",
-            "refresh_token": "r",
-            "endpoint": dbx.url,
+            "refresh_token": TOKEN,
+            "endpoint": endpoint,
         },
     )
     return Workspace({"/dbx": Mount(vfs, mode=MountMode.WRITE)})
+
+
+def _routes(requests: list[str]) -> list[str]:
+    """Each request's endpoint name, the token refresh left out."""
+    names = [request.rsplit("/", 1)[-1] for request in requests]
+    return [name for name in names if name != "token"]
 
 
 @pytest.mark.asyncio
@@ -88,20 +111,20 @@ def _workspace(dbx: FakeDropbox) -> Workspace:
     ],
     ids=["touch", "group-append"],
 )
-async def test_a_file_created_after_the_listing_is_found(line, after):
+async def test_a_file_created_after_the_listing_is_found(line, after, dropbox):
     # >>, sed -i and truncate on a simple command are integ's
     # write_conditional_own_read_ops_need_no_prior_read.
-    with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
-        ws = _workspace(dbx)
-        try:
-            await (await ws.shell("ls /dbx")).stdout_str()
-            dbx.write("n", b"v1\n")
-            r = await ws.shell(line)
-            err = await r.stderr_str()
-        finally:
-            await ws.close()
+    await dropbox.put("/f", b"one\n")
+    ws = _workspace(dropbox.run.url)
+    try:
+        await (await ws.shell("ls /dbx")).stdout_str()
+        await dropbox.put("/n", b"v1\n")
+        r = await ws.shell(line)
+        err = await r.stderr_str()
+    finally:
+        await ws.close()
     assert (r.exit_code, err) == (0, "")
-    assert dbx.read("n") == after
+    assert await dropbox.content("/n") == after
 
 
 @pytest.mark.asyncio
@@ -131,41 +154,41 @@ async def test_a_file_created_after_the_listing_is_found(line, after):
     ],
 )
 async def test_a_miss_asks_dropbox_only_past_an_earlier_listing(
-    setup, line, code, routes
+    setup, line, code, routes, dropbox
 ):
     # With no listing stored a miss asks by path, and cat's directory probe
     # lists the parent. A listing this command fetched for its own glob is
     # live evidence of absence; one an earlier line left behind is not, and
     # the miss asks once by path.
-    with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
-        ws = _workspace(dbx)
-        try:
-            if setup:
-                await (await ws.shell(setup)).stdout_str()
-            start = len(dbx.log)
-            r = await ws.shell(line)
-            await r.stderr_str()
-        finally:
-            await ws.close()
+    await dropbox.put("/f", b"one\n")
+    ws = _workspace(dropbox.run.url)
+    try:
+        if setup:
+            await (await ws.shell(setup)).stdout_str()
+        await dropbox.run.record_requests()
+        r = await ws.shell(line)
+        await r.stderr_str()
+    finally:
+        await ws.close()
     assert r.exit_code == code
-    assert [
-        route for route, _ in dbx.log[start:] if route != "token"
-    ] == routes
+    assert _routes(await dropbox.run.requests()) == routes
 
 
 @pytest.mark.asyncio
-async def test_glob_append_preserves_existing_target_and_sibling():
-    with serve(FakeDropbox(files={"f": b"one\n", "out": b""})) as dbx:
-        ws = _workspace(dbx)
-        try:
-            r = await ws.shell("echo /dbx/* >> /dbx/out")
-            err = await r.stderr_str()
-        finally:
-            await ws.close()
+async def test_glob_append_preserves_existing_target_and_sibling(dropbox):
+    await dropbox.put("/f", b"one\n")
+    await dropbox.put("/out", b"")
+    await dropbox.run.record_requests()
+    ws = _workspace(dropbox.run.url)
+    try:
+        r = await ws.shell("echo /dbx/* >> /dbx/out")
+        err = await r.stderr_str()
+    finally:
+        await ws.close()
     assert (r.exit_code, err) == (0, "")
-    assert dbx.read("out") == b"/dbx/f /dbx/out\n"
-    assert dbx.read("f") == b"one\n"
-    assert [route for route, _ in dbx.log if route != "token"] == [
+    assert await dropbox.content("/out") == b"/dbx/f /dbx/out\n"
+    assert await dropbox.content("/f") == b"one\n"
+    assert _routes(await dropbox.run.requests()) == [
         "list_folder",
         "list_folder",
         "get_metadata",
@@ -176,19 +199,19 @@ async def test_glob_append_preserves_existing_target_and_sibling():
 
 
 @pytest.mark.asyncio
-async def test_a_miss_outside_a_command_always_asks_dropbox():
+async def test_a_miss_outside_a_command_always_asks_dropbox(dropbox):
     # FUSE and programmatic calls belong to no command, so no listing is
     # theirs to trust, however recent.
-    with serve(FakeDropbox(files={"f": b"one\n"})) as dbx:
-        ws = _workspace(dbx)
-        try:
-            await (await ws.shell("ls /dbx")).stdout_str()
-            start = len(dbx.log)
-            with pytest.raises(FileNotFoundError):
-                await ws.vfs.stat("/dbx/.DS_Store")
-        finally:
-            await ws.close()
-    assert [r for r, _ in dbx.log[start:] if r != "token"] == ["get_metadata"]
+    await dropbox.put("/f", b"one\n")
+    ws = _workspace(dropbox.run.url)
+    try:
+        await (await ws.shell("ls /dbx")).stdout_str()
+        await dropbox.run.record_requests()
+        with pytest.raises(FileNotFoundError):
+            await ws.vfs.stat("/dbx/.DS_Store")
+    finally:
+        await ws.close()
+    assert _routes(await dropbox.run.requests()) == ["get_metadata"]
 
 
 @pytest.mark.asyncio
@@ -212,26 +235,77 @@ async def test_truncate_with_no_row_refuses_a_case_alias():
     download.assert_not_awaited()
 
 
+def _fold(arg: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value.lower()
+        if key in FOLDED and isinstance(value, str) and value.startswith("/")
+        else value
+        for key, value in arg.items()
+    }
+
+
+@asynccontextmanager
+async def _folding(run: KitRun) -> AsyncIterator[str]:
+    """A Dropbox in front of ``run`` that matches paths in any case, as the
+    real service does, and yield its origin.
+
+    Each path a request names is lowercased on its way to the fake, whose
+    names are lowercase already: the fake itself matches case exactly.
+
+    Args:
+        run (KitRun): the run the requests go on to.
+    """
+    async with aiohttp.ClientSession(auto_decompress=False) as http:
+
+        async def forward(request: web.Request) -> web.Response:
+            headers = {
+                key: value
+                for key, value in request.headers.items()
+                if key.lower() not in ("host", "content-length")
+            }
+            arg = request.headers.get("Dropbox-API-Arg")
+            if arg is not None:
+                headers["Dropbox-API-Arg"] = json.dumps(_fold(json.loads(arg)))
+            body = await request.read()
+            if request.content_type == "application/json" and body:
+                body = json.dumps(_fold(json.loads(body))).encode()
+            async with http.request(
+                request.method,
+                run.url + request.path_qs,
+                headers=headers,
+                data=body,
+            ) as resp:
+                kept = {
+                    key: value
+                    for key, value in resp.headers.items()
+                    if key.lower() in ("content-type", "dropbox-api-result")
+                }
+                return web.Response(
+                    status=resp.status, body=await resp.read(), headers=kept
+                )
+
+        app = web.Application()
+        app.router.add_route("*", "/{tail:.*}", forward)
+        server = TestServer(app)
+        await server.start_server()
+        try:
+            yield str(server.make_url("")).rstrip("/")
+        finally:
+            await server.close()
+
+
 @pytest.mark.asyncio
 async def test_hidden_case_aliases_are_refused_over_a_folding_service(
-    monkeypatch,
+    dropbox,
 ):
-    original = dropbox_api._norm
-
-    def folded(path):
-        return original(path).lower()
-
-    monkeypatch.setattr(dropbox_api, "_norm", folded)
-    with serve(
-        FakeDropbox(
-            files={
-                "secret.txt": b"secret",
-                "vault/private.txt": b"private",
-                "f": b"public",
-            }
-        )
-    ) as dbx:
-        ws = _workspace(dbx)
+    for path, data in {
+        "/secret.txt": b"secret",
+        "/vault/private.txt": b"private",
+        "/f": b"public",
+    }.items():
+        await dropbox.put(path, data)
+    async with _folding(dropbox.run) as endpoint:
+        ws = _workspace(endpoint)
         try:
             assert (
                 await ws.shell("cat /dbx/secret.txt /dbx/vault/private.txt")
@@ -240,7 +314,7 @@ async def test_hidden_case_aliases_are_refused_over_a_folding_service(
                 "hidden",
                 profile={"paths": {"hide": ["/dbx/secret.txt", "/dbx/vault"]}},
             )
-            dbx.log.clear()
+            await dropbox.run.record_requests("dropbox-api-arg")
             for command in [
                 "cat /dbx/SECRET.txt",
                 "cat /dbx/Vault/private.txt",
@@ -255,17 +329,16 @@ async def test_hidden_case_aliases_are_refused_over_a_folding_service(
                 assert b"secret" not in await result.materialize_stdout(), (
                     command
                 )
-            assert dbx.read("secret.txt") == b"secret"
-            assert dbx.read("vault/private.txt") == b"private"
-            assert dbx.read("f") == b"public"
+            routes = _routes(await dropbox.run.requests())
+            downloads = await dropbox.run.headers("POST", "/2/files/download")
+            assert await dropbox.content("/secret.txt") == b"secret"
+            assert await dropbox.content("/vault/private.txt") == b"private"
+            assert await dropbox.content("/f") == b"public"
+            assert not any(route in WRITES for route in routes)
             assert not any(
-                route in ("upload", "delete", "move", "copy")
-                for route, _ in dbx.log
-            )
-            assert not any(
-                route == "download"
-                and path in ("/secret.txt", "/vault/private.txt")
-                for route, path in dbx.log
+                json.loads(sent["dropbox-api-arg"])["path"]
+                in ("/secret.txt", "/vault/private.txt")
+                for sent in downloads
             )
         finally:
             await ws.close()

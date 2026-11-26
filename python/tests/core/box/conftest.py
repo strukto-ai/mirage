@@ -13,17 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiohttp
-import pytest
 import pytest_asyncio
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.client import BoxTokenManager
 from mirage.vfs.box.config import BoxConfig
-from tests.fixtures.kit_fake import KitRun, serve
+from tests.fixtures.kit_fake import KitRun
 
 TOKEN = "unit"
 
@@ -165,6 +164,124 @@ class BoxAccount:
         )
         return made["id"]
 
+    async def row_at(self, path: str) -> dict[str, Any] | None:
+        """The listing row of the item at ``path``; None if none is there.
+
+        Args:
+            path (str): slash-separated names from All Files.
+        """
+        row: dict[str, Any] | None = {"id": "0", "type": "folder"}
+        for name in [p for p in path.split("/") if p]:
+            if row is None or row["type"] != "folder":
+                return None
+            found = [
+                e for e in await self.entries(row["id"]) if e["name"] == name
+            ]
+            row = found[0] if found else None
+        return row
+
+    async def id_of(self, path: str) -> str:
+        """The id of the item at ``path``.
+
+        Args:
+            path (str): slash-separated names from All Files.
+        """
+        row = await self.row_at(path)
+        assert row is not None, path
+        return row["id"]
+
+    async def folder_at(self, path: str) -> str:
+        """The id of the folder at ``path``, making those missing on the way.
+
+        Args:
+            path (str): slash-separated names from All Files.
+        """
+        folder = "0"
+        for name in [p for p in path.split("/") if p]:
+            found = [
+                e
+                for e in await self.entries(folder)
+                if e["name"] == name and e["type"] == "folder"
+            ]
+            folder = (
+                found[0]["id"] if found else await self.mkdir(name, folder)
+            )
+        return folder
+
+    async def write(self, path: str, data: bytes) -> str:
+        """Put ``data`` at ``path`` as another client would: a new version of
+        the file there, else a new file. Returns its id.
+
+        Args:
+            path (str): slash-separated names from All Files.
+            data (bytes): the content.
+        """
+        row = await self.row_at(path)
+        if row is not None:
+            await self.upload_version(row["id"], data)
+            return row["id"]
+        parent, _, name = path.strip("/").rpartition("/")
+        return await self.put(name, data, await self.folder_at(parent))
+
+    async def move(self, path: str, to: str) -> None:
+        """Move or rename the item at ``path`` to ``to``, as another client
+        would, making the folders missing on the way.
+
+        Args:
+            path (str): slash-separated names from All Files.
+            to (str): where it goes, the same way.
+        """
+        row = await self.row_at(path)
+        assert row is not None, path
+        parent, _, name = to.strip("/").rpartition("/")
+        kind = "folders" if row["type"] == "folder" else "files"
+        await self.run.call(
+            "PUT",
+            f"/2.0/{kind}/{row['id']}",
+            json={
+                "name": name,
+                "parent": {"id": await self.folder_at(parent)},
+            },
+        )
+
+    async def remove(self, path: str) -> None:
+        """Delete the item at ``path``, a folder with everything in it.
+
+        Args:
+            path (str): slash-separated names from All Files.
+        """
+        row = await self.row_at(path)
+        assert row is not None, path
+        kind = {"file": "files", "folder": "folders", "web_link": "web_links"}
+        query = "?recursive=true" if row["type"] == "folder" else ""
+        await self.run.call(
+            "DELETE", f"/2.0/{kind[row['type']]}/{row['id']}{query}"
+        )
+
+    async def content(self, path: str) -> bytes | None:
+        """The bytes of the file at ``path``; None if no file is there.
+
+        Args:
+            path (str): slash-separated names from All Files.
+        """
+        row = await self.row_at(path)
+        if row is None or row["type"] != "file":
+            return None
+        return await self.read(row["id"])
+
+    async def unhash(self, file_id: str) -> None:
+        """Store the file ``file_id`` with no sha1, as Box answers some.
+
+        Its new versions keep none either. The run is reloaded, so a
+        recording of its requests stops.
+
+        Args:
+            file_id (str): the file's id.
+        """
+        await self.run.execute(
+            "UPDATE BoxItem SET sha1 = NULL WHERE id = ?", file_id
+        )
+
     async def file_info(self, file_id: str) -> dict[str, Any]:
         """What Box answers for a file by id.
 
@@ -180,12 +297,6 @@ class BoxAccount:
             folder_id (str): the folder's id.
         """
         return await self.run.call("GET", f"/2.0/folders/{folder_id}")
-
-
-@pytest.fixture(scope="session")
-def box_origin() -> Iterator[str]:
-    with serve("box") as origin:
-        yield origin
 
 
 @pytest_asyncio.fixture

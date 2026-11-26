@@ -39,13 +39,13 @@ from tests.e2e.gdrive_mock import (
     FakeRenderApi,
 )
 from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
-from tests.fixtures.dropbox_api import FakeDropbox
 from tests.fixtures.github_mock import (
     MOCK_BLOBS,
     MOCK_DEFAULT_BRANCH,
     MOCK_TREE,
     FakeGitHubApi,
 )
+from tests.sim.dropbox import FakeDropbox
 from tests.sim.loop import SimClock, SimLoop
 from tests.sim.rand import exponential
 from tests.sim.trace import (

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
@@ -22,7 +22,7 @@ import pytest_asyncio
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.core.dropbox.client import DropboxTokenManager
 from mirage.vfs.dropbox.config import DropboxConfig
-from tests.fixtures.kit_fake import KitRun, serve
+from tests.fixtures.kit_fake import KitRun
 
 TOKEN = "unit"
 
@@ -126,11 +126,29 @@ class DropboxAccount:
             headers={"Dropbox-API-Arg": json.dumps({"path": path})},
         )
 
+    async def content(self, path: str) -> bytes | None:
+        """The bytes of the file at ``path``; None if no file is there.
 
-@pytest.fixture(scope="session")
-def dropbox_origin() -> Iterator[str]:
-    with serve("dropbox") as origin:
-        yield origin
+        Args:
+            path (str): the file's path.
+        """
+        async with self.run.http.post(
+            self.run.url + "/2/files/download",
+            headers={"Dropbox-API-Arg": json.dumps({"path": path})},
+        ) as resp:
+            body = await resp.read()
+            if resp.status == 409:
+                return None
+            assert resp.status == 200, body
+            return body
+
+    async def remove(self, path: str) -> None:
+        """Delete the file or folder at ``path``, as another client would.
+
+        Args:
+            path (str): the item's path.
+        """
+        await self.run.call("POST", "/2/files/delete_v2", json={"path": path})
 
 
 @pytest_asyncio.fixture

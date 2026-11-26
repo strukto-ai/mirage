@@ -513,6 +513,9 @@ export function boxRoutes(): KitRoute<C>[] {
     route('PUT', '/2.0/folders/:folder_id', updateOf('folder', 'folder_id'), { write: true }),
     route('DELETE', '/2.0/files/:file_id', deleteOf('file', 'file_id'), { write: true }),
     route('DELETE', '/2.0/folders/:folder_id', deleteOf('folder', 'folder_id'), { write: true }),
+    route('DELETE', '/2.0/web_links/:web_link_id', deleteOf('web_link', 'web_link_id'), {
+      write: true,
+    }),
     route('GET', '/2.0/search', search),
     route('GET', '/2.0/users/me', me),
     route('GET', '/2.0/events', events),

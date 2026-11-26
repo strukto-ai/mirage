@@ -14,9 +14,11 @@
 
 import { deepStrictEqual } from 'node:assert'
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { ANNOUNCE_RE } from '../kit/typescript/announce.ts'
 
@@ -338,6 +340,51 @@ async function main(): Promise<void> {
       'a download under a run stays in that run',
       fetched.status === 200 && (await fetched.text()) === 'run',
       String(fetched.status),
+    )
+
+    const link = await json(
+      await fetch(`${fake.endpoint}/2.0/web_links`, {
+        method: 'POST',
+        headers: { ...AUTH, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: 'https://example.com', name: 'w', parent: { id: '0' } }),
+      }),
+    )
+    const unlinked = await fetch(`${fake.endpoint}/2.0/web_links/${String(link.id)}`, {
+      method: 'DELETE',
+      headers: AUTH,
+    })
+    const root = await json(await fetch(`${fake.endpoint}/2.0/folders/0/items`, { headers: AUTH }))
+    check(
+      'a web link is deleted by its own route',
+      unlinked.status === 204 &&
+        !(root.entries as { id: string }[]).some((e) => e.id === String(link.id)),
+      String(unlinked.status),
+    )
+
+    const snapshot = await json(await fetch(`${fake.endpoint}/_kit/runs/default/snapshot`))
+    const file = join(await mkdtemp(join(tmpdir(), 'box-selftest-')), 'run.db')
+    await writeFile(file, Buffer.from(String(snapshot.db), 'base64'))
+    const edited = new DatabaseSync(file)
+    edited.prepare('UPDATE BoxItem SET sha1 = NULL WHERE id = ?').run(id)
+    edited.close()
+    const load = await fetch(`${fake.endpoint}/_kit/runs/default/load`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...snapshot, db: (await readFile(file)).toString('base64') }),
+    })
+    await load.arrayBuffer()
+    const unhashed = await fetch(`${fake.endpoint}/2.0/files/${id}/content`, {
+      method: 'POST',
+      headers: AUTH,
+      body: form({}, 'unhashed'),
+    })
+    await unhashed.arrayBuffer()
+    check(
+      'a file stored with no sha1 keeps none on a new version',
+      load.status === 200 &&
+        unhashed.status === 200 &&
+        (await info(fake.endpoint, id)).sha1 === null,
+      `${String(load.status)} ${String(unhashed.status)}`,
     )
 
     process.stdout.write(`box selftest: ${String(checks)} checks passed\n`)

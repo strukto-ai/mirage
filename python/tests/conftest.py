@@ -17,6 +17,7 @@ import importlib
 import os
 import resource
 import uuid
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import aiohttp
@@ -26,6 +27,7 @@ from mirage.core.api.client import SessionPool
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.kit_fake import serve
 
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 if _soft < 8192:
@@ -83,6 +85,20 @@ def _drain_session_pools(monkeypatch):
     yield
     if made:
         asyncio.run(_close_pools(made))
+
+
+@pytest.fixture(scope="session")
+def box_origin() -> Iterator[str]:
+    """The integ Box fake's origin, one fake for every test that asks."""
+    with serve("box") as origin:
+        yield origin
+
+
+@pytest.fixture(scope="session")
+def dropbox_origin() -> Iterator[str]:
+    """The integ Dropbox fake's origin, one fake for every test that asks."""
+    with serve("dropbox") as origin:
+        yield origin
 
 
 @pytest.fixture
