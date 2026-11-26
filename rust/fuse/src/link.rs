@@ -142,11 +142,18 @@ impl Link {
         Ok(())
     }
 
-    /// Wait until every request sent ahead for host handle `fh` has its
-    /// reply, and hand over the first refusal among them, once.
+    /// Wait until every request sent ahead for host handle `fh` before this
+    /// call has its reply, and hand over the first refusal the handle met,
+    /// once. Writes sent meanwhile through the same handle, by another
+    /// descriptor of it, are not waited for, so they cannot hold it off.
     pub fn settle(&self, fh: u64) -> Result<(), Failure> {
-        let mut ahead =
-            self.await_ahead(|a| a.handles.get(&fh).is_none_or(|h| h.unanswered == 0))?;
+        let before: Vec<u64> = locked(&self.ahead)
+            .sent
+            .iter()
+            .filter(|(_, (handle, _))| *handle == fh)
+            .map(|(&id, _)| id)
+            .collect();
+        let mut ahead = self.await_ahead(|a| before.iter().all(|id| !a.sent.contains_key(id)))?;
         let Some(handle) = ahead.handles.get_mut(&fh) else {
             return Ok(());
         };
@@ -448,6 +455,22 @@ mod tests {
         link.serve(&mut input.as_slice(), |_| {}).unwrap();
         assert!(settling.0.recv().unwrap().is_ok());
         assert!(locked(&link.ahead).handles.is_empty());
+    }
+
+    #[test]
+    fn a_settle_waits_only_for_the_writes_sent_before_it() {
+        let link = Arc::new(Link::new(Box::new(io::sink())));
+        link.send_ahead(7, "write", json!({}), b"a").unwrap();
+        let settling = {
+            let link = link.clone();
+            returns_within(Duration::from_millis(50), move || link.settle(7))
+        };
+        assert!(settling.1.is_none());
+        link.send_ahead(7, "write", json!({}), b"b").unwrap();
+        let mut replies = served(&link);
+        replies.write_all(&frame(json!({"id": 1}), b"")).unwrap();
+        assert!(settling.0.recv().unwrap().is_ok());
+        assert_eq!(locked(&link.ahead).handles[&7].unanswered, 1);
     }
 
     #[test]
