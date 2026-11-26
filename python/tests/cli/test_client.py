@@ -472,3 +472,65 @@ def test_a_socks_proxy_in_the_environment_does_not_stop_a_command(
         server.shutdown()
         server.server_close()
     assert r.status_code == 200
+
+
+def _refused_once(sent: list[bytes]) -> httpx.MockTransport:
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request.read())
+        if len(sent) == 1:
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(201)
+
+    return httpx.MockTransport(handle)
+
+
+def _spawning_client(monkeypatch, sent: list[bytes]) -> DaemonClient:
+    client = DaemonClient(
+        DaemonSettings(url="http://127.0.0.1:1", auth_token="t")
+    )
+    monkeypatch.setattr(client, "is_reachable", lambda timeout=0.5: True)
+    client.ensure_running()
+    client._client.close()
+    client._client = httpx.Client(
+        base_url=client.settings.url, transport=_refused_once(sent)
+    )
+    return client
+
+
+def test_a_daemon_that_exited_idle_is_started_again_for_the_next_request(
+    monkeypatch,
+):
+    # The CLI checks /v1/health and then creates: a daemon whose idle
+    # exit came between the two refused the create.
+    sent: list[bytes] = []
+    started = []
+    with _spawning_client(monkeypatch, sent) as client:
+        monkeypatch.setattr(
+            client, "ensure_running", lambda: started.append(True)
+        )
+        r = client.request("POST", "/v1/workspaces", content=b"{}")
+    assert r.status_code == 201
+    assert sent == [b"{}", b"{}"]
+    assert started == [True]
+
+
+def test_a_client_that_may_not_start_the_daemon_passes_a_refusal_on():
+    sent: list[bytes] = []
+    with DaemonClient(
+        DaemonSettings(url="http://127.0.0.1:1", auth_token="t")
+    ) as client:
+        client._client.close()
+        client._client = httpx.Client(
+            base_url=client.settings.url, transport=_refused_once(sent)
+        )
+        with pytest.raises(httpx.ConnectError):
+            client.request("GET", "/v1/workspaces")
+    assert len(sent) == 1
+
+
+def test_a_streamed_body_is_not_sent_twice(monkeypatch):
+    sent: list[bytes] = []
+    with _spawning_client(monkeypatch, sent) as client:
+        with pytest.raises(httpx.ConnectError):
+            client.request("POST", "/v1/upload", content=iter([b"part"]))
+    assert len(sent) == 1

@@ -335,7 +335,9 @@ class WorkspaceRegistry:
 
     Owns the lifecycle for each workspace inside the daemon process:
     register on create, drop on delete, and trip an idle-shutdown
-    event when the registry empties for ``idle_grace_seconds``.
+    event when the registry has been empty for ``idle_grace_seconds``.
+    The exit waits for the requests in flight and the creates still
+    building, and a workspace one of them makes cancels it.
 
     Threading: the underlying ``dict`` is mutated only from the FastAPI
     server loop (the same loop the registry is constructed on), so no
@@ -413,6 +415,21 @@ class WorkspaceRegistry:
             exit_event if exit_event is not None else asyncio.Event()
         )
         self._idle_task: asyncio.Task[Any] | None = None
+        self._requests = 0
+        # The grace ran out with requests in flight or a create building:
+        # exit once they are done, unless one of them made a workspace.
+        self._idle_due = False
+
+    def request_began(self) -> None:
+        """Count a request in flight, which an idle exit waits for."""
+        self._requests += 1
+
+    def request_ended(self) -> None:
+        """Count a request answered, and exit if the grace ran out while
+        it was in flight."""
+        self._requests -= 1
+        if self._idle_due and not self._requests:
+            self._exit_when_idle()
 
     async def refusal(
         self, config: dict[str, JsonValue], account: str | None
@@ -508,6 +525,8 @@ class WorkspaceRegistry:
         finally:
             del self._creates[workspace_id]
             done.set_result(None)
+            if self._idle_due:
+                self._exit_when_idle()
 
     @property
     def draining(self) -> bool:
@@ -1012,9 +1031,18 @@ class WorkspaceRegistry:
         self._cancel_idle_timer()
         await self._admission_programs.close()
 
+    def _exit_when_idle(self) -> None:
+        self._idle_due = False
+        if self._entries:
+            return
+        if self._requests or self._creates:
+            self._idle_due = True
+            return
+        self.exit_event.set()
+
     def _start_idle_timer(self) -> None:
         if self.idle_grace_seconds <= 0:
-            self.exit_event.set()
+            self._exit_when_idle()
             return
         if self._idle_task is not None and not self._idle_task.done():
             return
@@ -1024,14 +1052,14 @@ class WorkspaceRegistry:
         if self._idle_task is not None and not self._idle_task.done():
             self._idle_task.cancel()
         self._idle_task = None
+        self._idle_due = False
 
     async def _idle_wait(self) -> None:
         try:
             await asyncio.sleep(self.idle_grace_seconds)
         except asyncio.CancelledError:
             return
-        if not self._entries:
-            self.exit_event.set()
+        self._exit_when_idle()
 
 
 def _workspace_context(

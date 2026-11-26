@@ -70,6 +70,9 @@ class DaemonClient:
         self._client = httpx.Client(base_url=settings.url, timeout=60.0)
         self._refreshing = threading.Lock()
         self.held = ""
+        # A local daemon this client may start: one that exited idle after
+        # answering it is started again for the next request.
+        self._may_spawn = False
 
     def __enter__(self) -> "DaemonClient":
         return self
@@ -128,8 +131,35 @@ class DaemonClient:
         return headers
 
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        headers = {**self.headers(), **kwargs.pop("headers", {})}
-        return self._client.request(method, path, headers=headers, **kwargs)
+        """Send a request to the daemon.
+
+        A daemon this client may start can exit idle between two of its
+        requests. A connection it refused carried nothing, so the daemon
+        is started again and a request whose body can be sent twice goes
+        once more.
+
+        Args:
+            method (str): the HTTP method.
+            path (str): the path under the daemon's URL.
+            **kwargs (Any): what ``httpx.Client.request`` takes.
+        """
+        extra = kwargs.pop("headers", {})
+        try:
+            return self._client.request(
+                method, path, headers={**self.headers(), **extra}, **kwargs
+            )
+        except httpx.ConnectError:
+            content = kwargs.get("content")
+            if (
+                not self._may_spawn
+                or "files" in kwargs
+                or not (content is None or isinstance(content, (bytes, str)))
+            ):
+                raise
+        self.ensure_running()
+        return self._client.request(
+            method, path, headers={**self.headers(), **extra}, **kwargs
+        )
 
     def stream(
         self, method: str, path: str, **kwargs: Any
@@ -179,6 +209,7 @@ class DaemonClient:
             raise DaemonUnreachable(
                 f"daemon not reachable at {self.settings.url}"
             )
+        self._may_spawn = self._may_spawn or allow_spawn
         if self.is_reachable():
             return
         if self._listening():

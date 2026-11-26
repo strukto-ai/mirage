@@ -291,6 +291,10 @@ export class WorkspaceRegistry {
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
+  private requests = 0
+  // The grace ran out with requests in flight or a create building: exit
+  // once they are done, unless one of them made a workspace.
+  private idleDue = false
   accountsRequired: boolean
   private readonly owners: RecordClient | null
   private readonly configs: RecordClient | null
@@ -472,6 +476,7 @@ export class WorkspaceRegistry {
     } finally {
       this.creates.delete(id)
       finish()
+      if (this.idleDue) this.exitWhenIdle()
     }
   }
 
@@ -796,16 +801,41 @@ export class WorkspaceRegistry {
     await this.admissionPrograms.close()
   }
 
+  /**
+   * Count a request in flight, which an idle exit waits for. A request
+   * counts until its connection closes; a create it left building is held
+   * by `creates` until it settles.
+   */
+  requestBegan(): void {
+    this.requests += 1
+  }
+
+  /** Count a request answered, and exit if the grace ran out while it was in flight. */
+  requestEnded(): void {
+    this.requests -= 1
+    if (this.idleDue && this.requests === 0) this.exitWhenIdle()
+  }
+
+  private exitWhenIdle(): void {
+    this.idleDue = false
+    if (this.entries.size > 0 || this.onIdleExit === null) return
+    if (this.requests > 0 || this.creates.size > 0) {
+      this.idleDue = true
+      return
+    }
+    this.onIdleExit()
+  }
+
   private startIdleTimer(): void {
     if (this.onIdleExit === null) return
     if (this.idleGraceSeconds <= 0) {
-      this.onIdleExit()
+      this.exitWhenIdle()
       return
     }
     if (this.idleTimer !== null) return
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null
-      if (this.entries.size === 0 && this.onIdleExit !== null) this.onIdleExit()
+      this.exitWhenIdle()
     }, this.idleGraceSeconds * 1000)
   }
 
@@ -814,6 +844,7 @@ export class WorkspaceRegistry {
       clearTimeout(this.idleTimer)
       this.idleTimer = null
     }
+    this.idleDue = false
   }
 }
 

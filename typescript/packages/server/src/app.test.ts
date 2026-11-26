@@ -185,3 +185,26 @@ describe('buildApp close', () => {
     expect(app.registry.draining).toBe(true)
   })
 })
+
+describe('buildApp idle exit', () => {
+  it('holds the idle countdown for each request until it is answered', async () => {
+    const app = buildApp()
+    try {
+      const began = vi.spyOn(app.registry, 'requestBegan')
+      const ended = vi.spyOn(app.registry, 'requestEnded')
+      expect((await app.inject({ method: 'GET', url: '/v1/health' })).statusCode).toBe(200)
+      expect([began.mock.calls.length, ended.mock.calls.length]).toEqual([1, 1])
+      // The hook comes ahead of the host check, so a refused request is
+      // held and let go too.
+      const refused = await app.inject({
+        method: 'GET',
+        url: '/v1/health',
+        headers: { host: 'elsewhere.example' },
+      })
+      expect(refused.statusCode).toBe(403)
+      expect([began.mock.calls.length, ended.mock.calls.length]).toEqual([2, 2])
+    } finally {
+      await app.close()
+    }
+  })
+})

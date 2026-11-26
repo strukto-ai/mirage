@@ -224,6 +224,84 @@ describe('WorkspaceRegistry', () => {
     expect(tripped).toBe(true)
     vi.useRealTimers()
   })
+
+  // A grace of zero runs out the moment the last workspace goes, so the count
+  // of exits shows when the exit comes.
+  const exiting = (graceSeconds: number) => {
+    const seen = { exits: 0 }
+    const registry = new WorkspaceRegistry({
+      idleGraceSeconds: graceSeconds,
+      onIdleExit: () => {
+        seen.exits += 1
+      },
+    })
+    return { registry, seen }
+  }
+  const ram = () => new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+
+  it('holds the idle exit while a request is in flight', async () => {
+    const { registry: r, seen } = exiting(0)
+    r.requestBegan()
+    await r.remove(r.add(ram()).id)
+    expect(seen.exits).toBe(0)
+    r.requestBegan()
+    r.requestEnded()
+    expect(seen.exits).toBe(0)
+    r.requestEnded()
+    expect(seen.exits).toBe(1)
+  })
+
+  it('cancels the idle exit for a workspace a request in flight made', async () => {
+    const { registry: r, seen } = exiting(0)
+    r.requestBegan()
+    await r.remove(r.add(ram()).id)
+    const entry = r.add(ram())
+    r.requestEnded()
+    expect(seen.exits).toBe(0)
+    await r.remove(entry.id)
+    expect(seen.exits).toBe(1)
+  })
+
+  // A client that went away leaves its create building: the exit waits for
+  // it, and goes unless it made a workspace.
+  it.each(['empty', 'throws', 'made'])('waits for a create still building (%s)', async (ends) => {
+    const { registry: r, seen } = exiting(0)
+    const entry = r.add(ram())
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const building = r.creating('v', 'config', async (admitted) => {
+      expect(admitted).toBe(true)
+      await gate
+      if (ends === 'throws') throw new Error('the build failed')
+      if (ends === 'made') r.add(ram(), 'v')
+    })
+    await r.remove(entry.id)
+    expect(seen.exits).toBe(0)
+    release()
+    if (ends === 'throws') await expect(building).rejects.toThrow('the build failed')
+    else await building
+    expect(seen.exits).toBe(ends === 'made' ? 0 : 1)
+  })
+
+  // A client that polls /v1/health while it waits for the daemon to go sees
+  // it go: only a request still in flight holds the exit.
+  it('does not put off the idle exit for requests already answered', async () => {
+    vi.useFakeTimers()
+    try {
+      const { registry: r, seen } = exiting(0.1)
+      await r.remove(r.add(ram()).id)
+      for (let i = 0; i < 6; i++) {
+        r.requestBegan()
+        r.requestEnded()
+        await vi.advanceTimersByTimeAsync(50)
+      }
+      expect(seen.exits).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('WorkspaceRegistry accounts', () => {

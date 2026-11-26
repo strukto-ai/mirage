@@ -315,3 +315,95 @@ describe('DaemonClient trace context', () => {
     expect(seen).toEqual([traceparent])
   })
 })
+
+describe('DaemonClient after a daemon exited idle', () => {
+  const settings = (port: number) => ({
+    context: 'local',
+    url: `http://127.0.0.1:${String(port)}`,
+    authToken: 't',
+    idleGraceSeconds: 30,
+  })
+  const listen = (server: ReturnType<typeof createServer>, port: number) =>
+    new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve))
+  const close = (server: ReturnType<typeof createServer>) =>
+    new Promise((resolve) => server.close(resolve))
+  // A port the daemon held and gave up: its next connection is refused.
+  const given = async () => {
+    const bodies: string[] = []
+    const server = createServer((req, res) => {
+      let body = ''
+      req.on('data', (chunk: Buffer) => (body += chunk.toString()))
+      req.on('end', () => {
+        bodies.push(body)
+        res.writeHead(201).end()
+      })
+    })
+    await listen(server, 0)
+    const { port } = server.address() as AddressInfo
+    await close(server)
+    return { server, port, bodies }
+  }
+
+  // The CLI checks /v1/health and then creates: a daemon whose idle exit
+  // came between the two refused the create.
+  it('starts the daemon again and sends the request once more', async () => {
+    const { server, port, bodies } = await given()
+    const client = new DaemonClient(settings(port))
+    vi.spyOn(client, 'isReachable').mockResolvedValueOnce(true)
+    await client.ensureRunning()
+    const started = vi.spyOn(client, 'ensureRunning').mockImplementation(async () => {
+      await listen(server, port)
+    })
+    try {
+      const r = await client.request('POST', '/v1/workspaces', { body: '{}' })
+      expect(r.status).toBe(201)
+    } finally {
+      await close(server)
+    }
+    expect(started).toHaveBeenCalledTimes(1)
+    expect(bodies).toEqual(['{}'])
+  })
+
+  it('sends a byte body once more', async () => {
+    const { server, port, bodies } = await given()
+    const client = new DaemonClient(settings(port))
+    vi.spyOn(client, 'isReachable').mockResolvedValueOnce(true)
+    await client.ensureRunning()
+    vi.spyOn(client, 'ensureRunning').mockImplementation(async () => {
+      await listen(server, port)
+    })
+    try {
+      const body = new TextEncoder().encode('{}')
+      expect((await client.request('POST', '/v1/workspaces', { body })).status).toBe(201)
+    } finally {
+      await close(server)
+    }
+    expect(bodies).toEqual(['{}'])
+  })
+
+  it('passes the refusal on from a client that may not start the daemon', async () => {
+    const { port } = await given()
+    const client = new DaemonClient(settings(port))
+    const started = vi.spyOn(client, 'ensureRunning')
+    await expect(client.request('GET', '/v1/workspaces')).rejects.toThrow(TypeError)
+    expect(started).not.toHaveBeenCalled()
+  })
+
+  it('does not send a streamed body twice', async () => {
+    const { port } = await given()
+    const client = new DaemonClient(settings(port))
+    vi.spyOn(client, 'isReachable').mockResolvedValueOnce(true)
+    await client.ensureRunning()
+    const started = vi.spyOn(client, 'ensureRunning')
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('part'))
+        controller.close()
+      },
+    })
+    await expect(
+      client.request('POST', '/v1/upload', { body, duplex: 'half' } as RequestInit),
+    ).rejects.toThrow(TypeError)
+    expect(started).not.toHaveBeenCalled()
+  })
+})

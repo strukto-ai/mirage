@@ -327,6 +327,21 @@ function listenTogether(app: FastifyInstance, e2b: FastifyInstance, port: number
   app.listen = listen
 }
 
+/**
+ * Count each request in flight, so the daemon's idle exit waits for it to be
+ * answered. Installed ahead of every other hook, since a hook that answers
+ * skips the ones after it.
+ */
+function idleExitHold(app: FastifyInstance, registry: WorkspaceRegistry): void {
+  app.addHook('onRequest', (_request, reply, done) => {
+    registry.requestBegan()
+    reply.raw.once('close', () => {
+      registry.requestEnded()
+    })
+    done()
+  })
+}
+
 function requestGuards(
   app: FastifyInstance,
   allowedHosts: readonly string[],
@@ -419,6 +434,7 @@ export function buildApp(options: BuildAppOptions = {}) {
       },
     })
   const app = server(errorResponse)
+  idleExitHold(app, registry)
   registerErrorHandlers(app, answerMissing({ registry, host }))
   lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
@@ -447,6 +463,7 @@ export function buildApp(options: BuildAppOptions = {}) {
         }
   if (companion !== null) {
     const { app: e2b, sandboxes, port } = companion
+    idleExitHold(e2b, registry)
     e2b.setErrorHandler((err, _req, reply) => {
       void e2bError(reply, errorOf(err))
     })

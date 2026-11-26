@@ -431,6 +431,31 @@ class LenientJson:
         await self.app(scope, receive, send)
 
 
+class IdleExitHold:
+    """Count each request in flight, so the daemon's idle exit waits for
+    it to be answered.
+
+    Args:
+        app (ASGIApp): the app behind.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        registry: WorkspaceRegistry = scope["app"].state.registry
+        registry.request_began()
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            registry.request_ended()
+
+
 async def _e2b_http_error(request: Request, exc: Exception) -> JSONResponse:
     error = cast(StarletteHTTPException, exc)
     return JSONResponse(
@@ -474,6 +499,7 @@ def _build_e2b_app(
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(proxies))
     app.add_middleware(TraceContextMiddleware)
+    app.add_middleware(IdleExitHold)
     app.include_router(e2b.router)
     app.include_router(e2b.data_router)
     return app
@@ -634,6 +660,7 @@ def build_app(
     if proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=proxies)
     app.add_middleware(TraceContextMiddleware)
+    app.add_middleware(IdleExitHold)
     app.state.allowed_hosts = hosts
     app.state.auth_config = auth
     app.state.started_at = time.time()

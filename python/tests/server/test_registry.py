@@ -438,3 +438,74 @@ async def test_a_drain_deadline_counts_a_capture_it_waits_behind():
         await line
     await snapshot
     await registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_request_in_flight_holds_the_idle_exit_until_it_is_answered():
+    # A grace of zero runs out the moment the last workspace goes, so the
+    # event shows when the exit comes.
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    registry.request_began()
+    await registry.remove(registry.add(_ws(), "w").id)
+    assert not registry.exit_event.is_set()
+    registry.request_began()
+    registry.request_ended()
+    assert not registry.exit_event.is_set()
+    registry.request_ended()
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_made_by_a_request_in_flight_cancels_the_idle_exit():
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    registry.request_began()
+    await registry.remove(registry.add(_ws(), "w").id)
+    entry = registry.add(_ws(), "v")
+    registry.request_ended()
+    assert not registry.exit_event.is_set()
+    await registry.remove(entry.id)
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_answered_requests_do_not_put_off_the_idle_exit():
+    # A client that polls /v1/health while it waits for the daemon to go
+    # sees it go: only a request still in flight holds the exit.
+    registry = WorkspaceRegistry(idle_grace_seconds=0.1)
+    await registry.remove(registry.add(_ws(), "w").id)
+    for _ in range(6):
+        registry.request_began()
+        registry.request_ended()
+        await asyncio.sleep(0.05)
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ends", ["empty", "raises", "made"])
+async def test_a_create_still_building_holds_the_idle_exit(ends):
+    # A client that went away leaves its create building: the exit waits
+    # for it, and goes unless it made a workspace.
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    entry = registry.add(_ws(), "w")
+    gate = asyncio.Event()
+
+    async def build() -> None:
+        async with registry.creating("v", "config") as admitted:
+            assert admitted
+            await gate.wait()
+            if ends == "raises":
+                raise RuntimeError("the build failed")
+            if ends == "made":
+                registry.add(_ws(), "v")
+
+    building = asyncio.create_task(build())
+    await asyncio.sleep(0)
+    await registry.remove(entry.id)
+    assert not registry.exit_event.is_set()
+    gate.set()
+    if ends == "raises":
+        with pytest.raises(RuntimeError):
+            await building
+    else:
+        await building
+    assert registry.exit_event.is_set() is (ends != "made")
