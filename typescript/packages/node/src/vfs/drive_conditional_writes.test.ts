@@ -177,7 +177,7 @@ function use(kind: Kind): void {
   })
   afterEach(async () => {
     // Each workspace is closed even after one fails to, and the run with
-    // them; the first failure is reported once all of it is torn down.
+    // them; every failure is reported once all of it is torn down.
     const failed: unknown[] = []
     for (const ws of built.splice(0)) {
       try {
@@ -187,8 +187,13 @@ function use(kind: Kind): void {
       }
     }
     vi.unstubAllGlobals()
-    await drive.account.run.close()
-    if (failed.length > 0) throw failed[0]
+    try {
+      await drive.account.run.close()
+    } catch (err) {
+      failed.push(err)
+    }
+    if (failed.length === 1) throw failed[0]
+    if (failed.length > 1) throw new AggregateError(failed, 'the teardown failed more than once')
   })
 }
 

@@ -73,7 +73,9 @@ class FakeDropbox:
     same bytes. An upload in ``update`` mode whose rev is not the file's
     answers 409 ``path/conflict/file/``, and ``delete_v2`` with a stale
     ``parent_rev`` answers 409 ``path_write/conflict/file/`` (measured
-    2026-10-05 and 2026-10-08).
+    2026-10-05 and 2026-10-08). A write under a file answers
+    ``conflict/file``, Dropbox's "a file in the way", so the file stays a
+    file.
 
     Args:
         files (dict[str, bytes]): Dropbox path to bytes.
@@ -94,6 +96,13 @@ class FakeDropbox:
         parts = path.strip("/").split("/")[:-1]
         for i in range(1, len(parts) + 1):
             self.dirs.add("/" + "/".join(parts[:i]))
+
+    def _file_in_way(self, path: str) -> bool:
+        parts = path.strip("/").split("/")[:-1]
+        return any(
+            "/" + "/".join(parts[:i]) in self.files
+            for i in range(1, len(parts) + 1)
+        )
 
     def _folders(self) -> set[str]:
         out = {"/"} | self.dirs
@@ -178,6 +187,10 @@ class FakeDropbox:
         self, path: str, data: bytes, mode: Any = "add"
     ) -> dict[str, Any]:
         p = _norm(path)
+        if self._file_in_way(p):
+            raise DropboxFakeError(
+                f"conflict: {p}", 409, summary="path/conflict/file/.."
+            )
         if isinstance(mode, dict) and mode.get(".tag") == "update":
             if self.revs.get(p) != mode.get("update") or p not in self.files:
                 raise DropboxFakeError(
@@ -225,6 +238,10 @@ class FakeDropbox:
             raise DropboxFakeError(
                 f"conflict: {p}", 409, summary="path/conflict/folder/.."
             )
+        if self._file_in_way(p):
+            raise DropboxFakeError(
+                f"conflict: {p}", 409, summary="path/conflict/file/.."
+            )
         parts = p.strip("/").split("/")
         for i in range(1, len(parts) + 1):
             self.dirs.add("/" + "/".join(parts[:i]))
@@ -239,7 +256,7 @@ class FakeDropbox:
             raise DropboxFakeError(
                 f"not found: {src}", 409, summary="from_lookup/not_found/.."
             )
-        if dst in self.files:
+        if dst in self.files or self._file_in_way(dst):
             raise DropboxFakeError(
                 f"conflict: {dst}", 409, summary="to/conflict/file/.."
             )
