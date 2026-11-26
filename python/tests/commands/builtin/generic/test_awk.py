@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin.generic.awk import awk_generic
 from mirage.commands.errors import UsageError
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 
 
@@ -22,14 +23,6 @@ def _make_backend(files: dict[str, bytes]):
         yield files[key]
 
     return read_stream
-
-
-async def _drain(stdout) -> bytes:
-    if stdout is None:
-        return b""
-    if isinstance(stdout, bytes):
-        return stdout
-    return b"".join([c async for c in stdout])
 
 
 @pytest.mark.parametrize(
@@ -72,7 +65,7 @@ async def test_awk_runs_the_program_files(f, files, data, expected):
         {"f": f},
         stream=rs,
     )
-    assert (await _drain(output)).decode() == expected
+    assert (await materialize(output)).decode() == expected
 
 
 @pytest.mark.asyncio
@@ -85,7 +78,7 @@ async def test_awk_empty_fs_splits_characters():
         stream=rs,
         stdin=b"abc\n",
     )
-    assert (await _drain(output)).decode() == "b\n"
+    assert (await materialize(output)).decode() == "b\n"
 
 
 @pytest.mark.asyncio
@@ -102,7 +95,7 @@ async def test_awk_processes_all_files_with_continuous_nr():
         None,
         stream=rs,
     )
-    assert (await _drain(output)).decode() == "1 one\n2 two\n3 three\n"
+    assert (await materialize(output)).decode() == "1 one\n2 two\n3 three\n"
 
 
 @pytest.mark.asyncio
@@ -126,7 +119,7 @@ async def _run_stdin(program: str, stdin: bytes, flags=None) -> str:
         stream=rs,
         stdin=stdin,
     )
-    return (await _drain(output)).decode()
+    return (await materialize(output)).decode()
 
 
 @pytest.mark.asyncio
@@ -183,7 +176,7 @@ async def _run_io(program: str, stdin: bytes) -> tuple[str, int, bytes]:
         stream=rs,
         stdin=stdin,
     )
-    out = (await _drain(output)).decode()
+    out = (await materialize(output)).decode()
     err = io.stderr if isinstance(io.stderr, bytes) else b""
     return out, io.exit_code, err
 
@@ -227,7 +220,7 @@ async def test_awk_rs_holds_a_record_across_chunks(parts, rs, expected):
         stream=read_stream,
         stdin=_chunked(parts),
     )
-    assert (await _drain(output)).decode() == expected
+    assert (await materialize(output)).decode() == expected
 
 
 @pytest.mark.asyncio
@@ -240,7 +233,7 @@ async def test_awk_rs_paragraph_separator_is_the_whole_newline_run():
         stream=read_stream,
         stdin=_chunked((b"a\n\n", b"\nb\n")),
     )
-    assert (await _drain(output)).decode() == "a|b|"
+    assert (await materialize(output)).decode() == "a|b|"
 
 
 @pytest.mark.asyncio
@@ -258,7 +251,7 @@ async def test_awk_keeps_detected_errors_when_stdout_closes_early(fmt):
     assert await anext(iterator) == b"before\n"
     await iterator.aclose()
     assert (
-        await _drain(io.stderr)
+        await materialize(io.stderr)
         == (
             f"awk: not enough arguments to satisfy format string '{fmt}'\n"
         ).encode()

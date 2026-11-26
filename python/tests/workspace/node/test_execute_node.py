@@ -3042,6 +3042,7 @@ def test_echo_in_brace_group():
 
 def test_printf_in_function():
     stdout, _, _, _, _, _ = _exec("f() { printf 'hi %s' $1; }; f world")
+    assert stdout == b"hi world"
 
 
 def test_sort_in_while_read():

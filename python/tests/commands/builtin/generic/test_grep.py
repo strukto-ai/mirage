@@ -8,6 +8,7 @@ from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.config import Context
 from mirage.errors.fs import no_mount
 from mirage.io.stream import OutputStream
+from mirage.io.types import materialize
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.workspace.files import Files
@@ -97,15 +98,6 @@ def _spec(path: str) -> PathSpec:
     return PathSpec(
         vfs_path=(path).strip("/"), virtual=path, directory=path, resolved=True
     )
-
-
-async def _drain_async(stdout):
-    if stdout is None:
-        return b""
-    if isinstance(stdout, bytes):
-        return stdout
-    chunks = [chunk async for chunk in stdout]
-    return b"".join(chunks)
 
 
 def _make_prefixed_backend(files: dict[str, bytes], mount_prefix: str):
@@ -210,7 +202,7 @@ async def test_grep_recursive_files_only_mount_prefix(engines):
         stat=stat,
         read=rb,
     )
-    decoded = (await _drain_async(output)).decode().strip()
+    decoded = (await materialize(output)).decode().strip()
     assert decoded == "/s3/dir/a.txt"
     assert "/s3/s3" not in decoded
     assert len(engines) == 1 and not engines[0].live
@@ -250,7 +242,7 @@ async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
         stat=stat_enoent,
         read=rs,
     )
-    decoded = (await _drain_async(output)).decode()
+    decoded = (await materialize(output)).decode()
     assert decoded == "/real/b.txt\n"
     assert b"/a.txt/x" in (io.stderr or b"")
 
@@ -310,7 +302,7 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
         stat=stat,
         read=rs,
     )
-    await _drain_async(out)
+    await materialize(out)
     assert io.exit_code == 2
     assert b"/nope" in (io.stderr or b"")
 
@@ -336,7 +328,7 @@ async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
         read=rs,
     )
     assert (
-        await _drain_async(output)
+        await materialize(output)
     ) == b"/data/a.txt:apple\n/data/b.txt:apple\n"
     assert io.stderr == b"grep: /data/0ghost: No such file or directory\n"
     assert io.exit_code == 2
@@ -359,7 +351,7 @@ async def test_grep_recursive_separates_context_groups_between_files():
         read=rs,
     )
     assert (
-        await _drain_async(output)
+        await materialize(output)
     ) == b"/d/f1:a\n/d/f1-b\n--\n/d/f2:a\n/d/f2-y\n"
 
 
@@ -395,7 +387,7 @@ async def test_recursive_grep_stops_reading_and_closes_stream(quiet, engines):
     )
     assert opened == []  # Opening the command is lazy too.
     if quiet:
-        assert await _drain_async(output) == b""
+        assert await materialize(output) == b""
         assert io.exit_code == 0
     else:
         assert await anext(output) == b"/d/a/first:hit\n"
@@ -422,7 +414,7 @@ async def test_recursive_quiet_no_match_visits_every_file():
         stat=stat,
         read=stream,
     )
-    assert await _drain_async(output) == b""
+    assert await materialize(output) == b""
     assert io.exit_code == 1
     assert opened == ["/d/a", "/d/b"]
 
@@ -466,8 +458,8 @@ async def test_grep_no_messages_keeps_operand_failures(
         stat=stat,
         read=read_stream if streamed else read_bytes,
     )
-    assert await _drain_async(output) == expected
-    assert await _drain_async(io.stderr) == b""
+    assert await materialize(output) == expected
+    assert await materialize(io.stderr) == b""
     assert io.exit_code == status
 
 
@@ -517,7 +509,7 @@ async def test_grep_propagates_non_filesystem_read_failures(
         read=read_stream if streamed else read_bytes,
     )
     with pytest.raises(type(error)) as raised:
-        await _drain_async(output)
+        await materialize(output)
     assert raised.value is error
 
 
@@ -582,7 +574,7 @@ async def test_grep_preserves_binary_notice_before_read_failure(no_messages):
         stat=stat,
         read=read_stream,
     )
-    assert await _drain_async(output) == b""
+    assert await materialize(output) == b""
     assert io.exit_code == 2
     expected = b"grep: /data/a.txt: binary file matches\n"
     if not no_messages:
@@ -602,7 +594,7 @@ async def test_grep_preserves_stderr_added_before_drain():
         read=rs,
     )
     io.stderr = b"backend: scan fallback\n" + (io.stderr or b"")
-    assert await _drain_async(output) == b"/data/a.txt:alice\n"
+    assert await materialize(output) == b"/data/a.txt:alice\n"
     assert io.exit_code == 2
     assert io.stderr == (
         b"backend: scan fallback\n"
@@ -629,7 +621,7 @@ async def test_grep_settles_late_binary_detection_after_a_match():
     )
     assert await anext(output) == b"alice\n"
     assert io.exit_code == 0
-    assert await _drain_async(output) == b""
+    assert await materialize(output) == b""
     assert io.exit_code == 1
 
 
@@ -666,5 +658,5 @@ async def test_false_flags_turn_nothing_on():
         stat=stat,
         read=rs,
     )
-    assert await _drain_async(output) == b""
-    assert await _drain_async(io.stderr) == b"grep: /data: Is a directory\n"
+    assert await materialize(output) == b""
+    assert await materialize(io.stderr) == b"grep: /data: Is a directory\n"

@@ -14,10 +14,6 @@ from mirage.types import FileStat, FileType, PathSpec
 from tests.commands.builtin.conftest import TrackedSource as _Tracked
 
 
-async def _drain(gen):
-    return b"".join([c async for c in gen])
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "data,flags,expected",
@@ -31,7 +27,9 @@ async def _drain(gen):
     ],
 )
 async def test_cat_renders_bytes(data, flags, expected):
-    assert await _drain(display_lines(data, CatFlags(**flags))) == expected
+    assert (
+        await materialize(display_lines(data, CatFlags(**flags))) == expected
+    )
 
 
 @pytest.mark.asyncio
@@ -43,7 +41,7 @@ async def test_cat_number_lines_chunked_one_byte_at_a_time():
         for byte in b"a\nbb\nccc\n":
             yield bytes([byte])
 
-    out = await _drain(display_lines(src(), CatFlags(number_lines=True)))
+    out = await materialize(display_lines(src(), CatFlags(number_lines=True)))
     assert out == b"     1\ta\n     2\tbb\n     3\tccc\n"
 
 
@@ -59,7 +57,7 @@ async def test_display_lines_lets_a_cancel_into_ready_input(piece):
     loop = asyncio.get_running_loop()
     start = loop.time()
     out = display_lines(src(), CatFlags(number_lines=True))
-    task = asyncio.ensure_future(_drain(out))
+    task = asyncio.ensure_future(materialize(out))
     loop.call_later(0.005, task.cancel)
     with pytest.raises(asyncio.CancelledError):
         await task

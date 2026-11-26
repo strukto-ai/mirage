@@ -21,7 +21,7 @@ from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import close_quietly
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.shell.console import Channel
 from mirage.types import (
     FileStat,
@@ -43,10 +43,6 @@ async def _tail_generic(paths, texts, ctx, *args, **kwargs):
     parsed = parse_flags(ctx.flags)
     assert isinstance(parsed, TailFlags)
     return await tail_generic(parsed, paths, texts, ctx, *args, **kwargs)
-
-
-async def _drain(gen):
-    return b"".join([c async for c in gen])
 
 
 async def _stream(parts):
@@ -83,7 +79,7 @@ _TWENTY = b"\n".join(f"line{i}".encode() for i in range(1, 21)) + b"\n"
     ],
 )
 async def test_tail_cuts(body, kwargs, expected):
-    assert await _drain(tail(body, **kwargs)) == expected
+    assert await materialize(tail(body, **kwargs)) == expected
 
 
 @pytest.mark.asyncio
@@ -98,7 +94,7 @@ async def test_tail_cuts(body, kwargs, expected):
 )
 async def test_tail_reads_one_byte_chunks(body, kwargs, expected):
     parts = [bytes([byte]) for byte in body]
-    assert await _drain(tail(_stream(parts), **kwargs)) == expected
+    assert await materialize(tail(_stream(parts), **kwargs)) == expected
 
 
 @pytest.mark.asyncio
@@ -112,11 +108,11 @@ async def test_tail_writes_the_last_lines_in_one_piece():
 async def test_tail_counts_what_it_keeps_against_the_memory_budget():
     memory = MemoryBudget(8, lambda: 0)
     parts = [b"ab\n", b"cd\n", b"ef\n", b"gh"]
-    out = await run_with_memory(memory, _drain(tail(_stream(parts), n=1)))
+    out = await run_with_memory(memory, materialize(tail(_stream(parts), n=1)))
     assert out == b"gh"
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), n=1))
+            memory, materialize(tail(_stream([b"abcd", b"efgh", b"i"]), n=1))
         )
 
 
@@ -125,7 +121,7 @@ async def test_tail_c_counts_its_window_against_the_memory_budget():
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, _drain(tail(_stream([b"abcd", b"efgh", b"i"]), c=100))
+            memory, materialize(tail(_stream([b"abcd", b"efgh", b"i"]), c=100))
         )
 
 
@@ -309,7 +305,7 @@ def _stream_read(p):
 )
 async def test_tail_multi(read, n, headers, expected):
     # A reader may hand bytes or a stream; headers separate the files.
-    out = await _drain(
+    out = await materialize(
         tail_multi(_paths("/a", "/b"), read=read, n=n, show_headers=headers)
     )
     assert out == expected
@@ -333,7 +329,7 @@ async def test_tail_heads_no_operand_whose_open_is_refused():
         fs.stat,
         read,
     )
-    assert await _drain(stream) == b"==> /small <==\nok\n"
+    assert await materialize(stream) == b"==> /small <==\nok\n"
     assert io.exit_code == 1
     assert io.stderr == (
         b"tail: cannot open '/locked' for reading: Permission denied\n"
@@ -369,7 +365,7 @@ async def test_tail_reports_a_failed_operand_and_prints_the_next(
             b"tail: error reading '/big': File too large\n",
         )
         return
-    assert await _drain(stream) == b"==> /big <==\n\n==> /small <==\nok\n"
+    assert await materialize(stream) == b"==> /big <==\n\n==> /small <==\nok\n"
     assert io.exit_code == 1
     assert io.stderr == (
         b"tail: error reading '/big': File too large\n"
@@ -901,7 +897,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
         fs.read_range,
     )
     assert stream is not None
-    assert await _drain(stream) == b"l2\n"
+    assert await materialize(stream) == b"l2\n"
     assert io.stderr == (
         b"tail: warning: --retry ignored; --retry is useful "
         b"only when following\n"
@@ -1296,7 +1292,7 @@ async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
         None,
         last_lines,
     )
-    data = await _drain(stream)
+    data = await materialize(stream)
     assert calls == ([] if asked is None else [asked])
     if asked is not None:
         assert data == b"c\n"
@@ -1478,5 +1474,5 @@ async def test_a_zero_stat_size_does_not_hide_streamed_bytes(flags):
     source, io = await _tail_generic(
         _paths("/pipe"), [], Context(flags=flags), stat, read, read_range
     )
-    assert await _drain(source) == b"last"
+    assert await materialize(source) == b"last"
     assert io.exit_code == 0

@@ -12,6 +12,7 @@ from mirage.commands.builtin.generic.join import (
 )
 from mirage.commands.errors import UsageError
 from mirage.core.ram.write import write
+from mirage.io.types import materialize
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -40,14 +41,6 @@ GNU = [
 ]
 
 
-async def _drain(source) -> bytes:
-    if source is None:
-        return b""
-    if isinstance(source, bytes):
-        return source
-    return b"".join([chunk async for chunk in source])
-
-
 async def _shell(
     files: dict[str, bytes], cmd: str, stdin: bytes
 ) -> tuple[int, bytes, bytes]:
@@ -57,7 +50,11 @@ async def _shell(
     ws = Workspace({"/data": (ram, MountMode.WRITE)}, mode=MountMode.WRITE)
     ws._cwd = "/data"
     io = await ws.shell(cmd, stdin=stdin or None)
-    return io.exit_code, await _drain(io.stdout), await _drain(io.stderr)
+    return (
+        io.exit_code,
+        await materialize(io.stdout),
+        await materialize(io.stderr),
+    )
 
 
 @pytest.mark.asyncio
@@ -109,7 +106,7 @@ async def test_cross_mount_relay_reads_every_flag():
         "join -i -j 1 -a1 -a2 -e - -o 0,1.2,2.2 "
         "--nocheck-order /data/a /data2/b"
     )
-    assert (io.exit_code, await _drain(io.stdout)) == (
+    assert (io.exit_code, await materialize(io.stdout)) == (
         0,
         b"B 2 y\nC - z\nx 1 -\n",
     )
@@ -118,7 +115,7 @@ async def test_cross_mount_relay_reads_every_flag():
 @pytest.mark.asyncio
 async def test_join_refuses_a_missing_file():
     with pytest.raises(UsageError, match="missing operand after '/a'"):
-        await join([PathSpec.from_str_path("/a")], read_stream=_drain)
+        await join([PathSpec.from_str_path("/a")], read_stream=_unopenable)
 
 
 @pytest.mark.parametrize(
@@ -258,7 +255,7 @@ async def test_join_reports_an_unreadable_file_without_reading_stdin(
     source, io = await join(
         paths, read_stream=_unopenable, stdin=_silent_stdin()
     )
-    out = await asyncio.wait_for(_drain(source), 5)
+    out = await asyncio.wait_for(materialize(source), 5)
     assert (io.exit_code, out, io.stderr) == (1, b"", stderr)
 
 
@@ -287,7 +284,7 @@ async def test_join_reads_records_across_any_chunking(flags, a, b):
             read_stream=read,
             flags=parse_flags(flags),
         )
-        out = await _drain(source)
+        out = await materialize(source)
         return out, io.exit_code, io.stderr
 
     whole = await run(1 << 20)
@@ -313,7 +310,7 @@ async def _best_seconds(body: bytes) -> float:
             read_stream=read,
             flags=parse_flags({"a": "1"}),
         )
-        await _drain(source)
+        await materialize(source)
         best = min(best, time.perf_counter() - started)
     return best
 
@@ -380,4 +377,4 @@ async def test_join_keeps_records_whole_over_a_source_that_reuses_its_buffer(
         read_stream=read,
         flags=parse_flags({"a": "1"}),
     )
-    assert (await _drain(source), io.exit_code) == (expected, 0)
+    assert (await materialize(source), io.exit_code) == (expected, 0)

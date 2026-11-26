@@ -25,10 +25,6 @@ async def _head_generic(paths, texts, ctx, *args, **kwargs):
     return await head_generic(parsed, paths, texts, ctx, *args, **kwargs)
 
 
-async def _drain(gen):
-    return b"".join([c async for c in gen])
-
-
 async def _five_lines_in_two_chunks():
     yield b"1\n2\n"
     yield b"3\n4\n5\n"
@@ -50,7 +46,7 @@ async def test_head_reads_across_chunks(chunks, flags, expected):
         for chunk in chunks:
             yield chunk
 
-    assert await _drain(head_stream(src(), **flags)) == expected
+    assert await materialize(head_stream(src(), **flags)) == expected
 
 
 @pytest.mark.asyncio
@@ -70,7 +66,7 @@ async def test_head_writes_the_front_of_a_kept_chunk_without_copying_the_rest():
         for _ in range(1000):
             yield Chunk(b"\n")
 
-    assert await _drain(head_stream(src(), n=-1000)) == b"\n" * 1000
+    assert await materialize(head_stream(src(), n=-1000)) == b"\n" * 1000
     assert copied <= 2000
 
 
@@ -97,7 +93,7 @@ async def test_head_writes_what_it_keeps_of_a_chunk_in_one_piece(flags):
     ],
 )
 async def test_head_selects_lines(data, flags, expected):
-    assert await _drain(head_stream(data, **flags)) == expected
+    assert await materialize(head_stream(data, **flags)) == expected
 
 
 @pytest.mark.asyncio
@@ -126,7 +122,7 @@ async def test_head_lets_a_cancel_into_ready_input(n, piece):
 
     loop = asyncio.get_running_loop()
     start = loop.time()
-    task = asyncio.ensure_future(_drain(head_stream(src(), n=n)))
+    task = asyncio.ensure_future(materialize(head_stream(src(), n=n)))
     loop.call_later(0.005, task.cancel)
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -141,7 +137,7 @@ async def test_head_closes_its_source_when_it_stops(flags):
     # At its limit or at the end alike: an unfinished read releases its
     # mount at once, not when the generator is collected.
     src = _Tracked(b"a\nb\n", b"c\n")
-    await _drain(head_stream(src, **flags))
+    await materialize(head_stream(src, **flags))
     assert src.closed
 
 
@@ -332,7 +328,7 @@ async def test_head_minus_counts_its_window_against_the_memory_budget(kwargs):
     memory = MemoryBudget(8, lambda: 0)
     with pytest.raises(MemoryExhausted):
         await run_with_memory(
-            memory, _drain(head_stream(_four_lines(), **kwargs))
+            memory, materialize(head_stream(_four_lines(), **kwargs))
         )
 
 
