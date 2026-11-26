@@ -6,15 +6,12 @@ import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { withCaller } from '@struktoai/mirage-core/workspace/files'
-import { FileError, SandboxFiles, fileError } from '../e2b/files.ts'
-import type { Sandboxes, SandboxLease } from '../e2b/leases.ts'
 import { bodyChunks, closeUnreadBody, readJsonBody, unaryContentType } from '../e2b/body.ts'
-import {
-  CONNECT_STREAM,
-  isProcessRequest,
-  isProcessStart,
-  registerProcess,
-} from '../e2b/process.ts'
+import * as constants from '../e2b/constants.ts'
+import { CONNECT_STATUS, FileError, connectCode, fileError } from '../e2b/errors.ts'
+import { SandboxFiles } from '../e2b/files.ts'
+import { isProcessRequest, isProcessStart, registerProcess } from '../e2b/process.ts'
+import type { Sandboxes, SandboxLease } from '../e2b/sandbox.ts'
 import { HttpError } from '../errors.ts'
 import { MAX_REQUEST_PART, partEvents } from '../multipart.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
@@ -22,43 +19,9 @@ import { storeRefusal } from './templates.ts'
 import { sessionOf } from './vfs.ts'
 import { createEphemeralWorkspace, type WorkspaceRoutesDeps } from './workspaces.ts'
 
-const CREATE = '/v2/sandboxes'
-const CONNECT = '/v2/sandboxes/:id/connect'
-const KILL = '/sandboxes/:id'
-const SET_TIMEOUT = '/sandboxes/:id/timeout'
-const HEALTH = '/health'
-const FILES = '/files'
-const RPC_PREFIX = '/filesystem.Filesystem/'
-const METHODS = ['Stat', 'ListDir', 'MakeDir', 'Move', 'Remove'] as const
-const UNSUPPORTED_LIFECYCLE_ROUTES = [
-  ['GET', CREATE],
-  ['GET', '/sandboxes'],
-  ['GET', KILL],
-  ['GET', '/sandboxes/:id/metrics'],
-  ['POST', '/sandboxes/:id/pause'],
-  ['POST', '/sandboxes/:id/resume'],
-] as const
-const UNSUPPORTED_RPC_PATHS = [
-  RPC_PREFIX + 'WatchDir',
-  RPC_PREFIX + 'CreateWatcher',
-  RPC_PREFIX + 'GetWatcherEvents',
-  RPC_PREFIX + 'RemoveWatcher',
-  '/process.Process/Connect',
-  '/process.Process/Update',
-  '/process.Process/StreamInput',
-]
-const RPC_PATHS: ReadonlySet<string> = new Set([
-  ...METHODS.map((method) => RPC_PREFIX + method),
-  ...UNSUPPORTED_RPC_PATHS,
-])
-
-const BASE_TEMPLATE = 'base'
-const BASE_WORKSPACE_TEMPLATE = 'e2b-base'
-const DEFAULT_TIMEOUT = 300
-const ENVD_VERSION = '0.5.6'
-const Timeout = z.number().int().positive().default(DEFAULT_TIMEOUT)
+const Timeout = z.number().int().positive().default(constants.DEFAULT_TIMEOUT)
 const CreateSandboxRequest = z.looseObject({
-  templateID: z.string().default(BASE_TEMPLATE),
+  templateID: z.string().default(constants.BASE_TEMPLATE),
   timeout: Timeout,
   envVars: z.record(z.string(), z.string()).default({}),
 })
@@ -71,17 +34,6 @@ const SetSandboxTimeoutRequest = z.object({
     .max(2 ** 31 - 1),
 })
 
-const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
-const CONNECT_STATUS: Record<FileError['code'], number> = {
-  invalid_argument: 400,
-  failed_precondition: 400,
-  permission_denied: 403,
-  not_found: 404,
-  already_exists: 409,
-  resource_exhausted: 429,
-  internal: 500,
-  unimplemented: 501,
-}
 const Path = z.object({ path: z.string() })
 const FileQuery = Path.extend({ username: z.string().optional() })
 const List = Path.extend({ depth: z.number().int().default(1) })
@@ -100,27 +52,33 @@ interface SandboxParams {
 
 export function isLifecycleRequest(method: string, path: string): boolean {
   return (
-    (method === 'POST' && (path === CREATE || path === CONNECT || path === SET_TIMEOUT)) ||
-    (method === 'DELETE' && path === KILL) ||
-    UNSUPPORTED_LIFECYCLE_ROUTES.some(([verb, route]) => method === verb && path === route)
+    (method === 'POST' &&
+      (path === constants.CREATE ||
+        path === constants.CONNECT ||
+        path === constants.SET_TIMEOUT)) ||
+    (method === 'DELETE' && path === constants.KILL) ||
+    constants.UNSUPPORTED_LIFECYCLE_ROUTES.some(
+      ([verb, route]) => method === verb && path === route,
+    )
   )
 }
 
 export function isDataRequest(method: string, path: string): boolean {
   return (
-    (method === 'GET' && (path === HEALTH || path === FILES)) ||
-    (method === 'POST' && (path === FILES || RPC_PATHS.has(path))) ||
+    (method === 'GET' && (path === constants.HEALTH || path === constants.FILES)) ||
+    (method === 'POST' && (path === constants.FILES || constants.RPC_PATHS.has(path))) ||
     isProcessRequest(method, path)
   )
 }
 
 export function acceptsRawBody(method: string, path: string, contentType: string): boolean {
-  if (contentType === CONNECT_STREAM) {
+  if (contentType === constants.CONNECT_STREAM) {
     return (
-      isProcessStart(method, path) || (method === 'POST' && UNSUPPORTED_RPC_PATHS.includes(path))
+      isProcessStart(method, path) ||
+      (method === 'POST' && constants.UNSUPPORTED_RPC_PATHS.includes(path))
     )
   }
-  return method === 'POST' && path === FILES
+  return method === 'POST' && path === constants.FILES
 }
 
 export function sandboxAccount(
@@ -167,28 +125,6 @@ export function sandboxWorkspace(
   return sandboxes.owned(params.id, request.account)?.entry.id ?? null
 }
 
-export function connectCode(status: number): string {
-  switch (status) {
-    case 400:
-      return 'invalid_argument'
-    case 401:
-      return 'unauthenticated'
-    case 403:
-      return 'permission_denied'
-    case 404:
-      return 'not_found'
-    case 413:
-    case 429:
-      return 'resource_exhausted'
-    case 501:
-      return 'unimplemented'
-    case 503:
-      return 'unavailable'
-    default:
-      return 'internal'
-  }
-}
-
 function unsupportedCreateOption(options: Record<string, unknown>): string | undefined {
   const result = InertCreateOptions.safeParse(options)
   if (result.success) return undefined
@@ -205,9 +141,9 @@ function unsupportedLifecycle(reply: RouteReply, message: string): RouteReply {
 function present(lease: SandboxLease) {
   return {
     sandboxID: lease.entry.id,
-    templateID: BASE_TEMPLATE,
+    templateID: constants.BASE_TEMPLATE,
     clientID: lease.entry.id,
-    envdVersion: ENVD_VERSION,
+    envdVersion: constants.ENVD_VERSION,
     envdAccessToken: lease.accessToken,
   }
 }
@@ -246,7 +182,8 @@ async function* uploadBody(request: RouteRequest, signal: AbortSignal): AsyncGen
   let size = 0
   for await (const chunk of bodyChunks(request, signal)) {
     size += chunk.byteLength
-    if (size > MAX_UPLOAD_BYTES) throw new HttpError('too_large', 'file upload is too large')
+    if (size > constants.MAX_UPLOAD_BYTES)
+      throw new HttpError('too_large', 'file upload is too large')
     yield chunk
   }
 }
@@ -355,7 +292,7 @@ export function router(
 ): void {
   const { sandboxes } = deps
   registerProcess(app, sandboxes, deps.registry)
-  app.post(CREATE, { bodyLimit: MAX_REQUEST_PART }, async (req, reply) => {
+  app.post(constants.CREATE, { bodyLimit: MAX_REQUEST_PART }, async (req, reply) => {
     const input = CreateSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
     if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox create request')
     const { templateID, timeout, envVars, ...options } = input.data
@@ -366,19 +303,19 @@ export function router(
     if (unsupported !== undefined) {
       return unsupportedLifecycle(reply, `sandbox create option is unsupported: ${unsupported}`)
     }
-    if (templateID !== BASE_TEMPLATE) {
+    if (templateID !== constants.BASE_TEMPLATE) {
       throw new HttpError('not_found', 'sandbox template not found')
     }
     let config: Record<string, JsonValue>
     try {
-      config = (await deps.resources.getTemplate(BASE_WORKSPACE_TEMPLATE)).config
+      config = (await deps.resources.getTemplate(constants.BASE_WORKSPACE_TEMPLATE)).config
     } catch (error) {
       if (!(error instanceof ResourceError)) throw error
       if (error.code !== 'not_found') throw storeRefusal(error)
       config = {
         mode: 'read',
-        mounts: { '/home/user': { vfs: 'ram', mode: 'write' } },
-        env: { HOME: '/home/user' },
+        mounts: { [constants.HOME]: { vfs: 'ram', mode: 'write' } },
+        env: { HOME: constants.HOME },
       }
     }
     const entry = await createEphemeralWorkspace(deps, req, reply, config)
@@ -389,22 +326,26 @@ export function router(
     void reply.status(201)
     return present(sandboxes.add(entry, envVars, timeout))
   })
-  app.post<{ Params: SandboxParams }>(CONNECT, { bodyLimit: MAX_REQUEST_PART }, (req, reply) => {
-    const input = ConnectSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
-    if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox connect request')
-    const { timeout, ...options } = input.data
-    const invalid = Object.entries(options).find(
-      ([name, value]) => name !== 'memory' || value !== true,
-    )
-    if (invalid !== undefined) {
-      return unsupportedLifecycle(reply, `sandbox connect option is unsupported: ${invalid[0]}`)
-    }
-    const lease = sandboxes.reconnect(req.params.id, req.account, timeout)
-    if (lease === null) throw missingSandbox()
-    return present(lease)
-  })
   app.post<{ Params: SandboxParams }>(
-    SET_TIMEOUT,
+    constants.CONNECT,
+    { bodyLimit: MAX_REQUEST_PART },
+    (req, reply) => {
+      const input = ConnectSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
+      if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox connect request')
+      const { timeout, ...options } = input.data
+      const invalid = Object.entries(options).find(
+        ([name, value]) => name !== 'memory' || value !== true,
+      )
+      if (invalid !== undefined) {
+        return unsupportedLifecycle(reply, `sandbox connect option is unsupported: ${invalid[0]}`)
+      }
+      const lease = sandboxes.reconnect(req.params.id, req.account, timeout)
+      if (lease === null) throw missingSandbox()
+      return present(lease)
+    },
+  )
+  app.post<{ Params: SandboxParams }>(
+    constants.SET_TIMEOUT,
     { bodyLimit: MAX_REQUEST_PART },
     (req, reply) => {
       const input = SetSandboxTimeoutRequest.safeParse(req.body)
@@ -414,11 +355,11 @@ export function router(
       return reply.status(204).send()
     },
   )
-  app.delete<{ Params: SandboxParams }>(KILL, async (req, reply) => {
+  app.delete<{ Params: SandboxParams }>(constants.KILL, async (req, reply) => {
     if (!(await sandboxes.kill(req.params.id, req.account))) throw missingSandbox()
     return reply.status(204).send()
   })
-  app.get(HEALTH, (req, reply) => {
+  app.get(constants.HEALTH, (req, reply) => {
     try {
       sandboxes.requireAccess(req.headers)
     } catch (error) {
@@ -428,7 +369,7 @@ export function router(
     }
     return reply.status(204).send()
   })
-  app.get(FILES, async (request, reply) => {
+  app.get(constants.FILES, async (request, reply) => {
     try {
       const lease = sandboxes.requireAccess(request.headers)
       const body = await downloadOf(lease, queryPath(request), request.closed)
@@ -438,7 +379,7 @@ export function router(
     }
   })
 
-  app.post(FILES, async (request, reply) => {
+  app.post(constants.FILES, async (request, reply) => {
     try {
       const lease = sandboxes.requireAccess(request.headers)
       if (Object.keys(request.headers).some((name) => name.startsWith('x-metadata-'))) {
@@ -455,11 +396,11 @@ export function router(
     }
   })
 
-  for (const method of METHODS) {
-    app.post(RPC_PREFIX + method, { rawBody: true }, async (request, reply) => {
+  for (const method of constants.METHODS) {
+    app.post(constants.RPC_PREFIX + method, { rawBody: true }, async (request, reply) => {
       try {
         const lease = sandboxes.requireAccess(request.headers)
-        unaryContentType(request, CONNECT_STREAM)
+        unaryContentType(request, constants.CONNECT_STREAM)
         const body = await readJsonBody(
           request,
           AbortSignal.any([lease.revoked, request.closed]),
@@ -501,7 +442,7 @@ export function router(
     })
   }
 
-  for (const [method, url] of UNSUPPORTED_LIFECYCLE_ROUTES) {
+  for (const [method, url] of constants.UNSUPPORTED_LIFECYCLE_ROUTES) {
     app.route({
       method,
       url,
@@ -509,7 +450,7 @@ export function router(
         unsupportedLifecycle(reply, 'E2B sandbox operation is unsupported by Mirage'),
     })
   }
-  for (const url of UNSUPPORTED_RPC_PATHS) {
+  for (const url of constants.UNSUPPORTED_RPC_PATHS) {
     app.post(url, (request, reply) => {
       closeUnreadBody(request, reply)
       try {

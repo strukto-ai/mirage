@@ -7,18 +7,11 @@ from dataclasses import dataclass, field
 
 from mirage.io.pipe import BytePipe
 from mirage.server.e2b.connect import StartCommand
-from mirage.server.errors import ErrorCode, HttpError
+from mirage.server.e2b.errors import SandboxNotRunning
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.workspace.shell_execution import ShellExecution
 
 logger = logging.getLogger(__name__)
-
-
-class SandboxNotRunning(HttpError):
-    def __init__(self) -> None:
-        super().__init__(
-            ErrorCode.UNAUTHORIZED, "invalid sandbox access token"
-        )
 
 
 @dataclass(slots=True)

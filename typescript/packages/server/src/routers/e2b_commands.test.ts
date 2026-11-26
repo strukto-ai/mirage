@@ -8,7 +8,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app.ts'
 import { AuthMode } from '../auth/index.ts'
-import { CONNECT_STREAM } from '../e2b/process.ts'
+import { CONNECT_STREAM } from '../e2b/constants.ts'
 import { e2bListener } from './e2b_test_support.ts'
 
 const PREFIX = '/process.Process/'

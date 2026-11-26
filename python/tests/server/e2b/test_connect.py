@@ -3,12 +3,14 @@ import json
 import pytest
 
 from mirage.server.e2b.connect import (
-    InvalidConnectRequest,
     StartCommand,
-    UnsupportedProcessOption,
     decode_start,
     encode_message,
     end_stream,
+)
+from mirage.server.e2b.errors import (
+    InvalidConnectRequest,
+    UnsupportedProcessOption,
 )
 
 

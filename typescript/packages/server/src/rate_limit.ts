@@ -148,7 +148,7 @@ function value(key: RateLimit['key'], request: FastifyRequest): string | null {
   return typeof header === 'string' ? header : (header?.[0] ?? null)
 }
 
-/** One set of configured limits shared by the pre- and post-auth hooks. */
+/** Share rate counters across the native and E2B listeners so callers use one budget. */
 export class RateLimitBuckets {
   readonly limits: readonly { limit: RateLimit; limiter: RateLimiterMemory }[]
 

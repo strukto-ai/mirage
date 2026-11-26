@@ -195,7 +195,10 @@ def _value(
 
 
 class RateLimitBuckets:
-    """One set of configured limits shared by the pre- and post-auth checks."""
+    """Share rate counters across the native and E2B listeners.
+
+    A caller uses the same budget when switching between listeners.
+    """
 
     def __init__(self, rate_limits: Sequence[RateLimit]) -> None:
         self.limits = tuple(enumerate(rate_limits))

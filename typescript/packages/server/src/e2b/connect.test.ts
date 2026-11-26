@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-  decodeStart,
-  encodeMessage,
-  endStream,
-  InvalidConnectRequest,
-  UnsupportedProcessOption,
-} from './connect.ts'
+import { decodeStart, encodeMessage, endStream } from './connect.ts'
+import { InvalidConnectRequest, UnsupportedProcessOption } from './errors.ts'
 
 function envelope(flags: number, payload: string): Buffer {
   const bytes = Buffer.from(payload)

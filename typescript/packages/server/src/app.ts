@@ -89,11 +89,11 @@ import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_PORT } from './env.ts'
-import { Sandboxes } from './e2b/leases.ts'
-import { CONNECT_STREAM } from './e2b/process.ts'
+import { CONNECT_STREAM } from './e2b/constants.ts'
+import { connectCode } from './e2b/errors.ts'
+import { Sandboxes } from './e2b/sandbox.ts'
 import {
   acceptsRawBody,
-  connectCode,
   isDataRequest,
   isLifecycleRequest,
   router as registerE2BRoutes,

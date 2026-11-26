@@ -1,6 +1,10 @@
 import json
 from dataclasses import dataclass
 
+from mirage.server.e2b.errors import (
+    InvalidConnectRequest,
+    UnsupportedProcessOption,
+)
 from mirage.types import JsonValue
 
 
@@ -10,16 +14,6 @@ class StartCommand:
     cwd: str | None
     envs: dict[str, str]
     stdin: bool
-
-
-class InvalidConnectRequest(ValueError):
-    pass
-
-
-class UnsupportedProcessOption(ValueError):
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
 
 
 def decode_start(body: bytes) -> StartCommand:

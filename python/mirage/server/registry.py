@@ -94,7 +94,8 @@ class WorkspaceEntry:
         runner (WorkspaceRunner): the runner driving it.
         owner (str | None): the account that created it; None when it
             was created by a caller with no account.
-        ephemeral (bool): the workspace keeps no state across stops.
+        ephemeral (bool): remove the workspace on stop without saving state
+            to reopen it. The E2B adapter uses this for sandbox workspaces.
     """
 
     def __init__(

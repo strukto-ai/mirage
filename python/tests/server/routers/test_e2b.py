@@ -9,7 +9,7 @@ from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
 from mirage.server.auth import AuthConfig, AuthMode, JWTConfig
 from mirage.server.e2b.files import SandboxFiles
-from mirage.server.e2b.leases import Sandbox
+from mirage.server.e2b.sandbox import Sandbox
 from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,

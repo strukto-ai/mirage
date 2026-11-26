@@ -16,16 +16,20 @@ from starlette.types import Message, Receive, Scope, Send
 from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import CAPACITY, BytePipe
+from mirage.server.e2b import constants
 from mirage.server.e2b.connect import (
-    InvalidConnectRequest,
     StartCommand,
-    UnsupportedProcessOption,
     decode_start,
     encode_message,
     end_stream,
 )
-from mirage.server.e2b.leases import LiveProcess, Sandbox, SandboxNotRunning
+from mirage.server.e2b.errors import (
+    InvalidConnectRequest,
+    SandboxNotRunning,
+    UnsupportedProcessOption,
+)
 from mirage.server.e2b.routing import require_sandbox
+from mirage.server.e2b.sandbox import LiveProcess, Sandbox
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.multipart import MAX_REQUEST_PART
 from mirage.types import JsonValue
@@ -33,11 +37,6 @@ from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 
 logger = logging.getLogger(__name__)
 
-CONNECT_STREAM = "application/connect+json"
-DEADLINE_MESSAGE = "command deadline exceeded"
-PROCESS_PREFIX = "/process.Process/"
-CONTROL_METHODS = ("List", "SendInput", "CloseStdin", "SendSignal")
-MAX_CONTROL_BODY = 2 * CAPACITY
 _BASE64 = re.compile(r"[A-Za-z0-9+/_-]*={0,2}")
 _process_ids = count(1)
 
@@ -78,7 +77,7 @@ async def _open_process(
     execution = await lease.entry.runner.ws.shell(
         command.line,
         session_id=lease.session_id,
-        cwd=command.cwd if command.cwd is not None else "/home/user",
+        cwd=command.cwd if command.cwd is not None else constants.HOME,
         env={**lease.env_vars, **command.envs},
         stdin=stdin.stream() if stdin is not None else None,
         stream=True,
@@ -173,7 +172,7 @@ class ProcessResponse(Response):
     def __init__(
         self, lease: Sandbox, command: StartCommand, deadline: float | None
     ) -> None:
-        super().__init__(media_type=CONNECT_STREAM)
+        super().__init__(media_type=constants.CONNECT_STREAM)
         del self.headers["content-length"]
         self._lease = lease
         self._command = command
@@ -204,7 +203,9 @@ class ProcessResponse(Response):
                     )
         except TimeoutError:
             if timeout.expired():
-                terminal = end_stream("deadline_exceeded", DEADLINE_MESSAGE)
+                terminal = end_stream(
+                    "deadline_exceeded", constants.DEADLINE_MESSAGE
+                )
             else:
                 logger.exception("sandbox command raised a timeout")
                 terminal = end_stream("internal", INTERNAL_MESSAGE)
@@ -274,7 +275,7 @@ async def start_process(request: Request) -> Response:
     try:
         lease = require_sandbox(request)
         media = request.headers.get("content-type", "").partition(";")[0]
-        if media.strip().lower() != CONNECT_STREAM:
+        if media.strip().lower() != constants.CONNECT_STREAM:
             return _error(415, "invalid_argument", "expected Connect JSON")
         deadline = _request_deadline(request)
         loop = asyncio.get_running_loop()
@@ -304,8 +305,8 @@ async def start_process(request: Request) -> Response:
         return _error(exc.status, "invalid_argument", exc.message)
     except TimeoutError:
         return Response(
-            end_stream("deadline_exceeded", DEADLINE_MESSAGE),
-            media_type=CONNECT_STREAM,
+            end_stream("deadline_exceeded", constants.DEADLINE_MESSAGE),
+            media_type=constants.CONNECT_STREAM,
         )
     return ProcessResponse(lease, command, deadline)
 
@@ -347,7 +348,7 @@ async def _control(
 ) -> Response:
     now = asyncio.get_running_loop().time()
     if deadline is not None and deadline <= now:
-        return _error(504, "deadline_exceeded", DEADLINE_MESSAGE)
+        return _error(504, "deadline_exceeded", constants.DEADLINE_MESSAGE)
     if not lease.entry.accepting_jobs or lease.expires_at <= now:
         raise SandboxNotRunning()
     if method == "List":
@@ -419,7 +420,7 @@ async def control_process(request: Request) -> Response:
                 body = json.loads(
                     (
                         await lease.read_body(
-                            _read_body, request, MAX_CONTROL_BODY
+                            _read_body, request, constants.MAX_CONTROL_BODY
                         )
                     ).decode()
                 )
@@ -436,7 +437,9 @@ async def control_process(request: Request) -> Response:
                 or deadline > asyncio.get_running_loop().time()
             ):
                 raise
-            response = _error(504, "deadline_exceeded", DEADLINE_MESSAGE)
+            response = _error(
+                504, "deadline_exceeded", constants.DEADLINE_MESSAGE
+            )
             response.headers["Connection"] = "close"
             return response
     except HttpError as exc:

@@ -1767,13 +1767,29 @@
     "isRecord": "TypeScript names the JSON object shape, its type guard and the child process type, which Python spells inline as JsonObject, isinstance and asyncio.subprocess.Process."
    }
   },
-  "server/e2b/leases": {
+  "server/e2b/sandbox": {
    "python_only": {
     "Sandbox": "The asyncio lease keeps the expiration timer and the sandbox data together."
    },
    "typescript_only": {
     "SandboxLease": "The TypeScript adapter returns a read-only sandbox view without the mutable timer.",
     "MAX_TIMER_DELAY_MS": "Node timers cannot schedule a delay larger than a signed 32-bit integer."
+   }
+  },
+  "server/e2b/constants": {
+   "python_only": {
+    "FileMethod": "Python types the loop callback's method from the Literal of supported unary file operations."
+   },
+   "typescript_only": {
+    "RPC_PATHS": "Fastify's auth hook checks a set of registered paths. FastAPI matches its registered routes."
+   }
+  },
+  "server/e2b/errors": {
+   "python_only": {
+    "HTTP_CONNECT_CODE": "The Python file error handler looks up Connect codes in a table; TypeScript uses connectCode."
+   },
+   "typescript_only": {
+    "connectCode": "The Fastify error boundary and file handlers share a function that maps native HTTP status to a Connect code."
    }
   },
   "server/routers/e2b": {
@@ -1788,8 +1804,6 @@
     "data_router": "FastAPI groups the data endpoints into their own router for raw body and lease authentication handling.",
     "download": "FastAPI registers a named route handler; the RouteApp registers the handler inline.",
     "upload": "FastAPI registers a named route handler; the RouteApp registers the handler inline.",
-    "FileMethod": "Python types the loop callback's method from the Literal of supported unary file operations.",
-    "HTTP_CONNECT_CODE": "The Python file error handler looks up Connect codes in a table; TypeScript uses connectCode.",
     "_rpc_endpoint": "FastAPI requires a callback factory to bind each declared unary method to its wrapped response.",
     "DownloadResponse": "The ASGI response owns the file reader until the stream closes.",
     "_files_of": "FastAPI callers build the file adapter inside the lease and runner scopes; the Fastify routes use withFiles.",
@@ -1799,18 +1813,11 @@
     "rate_limit_error": "The ASGI rate limiter calls the router for the appropriate error envelope; Fastify uses e2bError."
    },
    "typescript_only": {
-    "CONNECT": "The Fastify auth hook and route registration share the matchable route pattern.",
-    "CREATE": "The Fastify auth hook and route registration share the matchable route pattern.",
-    "KILL": "The Fastify auth hook and route registration share the matchable route pattern.",
-    "HEALTH": "The Fastify auth hook and route registration share the matchable route pattern.",
-    "SET_TIMEOUT": "The Fastify auth hook and route registration share the matchable route pattern.",
     "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
     "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
     "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory.",
-    "connectCode": "The Fastify error boundary and file handlers share a function that maps native HTTP status to a Connect code.",
     "List": "The Zod request schema types the list path and depth; Python validates them after reading the JSON object.",
     "Path": "The Zod request schema validates the path field; Python checks its decoded JSON value directly.",
-    "RPC_PATHS": "Fastify's auth hook checks a set of registered paths. FastAPI matches its registered routes.",
     "FileQuery": "Zod validates file query fields; FastAPI validates declared query parameters.",
     "InertCreateOptions": "Zod groups accepted SDK defaults into a shared schema; Pydantic validates them on the request model.",
     "Move": "Zod validates the source and destination paths; Python extracts them from the decoded request.",
@@ -1842,7 +1849,6 @@
     "control_process": "FastAPI registers a named unary handler; the TypeScript routes share an inline request boundary."
    },
    "typescript_only": {
-    "START": "Fastify's route registration, parser, and authentication predicate share the path constant.",
     "isProcessStart": "Fastify matches method and registered URL; FastAPI checks its declared route matches.",
     "registerProcess": "The TypeScript RouteApp registers the route with deps; FastAPI registers the handler on its router.",
     "Input": "Zod validates the unary command input and base64 syntax.",

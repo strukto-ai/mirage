@@ -52,8 +52,8 @@ from mirage.server.daemon_config import (
     read_daemon_table,
     validate_daemon_table,
 )
-from mirage.server.e2b.leases import Sandboxes
-from mirage.server.e2b.process import CONNECT_STREAM
+from mirage.server.e2b.constants import CONNECT_STREAM
+from mirage.server.e2b.sandbox import Sandboxes
 from mirage.server.env import ENV_E2B_PORT
 from mirage.server.errors import (
     WorkspaceMissing,

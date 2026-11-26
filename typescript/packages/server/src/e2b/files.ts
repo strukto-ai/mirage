@@ -1,59 +1,13 @@
 import { ensureDir } from '@struktoai/mirage-core/commands/cli/operand'
 import { classify } from '@struktoai/mirage-core/errors/classify'
-import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import { type FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { rfc3339Of } from '@struktoai/mirage-core/utils/dates'
 import { entryName } from '@struktoai/mirage-core/utils/remnants'
 import { fileMode, posixMode } from '@struktoai/mirage-core/utils/stat_view'
 import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
 
-const HOME = '/home/user'
-
-type FileCode =
-  | 'already_exists'
-  | 'failed_precondition'
-  | 'internal'
-  | 'invalid_argument'
-  | 'not_found'
-  | 'permission_denied'
-  | 'resource_exhausted'
-  | 'unimplemented'
-
-export class FileError extends Error {
-  constructor(
-    readonly code: FileCode,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'FileError'
-  }
-}
-
-const ERRORS: Partial<Record<FsCondition, [FileCode, string]>> = {
-  ENOENT: ['not_found', 'file not found'],
-  EEXIST: ['already_exists', 'file or directory already exists'],
-  EACCES: ['permission_denied', 'permission denied'],
-  EPERM: ['permission_denied', 'permission denied'],
-  EROFS: ['permission_denied', 'read-only filesystem'],
-  ENOTDIR: ['failed_precondition', 'not a directory'],
-  EISDIR: ['failed_precondition', 'is a directory'],
-  ENOTEMPTY: ['failed_precondition', 'directory is not empty'],
-  EBUSY: ['failed_precondition', 'path is busy'],
-  EXDEV: ['failed_precondition', 'cannot move across mounts'],
-  ELOOP: ['invalid_argument', 'symbolic link loop'],
-  EINVAL: ['invalid_argument', 'invalid path'],
-  EDQUOT: ['resource_exhausted', 'disk quota exceeded'],
-  EFBIG: ['resource_exhausted', 'file is too large'],
-  ENOTSUP: ['unimplemented', 'filesystem operation is unsupported'],
-}
-
-export function fileError(error: unknown): FileError {
-  if (error instanceof FileError) return error
-  const condition = classify(error)
-  const entry = condition === null ? undefined : ERRORS[condition]
-  if (entry !== undefined) return new FileError(...entry)
-  return new FileError('internal', 'filesystem operation failed')
-}
+import * as constants from './constants.ts'
+import { FileError } from './errors.ts'
 
 interface WriteInfo {
   name: string
@@ -74,17 +28,11 @@ interface EntryInfo {
   symlinkTarget?: string
 }
 
-const TYPES: Partial<Record<FileType, string>> = {
-  [FileType.FILE]: 'FILE_TYPE_FILE',
-  [FileType.DIRECTORY]: 'FILE_TYPE_DIRECTORY',
-  [FileType.SYMLINK]: 'FILE_TYPE_SYMLINK',
-}
-
 function filePath(value: string): PathSpec {
   if (value === '' || value.includes('\0')) {
     throw new FileError('invalid_argument', 'invalid path')
   }
-  return PathSpec.fromStrPath(value, undefined, HOME)
+  return PathSpec.fromStrPath(value, undefined, constants.HOME)
 }
 
 export class SandboxFiles {
@@ -162,7 +110,7 @@ export class SandboxFiles {
     const mode = posixMode(info)
     const result: EntryInfo = {
       name: entryName(spec.virtual) || '/',
-      type: TYPES[info.type] ?? 'FILE_TYPE_UNSPECIFIED',
+      type: constants.TYPES[info.type] ?? 'FILE_TYPE_UNSPECIFIED',
       path: spec.virtual,
       size: String(info.size ?? 0),
       mode,

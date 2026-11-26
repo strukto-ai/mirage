@@ -16,23 +16,15 @@ import { MAX_REQUEST_PART } from '../multipart.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { closeUnreadBody, readBody, readJsonBody, unaryContentType } from './body.ts'
-import {
-  decodeStart,
-  encodeMessage,
-  endStream,
-  InvalidConnectRequest,
-  UnsupportedProcessOption,
-  type StartCommand,
-} from './connect.ts'
-import type { LiveProcess, Sandboxes, SandboxLease } from './leases.ts'
+import { decodeStart, encodeMessage, endStream, type StartCommand } from './connect.ts'
+import * as constants from './constants.ts'
+import { InvalidConnectRequest, UnsupportedProcessOption } from './errors.ts'
+import type { LiveProcess, Sandboxes, SandboxLease } from './sandbox.ts'
 
-const PROCESS_PREFIX = '/process.Process/'
-const START = PROCESS_PREFIX + 'Start'
-const CONTROL_METHODS = ['List', 'SendInput', 'CloseStdin', 'SendSignal'] as const
-const PROCESS_PATHS = new Set([START, ...CONTROL_METHODS.map((method) => PROCESS_PREFIX + method)])
-export const CONNECT_STREAM = 'application/connect+json'
-const DEADLINE_MESSAGE = 'command deadline exceeded'
-const MAX_CONTROL_BODY = 2 * CAPACITY
+const PROCESS_PATHS = new Set([
+  constants.START,
+  ...constants.CONTROL_METHODS.map((method) => constants.PROCESS_PREFIX + method),
+])
 const List = z.object({})
 const Selector = z.object({
   process: z.object({ pid: z.number().int().min(1).max(0xffffffff), tag: z.null().optional() }),
@@ -46,7 +38,7 @@ const Input = z.object({
 const KillSignal = z.object({ signal: z.union([z.literal(9), z.literal('SIGNAL_SIGKILL')]) })
 
 export function isProcessStart(method: string, path: string): boolean {
-  return method === 'POST' && path === START
+  return method === 'POST' && path === constants.START
 }
 
 export function isProcessRequest(method: string, path: string): boolean {
@@ -82,7 +74,7 @@ function events(
   const connection = AbortSignal.any([closed, canceled.signal])
   const deadline = new AbortController()
   const expire = (): void => {
-    deadline.abort(new DOMException(DEADLINE_MESSAGE, 'TimeoutError'))
+    deadline.abort(new DOMException(constants.DEADLINE_MESSAGE, 'TimeoutError'))
   }
   const signal = AbortSignal.any([connection, deadline.signal, lease.revoked])
   const { runner } = lease.entry
@@ -92,7 +84,7 @@ function events(
     if (hasAborted(connection)) return
     const timeout = timeLeft(deadlineAt)
     if (timeout === 0) {
-      yield endStream('deadline_exceeded', DEADLINE_MESSAGE)
+      yield endStream('deadline_exceeded', constants.DEADLINE_MESSAGE)
       return
     }
     const disarm = timeout === null ? undefined : atDeadline(timeout, expire)
@@ -105,7 +97,7 @@ function events(
         }
         return runner.ws.shell(command.line, {
           sessionId: runner.ws.defaultSessionId,
-          cwd: command.cwd ?? '/home/user',
+          cwd: command.cwd ?? constants.HOME,
           env: { ...lease.envVars, ...command.envs },
           ...(stdin === undefined ? {} : { stdin: stdin.stream() }),
           signal,
@@ -131,7 +123,7 @@ function events(
         return
       }
       if (deadline.signal.aborted || timeLeft(deadlineAt) === 0) {
-        yield endStream('deadline_exceeded', DEADLINE_MESSAGE)
+        yield endStream('deadline_exceeded', constants.DEADLINE_MESSAGE)
         return
       }
       disarm?.()
@@ -142,7 +134,7 @@ function events(
     } catch (error) {
       if (hasAborted(connection)) return
       if (deadline.signal.aborted) {
-        yield endStream('deadline_exceeded', DEADLINE_MESSAGE)
+        yield endStream('deadline_exceeded', constants.DEADLINE_MESSAGE)
       } else if (process?.killed === true) {
         yield encodeMessage({ end: { exitCode: 137, exited: true, status: 'signal: killed' } })
         yield endStream()
@@ -175,7 +167,7 @@ function events(
   })
   if (lease.revoked.aborted) revoke()
   else lease.revoked.addEventListener('abort', revoke, { once: true })
-  const response = reply.type(CONNECT_STREAM).send(body)
+  const response = reply.type(constants.CONNECT_STREAM).send(body)
   void pipeline(Readable.from(events(), { objectMode: false }), body).catch((error: unknown) => {
     if (!connection.aborted && !lease.revoked.aborted) {
       console.debug('sandbox command transport closed', error)
@@ -190,7 +182,7 @@ function failure(reply: RouteReply, status: number, code: string, message: strin
 
 async function control(
   lease: SandboxLease,
-  method: (typeof CONTROL_METHODS)[number],
+  method: (typeof constants.CONTROL_METHODS)[number],
   body: unknown,
   reply: RouteReply,
   signal: AbortSignal,
@@ -268,16 +260,16 @@ export function registerProcess(
   registry: WorkspaceRegistry,
 ): void {
   let nextPid = 0
-  app.post(START, { rawBody: true }, async (req, reply) => {
+  app.post(constants.START, { rawBody: true }, async (req, reply) => {
     const uploadDeadline = new AbortController()
     const expire = (): void => {
-      uploadDeadline.abort(new DOMException(DEADLINE_MESSAGE, 'TimeoutError'))
+      uploadDeadline.abort(new DOMException(constants.DEADLINE_MESSAGE, 'TimeoutError'))
     }
     let disarm: (() => void) | undefined
     try {
       const lease = sandboxes.requireAccess(req.headers)
       const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
-      if (contentType !== CONNECT_STREAM) {
+      if (contentType !== constants.CONNECT_STREAM) {
         closeUnreadBody(req, reply)
         return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
       }
@@ -290,7 +282,9 @@ export function registerProcess(
         AbortSignal.any([req.closed, uploadDeadline.signal, lease.revoked]),
       )
       if (timeLeft(deadline) === 0) {
-        return reply.type(CONNECT_STREAM).send(endStream('deadline_exceeded', DEADLINE_MESSAGE))
+        return reply
+          .type(constants.CONNECT_STREAM)
+          .send(endStream('deadline_exceeded', constants.DEADLINE_MESSAGE))
       }
       sandboxes.requireAccess(req.headers)
       if (registry.draining) throw new HttpError('shutting_down', 'server is shutting down')
@@ -301,7 +295,9 @@ export function registerProcess(
     } catch (error) {
       closeUnreadBody(req, reply)
       if (uploadDeadline.signal.aborted && error === uploadDeadline.signal.reason) {
-        return reply.type(CONNECT_STREAM).send(endStream('deadline_exceeded', DEADLINE_MESSAGE))
+        return reply
+          .type(constants.CONNECT_STREAM)
+          .send(endStream('deadline_exceeded', constants.DEADLINE_MESSAGE))
       }
       if (error instanceof UnsupportedProcessOption) {
         return failure(reply, 501, 'unimplemented', error.message)
@@ -312,16 +308,16 @@ export function registerProcess(
       disarm?.()
     }
   })
-  for (const method of CONTROL_METHODS) {
-    app.post(PROCESS_PREFIX + method, { rawBody: true }, async (req, reply) => {
+  for (const method of constants.CONTROL_METHODS) {
+    app.post(constants.PROCESS_PREFIX + method, { rawBody: true }, async (req, reply) => {
       const deadlineSignal = new AbortController()
       const expire = (): void => {
-        deadlineSignal.abort(new DOMException(DEADLINE_MESSAGE, 'TimeoutError'))
+        deadlineSignal.abort(new DOMException(constants.DEADLINE_MESSAGE, 'TimeoutError'))
       }
       let disarm: (() => void) | undefined
       try {
         const lease = sandboxes.requireAccess(req.headers)
-        if (unaryContentType(req, CONNECT_STREAM) !== 'application/json') {
+        if (unaryContentType(req, constants.CONNECT_STREAM) !== 'application/json') {
           closeUnreadBody(req, reply)
           return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
         }
@@ -331,7 +327,7 @@ export function registerProcess(
         else if (remaining !== null) disarm = atDeadline(remaining, expire)
         const signal = AbortSignal.any([lease.revoked, req.closed, deadlineSignal.signal])
         signal.throwIfAborted()
-        const body = await readJsonBody(req, signal, MAX_CONTROL_BODY)
+        const body = await readJsonBody(req, signal, constants.MAX_CONTROL_BODY)
         lease.checkFiles()
         if (timeLeft(deadline) === 0) expire()
         signal.throwIfAborted()
@@ -339,7 +335,7 @@ export function registerProcess(
       } catch (error) {
         closeUnreadBody(req, reply)
         if (deadlineSignal.signal.aborted) {
-          return failure(reply, 504, 'deadline_exceeded', DEADLINE_MESSAGE)
+          return failure(reply, 504, 'deadline_exceeded', constants.DEADLINE_MESSAGE)
         }
         throw error
       } finally {

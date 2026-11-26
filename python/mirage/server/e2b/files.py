@@ -8,6 +8,8 @@ from typing import Literal, NotRequired, TypedDict
 from mirage.commands.cli.operand import ensure_dir
 from mirage.errors import classify
 from mirage.errors.types import FsCondition
+from mirage.server.e2b import constants
+from mirage.server.e2b.errors import FileError
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import rfc3339_of
 from mirage.utils.remnants import entry_name
@@ -15,56 +17,6 @@ from mirage.utils.stat_view import posix_mode
 from mirage.workspace.files import Files, reader_of
 
 logger = logging.getLogger(__name__)
-
-HOME = "/home/user"
-FileCode = Literal[
-    "already_exists",
-    "failed_precondition",
-    "internal",
-    "invalid_argument",
-    "not_found",
-    "permission_denied",
-    "resource_exhausted",
-    "unimplemented",
-]
-
-
-class FileError(ValueError):
-    def __init__(self, code: FileCode, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-
-
-ERRORS: dict[FsCondition, tuple[FileCode, str]] = {
-    FsCondition.ENOENT: ("not_found", "file not found"),
-    FsCondition.EEXIST: ("already_exists", "file or directory already exists"),
-    FsCondition.EACCES: ("permission_denied", "permission denied"),
-    FsCondition.EPERM: ("permission_denied", "permission denied"),
-    FsCondition.EROFS: ("permission_denied", "read-only filesystem"),
-    FsCondition.ENOTDIR: ("failed_precondition", "not a directory"),
-    FsCondition.EISDIR: ("failed_precondition", "is a directory"),
-    FsCondition.ENOTEMPTY: ("failed_precondition", "directory is not empty"),
-    FsCondition.EBUSY: ("failed_precondition", "path is busy"),
-    FsCondition.EXDEV: ("failed_precondition", "cannot move across mounts"),
-    FsCondition.ELOOP: ("invalid_argument", "symbolic link loop"),
-    FsCondition.EINVAL: ("invalid_argument", "invalid path"),
-    FsCondition.EDQUOT: ("resource_exhausted", "disk quota exceeded"),
-    FsCondition.EFBIG: ("resource_exhausted", "file is too large"),
-    FsCondition.ENOTSUP: (
-        "unimplemented",
-        "filesystem operation is unsupported",
-    ),
-}
-
-
-def file_error(exc: Exception) -> FileError:
-    if isinstance(exc, FileError):
-        return exc
-    condition = classify(exc)
-    if condition is not None and condition in ERRORS:
-        return FileError(*ERRORS[condition])
-    return FileError("internal", "filesystem operation failed")
 
 
 class WriteInfo(TypedDict):
@@ -86,17 +38,10 @@ class EntryInfo(TypedDict):
     symlinkTarget: NotRequired[str]
 
 
-TYPES = {
-    FileType.FILE: "FILE_TYPE_FILE",
-    FileType.DIRECTORY: "FILE_TYPE_DIRECTORY",
-    FileType.SYMLINK: "FILE_TYPE_SYMLINK",
-}
-
-
 def _file_path(value: str) -> PathSpec:
     if not value or "\0" in value:
         raise FileError("invalid_argument", "invalid path")
-    return PathSpec.from_str_path(value, cwd=HOME)
+    return PathSpec.from_str_path(value, cwd=constants.HOME)
 
 
 class SandboxFiles:
@@ -173,7 +118,7 @@ class SandboxFiles:
         mode = posix_mode(info)
         result: EntryInfo = {
             "name": entry_name(spec.virtual) or "/",
-            "type": TYPES.get(info.type, "FILE_TYPE_UNSPECIFIED"),
+            "type": constants.TYPES.get(info.type, "FILE_TYPE_UNSPECIFIED"),
             "path": spec.virtual,
             "size": str(info.size or 0),
             "mode": mode,

@@ -82,6 +82,7 @@ export class WorkspaceEntry {
   readonly id: string
   readonly runner: WorkspaceRunner
   readonly owner: string | null
+  /** Remove on stop without saving state to reopen the workspace. */
   readonly ephemeral: boolean
   readonly createdAt: number
   /** The fingerprint of the config it was created from, when it was. */

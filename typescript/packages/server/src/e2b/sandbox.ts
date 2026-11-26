@@ -6,14 +6,10 @@ import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_exec
 import { HttpError } from '../errors.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import type { StartCommand } from './connect.ts'
+import { ENVD_PORT } from './constants.ts'
+import { SandboxNotRunning } from './errors.ts'
 
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
-
-class SandboxNotRunning extends HttpError {
-  constructor() {
-    super('unauthorized', 'invalid sandbox access token')
-  }
-}
 
 export interface LiveProcess {
   readonly command: StartCommand
@@ -135,7 +131,7 @@ export class Sandboxes {
     headers: Readonly<Record<string, string | readonly string[] | undefined>>,
   ): SandboxLease {
     const id = headers['e2b-sandbox-id']
-    if (typeof id !== 'string' || id === '' || headers['e2b-sandbox-port'] !== '49983') {
+    if (typeof id !== 'string' || id === '' || headers['e2b-sandbox-port'] !== ENVD_PORT) {
       throw new HttpError('invalid_request', 'invalid sandbox routing headers')
     }
     const token = headers['x-access-token']

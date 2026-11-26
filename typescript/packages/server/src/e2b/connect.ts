@@ -1,15 +1,13 @@
 import type { JsonValue } from '@struktoai/mirage-core/types'
 
+import { InvalidConnectRequest, UnsupportedProcessOption } from './errors.ts'
+
 export interface StartCommand {
   readonly line: string
   readonly cwd: string | null
   readonly envs: Readonly<Record<string, string>>
   readonly stdin: boolean
 }
-
-export class InvalidConnectRequest extends Error {}
-
-export class UnsupportedProcessOption extends Error {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

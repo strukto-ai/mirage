@@ -1,6 +1,6 @@
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
-from typing import Any, Literal
+from typing import Any
 
 from anyio import CancelScope
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -18,21 +18,18 @@ from mirage.server.auth.middleware import (
     admit_account,
 )
 from mirage.server.constants import RAW_BODIES
-from mirage.server.e2b.files import (
-    FileCode,
+from mirage.server.e2b import constants
+from mirage.server.e2b.errors import (
+    CONNECT_STATUS,
+    HTTP_CONNECT_CODE,
     FileError,
-    SandboxFiles,
+    SandboxNotRunning,
     file_error,
 )
-from mirage.server.e2b.leases import Sandbox, Sandboxes, SandboxNotRunning
-from mirage.server.e2b.process import (
-    CONNECT_STREAM,
-    CONTROL_METHODS,
-    PROCESS_PREFIX,
-    control_process,
-    start_process,
-)
+from mirage.server.e2b.files import SandboxFiles
+from mirage.server.e2b.process import control_process, start_process
 from mirage.server.e2b.routing import require_sandbox
+from mirage.server.e2b.sandbox import Sandbox, Sandboxes
 from mirage.server.errors import INTERNAL_MESSAGE, ErrorCode, HttpError
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.routers.vfs import json_body, session_of
@@ -42,63 +39,13 @@ from mirage.utils.ids import new_workspace_id
 
 logger = logging.getLogger(__name__)
 
-BASE_TEMPLATE = "base"
-BASE_WORKSPACE_TEMPLATE = "e2b-base"
-DEFAULT_TIMEOUT = 300
-ENVD_VERSION = "0.5.6"
-FILES = "/files"
-RPC_PREFIX = "/filesystem.Filesystem/"
-FileMethod = Literal["Stat", "ListDir", "MakeDir", "Move", "Remove"]
-METHODS: tuple[FileMethod, ...] = (
-    "Stat",
-    "ListDir",
-    "MakeDir",
-    "Move",
-    "Remove",
-)
-UNSUPPORTED_LIFECYCLE_ROUTES = (
-    ("GET", "/v2/sandboxes"),
-    ("GET", "/sandboxes"),
-    ("GET", "/sandboxes/{sandbox_id}"),
-    ("GET", "/sandboxes/{sandbox_id}/metrics"),
-    ("POST", "/sandboxes/{sandbox_id}/pause"),
-    ("POST", "/sandboxes/{sandbox_id}/resume"),
-)
-UNSUPPORTED_RPC_PATHS = (
-    RPC_PREFIX + "WatchDir",
-    RPC_PREFIX + "CreateWatcher",
-    RPC_PREFIX + "GetWatcherEvents",
-    RPC_PREFIX + "RemoveWatcher",
-    "/process.Process/Connect",
-    "/process.Process/Update",
-    "/process.Process/StreamInput",
-)
-MAX_UPLOAD_BYTES = 64 * 1024 * 1024
-CONNECT_STATUS: dict[FileCode, int] = {
-    "invalid_argument": 400,
-    "failed_precondition": 400,
-    "permission_denied": 403,
-    "not_found": 404,
-    "already_exists": 409,
-    "resource_exhausted": 429,
-    "internal": 500,
-    "unimplemented": 501,
-}
-HTTP_CONNECT_CODE = {
-    400: "invalid_argument",
-    401: "unauthenticated",
-    403: "permission_denied",
-    404: "not_found",
-    413: "resource_exhausted",
-    429: "resource_exhausted",
-    503: "unavailable",
-}
-
 
 def _require_unary_body(request: Request) -> None:
     media = request.headers.get("content-type", "").partition(";")[0]
     media = media.strip().lower()
-    if media == CONNECT_STREAM or media.encode().startswith(RAW_BODIES):
+    if media == constants.CONNECT_STREAM or media.encode().startswith(
+        RAW_BODIES
+    ):
         raise HttpError(
             ErrorCode.INVALID_REQUEST,
             "expected JSON on a unary E2B route",
@@ -153,16 +100,16 @@ class LifecycleRoute(APIRoute):
 
 router = APIRouter(route_class=LifecycleRoute, include_in_schema=False)
 data_router = APIRouter(include_in_schema=False)
-data_router.add_api_route(
-    f"{PROCESS_PREFIX}Start", start_process, methods=["POST"]
-)
-for method in CONTROL_METHODS:
+data_router.add_api_route(constants.START, start_process, methods=["POST"])
+for method in constants.CONTROL_METHODS:
     data_router.add_api_route(
-        f"{PROCESS_PREFIX}{method}", control_process, methods=["POST"]
+        f"{constants.PROCESS_PREFIX}{method}",
+        control_process,
+        methods=["POST"],
     )
 
 
-@data_router.get("/health", status_code=204)
+@data_router.get(constants.HEALTH, status_code=204)
 async def sandbox_health(request: Request) -> Response:
     try:
         require_sandbox(request)
@@ -180,12 +127,12 @@ class ConnectSandboxRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     timeout: int = Field(
-        default=DEFAULT_TIMEOUT, strict=True, gt=0, le=2**53 - 1
+        default=constants.DEFAULT_TIMEOUT, strict=True, gt=0, le=2**53 - 1
     )
 
 
 class CreateSandboxRequest(ConnectSandboxRequest):
-    template: str = Field(default=BASE_TEMPLATE, alias="templateID")
+    template: str = Field(default=constants.BASE_TEMPLATE, alias="templateID")
     env_vars: dict[str, StrictStr] = Field(
         default_factory=dict, alias="envVars"
     )
@@ -279,9 +226,9 @@ def sandbox_workspace(scope: Scope) -> str | None:
 def _present(lease: Sandbox) -> dict[str, str]:
     return {
         "sandboxID": lease.entry.id,
-        "templateID": BASE_TEMPLATE,
+        "templateID": constants.BASE_TEMPLATE,
         "clientID": lease.entry.id,
-        "envdVersion": ENVD_VERSION,
+        "envdVersion": constants.ENVD_VERSION,
         "envdAccessToken": lease.access_token,
     }
 
@@ -305,7 +252,7 @@ def unsupported_create_option(options: dict[str, Any]) -> str | None:
     return None
 
 
-@router.post("/v2/sandboxes", status_code=201, response_model=None)
+@router.post(constants.CREATE, status_code=201, response_model=None)
 async def create_sandbox(
     request: Request,
     response: Response,
@@ -318,11 +265,11 @@ async def create_sandbox(
         return unsupported_lifecycle(
             f"sandbox create option is unsupported: {unsupported}"
         )
-    if req.template != BASE_TEMPLATE:
+    if req.template != constants.BASE_TEMPLATE:
         raise HttpError(ErrorCode.NOT_FOUND, "sandbox template not found")
     try:
         config, written = await template_config(
-            request, BASE_WORKSPACE_TEMPLATE
+            request, constants.BASE_WORKSPACE_TEMPLATE
         )
     except HttpError as exc:
         if exc.code != ErrorCode.NOT_FOUND:
@@ -330,8 +277,8 @@ async def create_sandbox(
         logger.debug("using the built-in E2B base because %s", exc.message)
         written = {
             "mode": "read",
-            "mounts": {"/home/user": {"vfs": "ram", "mode": "write"}},
-            "env": {"HOME": "/home/user"},
+            "mounts": {constants.HOME: {"vfs": "ram", "mode": "write"}},
+            "env": {"HOME": constants.HOME},
         }
         config = check_config(written)
     entry = await open_workspace(
@@ -344,7 +291,7 @@ async def create_sandbox(
     return _present(sandboxes.add(entry, req.env_vars, req.timeout))
 
 
-@router.post("/v2/sandboxes/{sandbox_id}/connect", response_model=None)
+@router.post(constants.CONNECT, response_model=None)
 async def connect_sandbox(
     sandbox_id: str,
     request: Request,
@@ -362,7 +309,7 @@ async def connect_sandbox(
     return _present(lease)
 
 
-@router.post("/sandboxes/{sandbox_id}/timeout", status_code=204)
+@router.post(constants.SET_TIMEOUT, status_code=204)
 async def set_sandbox_timeout(
     sandbox_id: str, request: Request, req: SetSandboxTimeoutRequest
 ) -> Response:
@@ -374,7 +321,7 @@ async def set_sandbox_timeout(
     return Response(status_code=204)
 
 
-@router.delete("/sandboxes/{sandbox_id}", status_code=204)
+@router.delete(constants.KILL, status_code=204)
 async def kill_sandbox(sandbox_id: str, request: Request) -> Response:
     sandboxes: Sandboxes = request.app.state.e2b
     removed = await sandboxes.kill(sandbox_id, request.state.account)
@@ -428,7 +375,7 @@ async def _upload_body(request: Request) -> AsyncIterator[bytes]:
     size = 0
     async for chunk in request.stream():
         size += len(chunk)
-        if size > MAX_UPLOAD_BYTES:
+        if size > constants.MAX_UPLOAD_BYTES:
             raise HttpError(ErrorCode.TOO_LARGE, "file upload is too large")
         yield chunk
 
@@ -521,7 +468,7 @@ class DownloadResponse(StreamingResponse):
                 raise
 
 
-@data_router.get(FILES)
+@data_router.get(constants.FILES)
 async def download(request: Request) -> Response:
     try:
         lease = require_sandbox(request)
@@ -530,7 +477,7 @@ async def download(request: Request) -> Response:
         return failure(exc)
 
 
-@data_router.post(FILES)
+@data_router.post(constants.FILES)
 async def upload(request: Request) -> Response:
     try:
         lease = require_sandbox(request)
@@ -548,7 +495,7 @@ async def upload(request: Request) -> Response:
 
 
 def _rpc_endpoint(
-    method: FileMethod,
+    method: constants.FileMethod,
 ) -> Callable[[Request], Awaitable[Response]]:
     async def endpoint(request: Request) -> Response:
         try:
@@ -606,9 +553,9 @@ def _rpc_endpoint(
     return endpoint
 
 
-for method in METHODS:
+for method in constants.METHODS:
     data_router.add_api_route(
-        RPC_PREFIX + method, _rpc_endpoint(method), methods=["POST"]
+        constants.RPC_PREFIX + method, _rpc_endpoint(method), methods=["POST"]
     )
 
 
@@ -635,8 +582,8 @@ async def reject_rpc(request: Request) -> JSONResponse:
     )
 
 
-for verb, path in UNSUPPORTED_LIFECYCLE_ROUTES:
+for verb, path in constants.UNSUPPORTED_LIFECYCLE_ROUTES:
     router.add_api_route(path, reject_lifecycle, methods=[verb])
 
-for path in UNSUPPORTED_RPC_PATHS:
+for path in constants.UNSUPPORTED_RPC_PATHS:
     data_router.add_api_route(path, reject_rpc, methods=["POST"])

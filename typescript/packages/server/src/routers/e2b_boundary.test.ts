@@ -12,7 +12,7 @@ import { SignJWT } from 'jose'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
 import { AuthMode } from '../auth/config.ts'
-import { CONNECT_STREAM } from '../e2b/process.ts'
+import { CONNECT_STREAM } from '../e2b/constants.ts'
 import { e2bListener } from './e2b_test_support.ts'
 
 const KEY = { 'x-api-key': 'local-key' }
