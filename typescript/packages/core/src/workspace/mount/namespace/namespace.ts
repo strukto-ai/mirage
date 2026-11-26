@@ -24,7 +24,7 @@ import {
 } from '../../../types.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { epochToIso } from '../../../utils/dates.ts'
-import { ancestors, globPrefixMatch, resolveSymlinks } from '../../../utils/path.ts'
+import { ancestors, globPrefixMatch, norm, normDir, resolveSymlinks } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
@@ -513,12 +513,14 @@ export class Namespace {
   async purgeUnder(
     directory: string,
     keep: ReadonlySet<string> = new Set<string>(),
+    includeRoot = false,
   ): Promise<number> {
-    const base = rstripSlash(directory) + '/'
+    const root = norm(directory)
+    const base = normDir(directory)
     const roots = this.registry.descendantMounts(directory).map((m) => rstripSlash(m.prefix))
     const doomed: string[] = []
     for (const path of this.nodeTable.keys()) {
-      if (!path.startsWith(base) || keep.has(path)) continue
+      if ((!path.startsWith(base) && !(includeRoot && path === root)) || keep.has(path)) continue
       if (roots.some((r) => path === r || path.startsWith(r + '/'))) continue
       doomed.push(path)
     }

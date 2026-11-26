@@ -1,8 +1,9 @@
 import { Buffer } from 'node:buffer'
 import { generateKeyPairSync } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { Agent, request } from 'node:http'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buffer } from 'node:stream/consumers'
@@ -16,6 +17,7 @@ import { AuthMode, type AuthConfig } from '../auth/config.ts'
 import { SandboxFiles } from '../e2b/files.ts'
 import { CONNECT_STREAM } from '../e2b/process.ts'
 import { CONFIGS_PREFIX, OWNERS_PREFIX } from '../registry.ts'
+import { e2bListener } from './e2b_test_support.ts'
 
 const API_KEY = { 'x-api-key': 'test-key' }
 const BEARER = { authorization: 'Bearer test-key' }
@@ -56,6 +58,7 @@ async function setup(options: BuildAppOptions = {}, useApprovedTemplate = true) 
     })
   }
   const app = buildApp({
+    e2bPort: 8766,
     authConfig: { mode: AuthMode.Token, bearerToken: API_KEY['x-api-key'] },
     ...(useApprovedTemplate ? { e2bTemplate: 'approved' } : {}),
     rateLimits: [],
@@ -72,13 +75,13 @@ async function create(
   payload: Record<string, unknown> = {},
   headers = API_KEY,
 ): Promise<SandboxResponse> {
-  const reply = await app.inject({ method: 'POST', url: CREATE, headers, payload })
+  const reply = await e2bListener(app).inject({ method: 'POST', url: CREATE, headers, payload })
   expect(reply.statusCode, reply.body).toBe(201)
   return reply.json<SandboxResponse>()
 }
 
 function connect(app: MirageApp, id: string, timeout: number, headers = API_KEY) {
-  return app.inject({
+  return e2bListener(app).inject({
     method: 'POST',
     url: `${CREATE}/${id}/connect`,
     payload: { timeout },
@@ -87,7 +90,7 @@ function connect(app: MirageApp, id: string, timeout: number, headers = API_KEY)
 }
 
 function setSandboxTimeout(app: MirageApp, id: string, timeout: number, headers = API_KEY) {
-  return app.inject({
+  return e2bListener(app).inject({
     method: 'POST',
     url: `/sandboxes/${id}/timeout`,
     payload: { timeout },
@@ -96,7 +99,7 @@ function setSandboxTimeout(app: MirageApp, id: string, timeout: number, headers 
 }
 
 function kill(app: MirageApp, id: string, headers = API_KEY) {
-  return app.inject({ method: 'DELETE', url: `/sandboxes/${id}`, headers })
+  return e2bListener(app).inject({ method: 'DELETE', url: `/sandboxes/${id}`, headers })
 }
 
 function dataHeaders(sandbox: SandboxResponse): Record<string, string> {
@@ -188,16 +191,108 @@ async function runCommand(
   headers: Record<string, string>,
   body: Buffer,
 ): Promise<ProcessFrame[]> {
-  const answer = await app.inject({ method: 'POST', url: START, headers, payload: body })
+  const answer = await e2bListener(app).inject({
+    method: 'POST',
+    url: START,
+    headers,
+    payload: body,
+  })
   expect(answer.statusCode, answer.body).toBe(200)
   expect(answer.headers['content-type']).toBe(CONNECT_STREAM)
   return processFrames(answer.rawPayload)
 }
 
+async function reservePort() {
+  const socket = createServer()
+  socket.listen(0, '127.0.0.1')
+  await once(socket, 'listening')
+  const address = socket.address()
+  if (address === null || typeof address === 'string') throw new Error('missing TCP address')
+  return { socket, port: address.port }
+}
+
+describe('E2B listener', () => {
+  it('isolates both live HTTP surfaces while sharing sandbox workspaces', async () => {
+    const { socket, port } = await reservePort()
+    socket.close()
+    await once(socket, 'close')
+    vi.stubEnv('MIRAGE_E2B_PORT', String(port))
+    const stateRoot = await mkdtemp(join(tmpdir(), 'mirage-e2b-listener-'))
+    stateRoots.push(stateRoot)
+    const app = buildApp({
+      authConfig: { mode: AuthMode.Token, bearerToken: API_KEY['x-api-key'] },
+      resourceStore: memoryResourceStore(),
+      stateRoot,
+      rateLimits: [],
+    })
+    applications.push(app)
+    await app.ready()
+    expect(app.e2b?.server.listening).toBe(false)
+
+    const native = await app.listen({ host: '127.0.0.1', port: 0 })
+    const e2b = `http://127.0.0.1:${String(port)}`
+    const post = (origin: string, headers: Record<string, string>) =>
+      fetch(origin + CREATE, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: '{}',
+      })
+
+    const nativeAuth = await fetch(native + '/v1/workspaces', { headers: API_KEY })
+    expect(nativeAuth.status).toBe(401)
+    expect(nativeAuth.headers.get('WWW-Authenticate')).toBe('Bearer')
+    expect(await nativeAuth.json()).toMatchObject({ error: { code: 'unauthorized' } })
+    expect((await post(native, BEARER)).status).toBe(404)
+    expect((await fetch(e2b + '/v1/health')).status).toBe(404)
+    expect((await fetch(native + '/v1/health')).status).toBe(200)
+
+    const e2bAuth = await post(e2b, BEARER)
+    expect(e2bAuth.status).toBe(401)
+    expect(e2bAuth.headers.has('WWW-Authenticate')).toBe(false)
+    expect(await e2bAuth.json()).toEqual({ code: 401, message: 'unauthorized' })
+    const created = await post(e2b, API_KEY)
+    expect(created.status).toBe(201)
+    const sandbox = (await created.json()) as SandboxResponse
+    const workspace = await fetch(native + '/v1/workspaces/' + sandbox.sandboxID, {
+      headers: BEARER,
+    })
+    expect(workspace.status).toBe(200)
+    expect((await fetch(e2b + HEALTH, { headers: dataHeaders(sandbox) })).status).toBe(204)
+
+    await app.close()
+    expect(app.registry.has(sandbox.sandboxID)).toBe(false)
+    expect(app.server.listening).toBe(false)
+    expect(app.e2b?.server.listening).toBe(false)
+  })
+
+  it('rolls back the native listener when the E2B port is busy', async () => {
+    const { socket, port } = await reservePort()
+    try {
+      const { app } = await setup({ e2bPort: port })
+      await expect(app.listen({ host: '127.0.0.1', port: 0 })).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+      })
+      expect(app.server.listening).toBe(false)
+      expect(app.e2b?.server.listening).toBe(false)
+      expect(socket.listening).toBe(true)
+    } finally {
+      socket.close()
+      await once(socket, 'close')
+    }
+  })
+})
+
 describe('E2B lifecycle', () => {
   it('requires an actual API key and allows explicitly disabling the routes', async () => {
     vi.stubEnv('MIRAGE_E2B_TEMPLATE', 'approved')
-    const { app: disabled } = await setup({ e2bTemplate: '' })
+    const disabled = buildApp({
+      authConfig: { mode: AuthMode.Token, bearerToken: API_KEY['x-api-key'] },
+      resourceStore: memoryResourceStore(),
+    })
+    applications.push(disabled)
+    expect(disabled.e2b).toBeNull()
+    const { app: explicitlyDisabled } = await setup({ e2bPort: 8766, e2bTemplate: '' })
+    expect(explicitlyDisabled.e2b).toBeNull()
     expect(
       (await disabled.inject({ method: 'POST', url: CREATE, headers: BEARER })).statusCode,
     ).toBe(404)
@@ -205,17 +300,21 @@ describe('E2B lifecycle', () => {
 
     vi.stubEnv('MIRAGE_E2B_TEMPLATE', undefined)
     const { app: noCredential } = await setup({ authConfig: { mode: AuthMode.Local } }, false)
-    const local = await noCredential.inject({ method: 'POST', url: CREATE, headers: API_KEY })
+    const local = await e2bListener(noCredential).inject({
+      method: 'POST',
+      url: CREATE,
+      headers: API_KEY,
+    })
     expect(local.statusCode).toBe(401)
     expect(local.json()).toEqual({ code: 401, message: 'unauthorized' })
 
     const { app } = await setup({}, false)
     for (const headers of [{}, BEARER, { 'x-api-key': 'incorrect' }]) {
-      const refused = await app.inject({ method: 'POST', url: CREATE, headers })
+      const refused = await e2bListener(app).inject({ method: 'POST', url: CREATE, headers })
       expect(refused.statusCode).toBe(401)
       expect(refused.json()).toEqual({ code: 401, message: 'unauthorized' })
     }
-    expect((await app.inject({ url: CREATE, headers: API_KEY })).statusCode).toBe(501)
+    expect((await e2bListener(app).inject({ url: CREATE, headers: API_KEY })).statusCode).toBe(501)
     expect((await app.inject({ url: '/v1/workspaces', headers: API_KEY })).statusCode).toBe(401)
     expect((await app.inject({ url: '/v1/workspaces', headers: BEARER })).statusCode).toBe(200)
   })
@@ -250,14 +349,16 @@ describe('E2B lifecycle', () => {
       const written = await runCommand(app, headers, processBody('printf kept > state.txt'))
       expect(written.at(-2)?.payload.event?.end?.exitCode).toBe(0)
       const url = '/files?path=state.txt'
-      const stored = await app.inject({ url, headers })
+      const stored = await e2bListener(app).inject({ url, headers })
       expect(stored.statusCode).toBe(200)
       expect(stored.body).toBe('kept')
 
       const second = await create(app, { templateID: 'base' })
       expect(second.templateID).toBe('base')
       expect(second.sandboxID).not.toBe(first.sandboxID)
-      expect((await app.inject({ url, headers: dataHeaders(second) })).statusCode).toBe(404)
+      expect(
+        (await e2bListener(app).inject({ url, headers: dataHeaders(second) })).statusCode,
+      ).toBe(404)
     },
   )
 
@@ -268,14 +369,18 @@ describe('E2B lifecycle', () => {
     const { app } = await setup({ resourceStore }, false)
     expect((await create(app)).templateID).toBe('approved')
     const { app: empty } = await setup({}, false)
-    const missing = await empty.inject({ method: 'POST', url: CREATE, headers: API_KEY })
+    const missing = await e2bListener(empty).inject({
+      method: 'POST',
+      url: CREATE,
+      headers: API_KEY,
+    })
     expect(missing.statusCode).toBe(404)
     expect(missing.json()).toMatchObject({ code: 404 })
   })
 
   it('maps the approved aliases, validates input, and returns the same lease on connect', async () => {
     const { app } = await setup({ maxWorkspaces: 1 })
-    const unknown = await app.inject({
+    const unknown = await e2bListener(app).inject({
       method: 'POST',
       url: CREATE,
       headers: API_KEY,
@@ -289,11 +394,16 @@ describe('E2B lifecycle', () => {
       { timeout: 1.5 },
       { envVars: { VALUE: 1 } },
     ]) {
-      const invalid = await app.inject({ method: 'POST', url: CREATE, headers: API_KEY, payload })
+      const invalid = await e2bListener(app).inject({
+        method: 'POST',
+        url: CREATE,
+        headers: API_KEY,
+        payload,
+      })
       expect(invalid.statusCode).toBe(400)
       expect(invalid.json()).toMatchObject({ code: 400 })
     }
-    const invalidJson = await app.inject({
+    const invalidJson = await e2bListener(app).inject({
       method: 'POST',
       url: CREATE,
       headers: { ...API_KEY, 'content-type': 'application/json' },
@@ -312,7 +422,12 @@ describe('E2B lifecycle', () => {
     expect(reconnected.statusCode).toBe(200)
     expect(reconnected.json()).toEqual(first)
     expect((await connect(app, first.sandboxID, 0)).statusCode).toBe(400)
-    const full = await app.inject({ method: 'POST', url: CREATE, headers: API_KEY, payload: {} })
+    const full = await e2bListener(app).inject({
+      method: 'POST',
+      url: CREATE,
+      headers: API_KEY,
+      payload: {},
+    })
     expect(full.statusCode).toBe(503)
     expect(full.json()).toMatchObject({ code: 503 })
 
@@ -400,7 +515,12 @@ describe('E2B lifecycle', () => {
     const { sandboxID: id } = await create(app)
     const url = `/sandboxes/${id}/timeout`
     for (const headers of [{}, BEARER, { 'x-api-key': 'incorrect' }]) {
-      const refused = await app.inject({ method: 'POST', url, headers, payload: { timeout: 10 } })
+      const refused = await e2bListener(app).inject({
+        method: 'POST',
+        url,
+        headers,
+        payload: { timeout: 10 },
+      })
       expect(refused.statusCode).toBe(401)
       expect(refused.json()).toMatchObject({ code: 401 })
     }
@@ -413,7 +533,12 @@ describe('E2B lifecycle', () => {
       { timeout: -1 },
       { timeout: 2 ** 31 },
     ]) {
-      const invalid = await app.inject({ method: 'POST', url, payload, headers: API_KEY })
+      const invalid = await e2bListener(app).inject({
+        method: 'POST',
+        url,
+        payload,
+        headers: API_KEY,
+      })
       expect(invalid.statusCode).toBe(400)
       expect(invalid.json()).toMatchObject({ code: 400 })
     }
@@ -435,15 +560,15 @@ describe('E2B lifecycle', () => {
     expect(extended.statusCode).toBe(204)
     expect(extended.body).toBe('')
     await vi.advanceTimersByTimeAsync(1000)
-    const file = await app.inject({ url: '/files?path=state.txt', headers })
+    const file = await e2bListener(app).inject({ url: '/files?path=state.txt', headers })
     expect(file.statusCode).toBe(200)
     expect(file.body).toBe('kept')
 
     expect((await setSandboxTimeout(app, id, 2)).statusCode).toBe(204)
     await vi.advanceTimersByTimeAsync(1999)
-    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(204)
+    expect((await e2bListener(app).inject({ url: HEALTH, headers })).statusCode).toBe(204)
     await vi.advanceTimersByTimeAsync(1)
-    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(502)
+    expect((await e2bListener(app).inject({ url: HEALTH, headers })).statusCode).toBe(502)
     expect((await setSandboxTimeout(app, id, 5)).statusCode).toBe(404)
   })
 
@@ -455,8 +580,10 @@ describe('E2B lifecycle', () => {
     const id = sandbox.sandboxID
 
     expect((await setSandboxTimeout(app, id, 0)).statusCode).toBe(204)
-    expect((await app.inject({ url: HEALTH, headers })).statusCode).toBe(502)
-    expect((await app.inject({ url: '/files?path=state.txt', headers })).statusCode).toBe(401)
+    expect((await e2bListener(app).inject({ url: HEALTH, headers })).statusCode).toBe(502)
+    expect(
+      (await e2bListener(app).inject({ url: '/files?path=state.txt', headers })).statusCode,
+    ).toBe(401)
     expect((await connect(app, id, 300)).statusCode).toBe(404)
     await vi.advanceTimersByTimeAsync(1)
     expect(app.registry.has(id)).toBe(false)
@@ -492,7 +619,8 @@ describe('E2B health', () => {
       'e2b-sandbox-port': '49983',
     }
     const headers = { ...routing, 'x-access-token': sandbox.envdAccessToken }
-    const health = (headers: Record<string, string>) => app.inject({ url: HEALTH, headers })
+    const health = (headers: Record<string, string>) =>
+      e2bListener(app).inject({ url: HEALTH, headers })
 
     for (const malformed of [
       { ...headers, 'e2b-sandbox-id': '' },
@@ -571,7 +699,7 @@ describe('E2B commands', () => {
     const first = await create(app)
     const second = await create(app)
     const post = (headers: Record<string, string>, payload: Buffer = processBody('pwd')) =>
-      app.inject({ method: 'POST', url: START, headers, payload })
+      e2bListener(app).inject({ method: 'POST', url: START, headers, payload })
     const firstHeaders = dataHeaders(first)
     const wrongPort = await post({ ...firstHeaders, 'e2b-sandbox-port': '49999' })
     expect(wrongPort.statusCode).toBe(400)
@@ -617,7 +745,7 @@ describe('E2B commands', () => {
   it('expires a Connect deadline while the request body is still uploading', async () => {
     const { app } = await setup()
     const headers = dataHeaders(await create(app))
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const { client, reply } = streamingPost(address + START, {
       ...headers,
       'connect-timeout-ms': '100',
@@ -643,7 +771,7 @@ describe('E2B commands', () => {
   it('starts a command after a streamed request without a Connect timeout', async () => {
     const { app } = await setup()
     const headers = dataHeaders(await create(app))
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const { client, reply } = streamingPost(address + START, headers)
     const body = processBody('printf ready')
     client.write(body.subarray(0, 4))
@@ -659,7 +787,7 @@ describe('E2B commands', () => {
   it('uses only the remaining Connect deadline after reading the request', async () => {
     const { app } = await setup()
     const headers = dataHeaders(await create(app))
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const { client, reply } = streamingPost(address + START, {
       ...headers,
       'connect-timeout-ms': '1000',
@@ -681,7 +809,7 @@ describe('E2B commands', () => {
     const { app } = await setup()
     const sandbox = await create(app)
     const headers = dataHeaders(sandbox)
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const stop = new AbortController()
     const response = await fetch(`${address}${START}`, {
       method: 'POST',
@@ -740,7 +868,7 @@ describe('E2B files', () => {
       }
     }
     vi.spyOn(SandboxFiles.prototype, 'read').mockResolvedValue(source())
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     try {
       const response = await fetch(`${address}/files?path=fixture`, {
         headers: dataHeaders(sandbox),
@@ -790,7 +918,7 @@ describe('E2B files', () => {
       await pending
     })
     const mutate = async () =>
-      app.inject({
+      e2bListener(app).inject({
         method: 'POST',
         url: '/filesystem.Filesystem/MakeDir',
         headers,
@@ -820,7 +948,7 @@ describe('E2B files', () => {
     const headers = dataHeaders(sandbox)
     delete headers['content-type']
     function rpc(method: string, payload: Record<string, unknown>) {
-      return app.inject({
+      return e2bListener(app).inject({
         method: 'POST',
         url: `/filesystem.Filesystem/${method}`,
         headers,
@@ -843,7 +971,7 @@ describe('E2B files', () => {
       Buffer.from('\r\n--stage-test--\r\n'),
     ])
     const url = `/files?path=${encodeURIComponent(path)}`
-    const uploaded = await app.inject({
+    const uploaded = await e2bListener(app).inject({
       method: 'POST',
       url,
       headers: { ...headers, 'content-type': 'multipart/form-data; boundary=stage-test' },
@@ -851,7 +979,9 @@ describe('E2B files', () => {
     })
     expect(uploaded.statusCode, uploaded.body).toBe(200)
     expect(uploaded.json()).toMatchObject([{ path: `/home/user/${path}` }])
-    expect((await app.inject({ method: 'GET', url, headers })).rawPayload).toEqual(content)
+    expect((await e2bListener(app).inject({ method: 'GET', url, headers })).rawPayload).toEqual(
+      content,
+    )
     expect((await rpc('Stat', { path })).json()).toMatchObject({
       entry: { size: String(content.length) },
     })
@@ -861,19 +991,110 @@ describe('E2B files', () => {
         .entries.map((entry) => entry.name),
     ).toContain('fixture.bin')
 
-    const rejected = await app.inject({
+    const rejected = await e2bListener(app).inject({
       method: 'GET',
       url,
       headers: { ...headers, 'x-access-token': 'wrong' },
     })
     expect(rejected.statusCode).toBe(401)
     expect(rejected.json()).toMatchObject({ code: 401 })
-    expect((await rpc('Remove', { path: 'nested' })).json()).toMatchObject({
-      code: 'failed_precondition',
-    })
-    expect((await app.inject({ url, headers })).statusCode).toBe(200)
-    expect((await rpc('Remove', { path })).statusCode).toBe(200)
+    const second = await create(app)
+    const isolated = dataHeaders(second)
+    expect(
+      (
+        await runCommand(
+          app,
+          isolated,
+          processBody('mkdir -p nested/dir; touch nested/dir/fixture.bin'),
+        )
+      ).at(-2)?.payload.event?.end?.exitCode,
+    ).toBe(0)
+    expect((await rpc('Remove', { path: 'nested' })).json()).toEqual({})
     expect((await rpc('Stat', { path })).json()).toMatchObject({ code: 'not_found' })
+    expect((await e2bListener(app).inject({ url, headers: isolated })).statusCode).toBe(200)
+    expect((await rpc('Remove', { path })).json()).toEqual({})
+  })
+
+  it('removes child links without entering their targets and refuses mount crossings', async () => {
+    const resourceStore = memoryResourceStore()
+    await resourceStore.createTemplate({
+      name: 'protected',
+      description: null,
+      config: {
+        mounts: {
+          ...RAM.mounts,
+          '/home/user/parent/mounted': { vfs: 'ram', mode: 'write' },
+        },
+      },
+    })
+    const { app } = await setup({ e2bTemplate: 'protected', resourceStore }, false)
+    const headers = dataHeaders(await create(app))
+    const prepared = await runCommand(
+      app,
+      headers,
+      processBody(
+        'mkdir tree; printf outside > keep; ln -s /home/user/keep tree/link; ' +
+          'ln -s /home/user/tree alias; printf covered > parent/mounted/keep',
+      ),
+    )
+    expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+    delete headers['content-type']
+    const remove = (path: string) =>
+      e2bListener(app).inject({
+        method: 'POST',
+        url: '/filesystem.Filesystem/Remove',
+        headers,
+        payload: { path },
+      })
+    for (const path of ['alias/', 'parent', 'parent/mounted']) {
+      const refused = await remove(path)
+      expect(refused.statusCode, refused.body).toBe(400)
+      expect(refused.json()).toMatchObject({ code: 'failed_precondition' })
+    }
+    expect((await remove('tree')).statusCode).toBe(200)
+    expect(
+      (await e2bListener(app).inject({ url: '/files?path=tree/link', headers })).statusCode,
+    ).toBe(404)
+    for (const [path, expected] of [
+      ['keep', 'outside'],
+      ['parent/mounted/keep', 'covered'],
+    ] as const) {
+      expect((await e2bListener(app).inject({ url: '/files?path=' + path, headers })).body).toBe(
+        expected,
+      )
+    }
+  })
+
+  it('keeps empty-directory removal on a disk mount', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mirage-e2b-disk-'))
+    stateRoots.push(root)
+    await mkdir(join(root, 'empty'))
+    await mkdir(join(root, 'nonempty'))
+    await writeFile(join(root, 'nonempty', 'kept'), 'disk content')
+    const resourceStore = memoryResourceStore()
+    await resourceStore.createTemplate({
+      name: 'disk',
+      description: null,
+      config: {
+        mounts: { '/home/user': { vfs: 'disk', mode: 'write', config: { root } } },
+      },
+    })
+    const { app } = await setup({ e2bTemplate: 'disk', resourceStore }, false)
+    const headers = dataHeaders(await create(app))
+    delete headers['content-type']
+    const remove = (path: string) =>
+      e2bListener(app).inject({
+        method: 'POST',
+        url: '/filesystem.Filesystem/Remove',
+        headers,
+        payload: { path },
+      })
+    expect((await remove('empty')).json()).toEqual({})
+    await expect(stat(join(root, 'empty'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await remove('nonempty')).json()).toMatchObject({ code: 'failed_precondition' })
+    expect(
+      (await e2bListener(app).inject({ url: '/files?path=nonempty/kept', headers })).body,
+    ).toBe('disk content')
   })
 
   it('lists to the requested depth without following symlinks', async () => {
@@ -887,7 +1108,7 @@ describe('E2B files', () => {
     expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
     delete headers['content-type']
     const list = (depth?: unknown) =>
-      app.inject({
+      e2bListener(app).inject({
         method: 'POST',
         url: '/filesystem.Filesystem/ListDir',
         headers,
@@ -923,7 +1144,7 @@ describe('E2B files', () => {
   it('returns a multipart error before a malformed or oversized upload ends', async () => {
     const { app } = await setup()
     const sandbox = await create(app)
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const agent = new Agent({ keepAlive: true })
     const headers = { ...dataHeaders(sandbox), 'content-type': 'multipart/form-data; boundary=e2b' }
     const url = address + '/files?path=refused'
@@ -967,7 +1188,7 @@ describe('E2B files', () => {
     expect(prepared.at(-2)?.payload.event?.end?.exitCode).toBe(0)
     delete headers['content-type']
 
-    const refused = await app.inject({
+    const refused = await e2bListener(app).inject({
       method: 'POST',
       url: '/filesystem.Filesystem/Remove',
       headers,
@@ -978,14 +1199,14 @@ describe('E2B files', () => {
       code: 'failed_precondition',
       message: 'cannot remove a mount',
     })
-    const removed = await app.inject({
+    const removed = await e2bListener(app).inject({
       method: 'POST',
       url: '/filesystem.Filesystem/Remove',
       headers,
       payload: { path: 'workspace-link' },
     })
     expect(removed.statusCode).toBe(200)
-    const kept = await app.inject({
+    const kept = await e2bListener(app).inject({
       method: 'POST',
       url: '/filesystem.Filesystem/Stat',
       headers,

@@ -23,10 +23,10 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from mirage.server.app import build_app
+from mirage.server.app import build_app, resolve_e2b_port
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import (
-    ENV_E2B_TEMPLATE,
+    ENV_E2B_PORT,
     ENV_IDLE_GRACE_SECONDS,
     ENV_WORKER_SOCKET,
 )
@@ -85,8 +85,8 @@ def _workers_proxy() -> Any:
     """The daemon's server, sending each workspace's requests to one of
     ``workers`` workers. The daemon's SSH port is one server's, so it is
     not taken with workers yet; each worker counts its own rate limits."""
-    if os.environ.get(ENV_E2B_TEMPLATE, "").strip():
-        raise DaemonConfigError("MIRAGE_E2B_TEMPLATE requires one worker")
+    if resolve_e2b_port() is not None:
+        raise DaemonConfigError(f"{ENV_E2B_PORT} requires one worker")
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
     if resolve_resource_store() == ResourceStoreBackend.MEMORY:

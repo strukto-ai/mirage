@@ -3,27 +3,16 @@ import base64
 import json
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from mirage.io.pipe import CAPACITY
-from mirage.server.app import build_app
-from mirage.server.auth import AuthConfig, AuthMode
+from tests.server.routers.e2b_test_support import TOKEN, server
 
 PREFIX = "/process.Process/"
 
 
 @pytest.mark.asyncio
 async def test_live_process_controls(tmp_path):
-    app = build_app(
-        auth_config=AuthConfig(mode=AuthMode.TOKEN, bearer_token="server-key"),
-        state_root=tmp_path,
-    )
-    async with (
-        app.router.lifespan_context(app),
-        AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client,
-    ):
+    async with server(tmp_path, auth_config=TOKEN) as (app, client):
 
         async def sandbox():
             created = await client.post(
@@ -90,7 +79,7 @@ async def test_live_process_controls(tmp_path):
             if timeout is not None:
                 stream_headers["connect-timeout-ms"] = str(timeout)
             async with asyncio.timeout(3):
-                await app(
+                await app.state.e2b_app(
                     {
                         "type": "http",
                         "method": "POST",

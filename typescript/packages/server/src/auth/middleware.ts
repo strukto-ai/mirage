@@ -84,12 +84,8 @@ export function authenticator(
   }
 }
 
-async function unauthorized(reply: FastifyReply, reason: string, apiKey = false): Promise<void> {
+async function unauthorized(reply: FastifyReply, reason: string): Promise<void> {
   console.warn(`rejecting request from ${reply.request.ip}: ${reason}`)
-  if (apiKey) {
-    void reply.code(401).send({ code: 401, message: 'unauthorized' })
-    return
-  }
   await errorResponse(
     reply,
     new HttpError('unauthorized', 'unauthorized', { headers: { 'WWW-Authenticate': 'Bearer' } }),
@@ -99,12 +95,9 @@ async function unauthorized(reply: FastifyReply, reason: string, apiKey = false)
 export function registerAuth(
   app: FastifyInstance,
   config: AuthConfig,
-  usesApiKey?: (request: FastifyRequest) => boolean,
-  usesSandboxToken?: (request: FastifyRequest) => boolean,
-  sandboxAccount?: (request: FastifyRequest) => string | null,
+  check = authenticator(config),
 ): void {
   app.decorateRequest('account', null)
-  const check = authenticator(config)
   if (check === null) {
     console.warn(
       'daemon starting without bearer auth; anyone who can reach it can drive it. ' +
@@ -113,24 +106,36 @@ export function registerAuth(
   }
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    if (usesSandboxToken?.(req) === true) {
-      req.account = sandboxAccount?.(req) ?? null
+    if (check === null) return
+    const answer = await check(req.headers.authorization)
+    if (typeof answer === 'string') {
+      await unauthorized(reply, answer)
       return
     }
-    let authorization = req.headers.authorization
-    const apiKey = usesApiKey?.(req) === true
-    if (apiKey) {
-      const key = req.headers['x-api-key']
-      if (typeof key !== 'string' || key.trim() === '' || check === null) {
-        await unauthorized(reply, 'missing or unconfigured API key', true)
-        return
-      }
-      authorization = `${BEARER_PREFIX}${key}`
+    req.account = answer.account
+  })
+}
+
+export function registerE2BAuth(
+  app: FastifyInstance,
+  check: ReturnType<typeof authenticator>,
+  lifecycle: (request: FastifyRequest) => boolean,
+  sandboxAccount: (request: FastifyRequest) => string | null,
+): void {
+  app.decorateRequest('account', null)
+  app.addHook('onRequest', async (req, reply) => {
+    if (!lifecycle(req)) {
+      req.account = sandboxAccount(req)
+      return
     }
-    if (check === null) return
-    const answer = await check(authorization)
+    const key = req.headers['x-api-key']
+    const answer =
+      check === null || typeof key !== 'string' || key.trim() === ''
+        ? 'missing or unconfigured API key'
+        : await check(`${BEARER_PREFIX}${key}`)
     if (typeof answer === 'string') {
-      await unauthorized(reply, answer, apiKey)
+      console.warn(`rejecting request from ${req.ip}: ${answer}`)
+      void reply.code(401).send({ code: 401, message: 'unauthorized' })
       return
     }
     req.account = answer.account

@@ -136,6 +136,7 @@ import { ident } from '../../utils/stat_view.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { declared } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
 import {
   mergeReaddir,
@@ -143,9 +144,9 @@ import {
   namespaceListing,
   namespaceStat,
 } from '../../view/namespace_view.ts'
-import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import { BEFORE_DIRECTORY_REMOVE, type OpKwargs, type SessionAccess } from '../../view/types.ts'
 import type { MountEntry } from '../mount/mount.ts'
-import type { Namespace } from '../mount/namespace/namespace.ts'
+import { metaToFields, type Namespace, type NodeMeta } from '../mount/namespace/namespace.ts'
 import { mergeOverlayStat } from '../mount/namespace/overlay.ts'
 import { Reconciler } from '../reconcile.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
@@ -528,6 +529,11 @@ function followOrLoop(
   }
 }
 
+interface DirectoryRemovalGuard {
+  validate: () => void
+  keepNodes: () => ReadonlySet<string>
+}
+
 /**
  * One op on its way through the dispatcher, as the stages hand it on. Mirrors
  * Python's `_Call`.
@@ -586,6 +592,7 @@ interface Call {
    * listing's names are spelled under; null when nothing was followed.
    */
   walked: PathSpec | null
+  directoryRemoval: DirectoryRemovalGuard | null
 }
 
 /**
@@ -1132,6 +1139,11 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
+    if ((name === 'rm_r' || name === 'rmdir') && call.kwargs?.guarded === true) {
+      call.directoryRemoval = this.directoryRemovalGuard(call, owner)
+      call.kwargs = { ...call.kwargs }
+      delete call.kwargs.guarded
+    }
     if (name === 'rmdir' && owner !== null && owner.prefix === normDir(call.path.virtual)) {
       throw ebusy(call.path)
     }
@@ -1333,6 +1345,7 @@ export class Dispatcher {
         fullArgs,
         operands(name, call.args, call.kwargs),
         answer,
+        call.directoryRemoval,
       )
     }
     await this.dateMade(made, false)
@@ -1864,6 +1877,7 @@ export class Dispatcher {
       warm: false,
       fresh: false,
       walked: null,
+      directoryRemoval: null,
       caller,
       egress: null,
       readRecords: [],
@@ -2102,6 +2116,78 @@ export class Dispatcher {
       ((call.name === 'dir_copy' || call.name === 'files_containing') &&
         (await this.policies.wantsFor('postVfs', this.sessionId())))
     )
+  }
+
+  /**
+   * Hold a directory removal to its original mount and spelling. The mount
+   * checks again immediately before invoking its removal operation.
+   */
+  private directoryRemovalGuard(call: Call, owner: MountEntry | null): DirectoryRemovalGuard {
+    const { path, typed } = call
+    const vfs = owner?.vfs
+    const ram =
+      call.name === 'rm_r' && vfs instanceof RAMVFS && vfs.constructor === RAMVFS ? vfs : null
+    const { namespace } = this
+    const checkPath = (): void => {
+      const mounts = namespace.registry.allMounts()
+      const rawOwner = ownerPrefix(
+        mounts.map((entry) => entry.prefix),
+        path.virtual,
+      )
+      if (
+        rawOwner !== (owner?.prefix ?? null) ||
+        mounts.some((entry) => underPath(entry.prefix, path.virtual)) ||
+        norm(typed.virtual) !== norm(path.virtual) ||
+        norm(this.walked(typed, false).virtual) !== norm(path.virtual) ||
+        namespace.isLink(norm(path.virtual))
+      ) {
+        throw ebusy(path)
+      }
+    }
+    checkPath()
+    if (owner === null) throw noMount(path.virtual)
+    if (call.name === 'rm_r' && ram === null) {
+      throw enotsup(owner.vfs.name, 'rm_r', path)
+    }
+    const key = norm(mountKey(path.virtual, rstripSlash(owner.prefix)))
+    const modified = ram?.store.modified.get(key)
+    const nodesUnder = () => [...namespace.nodes].filter(([node]) => underPath(node, path.virtual))
+    const removedNodes = new Map<string, { meta: NodeMeta; fields: string }>()
+    return {
+      validate: () => {
+        if (namespace.tryMountFor(path.virtual) !== owner) throw ebusy(path)
+        checkPath()
+        if (ram === null) {
+          if (namespace.linkStatsBelow(path.virtual).length > 0) throw enotempty(path)
+          return
+        }
+        if (!ram.store.dirs.has(key)) {
+          throw ram.store.files.has(key) ? enotdir(path) : enoent(path)
+        }
+        if (ram.store.modified.get(key) !== modified) throw ebusy(path)
+        removedNodes.clear()
+        for (const [node, meta] of nodesUnder()) {
+          removedNodes.set(node, { meta, fields: JSON.stringify(metaToFields(meta)) })
+        }
+      },
+      keepNodes: () => {
+        const mounts = namespace.registry
+          .allMounts()
+          .filter((entry) => underPath(entry.prefix, path.virtual))
+        return new Set(
+          nodesUnder()
+            .filter(([node, meta]) => {
+              const previous = removedNodes.get(node)
+              return (
+                previous?.meta !== meta ||
+                previous.fields !== JSON.stringify(metaToFields(meta)) ||
+                mounts.some((entry) => underPath(node, entry.prefix))
+              )
+            })
+            .map(([node]) => node),
+        )
+      },
+    }
   }
 
   /**
@@ -2553,6 +2639,9 @@ export class Dispatcher {
         : value
     const fullKwargs: OpKwargs = {
       ...Object.fromEntries(Object.entries(kwargs ?? {}).map(([key, v]) => [key, keyed(v)])),
+      ...(call.directoryRemoval === null
+        ? {}
+        : { [BEFORE_DIRECTORY_REMOVE]: call.directoryRemoval.validate }),
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(call.fresh ? { index: new ListingCheckStore({ hints: mount.index }) } : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
@@ -2662,7 +2751,7 @@ export class Dispatcher {
                 : own(onCall, holds),
             async (value) => {
               served(report, value, payload?.moved ?? null)
-              await this.settleWrite(name, p, dst, fullArgs, others, value)
+              await this.settleWrite(name, p, dst, fullArgs, others, value, call.directoryRemoval)
               await this.keepWritten(
                 call,
                 mount,
@@ -2712,7 +2801,11 @@ export class Dispatcher {
       }
     } catch (err) {
       const code = (err as { code?: string }).code
-      if (name === 'rmdir' && (code === 'ENOTEMPTY' || code === 'EEXIST')) {
+      if (
+        name === 'rmdir' &&
+        call.directoryRemoval === null &&
+        (code === 'ENOTEMPTY' || code === 'EEXIST')
+      ) {
         await this.rmdirRemnants(vfs, scope, mountPrefix, mode, err, call.ruleGate, call.issuer)
         result = null
       } else {
@@ -3192,10 +3285,12 @@ export class Dispatcher {
     args: readonly unknown[],
     others: readonly [number | string, PathSpec][],
     created: unknown = null,
+    directoryRemoval: DirectoryRemovalGuard | null = null,
   ): Promise<void> {
     const opened = appendsNothing(name, args)
     const observed = STAMP_WRITE_OPS.has(name) && !opened ? systemNow() : null
     const removes = name === 'unlink' || name === 'rmdir' || name === 'rm_r'
+    const guardedTree = name === 'rm_r' ? directoryRemoval : null
     const row = created instanceof FileStat ? created : null
     // A copy reads its path, so only its destination changes: the copy is a
     // new file there, or a new tree, written now.
@@ -3217,10 +3312,16 @@ export class Dispatcher {
           ? FileChangeKind.DELETE
           : FileChangeKind.CREATE,
       name === 'rename' ? null : row,
-      { observed, times: !opened && name !== 'rename' },
+      { observed, times: !opened && name !== 'rename' && guardedTree === null },
     )
     for (const [, other] of others) await this.changed(other.virtual, FileChangeKind.UPDATE)
-    if (name === 'rm_r') await this.namespace.purgeUnder(p.virtual)
+    if (name === 'rm_r') {
+      if (guardedTree !== null) {
+        await this.namespace.purgeUnder(p.virtual, guardedTree.keepNodes(), true)
+        return
+      }
+      await this.namespace.purgeUnder(p.virtual)
+    }
     if (removes) {
       // The name no longer holds that file, so what was set on it
       // (overlay mode and owner, extended attributes) goes with it, as

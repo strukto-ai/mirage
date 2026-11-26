@@ -7,6 +7,7 @@ from mirage.server.rate_limit import RateLimit
 from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,
+    NATIVE,
     PROCESS,
     SECRET,
     TEMPLATE,
@@ -63,6 +64,11 @@ async def test_sandbox_account_limit_requires_a_valid_token(tmp_path):
             "message": "too many requests",
         }
         assert int(limited.headers["Retry-After"]) > 0
+        native = await client.get(
+            f"{NATIVE}/v1/workspaces",
+            headers={"Authorization": f"Bearer {account_key('alice')}"},
+        )
+        assert native.status_code == 429
         assert (await stat(bob)).status_code == 200
 
 
@@ -99,7 +105,7 @@ async def test_verified_sandbox_routes_share_the_native_workspace_limit(
         bob = await create(bob_api)
         sandbox_id = alice["e2b-sandbox-id"]
         connect = f"{CREATE}/{sandbox_id}/connect"
-        native = f"/v1/workspaces/{sandbox_id}"
+        native = f"{NATIVE}/v1/workspaces/{sandbox_id}"
         spoofed = {**alice, "x-access-token": bob["x-access-token"]}
         assert (await stat(spoofed)).status_code == 401
         assert (await client.post(connect)).status_code == 401
@@ -313,3 +319,18 @@ async def test_checks_lifecycle_bounds_and_data_options(tmp_path):
                 "/files", params={"path": "sample"}, headers=headers
             )
         ).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_shared_ip_limit_counts_both_listeners(tmp_path):
+    async with server(
+        tmp_path, auth_config=TOKEN, rate_limits=[RateLimit("ip", "1/minute")]
+    ) as (_, client):
+        response = await client.get(
+            f"{NATIVE}/v1/workspaces",
+            headers={"Authorization": "Bearer server-key"},
+        )
+        assert response.status_code == 200
+        response = await client.post(CREATE, headers=KEY)
+        assert response.status_code == 429
+        assert response.json() == {"code": 429, "message": "too many requests"}

@@ -112,7 +112,7 @@ import { DevVFS } from '../../vfs/dev/dev.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
-import type { OpKwargs, SessionAccess } from '../../view/types.ts'
+import { BEFORE_DIRECTORY_REMOVE, type OpKwargs, type SessionAccess } from '../../view/types.ts'
 import {
   answered,
   cliVoice,
@@ -990,7 +990,12 @@ export class MountEntry {
       case 'unlink':
         return [(scope, _args, kw) => vfs.unlink(scope, handedOf(kw))]
       case 'rmdir':
-        return [(scope, _args, kw) => vfs.rmdir(scope, handedOf(kw))]
+        return [
+          (scope, _args, kw) => {
+            kw[BEFORE_DIRECTORY_REMOVE]?.()
+            return vfs.rmdir(scope, handedOf(kw))
+          },
+        ]
       case 'rename':
         return [(scope, args, kw) => vfs.rename(scope, dstArg(args[0]), handedOf(kw))]
       case 'copy':
@@ -998,7 +1003,12 @@ export class MountEntry {
       case 'dir_copy':
         return [(scope, args, kw) => vfs.dirCopy(scope, dstArg(args[0]), handedOf(kw))]
       case 'rm_r':
-        return [(scope, _args, kw) => vfs.rmR(scope, handedOf(kw))]
+        return [
+          (scope, _args, kw) => {
+            kw[BEFORE_DIRECTORY_REMOVE]?.()
+            return vfs.rmR(scope, handedOf(kw))
+          },
+        ]
       case 'first_lines':
         return [(scope, args, kw) => vfs.firstLines(scope, args[0] as number, handedOf(kw))]
       case 'last_lines':

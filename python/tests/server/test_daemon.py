@@ -21,7 +21,7 @@ import pytest
 from mirage.server import daemon
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import (
-    ENV_E2B_TEMPLATE,
+    ENV_E2B_PORT,
     ENV_HOME,
     ENV_IDLE_GRACE_SECONDS,
 )
@@ -39,7 +39,7 @@ def test_the_daemon_writes_a_pid_file_and_exits_when_idle(
 
 
 def test_e2b_requires_one_worker(monkeypatch):
-    monkeypatch.setenv(ENV_E2B_TEMPLATE, "approved")
+    monkeypatch.setenv(ENV_E2B_PORT, "8766")
     with pytest.raises(DaemonConfigError, match="requires one worker"):
         daemon._workers_proxy()
 

@@ -178,11 +178,10 @@ export function registerRateLimits(
   replyError: (reply: FastifyReply, error: HttpError) => unknown = errorResponse,
   verifiedWorkspace?: (request: FastifyRequest) => string | null,
 ): void {
-  const workspaceOf = signedIn ? verifiedWorkspace : undefined
-  const counted = buckets.limits.filter(
-    ({ limit }) =>
-      (typeof limit.key === 'function' || limit.key === 'account') === signedIn ||
-      (limit.key === 'workspace' && workspaceOf !== undefined),
+  const counted = buckets.limits.filter(({ limit }) =>
+    limit.key === 'workspace'
+      ? signedIn === (verifiedWorkspace !== undefined)
+      : (typeof limit.key === 'function' || limit.key === 'account') === signedIn,
   )
   const token = process.env[ENV_WORKER_TOKEN]
   for (const { limit, limiter } of counted) {
@@ -192,8 +191,8 @@ export function registerRateLimits(
       const skips = limit.key !== 'workspace' && token !== undefined
       if (skips && isCounted(req.headers[COUNTED_HEADER], token)) return
       const by =
-        limit.key === 'workspace' && workspaceOf !== undefined
-          ? workspaceOf(req)
+        limit.key === 'workspace' && verifiedWorkspace !== undefined
+          ? verifiedWorkspace(req)
           : value(limit.key, req)
       if (by === null) return
       try {

@@ -20,7 +20,7 @@ import { SystemClock, type Clock } from '../utils/clock.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, type MountMode, PathSpec } from '../types.ts'
-import { isEnotdir, isMissingPath } from '../errors/fs.ts'
+import { isEnotdir, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   type Caller,
   type CallerDispatchFn,
@@ -743,6 +743,17 @@ export class Files {
 
   async rmdir(path: string | PathSpec, sessionId?: string): Promise<void> {
     await this.through('rmdir', path, [], {}, sessionId)
+  }
+
+  /** Remove a directory tree in one safe operation or remove an empty directory. */
+  async rmR(path: string | PathSpec, sessionId?: string): Promise<void> {
+    try {
+      await this.through('rm_r', path, [], { guarded: true }, sessionId)
+    } catch (error) {
+      if (!isMissingOp(error, 'rm_r') || (error instanceof Error && 'declined' in error))
+        throw error
+      await this.through('rmdir', path, [], { guarded: true }, sessionId)
+    }
   }
 
   /**

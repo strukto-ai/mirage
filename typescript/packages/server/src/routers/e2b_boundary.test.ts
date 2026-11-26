@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { buildApp, type BuildAppOptions, type MirageApp } from '../app.ts'
 import { AuthMode } from '../auth/config.ts'
 import { CONNECT_STREAM } from '../e2b/process.ts'
+import { e2bListener } from './e2b_test_support.ts'
 
 const KEY = { 'x-api-key': 'local-key' }
 const CREATE = '/v2/sandboxes'
@@ -29,6 +30,7 @@ afterEach(async () => {
 async function setup(options: BuildAppOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'mirage-e2b-boundary-'))
   const app = buildApp({
+    e2bPort: 8766,
     authConfig: { mode: AuthMode.Token, bearerToken: KEY['x-api-key'] },
     stateRoot: root,
     rateLimits: [],
@@ -45,7 +47,7 @@ interface SandboxResponse {
 }
 
 async function create(app: MirageApp, payload: Record<string, unknown> = {}, headers = KEY) {
-  const response = await app.inject({ method: 'POST', url: CREATE, headers, payload })
+  const response = await e2bListener(app).inject({ method: 'POST', url: CREATE, headers, payload })
   expect(response.statusCode, response.body).toBe(201)
   return response.json<SandboxResponse>()
 }
@@ -65,7 +67,7 @@ async function runCommand(app: MirageApp, headers: Record<string, string>, comma
   const frame = Buffer.alloc(5 + body.length)
   frame.writeUInt32BE(body.length, 1)
   body.copy(frame, 5)
-  const response = await app.inject({
+  const response = await e2bListener(app).inject({
     method: 'POST',
     url: START,
     headers: { ...headers, 'content-type': 'application/connect+json' },
@@ -103,7 +105,7 @@ it('charges sandbox requests to the authenticated owner', async () => {
   const createFor = async (subject: string) =>
     dataHeaders(await create(app, {}, { 'x-api-key': await accountKey(subject) }))
   const stat = (headers: Record<string, string>) =>
-    app.inject({
+    e2bListener(app).inject({
       method: 'POST',
       url: '/filesystem.Filesystem/Stat',
       headers: { ...headers, 'content-type': 'application/json' },
@@ -131,14 +133,14 @@ it('shares the native workspace limit with verified sandbox routes', async () =>
   const bob = dataHeaders(await create(app, {}, bobApi))
   const sandboxId = alice['e2b-sandbox-id']
   const connect = (headers: Record<string, string> = {}) =>
-    app.inject({ method: 'POST', url: `${CREATE}/${sandboxId}/connect`, headers })
+    e2bListener(app).inject({ method: 'POST', url: `${CREATE}/${sandboxId}/connect`, headers })
   const native = () =>
     app.inject({
       url: `/v1/workspaces/${sandboxId}`,
       headers: { authorization: `Bearer ${aliceKey}` },
     })
   const stat = (headers: Record<string, string>) =>
-    app.inject({
+    e2bListener(app).inject({
       method: 'POST',
       url: '/filesystem.Filesystem/Stat',
       headers,
@@ -154,7 +156,7 @@ it('shares the native workspace limit with verified sandbox routes', async () =>
   expect((await stat(alice)).statusCode).toBe(200)
   expect(
     (
-      await app.inject({
+      await e2bListener(app).inject({
         method: 'POST',
         url: `/sandboxes/${sandboxId}/timeout`,
         headers: aliceApi,
@@ -193,14 +195,14 @@ it('moves entries through the workspace filesystem', async () => {
   const { app } = await setup({ e2bTemplate: 'approved', resourceStore })
   const headers = dataHeaders(await create(app))
   await runCommand(app, headers, 'printf value > old')
-  const cross = await app.inject({
+  const cross = await e2bListener(app).inject({
     method: 'POST',
     url: MOVE,
     headers,
     payload: { source: 'old', destination: '/other/new' },
   })
   expect(cross.json()).toMatchObject({ code: 'failed_precondition' })
-  const moved = await app.inject({
+  const moved = await e2bListener(app).inject({
     method: 'POST',
     url: MOVE,
     headers,
@@ -208,8 +210,8 @@ it('moves entries through the workspace filesystem', async () => {
   })
   expect(moved.statusCode, moved.body).toBe(200)
   expect(moved.json()).toMatchObject({ entry: { path: '/home/user/new' } })
-  expect((await app.inject({ url: '/files?path=old', headers })).statusCode).toBe(404)
-  expect((await app.inject({ url: '/files?path=new', headers })).body).toBe('value')
+  expect((await e2bListener(app).inject({ url: '/files?path=old', headers })).statusCode).toBe(404)
+  expect((await e2bListener(app).inject({ url: '/files?path=new', headers })).body).toBe('value')
 })
 
 it('rejects incompatible requests before allocating workspaces', async () => {
@@ -220,7 +222,12 @@ it('rejects incompatible requests before allocating workspaces', async () => {
     { network: { allowPublicTraffic: false } },
     { metadata: { app: 'example' } },
   ]) {
-    const response = await app.inject({ method: 'POST', url: CREATE, headers: KEY, payload })
+    const response = await e2bListener(app).inject({
+      method: 'POST',
+      url: CREATE,
+      headers: KEY,
+      payload,
+    })
     expect(response.statusCode, response.body).toBe(501)
     expect(response.body).toContain(Object.keys(payload)[0])
   }
@@ -229,7 +236,7 @@ it('rejects incompatible requests before allocating workspaces', async () => {
     'application/octet-stream',
     'multipart/form-data; boundary=test',
   ]) {
-    const mislabelled = await app.inject({
+    const mislabelled = await e2bListener(app).inject({
       method: 'POST',
       url: CREATE,
       headers: { ...KEY, 'content-type': media },
@@ -237,17 +244,17 @@ it('rejects incompatible requests before allocating workspaces', async () => {
     })
     expect(mislabelled.statusCode, mislabelled.body).toBe(400)
   }
-  const idempotent = await app.inject({
+  const idempotent = await e2bListener(app).inject({
     method: 'POST',
     url: CREATE,
     headers: { ...KEY, 'idempotency-key': 'test' },
   })
   expect(idempotent.statusCode).toBe(501)
   expect(app.registry.list()).toEqual([])
-  expect((await app.inject({ url: CREATE })).statusCode).toBe(401)
-  expect((await app.inject({ url: CREATE, headers: KEY })).statusCode).toBe(501)
+  expect((await e2bListener(app).inject({ url: CREATE })).statusCode).toBe(401)
+  expect((await e2bListener(app).inject({ url: CREATE, headers: KEY })).statusCode).toBe(501)
   const sandbox = await create(app, { metadata: {}, autoPause: false })
-  const watcher = await app.inject({
+  const watcher = await e2bListener(app).inject({
     method: 'POST',
     url: '/filesystem.Filesystem/CreateWatcher',
     headers: dataHeaders(sandbox),
@@ -258,7 +265,7 @@ it('rejects incompatible requests before allocating workspaces', async () => {
 
 it('checks lifecycle bounds and data options', async () => {
   const { app } = await setup()
-  const large = await app.inject({
+  const large = await e2bListener(app).inject({
     method: 'POST',
     url: CREATE,
     headers: KEY,
@@ -268,7 +275,7 @@ it('checks lifecycle bounds and data options', async () => {
   expect(app.registry.list()).toEqual([])
 
   const sandbox = await create(app)
-  const viaBase = await app.inject({
+  const viaBase = await e2bListener(app).inject({
     method: 'POST',
     url: `${CREATE}/${sandbox.sandboxID}/connect`,
     headers: KEY,
@@ -277,22 +284,28 @@ it('checks lifecycle bounds and data options', async () => {
   expect(viaBase.statusCode, viaBase.body).toBe(501)
   const headers = dataHeaders(sandbox)
   const wrong = { ...headers, 'x-access-token': 'forged-token' }
-  expect((await app.inject({ url: '/health', headers: wrong })).statusCode).toBe(502)
+  expect((await e2bListener(app).inject({ url: '/health', headers: wrong })).statusCode).toBe(502)
   expect(
-    (await app.inject({ url: '/health', headers: { ...wrong, 'e2b-sandbox-id': 'missing' } }))
-      .statusCode,
+    (
+      await e2bListener(app).inject({
+        url: '/health',
+        headers: { ...wrong, 'e2b-sandbox-id': 'missing' },
+      })
+    ).statusCode,
   ).toBe(502)
 
-  const root = await app.inject({ url: '/files?path=sample&username=root', headers })
+  const root = await e2bListener(app).inject({ url: '/files?path=sample&username=root', headers })
   expect(root.statusCode).toBe(400)
   expect(root.body).toContain('default sandbox user')
-  const write = await app.inject({
+  const write = await e2bListener(app).inject({
     method: 'POST',
     url: '/files?path=sample',
     headers: { ...headers, 'x-metadata-label': 'data' },
   })
   expect(write.statusCode, write.body).toBe(501)
-  expect((await app.inject({ url: '/files?path=sample', headers })).statusCode).toBe(404)
+  expect((await e2bListener(app).inject({ url: '/files?path=sample', headers })).statusCode).toBe(
+    404,
+  )
 })
 
 describe('E2B body reads', () => {
@@ -306,7 +319,7 @@ describe('E2B body reads', () => {
     const reading = new Promise<void>((resolve) => {
       begin = resolve
     })
-    app.addHook('preHandler', (req, _reply, done) => {
+    e2bListener(app).addHook('preHandler', (req, _reply, done) => {
       if (req.url === path) begin()
       done()
     })
@@ -319,7 +332,7 @@ describe('E2B body reads', () => {
     const prefix = isCommand
       ? Buffer.alloc(4)
       : Buffer.from('--partial\r\nContent-Disposition: form-data; name="file"\r\n\r\n')
-    const address = await app.listen({ host: '127.0.0.1', port: 0 })
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     const client = request(address + path, { method: 'POST', headers })
     client.setTimeout(3000, () => client.destroy(new Error('streaming request timed out')))
     const reply = new Promise<IncomingMessage>((resolve, reject) => {
@@ -332,14 +345,14 @@ describe('E2B body reads', () => {
       client.write(prefix)
       await reading
       if (event === 'kill') {
-        const killed = await app.inject({
+        const killed = await e2bListener(app).inject({
           method: 'DELETE',
           url: `/sandboxes/${sandbox.sandboxID}`,
           headers: KEY,
         })
         expect(killed.statusCode).toBe(204)
       } else if (event === 'expiry') {
-        const expired = await app.inject({
+        const expired = await e2bListener(app).inject({
           method: 'POST',
           url: `/sandboxes/${sandbox.sandboxID}/timeout`,
           headers: KEY,

@@ -16,7 +16,12 @@ import { Buffer } from 'node:buffer'
 import { timingSafeEqual } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify'
+import Fastify, {
+  type FastifyInstance,
+  type FastifyListenOptions,
+  type FastifyReply,
+  type FastifyRequest,
+} from 'fastify'
 import {
   buildVfs,
   configToWorkspaceArgs,
@@ -54,7 +59,8 @@ import {
   WorkspaceRegistry,
 } from './registry.ts'
 import type { AuthConfig } from './auth/index.ts'
-import { AuthMode, registerAuth, resolveAuthConfig } from './auth/index.ts'
+import { AuthMode, resolveAuthConfig } from './auth/index.ts'
+import { authenticator, registerAuth, registerE2BAuth } from './auth/middleware.ts'
 import {
   isCrossOrigin,
   isHostAllowed,
@@ -63,7 +69,7 @@ import {
 } from './host_validation.ts'
 import { registerApi } from './api.ts'
 import { router as registerSshRoutes } from './routers/ssh.ts'
-import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
+import { DaemonConfigError, readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { loadDaemonId, mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
@@ -82,7 +88,7 @@ import {
 import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { isStopped } from './routers/workspaces.ts'
-import { ENV_E2B_TEMPLATE } from './env.ts'
+import { ENV_E2B_PORT, ENV_E2B_TEMPLATE } from './env.ts'
 import { Sandboxes } from './e2b/leases.ts'
 import { CONNECT_STREAM } from './e2b/process.ts'
 import {
@@ -188,11 +194,9 @@ export interface BuildAppOptions {
    * config key, else files under the mirage home.
    */
   resourceStore?: ResourceStore
-  /**
-   * Saved workspace template for E2B sandboxes. Defaults to a nonblank
-   * `$MIRAGE_E2B_TEMPLATE` or the built-in base. An empty string disables
-   * the sandbox routes.
-   */
+  /** Loopback HTTP port for E2B. Undefined reads `MIRAGE_E2B_PORT`. */
+  e2bPort?: number
+  /** Saved workspace template for E2B. Defaults to `MIRAGE_E2B_TEMPLATE` or the built-in base. */
   e2bTemplate?: string
 }
 
@@ -260,27 +264,115 @@ function matchesAccessToken(expected: string, presented: string): boolean {
   )
 }
 
+export function resolveE2bPort(
+  port?: number,
+  env: Record<string, string | undefined> = process.env,
+): number | undefined {
+  const raw = env[ENV_E2B_PORT]?.trim()
+  if (port === undefined && raw === undefined) return undefined
+  const value = port ?? (/^\d+$/.test(raw ?? '') ? Number(raw) : NaN)
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new DaemonConfigError(`${ENV_E2B_PORT} must be an integer from 1 to 65535`)
+  }
+  return value
+}
+
+type ListenCallback = (err: Error | null, address: string) => void
+
+function listenTogether(app: FastifyInstance, e2b: FastifyInstance, port: number): void {
+  const listenNative = app.listen.bind(app)
+  let starting: Promise<string> | undefined
+  function listen(options?: FastifyListenOptions): Promise<string>
+  function listen(options: FastifyListenOptions, callback: ListenCallback): void
+  function listen(callback: ListenCallback): void
+  function listen(
+    options?: FastifyListenOptions | ListenCallback,
+    callback?: ListenCallback,
+  ): Promise<string> | void {
+    const done = typeof options === 'function' ? options : callback
+    const listenOptions = typeof options === 'function' ? undefined : options
+    const listening =
+      starting === undefined
+        ? (starting = start(listenOptions))
+        : starting.then(() => listenNative(listenOptions))
+    if (done === undefined) return listening
+    void listening.then(
+      (address) => {
+        done(null, address)
+      },
+      (error: unknown) => {
+        done(error instanceof Error ? error : new Error(String(error)), '')
+      },
+    )
+  }
+  async function start(options: FastifyListenOptions | undefined): Promise<string> {
+    try {
+      const address = await listenNative(options)
+      await e2b.listen({ host: '127.0.0.1', port })
+      return address
+    } catch (error) {
+      try {
+        await app.close()
+      } catch (cleanup) {
+        console.debug('could not close server after listen failure:', cleanup)
+      }
+      throw error
+    }
+  }
+  app.listen = listen
+}
+
+function requestGuards(
+  app: FastifyInstance,
+  allowedHosts: readonly string[],
+  replyError: (reply: FastifyReply, error: HttpError) => FastifyReply,
+): void {
+  app.addHook('preHandler', traceContextMiddleware)
+  app.decorateRequest('closed', null as never)
+  app.addHook('onRequest', (request, reply, done) => {
+    const gone = new AbortController()
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) gone.abort()
+    })
+    request.closed = gone.signal
+    const { host, origin, 'sec-fetch-site': fetchSite } = request.headers
+    if (!isHostAllowed(host, allowedHosts)) {
+      console.warn(
+        `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
+      )
+      void replyError(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
+      return
+    }
+    if (isCrossOrigin(host, origin, fetchSite)) {
+      console.warn(
+        `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
+      )
+      void replyError(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
+      return
+    }
+    done()
+  })
+}
+
+function e2bError(reply: FastifyReply, error: HttpError): FastifyReply {
+  const request = reply.request
+  const data = isDataRequest(request.method, request.routeOptions.url ?? '')
+  for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
+  return reply
+    .code(error.status)
+    .send({ code: data ? connectCode(error.status) : error.status, message: error.message })
+}
+
 export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
   registerSecrets(STRUKTO, StruktoSourceConfig, fetchStrukto)
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
+  const check = authenticator(authConfig)
   const configuredTemplate = options.e2bTemplate?.trim()
-  const e2bEnabled = configuredTemplate !== ''
+  const e2bPort = configuredTemplate === '' ? undefined : resolveE2bPort(options.e2bPort)
   const e2bTemplate = configuredTemplate ?? process.env[ENV_E2B_TEMPLATE]?.trim()
-  const sandboxLifecycle = (req: FastifyRequest): boolean =>
-    e2bEnabled && isLifecycleRequest(req.method, req.routeOptions.url ?? '')
-  const sandboxData = (req: FastifyRequest): boolean =>
-    e2bEnabled && isDataRequest(req.method, req.routeOptions.url ?? '')
-  const replyError = (reply: FastifyReply, error: HttpError): FastifyReply => {
-    const lifecycle = sandboxLifecycle(reply.request)
-    if (!lifecycle && !sandboxData(reply.request)) return errorResponse(reply, error)
-    for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
-    return reply
-      .code(error.status)
-      .send({ code: lifecycle ? error.status : connectCode(error.status), message: error.message })
-  }
   const stateRoot = stateRootPath(options.stateRoot)
   const host: ServerHost = {
     Workspace,
@@ -316,71 +408,29 @@ export function buildApp(options: BuildAppOptions = {}) {
     maxSessions: resolveMaxSessions(options.maxSessions),
     ceilings: resolveCeilings(options),
   })
-  const sandboxes = e2bEnabled ? new Sandboxes(registry, matchesAccessToken) : null
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimitBuckets = new RateLimitBuckets(resolveRateLimits(options.rateLimits))
   const jobs = registry.jobs
   const pidFile = pidFilePath(options.pidFile)
   const proxies = resolveForwardedAllowIps(options.forwardedAllowIps)
-  // A drain serves reads and running lines to the end; it refuses new
-  // workspaces and holds new lines itself.
-  const app = Fastify({
-    logger: false,
-    ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
-    trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
-    return503OnClosing: false,
-    frameworkErrors: (err, _req, reply) => {
-      void replyError(reply, errorOf(err))
-    },
-  })
-  const nativeErrors = answerMissing({ registry, host })
-  registerErrorHandlers(app, async (err, req, reply) => {
-    if (sandboxLifecycle(req) || sandboxData(req)) {
-      void replyError(reply, errorOf(err))
-      return
-    }
-    await nativeErrors(err, req, reply)
-  })
+  const server = (replyError: (reply: FastifyReply, error: HttpError) => FastifyReply) =>
+    Fastify({
+      logger: false,
+      ajv: { customOptions: { coerceTypes: false, removeAdditional: false, allErrors: true } },
+      trustProxy: proxies.includes('*') ? true : proxies.length > 0 ? proxies : false,
+      return503OnClosing: false,
+      frameworkErrors: (err, _req, reply) => {
+        void replyError(reply, errorOf(err))
+      },
+    })
+  const app = server(errorResponse)
+  registerErrorHandlers(app, answerMissing({ registry, host }))
   lenientJson(app)
   const allowedHosts = resolveAllowedHosts(options.allowedHosts)
-  app.addHook('preHandler', traceContextMiddleware)
-  app.decorateRequest('closed', null as never)
-  app.addHook('onRequest', (request, reply, done) => {
-    const gone = new AbortController()
-    reply.raw.once('close', () => {
-      if (!reply.raw.writableFinished) gone.abort()
-    })
-    request.closed = gone.signal
-    const { host, origin, 'sec-fetch-site': fetchSite } = request.headers
-    if (!isHostAllowed(host, allowedHosts)) {
-      console.warn(
-        `rejecting request from ${request.ip}: Host=${JSON.stringify(host)} not in allowlist ${JSON.stringify(allowedHosts)}`,
-      )
-      void replyError(reply, new HttpError('host_not_allowed', 'host header is not allowed'))
-      return
-    }
-    if (isCrossOrigin(host, origin, fetchSite)) {
-      console.warn(
-        `rejecting request from ${request.ip}: Origin=${JSON.stringify(origin)} Sec-Fetch-Site=${JSON.stringify(fetchSite)} is not Host=${JSON.stringify(host)}`,
-      )
-      void replyError(reply, new HttpError('origin_not_allowed', 'cross-origin request refused'))
-      return
-    }
-    done()
-  })
-  registerRateLimits(app, rateLimitBuckets, false, replyError)
-  registerAuth(app, authConfig, sandboxLifecycle, sandboxData, (request) =>
-    sandboxAccount(sandboxes, request.headers),
-  )
-  registerRateLimits(
-    app,
-    rateLimitBuckets,
-    true,
-    replyError,
-    e2bEnabled
-      ? (request) => sandboxWorkspace(sandboxes, request.routeOptions.url ?? '', request)
-      : undefined,
-  )
+  requestGuards(app, allowedHosts, errorResponse)
+  registerRateLimits(app, rateLimitBuckets)
+  registerAuth(app, authConfig, check)
+  registerRateLimits(app, rateLimitBuckets, true)
   const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const routes = fastifyRoutes(app)
   const mcp = registerApi(routes, {
@@ -392,34 +442,59 @@ export function buildApp(options: BuildAppOptions = {}) {
     snapshotStore: options.snapshotStore,
     resources,
   })
-  if (sandboxes !== null) {
-    void app.register((scope, _opts, done) => {
-      scope.removeContentTypeParser(RAW_BODIES)
-      for (const media of [RAW_BODIES, CONNECT_STREAM]) {
-        scope.addContentTypeParser(media, (request, _payload, parsed) => {
-          const contentType =
-            request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-          if (acceptsRawBody(request.method, request.routeOptions.url ?? '', contentType)) {
-            parsed(null)
-          } else {
-            parsed(
-              new HttpError('invalid_request', 'expected JSON on a unary E2B route', {
-                headers: { connection: 'close' },
-              }),
-            )
-          }
-        })
-      }
-      registerE2BRoutes(fastifyRoutes(scope), {
-        registry,
-        host,
-        resources,
-        snapshotStore: options.snapshotStore,
-        template: e2bTemplate === '' ? undefined : e2bTemplate,
-        sandboxes,
-      })
-      done()
+  const companion =
+    e2bPort === undefined
+      ? null
+      : {
+          app: server(e2bError),
+          sandboxes: new Sandboxes(registry, matchesAccessToken),
+          port: e2bPort,
+        }
+  if (companion !== null) {
+    const { app: e2b, sandboxes, port } = companion
+    e2b.setErrorHandler((err, _req, reply) => {
+      void e2bError(reply, errorOf(err))
     })
+    e2b.setNotFoundHandler((_req, reply) => {
+      void e2bError(reply, new HttpError('not_found', 'not found'))
+    })
+    lenientJson(e2b)
+    requestGuards(e2b, allowedHosts, e2bError)
+    const workspaceOf = (request: FastifyRequest) =>
+      sandboxWorkspace(sandboxes, request.routeOptions.url ?? '', request)
+    registerRateLimits(e2b, rateLimitBuckets, false, e2bError, workspaceOf)
+    registerE2BAuth(
+      e2b,
+      check,
+      (request) => isLifecycleRequest(request.method, request.routeOptions.url ?? ''),
+      (request) => sandboxAccount(sandboxes, request.headers),
+    )
+    registerRateLimits(e2b, rateLimitBuckets, true, e2bError, workspaceOf)
+    e2b.removeContentTypeParser(RAW_BODIES)
+    for (const media of [RAW_BODIES, CONNECT_STREAM]) {
+      e2b.addContentTypeParser(media, (request, _payload, parsed) => {
+        const contentType =
+          request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+        if (acceptsRawBody(request.method, request.routeOptions.url ?? '', contentType)) {
+          parsed(null)
+        } else {
+          parsed(
+            new HttpError('invalid_request', 'expected JSON on a unary E2B route', {
+              headers: { connection: 'close' },
+            }),
+          )
+        }
+      })
+    }
+    registerE2BRoutes(fastifyRoutes(e2b), {
+      registry,
+      host,
+      resources,
+      snapshotStore: options.snapshotStore,
+      template: e2bTemplate === '' ? undefined : e2bTemplate,
+      sandboxes,
+    })
+    listenTogether(app, e2b, port)
   }
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
@@ -450,7 +525,8 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addHook('preClose', async () => {
     registry.draining = true
     if (gracefulTimeout > 0) await registry.drain(gracefulTimeout)
-    await sandboxes?.close()
+    await companion?.sandboxes.close()
+    await companion?.app.close()
   })
   app.addHook('onClose', async () => {
     if (ssh.listener !== null) await ssh.listener.close()
@@ -465,5 +541,13 @@ export function buildApp(options: BuildAppOptions = {}) {
       }
     }
   })
-  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp, resources })
+  return Object.assign(app, {
+    registry,
+    jobs,
+    pidFile,
+    ssh,
+    mcp,
+    resources,
+    e2b: companion?.app ?? null,
+  })
 }

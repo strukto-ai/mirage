@@ -8,6 +8,7 @@ import { expect, test } from 'vitest'
 import { buildApp } from '../app.ts'
 import { AuthMode } from '../auth/index.ts'
 import { CONNECT_STREAM } from '../e2b/process.ts'
+import { e2bListener } from './e2b_test_support.ts'
 
 const PREFIX = '/process.Process/'
 const JSON_HEADERS = { 'content-type': 'application/json' }
@@ -27,12 +28,13 @@ test('controls live commands within a sandbox', async () => {
   const stateRoot = await mkdtemp(join(tmpdir(), 'mirage-e2b-commands-'))
   const app = buildApp({
     stateRoot,
+    e2bPort: 8766,
     authConfig: { mode: AuthMode.Token, bearerToken: 'server-key' },
   })
   try {
-    const origin = await app.listen({ host: '127.0.0.1', port: 0 })
+    const origin = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
     async function sandbox() {
-      const response = await app.inject({
+      const response = await e2bListener(app).inject({
         method: 'POST',
         url: '/v2/sandboxes',
         headers: { 'x-api-key': 'server-key' },
@@ -50,7 +52,7 @@ test('controls live commands within a sandbox', async () => {
     const other = await sandbox()
 
     function control(method: string, payload: unknown, addressed = headers) {
-      return app.inject({
+      return e2bListener(app).inject({
         method: 'POST',
         url: PREFIX + method,
         headers: { ...addressed, ...JSON_HEADERS },
@@ -121,7 +123,7 @@ test('controls live commands within a sandbox', async () => {
     expect((await control('List', {})).json()).toEqual({ processes: [] })
 
     const revoked = await run(async () => {
-      const result = await app.inject({
+      const result = await e2bListener(app).inject({
         method: 'DELETE',
         url: `/sandboxes/${headers['e2b-sandbox-id']}`,
         headers: { 'x-api-key': 'server-key' },

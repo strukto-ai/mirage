@@ -138,6 +138,7 @@ from mirage.utils.stat_view import ident
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.call import declared
 from mirage.vfs.constants import WRITE_EFFECTS
+from mirage.vfs.ram.ram import RAMVFS
 from mirage.vfs.types import Effect, Target, VfsCall
 from mirage.view.namespace_view import (
     merge_readdir,
@@ -181,6 +182,7 @@ from mirage.workspace.dispatcher.stream import (
 )
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.mount.namespace.namespace import NodeMeta
 from mirage.workspace.mount.namespace.overlay import merge_overlay_stat
 from mirage.workspace.reconcile import Reconciler
 from mirage.workspace.snapshot.drift import DriftQueue
@@ -800,6 +802,9 @@ class _Call:
     direct: bool = False
     warm: bool = False
     fresh: bool = False
+    guarded_remove: bool = False
+    remove_modified: str | None = None
+    removed_nodes: dict[str, tuple[NodeMeta, NodeMeta]] | None = None
     walked: PathSpec | None = None
     read_records: list[OpRecord] = dataclasses.field(default_factory=list)
 
@@ -1393,6 +1398,9 @@ class Dispatcher:
         direct = name == "read" and bool(kwargs.pop("direct", False))
         warm = name == "read" and bool(kwargs.pop("warm", False))
         fresh = name == "stat" and bool(kwargs.pop("fresh", False))
+        guarded_remove = name in ("rm_r", "rmdir") and bool(
+            kwargs.pop("guarded", False)
+        )
         # The command's gate judges its own calls; a metadata call passes,
         # as its guards let stat pass, unless it only asks admission, and a
         # walk guard reads nothing: the rule judges each read it guards. A
@@ -1433,6 +1441,7 @@ class Dispatcher:
         call.direct = direct
         call.warm = warm
         call.fresh = fresh
+        call.guarded_remove = guarded_remove
         await self._refuse_rename(call)
         if report is not None:
             report.path = call.path.virtual
@@ -1480,6 +1489,16 @@ class Dispatcher:
         if name == "statfs":
             return await self._statfs(call.path, caller), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
+        if guarded_remove:
+            self._guard_directory_remove(call, mount)
+            if name == "rm_r":
+                assert mount is not None and isinstance(mount.vfs, RAMVFS)
+                key = norm(
+                    mount_key(call.path.virtual, mount.prefix.rstrip("/"))
+                )
+                store = mount.vfs.accessor.store
+                if key in store.dirs:
+                    call.remove_modified = store.modified.get(key, store.made)
         if (
             name == "rmdir"
             and mount is not None
@@ -1596,6 +1615,37 @@ class Dispatcher:
             raise walk_declined(str(mount.vfs.name), name, call.path)
         return result, IOResult()
 
+    def _guard_directory_remove(
+        self, call: _Call, mount: MountEntry | None
+    ) -> None:
+        """Keep a guarded removal on its original path and mount."""
+        virtual = norm(call.path.virtual)
+        base = norm_dir(virtual)
+        mounts = self._namespace.registry.mounts()
+        if any(entry.prefix.startswith(base) for entry in mounts):
+            raise ebusy(call.typed)
+        typed = call.typed
+        spelled = walk_spelling(typed, self._namespace.follow)
+        if (
+            norm(typed.virtual) != virtual
+            or norm(_follow_or_loop(self._namespace, typed, True, spelled))
+            != virtual
+            or self._namespace.is_link(virtual)
+            or self._namespace.try_mount_for(virtual) is not mount
+        ):
+            raise ebusy(typed)
+        if mount is None:
+            raise enoent(typed)
+        if call.name == "rm_r" and type(mount.vfs) is not RAMVFS:
+            raise enotsup(str(mount.vfs.name), "rm_r", typed)
+        if call.name == "rmdir" and self._namespace.link_stats_below(virtual):
+            raise enotempty(typed)
+        if (
+            owner_prefix((entry.prefix for entry in mounts), virtual)
+            != mount.prefix
+        ):
+            raise ebusy(typed)
+
     async def _perform(
         self,
         name: str,
@@ -1656,7 +1706,13 @@ class Dispatcher:
         result = self._filter(call, ran)
         if settles:
             await self._settle_write(
-                mount, name, call.path, kwargs, call.vis, created=ran
+                mount,
+                name,
+                call.path,
+                kwargs,
+                call.vis,
+                created=ran,
+                removed_nodes=call.removed_nodes,
             )
         await self._date_made(caller, mount, made, failed=False)
         if name not in CALLS:
@@ -2688,6 +2744,20 @@ class Dispatcher:
                         mount, call.path.virtual
                     )
                 probed = _probed(call, mount)
+                if call.guarded_remove:
+                    self._guard_directory_remove(call, mount)
+                    if call.name == "rm_r":
+                        kwargs["directory_only"] = True
+                        kwargs["expected_modified"] = call.remove_modified
+                        call.removed_nodes = {
+                            node: (
+                                meta,
+                                replace(meta, xattrs=meta.xattrs.copy()),
+                            )
+                            for node, meta in self._namespace.nodes_under(
+                                call.path.virtual
+                            ).items()
+                        }
                 result = (
                     probed
                     if probed is not None
@@ -2725,9 +2795,10 @@ class Dispatcher:
                 raise
             _memory_answered(call.report)
         except OSError as exc:
-            if call.name != "rmdir" or exc.errno not in (
-                errno.ENOTEMPTY,
-                errno.EEXIST,
+            if (
+                call.name != "rmdir"
+                or call.guarded_remove
+                or exc.errno not in (errno.ENOTEMPTY, errno.EEXIST)
             ):
                 raise
             await self._rmdir_remnants(
@@ -3451,6 +3522,7 @@ class Dispatcher:
         kwargs: dict[str, Any],
         vis: Visibility | None,
         created: Any = None,
+        removed_nodes: dict[str, tuple[NodeMeta, NodeMeta]] | None = None,
     ) -> None:
         """What a write changes beside the store: the caches above the
         path, and the node table's links and attributes at its names.
@@ -3471,6 +3543,9 @@ class Dispatcher:
             vis (Visibility | None): the writer's view.
             created (Any): what the op answered; a ``FileStat`` is the
                 stat of the entry it created or replaced.
+            removed_nodes (dict[str, tuple[NodeMeta, NodeMeta]] | None):
+                guarded removal's entries and their state before deleting
+                the RAM tree.
         """
         opened = _appends_nothing(name, kwargs)
         observed = (
@@ -3500,11 +3575,31 @@ class Dispatcher:
             else FileChangeKind.CREATE,
             None if name == "rename" else row,
             observed=observed,
-            times=not opened and name != "rename",
+            times=not opened and name != "rename" and removed_nodes is None,
         )
         for _, other in _operands(name, kwargs):
             await self._changed(mount, other, FileChangeKind.UPDATE)
         if name == "rm_r":
+            if removed_nodes is not None:
+                mounts = [
+                    entry.prefix
+                    for entry in self._namespace.registry.mounts()
+                    if under_path(entry.prefix, path.virtual)
+                ]
+                keep = frozenset(
+                    node
+                    for node, meta in self._namespace.nodes_under(
+                        path.virtual
+                    ).items()
+                    if (previous := removed_nodes.get(node)) is None
+                    or previous[0] is not meta
+                    or previous[1] != meta
+                    or any(under_path(node, prefix) for prefix in mounts)
+                )
+                await self._namespace.purge_under(
+                    path.virtual, keep=keep, include_root=True
+                )
+                return
             await self._namespace.purge_under(path.virtual)
         if name in ("unlink", "rmdir", "rm_r"):
             # The name no longer holds that file, so what was set on

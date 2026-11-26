@@ -2,12 +2,14 @@ import base64
 import json
 import time
 from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import jwt
 from httpx import ASGITransport, AsyncClient
 
 from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
+from mirage.server import app as app_module
 from mirage.server.app import build_app
 from mirage.server.auth import AuthConfig, AuthMode
 
@@ -17,10 +19,11 @@ TOKEN = AuthConfig(mode=AuthMode.TOKEN, bearer_token=KEY["X-API-Key"])
 CREATE = "/v2/sandboxes"
 PROCESS = "/process.Process/Start"
 SECRET = "e2b-test-key-with-at-least-32-bytes"
+NATIVE = "http://native"
 
 
 @asynccontextmanager
-async def server(tmp_path, *, resource_store=None, **kwargs):
+async def server(tmp_path, *, resource_store=None, e2b_port=8766, **kwargs):
     if resource_store is None:
         resource_store = memory_resource_store()
         await resource_store.create_template(
@@ -33,15 +36,23 @@ async def server(tmp_path, *, resource_store=None, **kwargs):
             )
         )
     app = build_app(
-        state_root=tmp_path / "daemon", resource_store=resource_store, **kwargs
+        state_root=tmp_path / "daemon",
+        resource_store=resource_store,
+        e2b_port=e2b_port,
+        allowed_hosts=["native", "test"],
+        **kwargs,
     )
-    async with (
-        app.router.lifespan_context(app),
-        AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client,
-    ):
-        yield app, client
+    sandbox = app.state.e2b_app
+    with patch.object(app_module, "_start_e2b", return_value=None):
+        async with (
+            app.router.lifespan_context(app),
+            AsyncClient(
+                transport=ASGITransport(app=sandbox or app),
+                mounts={NATIVE: ASGITransport(app=app)},
+                base_url="http://test",
+            ) as client,
+        ):
+            yield app, client
 
 
 def account_key(account):

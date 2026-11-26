@@ -152,7 +152,7 @@ export class SandboxFiles {
       if (this.files.isMount(target) || this.files.submounts(target).length > 0) {
         throw new FileError('failed_precondition', 'cannot remove a mount')
       }
-      await this.files.rmdir(spec)
+      await this.files.rmR(spec)
     } catch (error) {
       if (classify(error) !== 'ENOENT') throw error
     }

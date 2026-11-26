@@ -17,6 +17,7 @@ import { isMainThread, parentPort } from 'node:worker_threads'
 import {
   buildApp,
   removePidFile,
+  resolveE2bPort,
   writePidFile,
   type BuildAppOptions,
   type MirageApp,
@@ -24,6 +25,7 @@ import {
 import { DaemonConfigError, readDaemonTable } from '../daemon_config.ts'
 import {
   ENV_DAEMON_PORT,
+  ENV_E2B_PORT,
   ENV_E2B_TEMPLATE,
   ENV_IDLE_GRACE_SECONDS,
   ENV_WORKER_SOCKET,
@@ -49,9 +51,11 @@ export function buildDaemonOpts(env: Record<string, string | undefined>): Daemon
   const configPort = readDaemonTable(mirageHome(env)).port
   const port = Number(env[ENV_DAEMON_PORT] ?? configPort ?? DEFAULT_PORT)
   const idleGraceSeconds = Number(env[ENV_IDLE_GRACE_SECONDS] ?? '30')
+  const e2bPort = resolveE2bPort(undefined, env)
   const e2bTemplate = env[ENV_E2B_TEMPLATE]?.trim() ?? ''
   const opts: Omit<BuildAppOptions, 'onIdleExit'> = {
     idleGraceSeconds,
+    ...(e2bPort === undefined ? {} : { e2bPort }),
     ...(e2bTemplate === '' ? {} : { e2bTemplate }),
   }
   return { port, opts }
@@ -163,8 +167,8 @@ async function main(): Promise<void> {
   const { port, opts } = buildDaemonOpts(process.env)
   const workers = resolveWorkers()
   if (workers > 1) {
-    if (opts.e2bTemplate !== undefined) {
-      throw new DaemonConfigError(`${ENV_E2B_TEMPLATE} requires a single daemon worker`)
+    if (opts.e2bPort !== undefined) {
+      throw new DaemonConfigError(`${ENV_E2B_PORT} requires a single daemon worker`)
     }
     await serveWorkers(port, workers, opts.idleGraceSeconds ?? 30)
     return

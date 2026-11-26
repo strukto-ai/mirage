@@ -5,6 +5,7 @@ import pytest
 from tests.server.routers.e2b_test_support import (
     CREATE,
     KEY,
+    NATIVE,
     TEMPLATE,
     TOKEN,
     sandbox_headers,
@@ -46,7 +47,7 @@ async def test_native_stop_retires_the_lease_without_another_request(tmp_path):
         assert lease is not None and not lease.expiry.cancelled()
 
         stopped = await client.post(
-            f"/v1/workspaces/{wid}/stop",
+            f"{NATIVE}/v1/workspaces/{wid}/stop",
             headers={"Authorization": "Bearer server-key"},
         )
         assert stopped.status_code == 200, stopped.text

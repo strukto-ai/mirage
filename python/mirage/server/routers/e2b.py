@@ -9,9 +9,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from starlette.routing import Match
-from starlette.types import Message, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from mirage.io.stream import close_quietly
+from mirage.server.auth.middleware import (
+    CredentialRejected,
+    CredentialVerifier,
+    admit_account,
+)
 from mirage.server.e2b.files import (
     FileCode,
     FileError,
@@ -187,14 +192,40 @@ def is_data_request(scope: Scope) -> bool:
     )
 
 
-def sandbox_account(scope: Scope) -> str | None:
-    """Resolve the owner for quota accounting on a sandbox data route.
+class SandboxAuthMiddleware:
+    def __init__(self, app: ASGIApp, verifier: CredentialVerifier) -> None:
+        self.app = app
+        self.verifier = verifier
 
-    Args:
-        scope (Scope): the sandbox data request.
-    """
-    lease = _sandbox_access(scope)
-    return None if lease is None else lease.entry.owner
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
+        if scope["type"] == "http":
+            if is_lifecycle_request(scope):
+                keys = Request(scope).headers.getlist("x-api-key")
+                try:
+                    if len(keys) != 1 or not keys[0].strip():
+                        raise CredentialRejected("missing API key")
+                    account = await self.verifier.account(keys[0].strip())
+                except CredentialRejected as exc:
+                    logger.debug("sandbox API key rejected: %s", exc)
+                    response = JSONResponse(
+                        {"code": 401, "message": "unauthorized"},
+                        status_code=401,
+                    )
+                    await response(scope, receive, send)
+                    return
+                admit_account(scope, account)
+            elif is_data_request(scope):
+                lease = _sandbox_access(scope)
+                admit_account(
+                    scope, None if lease is None else lease.entry.owner
+                )
+        await self.app(scope, receive, send)
+
+
+def rate_limit_error(scope: Scope, error: HttpError) -> JSONResponse:
+    return failure(error, connect=is_data_request(scope))
 
 
 def _sandbox_access(scope: Scope) -> Sandbox | None:
@@ -287,6 +318,9 @@ async def create_sandbox(
     entry = await open_workspace(
         request, response, new_workspace_id(), config, written, ephemeral=True
     )
+    if request.app.state.registry.draining:
+        await request.app.state.registry.remove(entry.id)
+        raise HttpError(ErrorCode.SHUTTING_DOWN, "server is shutting down")
     sandboxes: Sandboxes = request.app.state.e2b
     return _present(sandboxes.add(entry, req.env_vars, req.timeout), template)
 

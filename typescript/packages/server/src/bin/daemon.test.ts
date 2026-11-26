@@ -29,6 +29,17 @@ describe('buildDaemonOpts', () => {
     expect(opts.idleGraceSeconds).toBe(30)
   })
 
+  it('reads the E2B listener port only when configured', () => {
+    const MIRAGE_HOME = emptyHome()
+    expect(buildDaemonOpts({ MIRAGE_HOME }).opts.e2bPort).toBeUndefined()
+    expect(buildDaemonOpts({ MIRAGE_HOME, MIRAGE_E2B_PORT: '8766' }).opts.e2bPort).toBe(8766)
+    for (const port of ['', '0', '-1', '65536', '1.2', '1e3', '0x1b']) {
+      expect(() => buildDaemonOpts({ MIRAGE_HOME, MIRAGE_E2B_PORT: port })).toThrow(
+        'MIRAGE_E2B_PORT must be an integer from 1 to 65535',
+      )
+    }
+  })
+
   it('reads MIRAGE_DAEMON_PORT', () => {
     const { port } = buildDaemonOpts({ MIRAGE_HOME: emptyHome(), MIRAGE_DAEMON_PORT: '19999' })
     expect(port).toBe(19999)

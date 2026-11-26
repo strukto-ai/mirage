@@ -29,6 +29,7 @@ from mirage.types import (
 )
 from mirage.utils.clock import Clock, bound_system_clock
 from mirage.utils.dates import epoch_to_iso
+from mirage.utils.key_prefix import under_path
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
 from mirage.vfs.base import BaseVFS
 from mirage.workspace.dispatcher.reader import NamespaceReader
@@ -686,8 +687,24 @@ class Namespace:
         await self._store.delete([path for path, _meta in moved])
         return len(moved)
 
+    def nodes_under(self, directory: str) -> dict[str, NodeMeta]:
+        """Snapshot the entries at and beneath the directory's literal path.
+
+        Args:
+            directory (str): absolute virtual directory path.
+        """
+        return {
+            path: meta
+            for path, meta in self._nodes.items()
+            if under_path(path, directory)
+        }
+
     async def purge_under(
-        self, directory: str, keep: frozenset[str] = frozenset()
+        self,
+        directory: str,
+        keep: frozenset[str] = frozenset(),
+        *,
+        include_root: bool = False,
     ) -> int:
         """Drop every node entry under a directory (``rm -r`` semantics).
 
@@ -697,10 +714,12 @@ class Namespace:
         Args:
             directory (str): absolute virtual directory path being removed.
             keep (frozenset[str]): entries under it that survive.
+            include_root (bool): drop the directory's own node as well.
 
         Returns:
             int: number of entries dropped.
         """
+        root = directory.rstrip("/") or "/"
         base = directory.rstrip("/") + "/"
         roots = [
             m.prefix.rstrip("/")
@@ -709,7 +728,7 @@ class Namespace:
         doomed = [
             path
             for path in self._nodes
-            if path.startswith(base)
+            if (path.startswith(base) or (include_root and path == root))
             and path not in keep
             and not any(path == r or path.startswith(r + "/") for r in roots)
         ]

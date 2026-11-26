@@ -38,10 +38,17 @@
     "_drain_on_signals": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_on_signal": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
     "_start_drain": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
-    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal."
+    "_drain_then_stop": "Starlette apps learn of SIGTERM only through the server's own handler, so the lifespan wraps it to drain first; Fastify drains in a preClose hook, and the TypeScript daemon calls app.close() on the signal.",
+    "_build_e2b_app": "FastAPI configures the companion ASGI app separately; Fastify registers its companion inline in buildApp.",
+    "_e2b_http_error": "Starlette needs a handler for HTTPException; Fastify translates failures through e2bError.",
+    "_start_e2b": "Uvicorn starts on a prebound socket within the native lifespan without installing a second signal handler."
    },
    "typescript_only": {
-    "matchesAccessToken": "The Node host injects its constant-time token comparator into the portable lease table; the Python routing boundary uses compare_digest."
+    "matchesAccessToken": "The Node host injects its constant-time token comparator into the portable lease table; the Python routing boundary uses compare_digest.",
+    "ListenCallback": "The Fastify listen overloads use a Node callback; Uvicorn starts the companion inside the native ASGI lifespan.",
+    "listenTogether": "The Fastify listen entry point coordinates the two socket binds and rolls them back on failure.",
+    "requestGuards": "Fastify registers shared origin and host checks plus disconnect tracking as request hooks; ASGI uses middleware.",
+    "e2bError": "Fastify translates companion HTTP, rate-limit, and Connect errors in one reply function."
    }
   },
   "server/metrics": {
@@ -600,11 +607,14 @@
   },
   "server/auth/middleware": {
    "python_only": {
-    "_admit": "Python records the caller's account on the ASGI scope in one helper its three admit paths share; the Fastify hook sets req.account inline.",
-    "_extract_api_key": "Python's ASGI middleware reads raw header bytes; the Fastify hook reads the parsed header directly."
+    "CredentialRejected": "The shared ASGI credential verifier raises a typed refusal; the Fastify check returns the reason.",
+    "CredentialVerifier": "ASGI shares an instance holding the JWT cache; Fastify shares the authenticator closure.",
+    "admit_account": "ASGI records the verified caller in scope state; Fastify writes the account to its decorated request."
    },
    "typescript_only": {
-    "authenticator": "The bearer and JWT check as a function of the Authorization header, so the Fastify hook and the Cloudflare host's fetch handler share it. Python's AuthMiddleware is its one ASGI host."
+    "authenticator": "Fastify and the Cloudflare host share a function of the Authorization header. ASGI shares a CredentialVerifier instance instead.",
+    "registerE2BAuth": "The Fastify companion registers its auth hook here; Python attaches SandboxAuthMiddleware.",
+    "unauthorized": "Fastify sends native credential refusals through a reply helper; ASGI sends them inline in AuthMiddleware."
    }
   },
   "server/routers/workspaces": {
@@ -645,7 +655,8 @@
   "workspace/dispatcher/dispatcher": {
    "typescript_only": {
     "AdmitWrite": "TypeScript names the function type of the workspace's write admission hook; Python annotates the Dispatcher parameter inline as a Callable.",
-    "globScope": "The TypeScript dispatcher builds the scope a backend is called with; in Python MountEntry._scope does, the glob's pattern included."
+    "globScope": "The TypeScript dispatcher builds the scope a backend is called with; in Python MountEntry._scope does, the glob's pattern included.",
+    "DirectoryRemovalGuard": "The dispatcher batches the TypeScript pre-mutation check and namespace cleanup callbacks in a typed value."
    }
   },
   "cli/ssh": {
@@ -1783,7 +1794,9 @@
     "DownloadResponse": "The ASGI response owns the file reader until the stream closes.",
     "_files_of": "FastAPI callers build the file adapter inside the lease and runner scopes; the Fastify routes use withFiles.",
     "reject_lifecycle": "FastAPI registers a named rejection handler for unsupported lifecycle operations.",
-    "reject_rpc": "FastAPI registers a named rejection handler for unsupported Connect methods."
+    "reject_rpc": "FastAPI registers a named rejection handler for unsupported Connect methods.",
+    "SandboxAuthMiddleware": "FastAPI authenticates companion requests through ASGI middleware; Fastify registers an onRequest hook.",
+    "rate_limit_error": "The ASGI rate limiter calls the router for the appropriate error envelope; Fastify uses e2bError."
    },
    "typescript_only": {
     "CONNECT": "The Fastify auth hook and route registration share the matchable route pattern.",
@@ -1803,7 +1816,8 @@
     "Move": "Zod validates the source and destination paths; Python extracts them from the decoded request.",
     "acceptsRawBody": "The scoped Fastify parser checks which routes read their own streams; FastAPI declares the body handling per handler.",
     "downloadOf": "The Fastify adapter wraps the async iterator as a Node stream; Python uses DownloadResponse.",
-    "withFiles": "The Fastify handler binds the request abort signal to a file-operation callback; Python uses an async lease scope and its runner."
+    "withFiles": "The Fastify handler binds the request abort signal to a file-operation callback; Python uses an async lease scope and its runner.",
+    "sandboxAccount": "The Fastify auth hook reads the verified sandbox owner through a callback; the ASGI middleware reads the lease inline."
    }
   },
   "server/e2b/connect": {
@@ -1840,6 +1854,11 @@
     "isProcessRequest": "Fastify uses the registered command path in its authentication and parser hooks.",
     "readStart": "The Fastify start route joins and caps raw stream chunks before decoding the frame.",
     "timeLeft": "Node converts an absolute timer deadline to remaining seconds for its abort timer."
+   }
+  },
+  "view/types": {
+   "typescript_only": {
+    "BEFORE_DIRECTORY_REMOVE": "TypeScript passes the final guard through mount keyword validation using a symbol. Python runs its guard from the dispatcher and RAM operation."
    }
   }
  }
