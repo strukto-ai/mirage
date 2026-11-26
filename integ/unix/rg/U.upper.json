@@ -232,6 +232,83 @@
         "B",
         "v"
       ]
+    },
+    {
+      "id": "rg_U_o_prints_no_piece_for_a_line_terminator_alone",
+      "seq": 14490248,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgfl; printf 'bar\\n\\nfoo\\n2026\\n' > /data/rgfl/n.txt; rg -U -o '\\n\\d{4}' /data/rgfl/n.txt; rg -U -o 'bar\\n+foo' /data/rgfl/n.txt; rg -U -o '\\n' /data/rgfl/n.txt; echo rc=$?; rg -U -o -n -b --column '\\n\\d{4}' /data/rgfl/n.txt; rg -U -o -n -b --column 'bar\\n+foo' /data/rgfl/n.txt; rg -U -o -n -r '$0' 'bar\\n+foo' /data/rgfl/n.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "2026\nbar\nfoo\nrc=0\n4:4:8:2026\n1:1:0:bar\n3:1:0:foo\n1:bar\n3:foo\n",
+        "stderr": ""
+      },
+      "flags": [
+        "U",
+        "o",
+        "n",
+        "b",
+        "column",
+        "r"
+      ]
+    },
+    {
+      "id": "rg_U_o_trim_takes_a_lines_leading_whitespace",
+      "seq": 14490249,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgtr; printf '  foo  bar\\n   baz  qux\\n\\tend\\n' > /data/rgtr/t.txt; rg -U -o --trim ' +bar\\n +baz' /data/rgtr/t.txt; rg -U -o --trim -n '\\s+\\w+' /data/rgtr/t.txt; rg -U -o --trim '\\s+' /data/rgtr/t.txt; rg -U -o --trim -n -r ' <$0>' '\\s+\\w+' /data/rgtr/t.txt; rg -o --trim -n ' +' /data/rgtr/t.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "  bar\nbaz\n1:foo\n1:  bar\n2:baz\n2:  qux\n3:end\n  \n  \n1:<  foo>\n1: <  bar>\n1: <\n2:baz>\n2: <  qux>\n2: <\n3:end>\n1:\n1:\n2:\n2:\n",
+        "stderr": ""
+      },
+      "flags": [
+        "U",
+        "o",
+        "trim",
+        "n",
+        "r"
+      ]
     }
   ]
 }
