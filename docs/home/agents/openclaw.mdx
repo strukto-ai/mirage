@@ -65,7 +65,7 @@ The probe prints `mirage: 7 tools`. Restart a foreground Gateway with `openclaw 
 
 `mirage mcp` sends your saved [login](/home/access/cli#log-in) or the local token file. OpenClaw starts it with only `HOME`, `PATH`, `USER` and `LOGNAME`, so a `MIRAGE_TOKEN` in the Gateway's environment does not reach it. If the Gateway runs as a service, set `command` to the path `command -v mirage` prints.
 
-For a Mirage server, OpenClaw fills `${MIRAGE_TOKEN}` in the header from the environment of the process that connects: export it in your shell for the probe, and in the Gateway's environment for sessions.
+For a Mirage server, add its host name to the server's [`MIRAGE_ALLOWED_HOSTS`](/home/access/http#launch-a-server). OpenClaw fills `${MIRAGE_TOKEN}` in the header from the environment of the process that connects: export it in your shell for the probe, and in the Gateway's environment for sessions.
 
 ## Plugin
 

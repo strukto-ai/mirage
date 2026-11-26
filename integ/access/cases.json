@@ -573,6 +573,7 @@
    {"id": "errno_is_a_directory", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/vfs/read", "json": {"path": "/"}}, "expect": {"status": 400, "code": "invalid_request"}},
    {"id": "unknown_route", "request": {"method": "GET", "path": "/v1/no-such-route"}, "expect": {"status": 404, "code": "not_found"}},
    {"id": "host_not_allowed", "request": {"method": "GET", "path": "/v1/health", "headers": {"Host": "evil.example"}, "auth": false}, "expect": {"status": 403, "code": "host_not_allowed"}},
+   {"id": "host_any_case", "request": {"method": "GET", "path": "/v1/health", "headers": {"Host": "LOCALHOST"}, "auth": false}, "expect": {"status": 200}},
    {"id": "origin_not_allowed", "request": {"method": "POST", "path": "/v1/workspaces/{seed}/shell", "json": {"command": "true"}, "headers": {"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}}, "expect": {"status": 403, "code": "origin_not_allowed"}},
    {"id": "unauthorized", "deployments": ["token", "jwt"], "request": {"method": "GET", "path": "/v1/workspaces", "auth": false}, "expect": {"status": 401, "code": "unauthorized"}}
   ],

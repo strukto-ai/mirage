@@ -27,7 +27,7 @@ def _allow_asgi_test_host(monkeypatch, request):
     # the @pytest.mark.no_host_override marker.
     if "no_host_override" in request.keywords:
         return
-    monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "test,127.0.0.1,localhost,::1")
+    monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "test")
 
 
 @pytest.fixture(autouse=True)

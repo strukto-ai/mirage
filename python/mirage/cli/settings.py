@@ -60,7 +60,7 @@ from mirage.server.env import (
     ENV_WORKER_TYPE,
     ENV_WORKERS,
 )
-from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
+from mirage.server.host_validation_constants import LOOPBACK_HOSTS
 from mirage.server.paths import mirage_home
 from mirage.server.ssh.config import default_ssh_dir
 from mirage.server.ssh.constants import (
@@ -173,7 +173,7 @@ def is_local_url(url: str) -> bool:
     Returns:
         bool: True when its host is a loopback name.
     """
-    return (urlsplit(url).hostname or "") in DEFAULT_ALLOWED_HOSTS
+    return (urlsplit(url).hostname or "") in LOOPBACK_HOSTS
 
 
 @dataclass
@@ -249,7 +249,7 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
 def _default_for_key(key: str) -> str:
     defaults = {
         "url": DEFAULT_DAEMON_URL,
-        "allowed_hosts": ",".join(DEFAULT_ALLOWED_HOSTS),
+        "allowed_hosts": "",
         "forwarded_allow_ips": "",
         "auth_mode": "local",
         "jwt_alg": "",

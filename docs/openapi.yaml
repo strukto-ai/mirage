@@ -9098,7 +9098,7 @@ components:
               value:
                 error:
                   code: host_not_allowed
-                  message: host header is not allowed
+                  message: host is not allowed; add it to MIRAGE_ALLOWED_HOSTS
     '404':
       description: The workspace, session, job, file or route does not exist, or the caller may not
         see it (`not_found`).

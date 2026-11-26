@@ -55,7 +55,7 @@ Each key's environment variable is `MIRAGE_` and the key in capitals:
 | --- | --- |
 | `port` | `8765`; its environment variable is `MIRAGE_DAEMON_PORT` |
 | `auth_mode` | `local` |
-| `allowed_hosts` | `127.0.0.1,localhost,::1` |
+| `allowed_hosts` | none; names added to `127.0.0.1`, `localhost` and `::1`, which are always answered |
 | `idle_grace_seconds` | `30` |
 | `max_workspaces` | no cap; past it a new workspace answers 503 |
 | `max_sessions` | `16`; past it a new session answers 429 |

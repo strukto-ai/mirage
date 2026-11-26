@@ -20,16 +20,20 @@ from mirage.server.host_validation import (
     is_cross_origin,
     is_host_allowed,
     parse_allowed_hosts,
+    refusal,
     resolve_allowed_hosts,
     strip_port,
 )
-from mirage.server.host_validation_constants import DEFAULT_ALLOWED_HOSTS
+from mirage.server.host_validation_constants import LOOPBACK_HOSTS
+
+LOOPBACK = list(LOOPBACK_HOSTS)
 
 
-def test_parse_allowed_hosts_defaults_when_missing():
-    assert parse_allowed_hosts(None) == list(DEFAULT_ALLOWED_HOSTS)
-    assert parse_allowed_hosts("") == list(DEFAULT_ALLOWED_HOSTS)
-    assert parse_allowed_hosts("   ") == list(DEFAULT_ALLOWED_HOSTS)
+def test_parse_allowed_hosts_lists_none_when_missing():
+    assert parse_allowed_hosts(None) == []
+    assert parse_allowed_hosts("") == []
+    assert parse_allowed_hosts("   ") == []
+    assert parse_allowed_hosts(" , ") == []
 
 
 def test_parse_allowed_hosts_csv():
@@ -73,17 +77,60 @@ def test_strip_port_empty_host_returns_raw():
 
 
 def test_is_host_allowed_malformed_fail_closed():
-    allowed = list(DEFAULT_ALLOWED_HOSTS)
-    assert is_host_allowed("[::1]evil", allowed) is False
-    assert is_host_allowed("[::1]:8765x", allowed) is False
-    assert is_host_allowed("[::1].attacker.tld", allowed) is False
+    assert is_host_allowed("[::1]evil", LOOPBACK) is False
+    assert is_host_allowed("[::1]:8765x", LOOPBACK) is False
+    assert is_host_allowed("[::1].attacker.tld", LOOPBACK) is False
 
 
 def test_is_host_allowed_accepts_loopback():
-    allowed = list(DEFAULT_ALLOWED_HOSTS)
-    assert is_host_allowed("[::1]", allowed) is True
-    assert is_host_allowed("[::1]:8765", allowed) is True
-    assert is_host_allowed("127.0.0.1:8765", allowed) is True
+    assert is_host_allowed("[::1]", LOOPBACK) is True
+    assert is_host_allowed("[::1]:8765", LOOPBACK) is True
+    assert is_host_allowed("127.0.0.1:8765", LOOPBACK) is True
+
+
+def test_is_host_allowed_ignores_case():
+    assert is_host_allowed("LOCALHOST:8765", LOOPBACK) is True
+    assert is_host_allowed("Localhost", LOOPBACK) is True
+
+
+def test_is_host_allowed_refuses_missing_host():
+    assert is_host_allowed("", LOOPBACK) is False
+    assert is_host_allowed(None, LOOPBACK) is False
+    assert is_host_allowed(None, ["*"]) is True
+
+
+def test_refusal_names_the_setting_not_the_host():
+    refused = refusal("attacker.example", None, None, LOOPBACK)
+    assert refused is not None
+    assert refused.status == 403
+    assert refused.code == "host_not_allowed"
+    assert (
+        refused.message
+        == "host is not allowed; add it to MIRAGE_ALLOWED_HOSTS"
+    )
+
+
+def test_refusal_checks_host_before_origin():
+    refused = refusal(
+        "attacker.example", "https://evil.example", "cross-site", LOOPBACK
+    )
+    assert refused is not None
+    assert refused.code == "host_not_allowed"
+
+
+def test_refusal_refuses_another_origin():
+    refused = refusal("127.0.0.1:8765", "https://evil.example", None, LOOPBACK)
+    assert refused is not None
+    assert refused.code == "origin_not_allowed"
+    assert refused.message == "cross-origin request refused"
+
+
+def test_refusal_lets_its_own_requests_on():
+    assert refusal("127.0.0.1:8765", None, None, LOOPBACK) is None
+    assert (
+        refusal("localhost:8765", "http://localhost:8765", None, LOOPBACK)
+        is None
+    )
 
 
 def test_is_cross_origin_refuses_other_fetch_sites():
@@ -127,17 +174,35 @@ def test_is_cross_origin_admits_its_own_origin():
 
 def test_resolve_allowed_hosts_explicit_wins(monkeypatch):
     monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "elsewhere")
-    assert resolve_allowed_hosts(["override.example"]) == ["override.example"]
+    assert resolve_allowed_hosts(["override.example"]) == [
+        *LOOPBACK,
+        "override.example",
+    ]
 
 
 def test_resolve_allowed_hosts_env_when_arg_missing(monkeypatch):
     monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "foo,bar")
-    assert resolve_allowed_hosts(None) == ["foo", "bar"]
+    assert resolve_allowed_hosts(None) == [*LOOPBACK, "foo", "bar"]
 
 
-def test_resolve_allowed_hosts_defaults_when_env_unset(monkeypatch):
+def test_resolve_allowed_hosts_loopback_when_env_unset(tmp_path, monkeypatch):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
-    assert resolve_allowed_hosts(None) == list(DEFAULT_ALLOWED_HOSTS)
+    assert resolve_allowed_hosts(None) == LOOPBACK
+    assert resolve_allowed_hosts([]) == LOOPBACK
+
+
+def test_resolve_allowed_hosts_keeps_each_name_once_bare_and_lower():
+    assert resolve_allowed_hosts(
+        [
+            "Mirage.Example.com:8443",
+            "mirage.example.com",
+            "[::1]",
+            "LOCALHOST",
+            "[fd00::1]:8765",
+            "*",
+        ]
+    ) == [*LOOPBACK, "mirage.example.com", "fd00::1", "*"]
 
 
 @pytest.mark.no_host_override
@@ -214,22 +279,42 @@ async def test_default_rejects_non_digit_port(monkeypatch):
 
 @pytest.mark.no_host_override
 @pytest.mark.asyncio
-async def test_env_override_extends_allowlist(monkeypatch):
-    monkeypatch.setenv(
-        "MIRAGE_ALLOWED_HOSTS", "127.0.0.1,localhost,daemon.mirage.local"
-    )
+async def test_env_adds_to_the_loopback_names(monkeypatch):
+    monkeypatch.setenv("MIRAGE_ALLOWED_HOSTS", "Daemon.Mirage.Local")
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://daemon.mirage.local"
-    ) as client:
-        r = await client.get("/v1/workspaces")
-        assert r.status_code == 200
+    for base in (
+        "http://daemon.mirage.local",
+        "http://127.0.0.1:8765",
+        "http://localhost",
+    ):
+        async with AsyncClient(transport=transport, base_url=base) as client:
+            r = await client.get("/v1/workspaces")
+            assert r.status_code == 200, base
     async with AsyncClient(
         transport=transport, base_url="http://attacker.example"
     ) as client:
         r = await client.get("/v1/workspaces")
         assert r.status_code == 403
+        assert r.json()["error"] == {
+            "code": "host_not_allowed",
+            "message": "host is not allowed; add it to MIRAGE_ALLOWED_HOSTS",
+        }
+
+
+@pytest.mark.no_host_override
+@pytest.mark.asyncio
+async def test_host_matches_in_any_case(monkeypatch):
+    monkeypatch.delenv("MIRAGE_ALLOWED_HOSTS", raising=False)
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://127.0.0.1"
+    ) as client:
+        r = await client.get(
+            "/v1/workspaces", headers={"host": "LOCALHOST:8765"}
+        )
+        assert r.status_code == 200
 
 
 @pytest.mark.no_host_override
@@ -314,7 +399,11 @@ def test_resolve_allowed_hosts_config_beats_default(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text(
         '[daemon]\nallowed_hosts = "example.com,api.example.com"\n'
     )
-    assert resolve_allowed_hosts() == ["example.com", "api.example.com"]
+    assert resolve_allowed_hosts() == [
+        *LOOPBACK,
+        "example.com",
+        "api.example.com",
+    ]
 
 
 def test_resolve_allowed_hosts_env_beats_config(tmp_path, monkeypatch):
@@ -323,4 +412,4 @@ def test_resolve_allowed_hosts_env_beats_config(tmp_path, monkeypatch):
     (tmp_path / "config.toml").write_text(
         '[daemon]\nallowed_hosts = "file.example.com"\n'
     )
-    assert resolve_allowed_hosts() == ["env.example.com"]
+    assert resolve_allowed_hosts() == [*LOOPBACK, "env.example.com"]
