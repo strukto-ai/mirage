@@ -8,8 +8,6 @@ Run the Python or TypeScript server to access your Mirage workspaces over HTTP.
 This guide covers setup, authentication, limits, and server operations.
 Use the [API reference](/api/reference) for endpoint fields and responses.
 
-To connect an existing E2B client, see [Switch an E2B integration to Mirage](/home/access/e2b).
-
 ## Launch a server
 
 Set a token in the server's environment before starting the process:
@@ -91,6 +89,50 @@ For workspace creation and command execution, see
 [Create a workspace](/api/operations/workspaces/create-workspace) and
 [Run shell command](/api/operations/shell/run-shell-command).
 Replace the example API host with your server's base URL.
+
+## Connect an E2B client
+
+Mirage exposes E2B-compatible endpoints for sandboxes, commands, and files.
+Existing E2B SDK clients and tools can switch to Mirage if they let you change
+both E2B URLs and use the supported operations below.
+
+Use the single-worker server setup above. In the environment that runs your E2B
+client or tool, set both URLs to your Mirage server and use its
+`MIRAGE_AUTH_TOKEN` as the API key.
+
+```bash
+export E2B_API_URL=http://127.0.0.1:8765
+export E2B_SANDBOX_URL=http://127.0.0.1:8765
+export E2B_API_KEY='replace-with-your-token'
+```
+
+Use a server URL the client can reach. If the integration passes URLs or a
+key in code, update those values there. Use `base` if it specifies a template.
+Each sandbox gets a workspace with a writable, in-memory `/home/user`.
+To use a saved workspace template, set `MIRAGE_E2B_TEMPLATE` to its name on the server.
+
+Run this example in the same client environment with the Python E2B SDK installed.
+
+```python
+from e2b import Sandbox
+
+sandbox = Sandbox.create()
+try:
+    sandbox.files.write("hello.txt", "Hello from Mirage\n")
+    print(sandbox.commands.run("cat hello.txt").stdout, end="")
+finally:
+    sandbox.kill()
+```
+
+The script prints `Hello from Mirage`.
+
+**Compatibility**
+
+| Area | Supported | Unsupported |
+| --- | --- | --- |
+| Sandbox | Create, reconnect, check health, set timeout, and delete | List or inspect sandboxes, pause or resume, VM settings and metrics, E2B template management, port forwarding, and Code Interpreter |
+| Commands | Run and stream commands with the SDK's default shell, list live commands, send or close stdin, and cancel with `kill` | Interactive terminals, alternate shells, and reattaching to a detached command |
+| Files | Read, upload, get file info, list, make directories, rename within a mount, and remove files or empty directories | Watchers, recursive removal, and signed file URLs |
 
 ## Configure authentication
 
