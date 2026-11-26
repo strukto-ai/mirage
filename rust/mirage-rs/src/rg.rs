@@ -707,6 +707,7 @@ struct Printed {
     spans: Spans,
     count: usize,
     trim_at: usize,
+    omit_empty: bool,
     preview_at: usize,
     preview_chars: u64,
     grapheme: Option<crate::rg_grapheme::Grapheme>,
@@ -728,6 +729,7 @@ impl Printed {
             spans: Spans::None,
             count: 0,
             trim_at: record.content.start,
+            omit_empty: false,
             preview_at: record.content.start,
             preview_chars: 0,
             grapheme: None,
@@ -754,9 +756,15 @@ impl Printed {
                     return false;
                 }
             }
-            self.range.start = self.trim_at;
-            self.preview_at = self.trim_at;
+            // A trim that began ahead of the piece, at the start of its
+            // line, takes only what of the line's own leading whitespace
+            // the piece holds.
+            self.range.start = self.range.start.max(self.trim_at);
+            self.preview_at = self.range.start;
             self.stage = 1;
+            if self.omit_empty && self.range.is_empty() {
+                return true;
+            }
         }
         let exceeded = config.max_columns.is_some_and(|limit| {
             limit > 0
@@ -1173,6 +1181,28 @@ impl Job {
     }
 }
 
+/// How far `--trim` has read into one line's leading whitespace, so the -o
+/// pieces of a line read it once between them.
+#[derive(Clone, Copy, Default)]
+struct LineTrim {
+    line: usize,
+    read_to: usize,
+}
+
+impl LineTrim {
+    /// Where the trim of a piece on the line that starts at `line` reads on
+    /// from.
+    fn resume(&mut self, line: usize) -> usize {
+        if self.line != line {
+            *self = Self {
+                line,
+                read_to: line,
+            };
+        }
+        self.read_to
+    }
+}
+
 struct RegionJob {
     data: Arc<Vec<u8>>,
     matches: Arc<Matches>,
@@ -1191,6 +1221,10 @@ struct RegionJob {
     per_match_initialized: bool,
     rendered_prefix_at: usize,
     rendered_prefix_lines: usize,
+    rendered_line_at: usize,
+    trim: LineTrim,
+    /// The piece in hand trims on from `trim`, and moves it on when done.
+    trimming: bool,
     stage: u8,
 }
 
@@ -1221,6 +1255,9 @@ impl RegionJob {
             per_match_initialized: false,
             rendered_prefix_at: 0,
             rendered_prefix_lines: 0,
+            rendered_line_at: 0,
+            trim: LineTrim::default(),
+            trimming: false,
             stage: 0,
         }
     }
@@ -1256,6 +1293,9 @@ impl RegionJob {
         if let Some(printed) = self.printed.as_mut() {
             if !printed.poll(config, label, pieces, budget) {
                 return false;
+            }
+            if std::mem::take(&mut self.trimming) {
+                self.trim.read_to = printed.trim_at;
             }
             self.printed = None;
             return false;
@@ -1420,6 +1460,7 @@ impl RegionJob {
                     while self.rendered_prefix_at < start && *budget > 0 {
                         if data[self.rendered_prefix_at] == config.terminator() {
                             self.rendered_prefix_lines += 1;
+                            self.rendered_line_at = self.rendered_prefix_at + 1;
                         }
                         self.rendered_prefix_at += 1;
                         *budget -= 1;
@@ -1458,7 +1499,18 @@ impl RegionJob {
                     && data.get(self.replacement_end) == Some(&config.terminator())
                     && data[self.replacement_end - 1] == b'\r';
                 printed.range = self.replacement_at..self.replacement_end - usize::from(cr);
-                printed.trim_at = self.replacement_at;
+                // A trim takes a line's leading whitespace, so one starts
+                // where the replacement's first line does in the text
+                // around it, and a piece that begins further in keeps its
+                // own. The pieces of one line read its whitespace once.
+                printed.trim_at = if !config.trim {
+                    self.replacement_at
+                } else if self.replacement_at == start {
+                    self.trim.resume(self.rendered_line_at)
+                } else {
+                    self.trim.resume(self.replacement_at)
+                };
+                printed.omit_empty = true;
                 printed.terminated = false;
                 printed.cr = false;
                 printed.offset = first.start as u64 + start as u64;
@@ -1468,7 +1520,12 @@ impl RegionJob {
                     + 1;
                 printed.spans = Spans::One(start, end);
                 printed.count = 1;
-                self.printed = Some(printed);
+                // A line of the replacement that holds nothing prints no
+                // piece.
+                if !printed.range.is_empty() {
+                    self.trimming = config.trim;
+                    self.printed = Some(printed);
+                }
                 if self.replacement_end >= end {
                     self.match_at += 1;
                     self.replacement_end = 0;
@@ -1500,13 +1557,27 @@ impl RegionJob {
             };
             let mut printed = Printed::plain(&record, true, column);
             printed.range = begin..end;
-            printed.trim_at = begin;
+            // A trim takes the line's leading whitespace, not the piece's:
+            // a piece that begins past it keeps its own, and one that lies
+            // within it prints nothing. The pieces of one line read its
+            // whitespace once.
+            printed.trim_at = if config.trim {
+                self.trim.resume(record.content.start)
+            } else {
+                begin
+            };
+            printed.omit_empty = true;
             printed.terminated = false;
             printed.cr = false;
             printed.offset = mat.start as u64;
             printed.spans = Spans::One(begin, end);
             printed.count = 1;
-            self.printed = Some(printed);
+            // A line the match holds nothing of but its terminator prints
+            // no piece.
+            if begin < end {
+                self.trimming = config.trim;
+                self.printed = Some(printed);
+            }
             if index >= last_line {
                 self.match_at += 1;
                 self.line_at = 0;
@@ -1890,6 +1961,17 @@ impl Input {
             finalized: false,
             done: config.max_count == Some(0),
             multi: None,
+        }
+    }
+    /// A search of `data` on the last finished search's automata and
+    /// tables, when one is held, so a tree of small files builds them once.
+    fn search_of(&mut self, program: &Program, data: Vec<u8>, all: bool) -> Box<Search> {
+        match self.scratch.take() {
+            Some(mut scratch) => {
+                scratch.reset(data, all);
+                scratch
+            }
+            None => Box::new(program.start(data, all)),
         }
     }
     /// Whether nothing is pending or queued, so a read can become the
@@ -2639,7 +2721,7 @@ impl Rg {
                 if input.finishing {
                     let data = input.pending.take();
                     input.tally.searched = data.len() as u64;
-                    input.search = Some(Box::new(program.start(data, true)));
+                    input.search = Some(input.search_of(program, data, true));
                     continue;
                 }
                 break;
@@ -2707,12 +2789,7 @@ impl Rg {
             input.scan = 0;
             input.record_end = None;
             let all = config.needs_every_match();
-            input.search = Some(if let Some(mut scratch) = input.scratch.take() {
-                scratch.reset(data, all);
-                scratch
-            } else {
-                Box::new(program.start(data, all))
-            });
+            input.search = Some(input.search_of(program, data, all));
         }
         Ok(())
     }
@@ -2727,7 +2804,12 @@ impl Stream for Rg {
             begin.pipe,
         )?);
         self.ending = false;
-        self.input = Some(Input::new(begin, &self.config));
+        // The last input's finished search carries its automata's states
+        // and its tables over, so a tree of small files builds them once.
+        let scratch = self.input.take().and_then(|input| input.scratch);
+        let mut input = Input::new(begin, &self.config);
+        input.scratch = scratch;
+        self.input = Some(input);
         Ok(())
     }
     fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
@@ -4066,6 +4148,151 @@ mod tests {
             out,
             b"1:1:0:Q\n2:1:0:R\n3:1:0:S\n3:6:5:Q\n4:6:5:R\n5:6:5:S\n"
         );
+    }
+
+    #[test]
+    fn only_matching_prints_no_piece_for_a_line_a_match_holds_only_the_terminator_of() {
+        let lines = b"bar\n\nfoo\n2026\n".as_slice();
+        let numbered = json!({"line_numbers":true,"column":true,"byte_offsets":true});
+        for (data, pattern, extra, expected) in [
+            (lines, "\\n\\d{4}", json!({}), b"2026\n".as_slice()),
+            (lines, "bar\\n+foo", json!({}), b"bar\nfoo\n"),
+            (lines, "\\n", json!({}), b""),
+            (lines, "\\n\\d{4}", numbered.clone(), b"4:4:8:2026\n"),
+            (lines, "bar\\n+foo", numbered, b"1:1:0:bar\n3:1:0:foo\n"),
+            (
+                lines,
+                "bar\\n+foo",
+                json!({"replace":"$0","line_numbers":true}),
+                b"1:bar\n3:foo\n",
+            ),
+            (
+                b"axb\naxb\n",
+                "xb\\n",
+                json!({"replace":"Q\n\nR","line_numbers":true}),
+                b"1:Q\n3:R\n3:Q\n5:R\n",
+            ),
+            (b"axb\naxb\n", "xb\\n", json!({"replace":"\n"}), b""),
+        ] {
+            let mut config = json!({"pattern":pattern,"multiline":true,"only_matching":true});
+            let more = extra.as_object().unwrap().clone();
+            config.as_object_mut().unwrap().extend(more);
+            let (out, metadata, _) = run(data, config);
+            assert_eq!(out, expected, "{pattern} {extra}");
+            assert_eq!(metadata["selected"], true);
+        }
+    }
+
+    #[test]
+    fn a_multiline_trim_takes_a_lines_leading_whitespace_not_a_pieces() {
+        let lines = b"  foo  bar\n   baz  qux\n\tend\n".as_slice();
+        let numbered = json!({"line_numbers":true});
+        for (pattern, extra, expected) in [
+            ("o  bar\\n +baz", json!({}), b"o  bar\nbaz\n".as_slice()),
+            (" +bar\\n +baz", json!({}), b"  bar\nbaz\n"),
+            ("\\s+", json!({}), b"  \n  \n"),
+            (
+                "\\s+\\w+",
+                numbered.clone(),
+                b"1:foo\n1:  bar\n2:baz\n2:  qux\n3:end\n",
+            ),
+            (
+                "\\s+\\w+",
+                json!({"line_numbers":true,"column":true}),
+                b"1:1:foo\n1:6:  bar\n2:11:baz\n2:18:  qux\n3:23:end\n",
+            ),
+            (
+                "\\s+\\w+",
+                json!({"byte_offsets":true}),
+                b"0:foo\n5:  bar\n10:baz\n17:  qux\n22:end\n",
+            ),
+            (
+                "\\s+\\w+",
+                json!({"replace":"<$0>","line_numbers":true}),
+                b"1:<  foo>\n1:<  bar>\n1:<\n2:baz>\n2:<  qux>\n2:<\n3:end>\n",
+            ),
+            (
+                "\\s+\\w+",
+                json!({"replace":" <$0>","line_numbers":true}),
+                b"1:<  foo>\n1: <  bar>\n1: <\n2:baz>\n2: <  qux>\n2: <\n3:end>\n",
+            ),
+            ("^\\s+foo", json!({"replace":"  $0"}), b"foo\n"),
+            ("qux\\n", json!({"replace":"\t$0"}), b"\tqux\n"),
+            (
+                " +bar\\n +baz",
+                json!({"replace":"[$0]"}),
+                b"[  bar\nbaz]\n",
+            ),
+            (
+                "bar\\n +baz",
+                json!({"replace":"  <$0>"}),
+                b"  <bar\nbaz>\n",
+            ),
+            (" +bar", json!({}), b"bar\n"),
+            (" +", numbered, b"1:\n1:\n2:\n2:\n"),
+        ] {
+            let mut config = json!({
+                "pattern":pattern,"multiline":true,"only_matching":true,"trim":true
+            });
+            let more = extra.as_object().unwrap().clone();
+            config.as_object_mut().unwrap().extend(more);
+            let (out, metadata, _) = run(lines, config);
+            assert_eq!(
+                String::from_utf8_lossy(&out),
+                String::from_utf8_lossy(expected),
+                "{pattern} {extra}"
+            );
+            assert_eq!(metadata["selected"], true);
+        }
+        let (out, _, _) = run(
+            lines,
+            json!({"pattern":"\\s+","only_matching":true,"trim":true}),
+        );
+        assert_eq!(out, b"\n\n\n\n\n");
+    }
+
+    #[test]
+    fn the_pieces_of_a_line_read_its_leading_whitespace_once_between_them() {
+        // Each piece inside the indent would read it again from the line's
+        // start: 20,000 one-space pieces, 200 million bytes.
+        let data = [b" ".repeat(20_000), b"x  y\n\t\t\tz\n".to_vec()].concat();
+        for (extra, expected) in [
+            (json!({}), b" \n \n".as_slice()),
+            (json!({"line_numbers":true}), b"1: \n1: \n"),
+            (json!({"replace":" "}), b" \n \n \n \n \n \n \n"),
+        ] {
+            let mut config = json!({
+                "pattern":"\\s","multiline":true,"only_matching":true,"trim":true
+            });
+            let more = extra.as_object().unwrap().clone();
+            config.as_object_mut().unwrap().extend(more);
+            let (out, _, calls) = run(&data, config);
+            assert_eq!(out, expected, "{extra}");
+            assert!(calls < 100, "{extra}: {calls} calls");
+        }
+    }
+
+    #[test]
+    fn a_multiline_search_kept_across_inputs_finds_each_ones_own_matches() {
+        let config = json!({"pattern":"a\\nb","multiline":true,"line_numbers":true});
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut out = Vec::new();
+        for data in [
+            b"a\nb\nc\n".as_slice(),
+            b"x\na\nb\n",
+            b"none\n",
+            b"ab\na\nb a\nb\n",
+        ] {
+            stream
+                .begin(br#"{"name":"<stdin>","label":null,"binary_mode":"text"}"#)
+                .unwrap();
+            stream.feed(data, &mut out).unwrap();
+            stream.finish(&mut out).unwrap();
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+            }
+        }
+        assert_eq!(out, b"1:a\n2:b\n2:a\n3:b\n2:a\n3:b a\n4:b\n");
     }
 
     #[test]

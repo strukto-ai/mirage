@@ -17,6 +17,9 @@ use crate::{config::Config, error::Error, literal::InnerLiterals};
 pub struct CompiledNfa {
     /// The exact matcher, including the requested captures.
     pub nfa: regex_automata::nfa::thompson::NFA,
+    /// The same matcher read backwards, without captures, for an automaton
+    /// that finds where a match starts; None past the size limit.
+    pub reverse: Option<regex_automata::nfa::thompson::NFA>,
     /// Bytes that cannot occur inside a match.
     pub non_matching_bytes: ByteSet,
     /// Conservative UTF-8 prefixes for backend lookup.
@@ -223,6 +226,15 @@ impl RegexMatcherBuilder {
             .nfa_size_limit(Some(chir.config().size_limit));
         let compiler = regex_automata::nfa::thompson::Compiler::new();
         let mut compiler = compiler;
+        let reverse = regex_automata::nfa::thompson::Compiler::new()
+            .configure(
+                config
+                    .clone()
+                    .which_captures(regex_automata::nfa::thompson::WhichCaptures::None)
+                    .reverse(true),
+            )
+            .build_from_hir(chir.hir())
+            .ok();
         let compiled = compiler
             .configure(config.clone())
             .build_from_hir(chir.hir());
@@ -247,6 +259,7 @@ impl RegexMatcherBuilder {
         );
         Ok(CompiledNfa {
             nfa,
+            reverse,
             non_matching_bytes: chir.non_matching_bytes(),
             lookup_terms: terms.map(|texts| (texts, whole_word)),
             literal_filters,

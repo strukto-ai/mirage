@@ -433,9 +433,11 @@ const CHECKS: [string, Check][] = [
       const multiline = `^(${branches}|\\n)+b?$`
       await ws.vfs.write('/data/rg-multi-control', new TextEncoder().encode('aaa\naaa\n'))
       equal(await shell(ws, `rg -U -c '${multiline}' /data/rg-multi-control`), [0, '1\n', ''])
+      // The lazy DFA reads the line in milliseconds; recording $1 over the
+      // whole 4 MB match keeps the PikeVM busy past the cancel.
       for (const command of [
-        `rg '^(${branches})+b?$' /data/rg-long`,
-        `rg -U '${multiline}' /data/rg-long`,
+        `rg -r '$1' '^(${branches})+!$' /data/rg-long`,
+        `rg -U -r '$1' '^(${branches}|\\n)+!$' /data/rg-long`,
       ]) {
         const abort = new AbortController()
         const running = ws.shell(command, { signal: abort.signal })

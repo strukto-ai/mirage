@@ -6,10 +6,11 @@
 use std::ops::Deref;
 
 use grep_regex::{CompiledNfa, LiteralFilters, RegexMatcherBuilder};
+use regex_automata::hybrid::{LazyStateID, dfa};
 use regex_automata::nfa::thompson::{NFA, State, WhichCaptures};
 use regex_automata::util::prefilter::Prefilter;
 use regex_automata::util::primitives::StateID;
-use regex_automata::{PatternID, Span};
+use regex_automata::{Anchored, Input, MatchErrorKind, MatchKind, PatternID, Span};
 use serde::Serialize;
 
 use crate::pcre::{self, Pcre};
@@ -29,6 +30,22 @@ const SEARCH_MEMORY_LIMIT: SearchMemoryLimit = SearchMemoryLimit(64 * 1024 * 102
 /// The backtracking steps of a -P search that weigh as much as one byte of
 /// rg's work, so a search past every quick limit ends a step of it.
 const PCRE_STEPS_PER_UNIT: usize = 16;
+
+/// The states each automaton of a search may hold, in bytes: room for an
+/// ordinary pattern's many times over, and too little for one whose NFA is
+/// so large that building a state would hold the host, which the NFA
+/// searches alone.
+const AUTOMATON_STATES: usize = 512 * 1024;
+
+/// How often an automaton may refill its states before it must read
+/// `AUTOMATON_BYTES_PER_STATE` bytes for each state it builds, or give the
+/// search to the NFA.
+const AUTOMATON_REFILLS: usize = 3;
+const AUTOMATON_BYTES_PER_STATE: usize = 10;
+
+/// The most bytes an automaton reads before the states it built on the way
+/// are counted against the budget.
+const STRETCH: usize = 64;
 
 impl SearchMemoryLimit {
     fn check(&self, nfa: &NFA) -> Result<(), StreamError> {
@@ -122,6 +139,11 @@ pub(crate) struct SearchHints {
 
 pub(crate) struct Program {
     nfa: NFA,
+    /// The lazy automata that find a match, one read forwards to where it
+    /// ends and one backwards to where it starts, so the NFA runs only to
+    /// record groups. None for a pattern past what they take, which the
+    /// NFA searches alone.
+    automata: Option<(dfa::DFA, dfa::DFA)>,
     filters: LiteralFilters,
     /// -P's matcher, which searches in place of the NFA.
     pcre: Option<Box<Pcre>>,
@@ -138,6 +160,7 @@ impl Program {
         if patterns.is_empty() {
             return Ok(Self {
                 nfa: NFA::never_match(),
+                automata: None,
                 filters: LiteralFilters::default(),
                 pcre: None,
                 pcre_groups: 0,
@@ -187,6 +210,7 @@ impl Program {
         };
         let CompiledNfa {
             nfa,
+            reverse,
             non_matching_bytes: non_matching,
             lookup_terms: required_terms,
             literal_filters: filters,
@@ -206,12 +230,15 @@ impl Program {
             StreamError::new(message)
         })?;
         SEARCH_MEMORY_LIMIT.check(&nfa)?;
+        let automata = reverse
+            .and_then(|reverse| lazy_automata(&nfa, reverse, filters.prefix.is_some(), &options));
         let terminator = if options.null_data { 0 } else { b'\n' };
         let multiline = options.multiline
             && (!non_matching.contains(terminator)
                 || options.null_data && !non_matching.contains(b'\n'));
         Ok(Self {
             nfa,
+            automata,
             filters,
             pcre: None,
             pcre_groups: 0,
@@ -313,6 +340,7 @@ impl Program {
         let record_context = options.multiline && options.null_data && !compiled.matches_nul;
         Ok(Self {
             nfa: NFA::never_match(),
+            automata: None,
             filters: LiteralFilters::default(),
             pcre: Some(Box::new(compiled)),
             pcre_groups,
@@ -369,6 +397,41 @@ impl Program {
     pub(crate) fn start(&self, haystack: Vec<u8>, all: bool) -> Search {
         Search::new(self, haystack, all)
     }
+}
+
+/// The forward and reverse automata of a pattern, each building its states
+/// as a search reaches them, or None when `AUTOMATON_STATES` cannot hold
+/// them. A Unicode word boundary makes them quit at a byte past ASCII, and
+/// the NFA takes that haystack. With `prefixed` the forward one marks its
+/// start states, where the prefix scan takes over.
+fn lazy_automata(
+    nfa: &NFA,
+    reverse: NFA,
+    prefixed: bool,
+    options: &Options,
+) -> Option<(dfa::DFA, dfa::DFA)> {
+    let capacity = options
+        .dfa_size_limit
+        .map_or(AUTOMATON_STATES, |limit| limit.min(AUTOMATON_STATES));
+    let config = dfa::Config::new()
+        .unicode_word_boundary(true)
+        .cache_capacity(capacity)
+        .minimum_cache_clear_count(Some(AUTOMATON_REFILLS))
+        .minimum_bytes_per_state(Some(AUTOMATON_BYTES_PER_STATE));
+    let forward = dfa::DFA::builder()
+        .configure(
+            config
+                .clone()
+                .match_kind(MatchKind::LeftmostFirst)
+                .specialize_start_states(prefixed),
+        )
+        .build_from_nfa(nfa.clone())
+        .ok()?;
+    let reverse = dfa::DFA::builder()
+        .configure(config.match_kind(MatchKind::All))
+        .build_from_nfa(reverse)
+        .ok()?;
+    Some((forward, reverse))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -539,6 +602,8 @@ struct Closure {
 #[derive(Clone, Copy)]
 enum Phase {
     Reject { cursor: usize },
+    Forward,
+    Reverse { end: usize },
     InitializeStates,
     InitializeSlots,
     Byte,
@@ -590,12 +655,202 @@ fn scan_literals(
     }
 }
 
+/// A search's own copy of the program's automata, each with the states it
+/// has built.
+struct Automata {
+    forward: (dfa::DFA, dfa::Cache),
+    reverse: (dfa::DFA, dfa::Cache),
+}
+
+/// What an automaton's walk comes back with.
+enum Walked {
+    /// Out of budget; the same walk goes on.
+    Paused,
+    /// The span is read or no match can follow: where the match ends, read
+    /// forwards, or starts, read backwards.
+    Done(Option<usize>),
+    /// Read forwards, the automaton is back in a start state with nothing
+    /// found: a match that reaches past `at` ends where one starting at or
+    /// after `at` does.
+    Idle(usize),
+    /// The automaton quit at a byte it does not read.
+    Quit,
+    /// The automaton built states faster than it read bytes.
+    GaveUp,
+}
+
+/// One automaton's walk over a haystack, a byte a step: the state it is in,
+/// the next byte it reads, and the last place it saw a match.
+struct Walk {
+    state: Option<LazyStateID>,
+    at: usize,
+    found: Option<usize>,
+}
+
+impl Walk {
+    fn new(at: usize) -> Self {
+        Self {
+            state: None,
+            at,
+            found: None,
+        }
+    }
+
+    /// Read `hay` forwards from where the walk began, unanchored, to where
+    /// the leftmost match ends. With `idles` the walk hands back each time
+    /// it returns to a start state.
+    fn forward(
+        &mut self,
+        (dfa, cache): &mut (dfa::DFA, dfa::Cache),
+        hay: &[u8],
+        idles: bool,
+        budget: &mut usize,
+    ) -> Walked {
+        let mut state = match self.state {
+            Some(state) => state,
+            None => {
+                let input = Input::new(hay).span(self.at..hay.len());
+                match dfa.start_state_forward(cache, &input) {
+                    Ok(state) => state,
+                    Err(err) if matches!(err.kind(), MatchErrorKind::Quit { .. }) => {
+                        return Walked::Quit;
+                    }
+                    Err(_) => return Walked::GaveUp,
+                }
+            }
+        };
+        let begin = self.at;
+        let stop = hay.len().min(begin.saturating_add(*budget));
+        while self.at < stop {
+            state = match dfa.next_state(cache, state, hay[self.at]) {
+                Ok(state) => state,
+                Err(_) => {
+                    *budget -= self.at - begin;
+                    return Walked::GaveUp;
+                }
+            };
+            if state.is_tagged() {
+                // A match state comes one byte late: the match ended before
+                // the byte just read.
+                if state.is_match() {
+                    self.found = Some(self.at);
+                } else if state.is_dead() {
+                    *budget -= self.at + 1 - begin;
+                    return Walked::Done(self.found);
+                } else if state.is_quit() {
+                    *budget -= self.at + 1 - begin;
+                    return Walked::Quit;
+                } else if idles && state.is_start() && self.found.is_none() {
+                    *budget -= self.at + 1 - begin;
+                    return Walked::Idle(self.at + 1);
+                }
+            }
+            self.at += 1;
+        }
+        *budget -= self.at - begin;
+        if self.at < hay.len() || *budget == 0 {
+            self.state = Some(state);
+            return Walked::Paused;
+        }
+        *budget -= 1;
+        match dfa.next_eoi_state(cache, state) {
+            Ok(state) if state.is_quit() => Walked::Quit,
+            Ok(state) => {
+                if state.is_match() {
+                    self.found = Some(hay.len());
+                }
+                Walked::Done(self.found)
+            }
+            Err(_) => Walked::GaveUp,
+        }
+    }
+
+    /// Read `hay[from..end]` backwards from `end`, where a match ends, to
+    /// the leftmost place a match ending there starts.
+    fn backward(
+        &mut self,
+        (dfa, cache): &mut (dfa::DFA, dfa::Cache),
+        hay: &[u8],
+        from: usize,
+        end: usize,
+        budget: &mut usize,
+    ) -> Walked {
+        let mut state = match self.state {
+            Some(state) => state,
+            None => {
+                let input = Input::new(hay).span(from..end).anchored(Anchored::Yes);
+                match dfa.start_state_reverse(cache, &input) {
+                    Ok(state) => state,
+                    Err(err) if matches!(err.kind(), MatchErrorKind::Quit { .. }) => {
+                        return Walked::Quit;
+                    }
+                    Err(_) => return Walked::GaveUp,
+                }
+            }
+        };
+        let begin = self.at;
+        let stop = from.max(begin.saturating_sub(*budget));
+        while self.at > stop {
+            state = match dfa.next_state(cache, state, hay[self.at - 1]) {
+                Ok(state) => state,
+                Err(_) => {
+                    *budget -= begin - self.at;
+                    return Walked::GaveUp;
+                }
+            };
+            if state.is_tagged() {
+                if state.is_match() {
+                    self.found = Some(self.at);
+                } else if state.is_dead() {
+                    *budget -= begin + 1 - self.at;
+                    return Walked::Done(self.found);
+                } else if state.is_quit() {
+                    *budget -= begin + 1 - self.at;
+                    return Walked::Quit;
+                }
+            }
+            self.at -= 1;
+        }
+        *budget -= begin - self.at;
+        if self.at > from || *budget == 0 {
+            self.state = Some(state);
+            return Walked::Paused;
+        }
+        *budget -= 1;
+        // What stands before the span decides the assertions at its start.
+        let last = match from.checked_sub(1) {
+            Some(before) => dfa.next_state(cache, state, hay[before]),
+            None => dfa.next_eoi_state(cache, state),
+        };
+        match last {
+            Ok(state) if state.is_quit() => Walked::Quit,
+            Ok(state) => {
+                if state.is_match() {
+                    self.found = Some(from);
+                }
+                Walked::Done(self.found)
+            }
+            Err(_) => Walked::GaveUp,
+        }
+    }
+}
+
 pub(crate) struct Search {
     haystack: Vec<u8>,
     all: bool,
     phase: Phase,
     from: usize,
     at: usize,
+    automata: Option<Box<Automata>>,
+    /// The automaton at work and how far it has read.
+    walk: Option<Walk>,
+    /// An automaton quit on this haystack, which the NFA searches alone.
+    quit: bool,
+    /// An automaton gave up, and the NFA searches alone from here on.
+    gave_up: bool,
+    /// Where the match the automata found ends, while the NFA reads its
+    /// groups from where it starts.
+    match_end: Option<usize>,
     current: States,
     next: States,
     start_slots: Vec<Option<usize>>,
@@ -622,6 +877,11 @@ impl Search {
             phase: Phase::Reject { cursor: 0 },
             from: 0,
             at: 0,
+            automata: None,
+            walk: None,
+            quit: false,
+            gave_up: false,
+            match_end: None,
             current: States::new(),
             next: States::new(),
             start_slots: Vec::new(),
@@ -751,6 +1011,9 @@ impl Search {
         self.all = all;
         self.from = 0;
         self.at = 0;
+        self.walk = None;
+        self.quit = false;
+        self.match_end = None;
         self.current.clear();
         self.next.clear();
         self.has_candidate = false;
@@ -809,14 +1072,19 @@ impl Search {
                 {
                     Some(Scan::Exhausted) => Phase::Done,
                     Some(Scan::Continue(cursor)) => Phase::Reject { cursor },
-                    _ => Phase::InitializeStates,
+                    _ => self.seek(program),
                 };
                 continue;
             }
+            let starting = match self.phase {
+                Phase::Forward => self.walk.is_none(),
+                Phase::Byte => {
+                    self.current.ids.is_empty() && !self.has_candidate && self.match_end.is_none()
+                }
+                _ => false,
+            };
             let prefix = program.filters.prefix.as_ref().filter(|_| {
-                matches!(self.phase, Phase::Byte)
-                    && self.current.ids.is_empty()
-                    && !self.has_candidate
+                starting
                     && !program.nfa.is_always_start_anchored()
                     && self.at <= self.haystack.len()
             });
@@ -834,9 +1102,125 @@ impl Search {
                     Scan::UseExact => {}
                 }
             }
-            self.one(program);
+            if matches!(self.phase, Phase::Forward | Phase::Reverse { .. }) {
+                // The step this turn paid for is the automaton's first.
+                *budget += 1;
+                self.locate(program, budget);
+            } else {
+                self.one(program);
+            }
         }
         matches!(self.phase, Phase::Done)
+    }
+
+    /// Where the search for the next match starts: at the automata, or at
+    /// the NFA when the pattern has none, one quit on this haystack, or one
+    /// gave up.
+    fn seek(&self, program: &Program) -> Phase {
+        if program.automata.is_some() && !self.quit && !self.gave_up {
+            Phase::Forward
+        } else {
+            Phase::InitializeStates
+        }
+    }
+
+    /// Read on with the automaton at work, a byte a step of `budget` and a
+    /// stretch a call: the forward one from `at` to where the next match
+    /// ends, then the reverse one back to where it starts, no earlier than
+    /// `from`. The states a stretch builds count against the budget by the
+    /// bytes they take. An automaton that quits leaves this haystack to
+    /// the NFA, and one that gives up leaves every later one too. The NFA
+    /// starts over at `from`, since a walk that went idle may have left a
+    /// match in progress behind `at`.
+    fn locate(&mut self, program: &Program, budget: &mut usize) {
+        let Some((forward, reverse)) = &program.automata else {
+            self.phase = Phase::InitializeStates;
+            return;
+        };
+        let automata = self.automata.get_or_insert_with(|| {
+            Box::new(Automata {
+                forward: (forward.clone(), forward.create_cache()),
+                reverse: (reverse.clone(), reverse.create_cache()),
+            })
+        });
+        let backwards = matches!(self.phase, Phase::Reverse { .. });
+        let automaton = if backwards {
+            &mut automata.reverse
+        } else {
+            &mut automata.forward
+        };
+        let (refills, held) = (automaton.1.clear_count(), automaton.1.memory_usage());
+        let stretch = (*budget).min(STRETCH);
+        let mut left = stretch;
+        let walked = match self.phase {
+            Phase::Reverse { end } => {
+                let walk = self.walk.get_or_insert_with(|| Walk::new(end));
+                automaton.1.search_start(walk.at);
+                let walked = walk.backward(automaton, &self.haystack, self.from, end, &mut left);
+                automaton.1.search_finish(walk.at);
+                walked
+            }
+            _ => {
+                let idles =
+                    program.filters.prefix.is_some() && !program.nfa.is_always_start_anchored();
+                let walk = self.walk.get_or_insert_with(|| Walk::new(self.at));
+                automaton.1.search_start(walk.at);
+                let walked = walk.forward(automaton, &self.haystack, idles, &mut left);
+                automaton.1.search_finish(walk.at);
+                walked
+            }
+        };
+        let built = if automaton.1.clear_count() == refills {
+            automaton.1.memory_usage().saturating_sub(held)
+        } else {
+            usize::MAX
+        };
+        *budget = (*budget - (stretch - left)).saturating_sub(built);
+        match (walked, self.phase) {
+            (Walked::Paused, _) => {}
+            (Walked::Idle(at), _) => {
+                self.walk = None;
+                self.at = at;
+            }
+            (Walked::Done(None), Phase::Forward) => self.phase = Phase::Done,
+            (Walked::Done(Some(end)), Phase::Forward) => {
+                self.walk = None;
+                self.phase = Phase::Reverse { end };
+            }
+            (Walked::Done(Some(start)), Phase::Reverse { end }) => {
+                self.walk = None;
+                self.located(start, end);
+            }
+            (walked, _) => {
+                if matches!(walked, Walked::GaveUp) {
+                    self.gave_up = true;
+                    self.automata = None;
+                } else {
+                    self.quit = true;
+                }
+                self.walk = None;
+                self.at = self.from;
+                self.phase = Phase::InitializeStates;
+            }
+        }
+    }
+
+    /// Take the match the automata found: as it stands when the pattern
+    /// records no group past the whole match, else the NFA reads its groups
+    /// from its start, no further than its end.
+    fn located(&mut self, start: usize, end: usize) {
+        if self.group_count > 1 {
+            self.from = start;
+            self.at = start;
+            self.match_end = Some(end);
+            self.phase = Phase::InitializeStates;
+            return;
+        }
+        self.candidate.resize(2, None);
+        self.candidate[0] = Some(start);
+        self.candidate[1] = Some(end);
+        self.has_candidate = true;
+        self.finish_match();
     }
 
     fn states_mut(&mut self, destination: Destination) -> &mut States {
@@ -899,7 +1283,9 @@ impl Search {
 
     fn one(&mut self, program: &Program) {
         match self.phase {
-            Phase::Reject { .. } => unreachable!("literal rejection is byte-budgeted by step"),
+            Phase::Reject { .. } | Phase::Forward | Phase::Reverse { .. } => {
+                unreachable!("literal rejection and the automata are byte-budgeted by step")
+            }
             Phase::InitializeStates => {
                 if self.current.rows.is_empty() {
                     let states = program.nfa.states().len();
@@ -927,15 +1313,14 @@ impl Search {
                 }
             }
             Phase::Byte => {
+                let anchored = program.nfa.is_always_start_anchored() || self.match_end.is_some();
                 if self.at > self.haystack.len()
+                    || self.match_end.is_some_and(|end| self.at > end)
                     || self.current.ids.is_empty()
-                        && (self.has_candidate
-                            || program.nfa.is_always_start_anchored() && self.at > self.from)
+                        && (self.has_candidate || anchored && self.at > self.from)
                 {
                     self.finish_match();
-                } else if !self.has_candidate
-                    && (!program.nfa.is_always_start_anchored() || self.at == self.from)
-                {
+                } else if !self.has_candidate && (!anchored || self.at == self.from) {
                     self.close(
                         Destination::Current,
                         Origin::Start,
@@ -1037,8 +1422,9 @@ impl Search {
                     self.current.clear();
                     self.next.clear();
                     self.has_candidate = false;
+                    self.match_end = None;
                     self.at = self.from;
-                    self.phase = Phase::Byte;
+                    self.phase = self.seek(program);
                 }
             }
             Phase::Done => {}
@@ -1262,10 +1648,13 @@ mod tests {
                 true
             })
             .unwrap();
-        for disabled in [false, true] {
+        for (disabled, lazy) in [(false, true), (true, true), (false, false), (true, false)] {
             let mut program = rg_matcher::Program::with_options(&sources, options).unwrap();
             if disabled {
                 program.filters = grep_regex::LiteralFilters::default();
+            }
+            if !lazy {
+                program.automata = None;
             }
             let mut search = program.start(hay.to_vec(), true);
             let mut steps = 0;
@@ -1309,11 +1698,13 @@ mod tests {
             b"user=user_0001 status=fail\n".repeat(128),
             "needle é É K kneedle Kneedle\r\nfoo\r".as_bytes().to_vec(),
             b"\xffneedle\0needle\n".to_vec(),
+            b"abababc ab ababc\n".to_vec(),
             Vec::new(),
         ];
         for pattern in [
             "abcdef|b",
             "(abcdef|b)(x)?",
+            "(?:ab)*c",
             r"event=[0-9]+.*status=fail",
             r"user=(user_[0-9]+).*status=fail",
             r"status=fail[^\n]*\nevent=",
@@ -1380,35 +1771,43 @@ mod tests {
 
     #[test]
     fn short_poll_keeps_prefix_scanning_available_to_later_polls() {
-        let mut program = rg_matcher::Program::with_options(
-            &["needle".to_owned()],
-            rg_matcher::Options::default(),
-        )
-        .unwrap();
-        program.filters.exact = None;
-        let mut haystack = vec![b'x'; 2 * 1024 * 1024];
-        let start = haystack.len();
-        haystack.extend_from_slice(b"needle");
-        let mut search = program.start(haystack, true);
-        let mut calls = 0;
-        while !matches!(search.phase, rg_matcher::Phase::Byte) {
+        for lazy in [true, false] {
+            let mut program = rg_matcher::Program::with_options(
+                &["needle".to_owned()],
+                rg_matcher::Options::default(),
+            )
+            .unwrap();
+            program.filters.exact = None;
+            if !lazy {
+                program.automata = None;
+            }
+            let mut haystack = vec![b'x'; 2 * 1024 * 1024];
+            let start = haystack.len();
+            haystack.extend_from_slice(b"needle");
+            let mut search = program.start(haystack, true);
+            let mut calls = 0;
+            while !matches!(
+                search.phase,
+                rg_matcher::Phase::Byte | rg_matcher::Phase::Forward
+            ) {
+                assert!(!search.step(&program, &mut 1));
+                calls += 1;
+                assert!(calls < 100);
+            }
             assert!(!search.step(&program, &mut 1));
-            calls += 1;
-            assert!(calls < 100);
+            calls = 0;
+            while !search.step(&program, &mut 16_384) {
+                calls += 1;
+                assert!(calls < 256, "later polls needed {calls} calls");
+            }
+            assert_eq!(
+                search.matches(),
+                [rg_matcher::Match {
+                    start,
+                    end: start + 6
+                }]
+            );
         }
-        assert!(!search.step(&program, &mut 1));
-        calls = 0;
-        while !search.step(&program, &mut 16_384) {
-            calls += 1;
-            assert!(calls < 256, "later polls needed {calls} calls");
-        }
-        assert_eq!(
-            search.matches(),
-            [rg_matcher::Match {
-                start,
-                end: start + 6
-            }]
-        );
     }
 
     #[test]
@@ -1484,7 +1883,7 @@ mod tests {
                 alternatives.push(r"\n".to_owned());
             }
             let pattern = format!("^({})+b?$", alternatives.join("|"));
-            let program = rg_matcher::Program::with_options(
+            let mut program = rg_matcher::Program::with_options(
                 &[pattern],
                 rg_matcher::Options {
                     multiline,
@@ -1492,6 +1891,7 @@ mod tests {
                 },
             )
             .unwrap();
+            program.automata = None;
             let haystack = [vec![b'a'; 4096], b"!\n".to_vec()].concat();
             let mut search = program.start(haystack, true);
             let mut budget = 16_384;
@@ -1500,6 +1900,141 @@ mod tests {
             assert!(!search.current.rows.is_empty());
             while !search.step(&program, &mut 16_384) {}
             assert!(search.matches().is_empty());
+        }
+    }
+
+    #[test]
+    fn automata_read_a_byte_a_step_and_leave_the_nfa_unbuilt() {
+        let program = rg_matcher::Program::with_options(
+            &["a[a-z]*z!".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let haystack = [vec![b'a'; 100_000], b"z! az!".to_vec()].concat();
+        let mut search = program.start(haystack, true);
+        let mut polls = 0;
+        loop {
+            let mut budget = 16_384;
+            let complete = search.step(&program, &mut budget);
+            polls += 1;
+            if complete {
+                break;
+            }
+            assert_eq!(budget, 0);
+        }
+        assert!(polls > 2 * 100_000 / 16_384);
+        let found = |start, end| rg_matcher::Match { start, end };
+        assert_eq!(
+            search.matches(),
+            [found(0, 100_002), found(100_003, 100_006)]
+        );
+        assert!(search.current.rows.is_empty());
+    }
+
+    #[test]
+    fn an_automaton_that_builds_a_state_a_byte_gives_the_search_to_the_nfa() {
+        let program = rg_matcher::Program::with_options(
+            &["a[ab]{2000}c".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let mut state = 7_u32;
+        let haystack: Vec<u8> = (0..20_000)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                b"ab"[(state >> 16) as usize % 2]
+            })
+            .collect();
+        let mut search = program.start(haystack, true);
+        let mut polls = 0;
+        while !search.gave_up {
+            let mut budget = 16_384;
+            assert!(!search.step(&program, &mut budget));
+            assert_eq!(budget, 0);
+            polls += 1;
+            assert!(polls < 200);
+        }
+        assert!(search.automata.is_none());
+        assert_eq!(search.at, search.from);
+        assert!(search.matches().is_empty());
+        let found = [vec![b'a'], vec![b'b'; 2000], b"c tail".to_vec()].concat();
+        search.reset(found, true);
+        while !search.step(&program, &mut 16_384) {}
+        assert_eq!(
+            search.matches(),
+            [rg_matcher::Match {
+                start: 0,
+                end: 2002
+            }]
+        );
+        assert!(search.automata.is_none());
+    }
+
+    #[test]
+    fn a_state_limit_below_the_automata_s_needs_leaves_the_nfa_alone() {
+        let program = rg_matcher::Program::with_options(
+            &["a.*z".to_owned()],
+            rg_matcher::Options {
+                dfa_size_limit: Some(1),
+                ..rg_matcher::Options::default()
+            },
+        )
+        .unwrap();
+        assert!(program.automata.is_none());
+        let mut search = program.start(b"an az".to_vec(), true);
+        while !search.step(&program, &mut 7) {}
+        assert_eq!(search.matches(), [rg_matcher::Match { start: 0, end: 5 }]);
+    }
+
+    #[test]
+    fn a_word_boundary_past_ascii_hands_the_haystack_to_the_nfa() {
+        let program = rg_matcher::Program::with_options(
+            &[r"\bn\w+".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let mut search = program.start("nee én née".as_bytes().to_vec(), true);
+        while !search.step(&program, &mut 3) {}
+        let found = |start, end| rg_matcher::Match { start, end };
+        assert_eq!(search.matches(), [found(0, 3), found(8, 12)]);
+        assert!(search.quit);
+        assert!(!search.current.rows.is_empty());
+        search.reset(b"no nee".to_vec(), true);
+        while !search.step(&program, &mut 3) {}
+        assert_eq!(search.matches(), [found(0, 2), found(3, 6)]);
+        assert!(!search.quit);
+    }
+
+    #[test]
+    fn an_automaton_that_quits_pays_for_the_bytes_it_read() {
+        // A warm automaton builds no state on the way to the byte it quits
+        // at, so the bytes it read are all the NFA's budget must lose.
+        let program = rg_matcher::Program::with_options(
+            &[r"\b\w+q".to_owned()],
+            rg_matcher::Options::default(),
+        )
+        .unwrap();
+        let ahead = [vec![b'x'; 40], "é xq".as_bytes().to_vec()].concat();
+        let mut search = program.start(ahead.clone(), true);
+        while !search.step(&program, &mut 16_384) {}
+        assert!(search.quit);
+        assert_eq!(search.matches(), [rg_matcher::Match { start: 43, end: 45 }]);
+        let behind = ["é".as_bytes().to_vec(), vec![b'x'; 40], b"q".to_vec()].concat();
+        for (haystack, phase, read) in [
+            (&ahead, rg_matcher::Phase::Forward, 41),
+            (&behind, rg_matcher::Phase::Reverse { end: 43 }, 42),
+        ] {
+            for warm in [false, true] {
+                search.reset(haystack.clone(), true);
+                search.phase = phase;
+                let mut budget = 1_000;
+                search.locate(&program, &mut budget);
+                assert!(search.quit);
+                assert_eq!(search.at, search.from);
+                if warm {
+                    assert_eq!(budget, 1_000 - read);
+                }
+            }
         }
     }
 
