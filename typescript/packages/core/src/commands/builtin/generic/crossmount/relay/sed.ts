@@ -30,7 +30,7 @@ export async function runSed(
         ...crossOpts(bag),
         stdin,
         cwd: PathSpec.fromStrPath(cwd),
-        vfs: new Files(dispatch, null, null, { ledger: false }).servedBy(null),
+        vfs: new Files(dispatch, null, null, { logOps: false }).servedBy(null),
         argv,
         ...(env !== undefined ? { env } : {}),
       },

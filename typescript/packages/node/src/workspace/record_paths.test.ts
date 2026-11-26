@@ -91,7 +91,7 @@ function underM(records: readonly OpRecord[]): [string, string][] {
     .map((r) => [r.op, r.path])
 }
 
-async function ledger(vfs: BaseVFS, setup: string | null): Promise<[string, string][]> {
+async function ops(vfs: BaseVFS, setup: string | null): Promise<[string, string][]> {
   const ws = new Workspace({ '/m': vfs, '/r': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     if (setup !== null) expect((await ws.shell(setup)).exitCode).toBe(0)
@@ -126,7 +126,7 @@ const NATIVE_APPEND: [string, string][] = [
 
 describe('record paths name the virtual path (node backends)', () => {
   it('ram', async () => {
-    expect(await ledger(new RAMVFS(), 'mkdir -p /m/m')).toEqual([
+    expect(await ops(new RAMVFS(), 'mkdir -p /m/m')).toEqual([
       ...NATIVE_APPEND,
       ['create', C],
       ['append', C],
@@ -139,7 +139,7 @@ describe('record paths name the virtual path (node backends)', () => {
     try {
       // disk records the rows s3 does for cp, mv, rm, rmdir and rm -r, and a
       // mkdir row as dropbox does.
-      expect(await ledger(new DiskVFS({ root }), null)).toEqual([
+      expect(await ops(new DiskVFS({ root }), null)).toEqual([
         ['write', K],
         ['append', K],
         ['append', K],
@@ -180,7 +180,7 @@ describe('record paths name the virtual path (node backends)', () => {
       // served from cache; tee -a and the dispatcher append are a read plus
       // a write, since s3 has no native append, and the rewrite proves the
       // cached copy it extends.
-      expect(await ledger(vfs, null)).toEqual([
+      expect(await ops(vfs, null)).toEqual([
         ['write', K],
         ['read', K],
         ['write', K],
@@ -219,7 +219,7 @@ describe('record paths name the virtual path (node backends)', () => {
     // the in-mount cp's native copy, a read and a write over sftp; gzip's read
     // is served from the cache. The date gzip and gunzip restore on an output
     // drops its cached copy, so the reads after them reach the server again.
-    expect(await ledger(vfs, null)).toEqual([
+    expect(await ops(vfs, null)).toEqual([
       ['write', K],
       ['append', K],
       ['append', K],

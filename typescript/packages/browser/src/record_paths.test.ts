@@ -80,7 +80,7 @@ const GENERIC_OUT: [string, string][] = [
 ]
 
 // echo's `>` is opened by its output write: one write. Opening `>>` on an existing file records no data write.
-const SHELL_LEDGER: [string, string][] = [
+const SHELL_OPS: [string, string][] = [
   ['write', K],
   ['append', K],
   ['append', K],
@@ -98,7 +98,7 @@ function underM(records: readonly OpRecord[]): [string, string][] {
     .map((r) => [r.op, r.path])
 }
 
-async function ledger(vfs: BaseVFS): Promise<[string, string][]> {
+async function ops(vfs: BaseVFS): Promise<[string, string][]> {
   const ws = new Workspace({ '/m': vfs, '/r': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     expect((await ws.shell('mkdir -p /m/m')).exitCode).toBe(0)
@@ -123,7 +123,7 @@ describe('record paths name the virtual path (browser backends)', () => {
     const restore = installFakeNavigator(() => makeMockRoot())
     try {
       // opfs create records `write`.
-      expect(await ledger(new OPFSVFS())).toEqual([...SHELL_LEDGER, ['write', C], ['append', C]])
+      expect(await ops(new OPFSVFS())).toEqual([...SHELL_OPS, ['write', C], ['append', C]])
     } finally {
       restore()
     }
@@ -137,6 +137,6 @@ describe('record paths name the virtual path (browser backends)', () => {
       keyPrefix: 'mirage:fs:',
       fetchImpl: fake.fetch,
     })
-    expect(await ledger(vfs)).toEqual([...SHELL_LEDGER, ['create', C], ['append', C]])
+    expect(await ops(vfs)).toEqual([...SHELL_OPS, ['create', C], ['append', C]])
   })
 })

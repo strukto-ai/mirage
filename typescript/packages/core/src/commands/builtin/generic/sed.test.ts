@@ -126,7 +126,7 @@ it.each([
       stdin: data,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as Context
     const result = await sedGeneric([], [script], ctx, noRead)
     if (result === null) throw new Error('no result')

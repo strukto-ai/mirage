@@ -592,7 +592,7 @@ class LineBox extends Runtime implements LineExecutorMixin {
 
 describe('whole-line runtimes', () => {
   it("puts what the runtime read in its line's report", async () => {
-    // A runtime's reads are the line's: they reach the workspace's ledger
+    // A runtime's reads are the line's: they reach the workspace's op log
     // and the observer's account of the line, as a command's do.
     class ReadingBox extends LineBox {
       override async runLine(
@@ -748,7 +748,7 @@ describe('whole-line runtimes', () => {
 
   it('keeps what an aborted runtime read on the books', async () => {
     // The runtime finished its read before the line was aborted: the read
-    // happened, so it reaches the ledger and the line's record all the same.
+    // happened, so it reaches the op log and the line's record all the same.
     let readDone = (): void => undefined
     const reading = new Promise<void>((resolve) => {
       readDone = resolve

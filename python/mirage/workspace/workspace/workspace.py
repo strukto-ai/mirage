@@ -103,6 +103,7 @@ from mirage.machine.program import (
 )
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
 from mirage.observe.observer import Observer
+from mirage.observe.record import OpLog
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
     AskHandler,
@@ -660,11 +661,13 @@ class Workspace:
         # and the policy gates fire exactly once, at that entry point. It runs
         # as the default session, as a bare ``shell`` does, so the
         # default profile confines it too.
+        self._op_log = OpLog()
         self._files = WorkspaceFiles(
             self._dispatcher.dispatch,
             self._namespace.readers(self._facade_visibility),
             observer=self.observer,
             bind=self._bind_session,
+            records=self._op_log,
             clock=self._clock,
         )
         self._kernel_mounts = KernelMounts(
@@ -3799,7 +3802,7 @@ class Workspace:
             registry=self._registry,
             dispatcher=self._dispatcher,
             observer=self.observer,
-            records=self._files.records,
+            records=self._op_log,
             job_table=self.job_table,
             line_table=self.line_table,
             runtimes=self._runtimes,

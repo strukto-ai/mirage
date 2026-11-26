@@ -117,7 +117,7 @@ describe('StreamHost', () => {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     await h.serve({ op: 'write', path: '/out', atomic: true }, ENC.encode('new '))
@@ -221,7 +221,7 @@ describe('StreamHost', () => {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     const kept = await h.serve({ op: 'copy', path: '/f', to: '/f.bak' }, new Uint8Array())
@@ -316,7 +316,7 @@ describe('StreamHost', () => {
       stdin: null,
       flags: {},
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     const stat = await h.serve({ op: 'stat', path: '/f' }, new Uint8Array())
@@ -351,7 +351,7 @@ describe('StreamHost', () => {
       flags: {},
       env: { TZ: 'UTC-8' },
       cwd: PathSpec.fromStrPath('/'),
-      vfs: new Files(dispatch, null, null, { ledger: false }),
+      vfs: new Files(dispatch, null, null, { logOps: false }),
     } as unknown as Context
     const h = new StreamHost([], () => parts(), ctx)
     const utc = { op: 'utime', path: '/f', mtime: 0 }

@@ -297,7 +297,7 @@ async def run_on_mount(
                         else None
                     ),
                     follow=follow,
-                    ledger=False,
+                    log_ops=False,
                 ),
                 env=env_snapshot(session),
                 session=session_view(

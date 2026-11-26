@@ -35,7 +35,7 @@ from mirage.observe.context import (
     fresh_recorder,
     record,
 )
-from mirage.observe.record import OpRecord, Recorder
+from mirage.observe.record import OpLog, OpRecord, Recorder
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import Clock, SystemClock
@@ -96,7 +96,7 @@ class Files:
     dispatcher answers from, read through the ``NamespaceReader`` it
     hands out for the session an op runs as (``namespace``), which the
     mount helpers here answer from.
-    What only the host asks of ``ws.vfs`` (the ledger, the mounts FUSE
+    What only the host asks of ``ws.vfs`` (the op log, the mounts FUSE
     and the runtime's ``open()`` interception ask about) is on
     ``WorkspaceFiles``.
 
@@ -117,7 +117,7 @@ class Files:
     serving one session) is kept, so the facade never widens the
     caller's view, and the record names the session that judged the
     op. ``Session`` derives a facade for another session over
-    the same ledger.
+    the same op log.
 
     Every op also takes ``session_id`` for the one-call case, the way
     ``Workspace.shell`` does. One rule decides between them: a shell
@@ -126,7 +126,7 @@ class Files:
     line's session wins when one is, which is what keeps a handler
     reaching the dispatcher from widening the view it was given.
 
-    A command's own files (its ``Context.vfs``) keep no ledger: calls go
+    A command's own files (its ``Context.vfs``) keep no op log: calls go
     straight to the dispatcher, which does the line's accounting. They
     carry the line's operand resolution (``follow``) for its globs.
     """
@@ -138,9 +138,9 @@ class Files:
         observer: Any | None = None,
         session_id: str | None = None,
         bind: SessionBind | None = None,
-        records: list[OpRecord] | None = None,
+        records: OpLog | None = None,
         follow: FollowOperands | None = None,
-        ledger: bool = True,
+        log_ops: bool = True,
         clock: Clock | None = None,
     ) -> None:
         self._clock: Clock = clock if clock is not None else SystemClock()
@@ -150,8 +150,8 @@ class Files:
         self._dispatch = dispatch
         self._bind = bind
         self._follow = follow
-        self._ledger = ledger
-        self._records: list[OpRecord] = records if records is not None else []
+        self._log_ops = log_ops
+        self._records = records if records is not None else OpLog()
 
     @property
     def session_id(self) -> str | None:
@@ -166,7 +166,7 @@ class Files:
         own: a host binds a session with ``ws.session(id)`` (creating
         it when the id is new) or ``Session(ws, id)`` (adopting
         one that exists), so there is one way to say it rather than
-        two. Shares the op ledger with this one, so the workspace-wide
+        two. Shares the op log with this one, so the workspace-wide
         account stays one list, and reads the same dispatcher's tables,
         so a later mount is seen by both.
 
@@ -184,7 +184,7 @@ class Files:
         )
 
     def _over(self, dispatch: DispatchFn) -> "Files":
-        """The same files over another dispatcher, keeping no ledger.
+        """The same files over another dispatcher, keeping no op log.
 
         Args:
             dispatch (DispatchFn): the dispatcher the calls go to.
@@ -194,7 +194,7 @@ class Files:
             self._namespace,
             session_id=self._session_id,
             follow=self._follow,
-            ledger=False,
+            log_ops=False,
         )
 
     def _reader(self) -> NamespaceReader:
@@ -258,15 +258,15 @@ class Files:
         """``Workspace.dispatch`` as this facade runs it: as its session,
         and recorded on ``records``. The dispatcher ``RuntimeFiles`` drives for
         a ``with ws:`` block, which is a facade caller like FUSE. The
-        IOResult is empty: a facade op's account is its record; without a
-        ledger the dispatcher's own answer passes through.
+        IOResult is empty: a facade op's account is its record; without an
+        op log the dispatcher's own answer passes through.
 
         Args:
             name (str): the function's name (read, write, stat, ...).
             path (PathSpec): the virtual path.
             **kwargs: the function's arguments, by its own names.
         """
-        if not self._ledger:
+        if not self._log_ops:
             return await self._dispatch(name, path, **kwargs)
         return await self._call(name, path, **kwargs), IOResult()
 
@@ -350,7 +350,7 @@ class Files:
         structure, invalidation). On a line this workspace runs, the op
         records where the line records, so its records are the line's;
         anywhere else (outside a line, or on another workspace's) it
-        records into its own recorder, handed to this ledger and the
+        records into its own recorder, handed to this op log and the
         observer once the op ends, a stream's once it closes. What records it is what
         records a line's calls: the backend and the dispatcher, with the
         tokens they read. An op nothing below recorded (a stat, a listing,
@@ -370,7 +370,7 @@ class Files:
             **kwargs: op arguments, by the op function's names.
         """
         typed = PathSpec.from_str_path(path, cwd="/")
-        if not self._ledger:
+        if not self._log_ops:
             answer, _ = await self._dispatch(op, typed, **kwargs)
             return answer
         timer = OpTimer(self._clock)
@@ -382,7 +382,7 @@ class Files:
         line = current_caller().recorder
         own = (
             None
-            if line is not None and line.ledger is self._records
+            if line is not None and line.op_log is self._records
             else fresh_recorder(clock=self._clock)
         )
         token = (
@@ -511,7 +511,7 @@ class Files:
         mine: list[OpRecord],
         outer: list[OpRecord] | None,
     ) -> None:
-        """Hand an op's records on once it ended: its own to the ledger
+        """Hand an op's records on once it ended: its own to the op log
         and the observer, while an op on a running line left them with the
         line; and each to the command the op ran in, if any.
 
@@ -529,7 +529,7 @@ class Files:
             return
         records = list(own.sink)
         own.sink.clear()
-        self._records.extend(records)
+        self._records.add(records)
         if self._observer is not None:
             session = self._session_for(seen)
             for rec in records:
@@ -851,7 +851,7 @@ class Files:
 
         Routed through the dispatcher like every write: session grants and
         admission policies fire on the link's turf, and the write lands
-        on the ledger. The target is stored verbatim as typed.
+        on the op log. The target is stored verbatim as typed.
 
         Args:
             path (str | PathSpec): Virtual path of the link.
@@ -1058,8 +1058,8 @@ class Files:
 class WorkspaceFiles(Files):
     """``ws.vfs``: the files the host holds, with what only the host asks.
 
-    The op ledger every ledgered facade appends to (``records``, with
-    the network/cache split derived from it), and the mount questions
+    The op log every facade that logs its ops appends to (``records``,
+    with the network/cache split derived from it), and the mount questions
     FUSE and the runtime's ``open()`` interception ask
     (``unsized_mounts``, ``writable_mounts``, ``is_mounted``), answered
     from the namespace's live mount table. The
@@ -1070,10 +1070,11 @@ class WorkspaceFiles(Files):
 
     @property
     def records(self) -> list[OpRecord]:
-        """The op ledger: every facade op lands here, and the executor
+        """The op log: every facade op lands here, and the executor
         appends each shell line's ops too, so this is the one
-        workspace-wide account."""
-        return self._records
+        workspace-wide account. It holds every record a snapshot pins a
+        path by and the newest of the rest (``OpLog``)."""
+        return self._records.records
 
     def unsized_mounts(self, root_prefix: str = "") -> list[tuple[str, str]]:
         """Mounts the session sees whose files cannot be sized without
@@ -1125,12 +1126,12 @@ class WorkspaceFiles(Files):
     @property
     def network_bytes(self) -> int:
         """Total bytes transferred over the network."""
-        return sum(r.bytes for r in self.records if not r.is_cache)
+        return self._records.network_bytes
 
     @property
     def cache_bytes(self) -> int:
         """Total bytes served from cache."""
-        return sum(r.bytes for r in self.records if r.is_cache)
+        return self._records.cache_bytes
 
     def is_mounted(self, path: str) -> bool:
         """Check if a path is under a mount someone made.

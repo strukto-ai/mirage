@@ -49,7 +49,7 @@ import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '.
 import { HISTFILESIZE } from '../../core/history/constants.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
 import { Observer } from '../../observe/observer.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import { OpLog, type OpRecord } from '../../observe/record.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { RoutePolicy } from '../../policy/builtin/route.ts'
@@ -314,6 +314,7 @@ export class Workspace {
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
   readonly observer: Observer
+  private readonly opLog = new OpLog()
   readonly vfs: WorkspaceFiles
   private readonly toolTables = new Map<string | null, MirageToolOperations>()
   private readonly reads = new Map<string, FileVersionTracker>()
@@ -668,7 +669,7 @@ export class Workspace {
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
     // the policy gates fire exactly once, at that entry point. It keeps the
-    // ledger, which is its own; the sink is only the observer's copy.
+    // op log, which is its own; the sink is only the observer's copy.
     // It runs as the default session, as a bare `shell` does, so the
     // default profile confines it too.
     this.vfs = new WorkspaceFiles(
@@ -682,6 +683,7 @@ export class Workspace {
       },
       {
         clock: this.clock,
+        records: this.opLog,
         bind: (sessionId, run) => this.bindSession(sessionId, run),
         // A facade that bound its own session dispatches as that owner,
         // so on the fallback storage a newer binding cannot judge its op.
@@ -2297,7 +2299,7 @@ export class Workspace {
   }
 
   /**
-   * The op ledger. It lives on `ws.vfs`, a `WorkspaceFiles` (python parity);
+   * The op log. It lives on `ws.vfs`, a `WorkspaceFiles` (python parity);
    * these are thin delegates so the public workspace API keeps reading.
    */
   get records(): OpRecord[] {
@@ -2575,7 +2577,7 @@ export class Workspace {
       registry: this.registry,
       dispatcher: this.dispatcher,
       observer: this.observer,
-      records: this.records,
+      records: this.opLog,
       jobTable: this.jobTable,
       lineTable: this.lineTable,
       runtimes: this.runtimeWorld,

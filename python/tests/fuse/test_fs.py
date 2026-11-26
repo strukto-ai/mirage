@@ -255,7 +255,7 @@ async def test_fsync_delegates_to_flush(rw_ws):
 
 
 @pytest.mark.asyncio
-async def test_mount_ops_land_on_the_workspace_ledger(rw_ws):
+async def test_mount_ops_land_on_the_workspace_op_log(rw_ws):
     await rw_ws.shell("tee /track.txt", stdin=b"x")
     fs = MirageFS(rw_ws.vfs)
     fh = fs.create("/new.txt", 0o644)

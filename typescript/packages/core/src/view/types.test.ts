@@ -51,7 +51,7 @@ describe('NamespaceLinks', () => {
     // Creating and removing a link belongs to the dispatcher, which is the
     // only layer that sees both planes: it decides symlink(2)'s refusal
     // to overwrite an occupied name, and it is where session grants,
-    // admission policies and the ledger fire. A mutator here is a write
+    // admission policies and the op log fire. A mutator here is a write
     // at a layer no session view covers, which is how a session-scoped
     // kernel mount came to delete a link on a mount its profile hides.
     // Checked at compile time as well: a member returning a Promise

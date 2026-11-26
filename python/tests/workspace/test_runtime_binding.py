@@ -623,7 +623,7 @@ class ReadingBox(LineBox):
 
 @pytest.mark.asyncio
 async def test_what_a_runtime_reads_is_in_its_lines_report():
-    # A runtime's reads are the line's: they reach the workspace's ledger
+    # A runtime's reads are the line's: they reach the workspace's op log
     # and the observer's account of the line, as a command's do.
     box = ReadingBox()
     box.captures = ("@line",)
@@ -672,7 +672,7 @@ class StallingBox(LineBox):
 @pytest.mark.asyncio
 async def test_what_an_aborted_runtime_read_stays_on_the_books():
     # The runtime finished its read before the line was aborted: the read
-    # happened, so it reaches the ledger and the line's record all the same.
+    # happened, so it reaches the op log and the line's record all the same.
     box = StallingBox()
     box.captures = ("@line",)
     ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC, machines=[box])

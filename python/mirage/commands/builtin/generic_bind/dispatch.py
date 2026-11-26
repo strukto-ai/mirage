@@ -129,7 +129,7 @@ async def run_dispatch(
         flags=virtual_flags(flag_kwargs),
         stdin=stdin,
         cwd=PathSpec(virtual=cwd, directory=cwd, vfs_path=cwd.strip("/")),
-        vfs=vfs or Files(dispatch, follow=follow, ledger=False),
+        vfs=vfs or Files(dispatch, follow=follow, log_ops=False),
         argv=argv,
         diff=diff,
         ids=ids if ids is not None else SystemIdSource(),

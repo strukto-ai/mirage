@@ -49,7 +49,7 @@ def mount_commands(vfs: BaseVFS) -> list[Command]:
 
 def command_files(ws: Workspace) -> Files:
     """The files a line's command on ``ws`` reads and writes through: over
-    the workspace's dispatcher, keeping no ledger.
+    the workspace's dispatcher, keeping no op log.
 
     Args:
         ws (Workspace): the workspace.
@@ -57,7 +57,7 @@ def command_files(ws: Workspace) -> Files:
     return Files(
         ws.dispatch,
         ws._namespace.readers(lambda _session: None),
-        ledger=False,
+        log_ops=False,
     )
 
 

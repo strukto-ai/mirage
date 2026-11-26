@@ -26,6 +26,7 @@ from mirage.execution.types import ProcessId
 from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     LostPaths,
+    OpLog,
     OpRecord,
     Recorder,
     RecordIndex,
@@ -84,12 +85,12 @@ def line_version(
 
 
 def fresh_recorder(
-    ledger: list[OpRecord] | None = None, clock: Clock | None = None
+    op_log: OpLog | None = None, clock: Clock | None = None
 ) -> Recorder:
     """An empty recorder, for a line or a call outside one.
 
     Args:
-        ledger (list[OpRecord] | None): the workspace ledger a line hands
+        op_log (OpLog | None): the workspace op log a line hands
             its records to, None for a file call's own.
         clock (Clock | None): the workspace clock its ops are timed and
             stamped on; None is the system clock.
@@ -99,7 +100,7 @@ def fresh_recorder(
         sink=sink,
         lost=LostPaths(sink),
         index=RecordIndex(sink),
-        ledger=ledger,
+        op_log=op_log,
         clock=clock if clock is not None else SYSTEM_CLOCK,
     )
 
@@ -117,7 +118,7 @@ class RecordingScope:
     Args:
         active (bool): False joins the enclosing scope instead of
             opening a new one.
-        ledger (list[OpRecord] | None): the workspace ledger the line
+        op_log (OpLog | None): the workspace op log the line
             hands its records to, which a file call of that workspace
             made on the line joins.
         clock (Clock | None): the workspace clock the line's ops are
@@ -127,13 +128,13 @@ class RecordingScope:
     def __init__(
         self,
         active: bool = True,
-        ledger: list[OpRecord] | None = None,
+        op_log: OpLog | None = None,
         clock: Clock | None = None,
     ) -> None:
         self.records: list[OpRecord] = []
         self._token = None
         if active:
-            rec = fresh_recorder(ledger, clock)
+            rec = fresh_recorder(op_log, clock)
             self.records = rec.sink
             self._token = bind_caller(
                 current_caller().changed({"recorder": rec})

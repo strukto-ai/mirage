@@ -101,7 +101,7 @@ describe('name-plane writes go through the dispatcher', () => {
   })
 
   it('ln leaves an op record', async () => {
-    // The op ledger must not say a workspace with ln traffic did
+    // The op log must not say a workspace with ln traffic did
     // nothing: the dispatcher records the namespace write like any other op.
     const ws = makeWs()
     const io = await ws.shell('ln -s x.txt /a/lk')

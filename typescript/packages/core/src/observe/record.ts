@@ -15,6 +15,7 @@
 import { VFSName } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
 import { underPath } from '../utils/key_prefix.ts'
+import { OP_LOG_RECORDS } from './constants.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -190,15 +191,87 @@ export class OpRecord {
 }
 
 /**
+ * Whether a snapshot's fingerprint capture changes a path's pin by `rec`:
+ * it retracts one, changes the bytes, or stamps a token. A read that carries
+ * no token and an op outside those sets change none. Mirrors Python's
+ * `changes_pin`.
+ */
+export function changesPin(rec: OpRecord): boolean {
+  if (RETRACT_FINGERPRINT_OPS.has(rec.op) || CONTENT_CHANGING_OPS.has(rec.op)) return true
+  return STAMP_FINGERPRINT_OPS.has(rec.op) && (rec.fingerprint !== null || rec.revision !== null)
+}
+
+/**
+ * A workspace's op log: every record a snapshot pins a path by, and the
+ * newest of the rest, which only account for an op.
+ *
+ * It holds at most `maxRecords` of those: past it the oldest go first, down
+ * to three quarters of it, and the bytes they moved stay in the totals.
+ * Mirrors Python's `OpLog`.
+ */
+export class OpLog {
+  readonly records: OpRecord[] = []
+  readonly maxRecords: number
+  private unpinned = 0
+  private droppedNetworkBytes = 0
+  private droppedCacheBytes = 0
+
+  /** @param maxRecords the most records it holds that change no pin. */
+  constructor(maxRecords: number = OP_LOG_RECORDS) {
+    this.maxRecords = maxRecords
+  }
+
+  /** Take the records of an op or a line that ended, oldest first. */
+  add(records: Iterable<OpRecord>): void {
+    for (const rec of records) {
+      this.records.push(rec)
+      if (!changesPin(rec)) this.unpinned += 1
+    }
+    if (this.unpinned <= this.maxRecords) return
+    let excess = this.unpinned - Math.floor((this.maxRecords * 3) / 4)
+    let kept = 0
+    this.unpinned = 0
+    for (const rec of this.records) {
+      if (!changesPin(rec)) {
+        if (excess > 0) {
+          excess -= 1
+          if (rec.isCache) this.droppedCacheBytes += rec.bytes
+          else this.droppedNetworkBytes += rec.bytes
+          continue
+        }
+        this.unpinned += 1
+      }
+      this.records[kept] = rec
+      kept += 1
+    }
+    this.records.length = kept
+  }
+
+  /** Bytes every record it took moved over the network. */
+  get networkBytes(): number {
+    let total = this.droppedNetworkBytes
+    for (const r of this.records) if (!r.isCache) total += r.bytes
+    return total
+  }
+
+  /** Bytes every record it took was served from cache. */
+  get cacheBytes(): number {
+    let total = this.droppedCacheBytes
+    for (const r of this.records) if (r.isCache) total += r.bytes
+    return total
+  }
+}
+
+/**
  * A line's recording: its records, the mount serving them, the workspace
- * ledger the line hands its records to when it ends (null for a file call's
+ * op log the line hands its records to when it ends (null for a file call's
  * own recording, which no other call joins), and the workspace clock every
  * op recorded here is timed and stamped on.
  */
 export interface Recorder {
   records: OpRecord[]
   mountId: string | null
-  ledger: OpRecord[] | null
+  opLog: OpLog | null
   clock: Clock
 }
 

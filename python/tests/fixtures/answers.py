@@ -86,7 +86,7 @@ async def run_generic(
         texts (Sequence[str]): its text operands.
         **flags (Any): its parsed flags.
     """
-    files = Files(mount, readers(mount.rows), ledger=False)
+    files = Files(mount, readers(mount.rows), log_ops=False)
     ctx = Context(flags=flags, cwd=PathSpec.from_str_path("/"), vfs=files)
     token = set_mount_gate(mount.prefix, MountMode.WRITE)
     try:

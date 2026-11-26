@@ -84,7 +84,7 @@ function optsWith(stat: FileStat | null, flags: Record<string, unknown> = {}): C
     stdin: null,
     flags,
     cwd: PathSpec.fromStrPath('/'),
-    vfs: new Files(dispatch, null, null, { ledger: false }),
+    vfs: new Files(dispatch, null, null, { logOps: false }),
   } as unknown as Context
 }
 

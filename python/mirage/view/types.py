@@ -245,7 +245,7 @@ class NamespaceLinks(Protocol):
     dispatcher (``Files.symlink``, ``Files.unlink``), never here: the
     dispatcher is the only layer that sees both planes, so it is where
     symlink(2)'s refusal to overwrite an occupied name is decided, and where
-    session grants, admission policies and the op ledger fire. A mutator on
+    session grants, admission policies and the op log fire. A mutator on
     this seam is a write at a layer no session view covers, which is
     how a session-scoped kernel mount came to delete a link on a mount
     its profile hides. Routing through the dispatcher costs a caller nothing:

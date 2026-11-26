@@ -56,7 +56,7 @@ async def resolve(
     rules: Argv0Rules = Argv0Rules(),
     **fields,
 ) -> Program | RunAnswer:
-    ctx = Context(vfs=Files(fake_dispatch, ledger=False), **fields)
+    ctx = Context(vfs=Files(fake_dispatch, log_ops=False), **fields)
     said = bytearray()
 
     async def errors(data: bytes) -> None:

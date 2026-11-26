@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
+from mirage.observe.constants import OP_LOG_RECORDS
 from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
 
@@ -138,6 +140,85 @@ class OpRecord:
             "revision": self.revision,
             **({"process": self.process} if self.process is not None else {}),
         }
+
+
+def changes_pin(rec: OpRecord) -> bool:
+    """Whether a snapshot's fingerprint capture changes a path's pin by
+    ``rec``: it retracts one, changes the bytes, or stamps a token. A
+    read that carries no token and an op outside those sets change none.
+
+    Args:
+        rec (OpRecord): the record.
+    """
+    if rec.op in RETRACT_FINGERPRINT_OPS or rec.op in CONTENT_CHANGING_OPS:
+        return True
+    return rec.op in STAMP_FINGERPRINT_OPS and (
+        rec.fingerprint is not None or rec.revision is not None
+    )
+
+
+class OpLog:
+    """A workspace's op log: every record a snapshot pins a path by,
+    and the newest of the rest, which only account for an op.
+
+    It holds at most ``max_records`` of those: past it the oldest go
+    first, down to three quarters of it, and the bytes they moved stay
+    in the totals. Mirrors TypeScript's ``OpLog``.
+
+    Args:
+        max_records (int): the most records it holds that change no pin.
+    """
+
+    def __init__(self, max_records: int = OP_LOG_RECORDS) -> None:
+        self.records: list[OpRecord] = []
+        self.max_records = max_records
+        self._unpinned = 0
+        self._network_bytes = 0
+        self._cache_bytes = 0
+
+    def add(self, records: Iterable[OpRecord]) -> None:
+        """Take the records of an op or a line that ended.
+
+        Args:
+            records (Iterable[OpRecord]): what it recorded, oldest first.
+        """
+        held = len(self.records)
+        self.records.extend(records)
+        self._unpinned += sum(
+            not changes_pin(rec) for rec in self.records[held:]
+        )
+        if self._unpinned <= self.max_records:
+            return
+        excess = self._unpinned - self.max_records * 3 // 4
+        kept: list[OpRecord] = []
+        self._unpinned = 0
+        for rec in self.records:
+            if changes_pin(rec):
+                kept.append(rec)
+            elif excess > 0:
+                excess -= 1
+                if rec.is_cache:
+                    self._cache_bytes += rec.bytes
+                else:
+                    self._network_bytes += rec.bytes
+            else:
+                self._unpinned += 1
+                kept.append(rec)
+        self.records[:] = kept
+
+    @property
+    def network_bytes(self) -> int:
+        """Bytes every record it took moved over the network."""
+        return self._network_bytes + sum(
+            r.bytes for r in self.records if not r.is_cache
+        )
+
+    @property
+    def cache_bytes(self) -> int:
+        """Bytes every record it took was served from cache."""
+        return self._cache_bytes + sum(
+            r.bytes for r in self.records if r.is_cache
+        )
 
 
 class RecordIndex:
@@ -290,7 +371,7 @@ class Recorder:
         lost (LostPaths): The line's lost paths.
         index (RecordIndex): The line's version index over ``sink``.
         mount_id (str | None): Identity of the mounted instance serving reads.
-        ledger (list[OpRecord] | None): the workspace ledger a line hands
+        op_log (OpLog | None): the workspace op log a line hands
             its records to when it ends; None for a file call's own
             recorder, which no other call joins.
         clock (Clock): the workspace clock every op recorded here is
@@ -301,5 +382,5 @@ class Recorder:
     lost: LostPaths
     index: RecordIndex
     mount_id: str | None = None
-    ledger: list[OpRecord] | None = None
+    op_log: OpLog | None = None
     clock: Clock = field(default_factory=SystemClock)

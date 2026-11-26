@@ -37,7 +37,7 @@ export function runUnzip(
   cwd: string,
   env?: Record<string, string>,
 ): CrossResult {
-  const vfs = new Files(dispatch, null, null, { ledger: false }).servedBy(null)
+  const vfs = new Files(dispatch, null, null, { logOps: false }).servedBy(null)
   const result = unzipGeneric(
     flatScopes(scopes),
     textArgs,

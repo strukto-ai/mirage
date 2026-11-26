@@ -75,7 +75,7 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
     ctx = Context(
         flags=flags,
         cwd=PathSpec.from_str_path(prefix or "/"),
-        vfs=Files(AsyncMock(), readers(rows), ledger=False),
+        vfs=Files(AsyncMock(), readers(rows), log_ops=False),
         stdin=patch_data if source == "stdin" else None,
     )
     operands = [orig_path, input_path] if source == "operand" else []
