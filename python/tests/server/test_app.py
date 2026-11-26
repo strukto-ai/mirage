@@ -25,9 +25,11 @@ import asyncssh
 import pytest
 from httpx import ASGITransport, AsyncClient, ConnectError
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.server import app as app_module
 from mirage.server import metrics as metrics_module
 from mirage.server.app import (
+    IdleExitHold,
     _remove_pid_file,
     _watch_exit,
     _write_pid_file,
@@ -35,6 +37,7 @@ from mirage.server.app import (
 )
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import ENV_E2B_PORT, ENV_HOME
+from mirage.server.registry import WorkspaceRegistry
 from mirage.server.ssh.config import SSHConfig
 from mirage.server.ssh.errors import SSHConfigError
 from tests.server.routers.e2b_test_support import (
@@ -458,3 +461,31 @@ async def test_live_e2b_listener_shares_registry_and_releases_http_on_sigterm():
         if server.returncode is None:
             server.kill()
             await server.wait()
+
+
+@pytest.mark.asyncio
+async def test_a_request_holds_the_idle_exit_until_it_is_answered():
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    entry = registry.add(Workspace({"/": (RAMVFS(), MountMode.WRITE)}), "w")
+    held = []
+
+    async def deletes(scope, receive, send) -> None:
+        await registry.remove(entry.id)
+        held.append(registry.exit_event.is_set())
+
+    app = SimpleNamespace(state=SimpleNamespace(registry=registry))
+    hold = IdleExitHold(deletes)
+    await hold({"type": "http", "app": app}, AsyncMock(), AsyncMock())
+    assert held == [False]
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_the_idle_hold_passes_a_lifespan_event_through():
+    seen = []
+
+    async def inner(scope, receive, send) -> None:
+        seen.append(scope["type"])
+
+    await IdleExitHold(inner)({"type": "lifespan"}, AsyncMock(), AsyncMock())
+    assert seen == ["lifespan"]

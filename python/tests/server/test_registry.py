@@ -438,3 +438,33 @@ async def test_a_drain_deadline_counts_a_capture_it_waits_behind():
         await line
     await snapshot
     await registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_a_request_in_flight_holds_the_idle_exit_until_it_is_answered():
+    # A grace of zero exits the moment the countdown starts, so the event
+    # shows when it does. The CLI checks /v1/health and then creates: a
+    # daemon that exited between the two refused the create.
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    registry.request_began()
+    await registry.remove(registry.add(_ws(), "w").id)
+    assert not registry.exit_event.is_set()
+    registry.request_began()
+    registry.request_ended()
+    assert not registry.exit_event.is_set()
+    registry.request_ended()
+    assert registry.exit_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_a_daemon_that_never_held_a_workspace_counts_no_grace():
+    registry = WorkspaceRegistry(idle_grace_seconds=0)
+    registry.request_began()
+    registry.request_ended()
+    assert not registry.exit_event.is_set()
+    entry = registry.add(_ws(), "w")
+    registry.request_began()
+    registry.request_ended()
+    assert not registry.exit_event.is_set()
+    await registry.remove(entry.id)
+    assert registry.exit_event.is_set()

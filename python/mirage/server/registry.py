@@ -335,7 +335,9 @@ class WorkspaceRegistry:
 
     Owns the lifecycle for each workspace inside the daemon process:
     register on create, drop on delete, and trip an idle-shutdown
-    event when the registry empties for ``idle_grace_seconds``.
+    event once the registry has emptied and answered no request for
+    ``idle_grace_seconds``. A request in flight holds the countdown,
+    so a client the daemon just answered reaches it with the next.
 
     Threading: the underlying ``dict`` is mutated only from the FastAPI
     server loop (the same loop the registry is constructed on), so no
@@ -413,6 +415,20 @@ class WorkspaceRegistry:
             exit_event if exit_event is not None else asyncio.Event()
         )
         self._idle_task: asyncio.Task[Any] | None = None
+        # The last workspace has gone, so the daemon counts down to its
+        # idle exit whenever no request is in flight.
+        self._emptied = False
+        self._requests = 0
+
+    def request_began(self) -> None:
+        """Hold the idle countdown while a request runs."""
+        self._requests += 1
+        self._cancel_idle_timer()
+
+    def request_ended(self) -> None:
+        """Count down again once the last request in flight is answered."""
+        self._requests -= 1
+        self._idle_if_empty()
 
     async def refusal(
         self, config: dict[str, JsonValue], account: str | None
@@ -894,6 +910,7 @@ class WorkspaceRegistry:
             entry.programs = ScriptPolicy(_Programs(self._programs))
             ws.policies.add(entry.programs)
         self._entries[wid] = entry
+        self._emptied = False
         self._cancel_idle_timer()
         return entry
 
@@ -948,7 +965,8 @@ class WorkspaceRegistry:
             del self._removals[entry.id]
             self._entries.pop(entry.id, None)
             if not self._entries:
-                self._start_idle_timer()
+                self._emptied = True
+                self._idle_if_empty()
         return entry
 
     async def stop(self, workspace_id: str) -> WorkspaceEntry:
@@ -992,7 +1010,8 @@ class WorkspaceRegistry:
         finally:
             del self._removals[entry.id]
             if not self._entries:
-                self._start_idle_timer()
+                self._emptied = True
+                self._idle_if_empty()
         return entry
 
     async def close_all(self) -> None:
@@ -1011,6 +1030,10 @@ class WorkspaceRegistry:
                 logger.exception("error stopping runner for %s", wid)
         self._cancel_idle_timer()
         await self._admission_programs.close()
+
+    def _idle_if_empty(self) -> None:
+        if self._emptied and not self._entries and not self._requests:
+            self._start_idle_timer()
 
     def _start_idle_timer(self) -> None:
         if self.idle_grace_seconds <= 0:

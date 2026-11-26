@@ -291,6 +291,10 @@ export class WorkspaceRegistry {
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
   private idleTimer: ReturnType<typeof setTimeout> | null = null
+  // The last workspace has gone, so the daemon counts down to its idle exit
+  // whenever no request is in flight.
+  private emptied = false
+  private requests = 0
   accountsRequired: boolean
   private readonly owners: RecordClient | null
   private readonly configs: RecordClient | null
@@ -695,6 +699,7 @@ export class WorkspaceRegistry {
       ws.policies.add(entry.programs)
     }
     this.entries.set(wid, entry)
+    this.emptied = false
     this.cancelIdleTimer()
     return entry
   }
@@ -735,7 +740,10 @@ export class WorkspaceRegistry {
       this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
       this.entries.delete(entry.id)
-      if (this.entries.size === 0) this.startIdleTimer()
+      if (this.entries.size === 0) {
+        this.emptied = true
+        this.idleIfEmpty()
+      }
     }
     return entry
   }
@@ -768,7 +776,10 @@ export class WorkspaceRegistry {
       await stop(entry)
     } finally {
       this.removals.delete(entry.id)
-      if (this.entries.size === 0) this.startIdleTimer()
+      if (this.entries.size === 0) {
+        this.emptied = true
+        this.idleIfEmpty()
+      }
     }
     return entry
   }
@@ -794,6 +805,22 @@ export class WorkspaceRegistry {
     }
     this.cancelIdleTimer()
     await this.admissionPrograms.close()
+  }
+
+  /** Hold the idle countdown while a request runs. */
+  requestBegan(): void {
+    this.requests += 1
+    this.cancelIdleTimer()
+  }
+
+  /** Count down again once the last request in flight is answered. */
+  requestEnded(): void {
+    this.requests -= 1
+    this.idleIfEmpty()
+  }
+
+  private idleIfEmpty(): void {
+    if (this.emptied && this.entries.size === 0 && this.requests === 0) this.startIdleTimer()
   }
 
   private startIdleTimer(): void {

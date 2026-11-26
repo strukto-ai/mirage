@@ -224,6 +224,46 @@ describe('WorkspaceRegistry', () => {
     expect(tripped).toBe(true)
     vi.useRealTimers()
   })
+
+  // A grace of zero exits the moment the countdown starts, so the count of
+  // exits shows when it does. The CLI checks /v1/health and then creates: a
+  // daemon that exited between the two refused the create.
+  it('holds the idle exit while a request is in flight', async () => {
+    let exits = 0
+    const r = new WorkspaceRegistry({
+      idleGraceSeconds: 0,
+      onIdleExit: () => {
+        exits += 1
+      },
+    })
+    r.requestBegan()
+    await r.remove(r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })).id)
+    expect(exits).toBe(0)
+    r.requestBegan()
+    r.requestEnded()
+    expect(exits).toBe(0)
+    r.requestEnded()
+    expect(exits).toBe(1)
+  })
+
+  it('counts no grace for a daemon that never held a workspace', async () => {
+    let exits = 0
+    const r = new WorkspaceRegistry({
+      idleGraceSeconds: 0,
+      onIdleExit: () => {
+        exits += 1
+      },
+    })
+    r.requestBegan()
+    r.requestEnded()
+    expect(exits).toBe(0)
+    const entry = r.add(new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE }))
+    r.requestBegan()
+    r.requestEnded()
+    expect(exits).toBe(0)
+    await r.remove(entry.id)
+    expect(exits).toBe(1)
+  })
 })
 
 describe('WorkspaceRegistry accounts', () => {
