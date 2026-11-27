@@ -15,9 +15,11 @@
 import base64
 import json
 import re
+from collections.abc import AsyncIterator
 from typing import Any, NamedTuple, TypeVar
 from urllib.parse import parse_qs, quote, unquote
 
+import pytest_asyncio
 from pydantic import SecretStr
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -712,3 +714,17 @@ class GoogleAccount:
             else:
                 named.append((f"{r['method']} {route}", path))
         return named
+
+
+@pytest_asyncio.fixture
+async def google_account(gws_origin: str) -> AsyncIterator[GoogleAccount]:
+    """An account of its own on the Google Workspace fake. It lives here,
+    not in the root conftest, because an isolated install that runs one
+    suite (hermes') has no pytest-asyncio.
+
+    Args:
+        gws_origin (str): the fake's origin.
+    """
+    made = GoogleAccount(gws_origin)
+    yield made
+    await made.run.close()

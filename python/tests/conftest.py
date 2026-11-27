@@ -17,18 +17,16 @@ import importlib
 import os
 import resource
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from unittest.mock import AsyncMock
 
 import aiohttp
 import pytest
-import pytest_asyncio
 
 from mirage.core.api.client import SessionPool
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from tests.fixtures.google_account import GoogleAccount
 from tests.fixtures.kit_fake import serve
 
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -116,14 +114,6 @@ def gws_origin() -> Iterator[str]:
     that asks."""
     with serve("gws") as origin:
         yield origin
-
-
-@pytest_asyncio.fixture
-async def google_account(gws_origin: str) -> AsyncIterator[GoogleAccount]:
-    """An account of its own on the Google Workspace fake."""
-    made = GoogleAccount(gws_origin)
-    yield made
-    await made.run.close()
 
 
 @pytest.fixture
