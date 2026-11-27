@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from stat import S_IFMT, S_IFREG, S_IXUSR
 
@@ -64,6 +65,8 @@ from mirage.errors.fs import fs_strerror
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import MountView
 from mirage.workspace.files import Files, reader_of
+
+logger = logging.getLogger(__name__)
 
 UNCHANGED = " "
 # What git diff adds to the commit of a gitlink whose repository has
@@ -382,7 +385,8 @@ async def _current(
         return info
     try:
         return await lstat(vfs, where, fresh=True)
-    except PermissionError:
+    except PermissionError as exc:
+        logger.debug("git: no fresh stat of %s: %s", where.virtual, exc)
         return None
 
 
@@ -592,7 +596,7 @@ async def work_changes(
             # Kept only when the backend still gives the walk's fingerprint
             # once the bytes are read, so it describes the bytes hashed.
             after = await still_stats(
-                vfs, worktree.join(name), found.files[name]
+                vfs, worktree.join(name), found.files[name], mounts
             )
             if after is not None:
                 refreshed[path] = with_fingerprint(entry, after)

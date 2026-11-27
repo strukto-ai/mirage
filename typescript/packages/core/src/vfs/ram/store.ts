@@ -82,6 +82,10 @@ export interface RAMAttrs {
   uid?: number | string
   gid?: number | string
   atime?: string
+  /** The stamp the store gave when a caller last set the file's mtime by
+   * hand, which its fingerprint carries: a time set back keeps the
+   * fingerprint off every one the file had before. */
+  timesSetAt?: string
 }
 
 /**

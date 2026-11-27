@@ -19,6 +19,7 @@ from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.cli.builtin.git.constants import (
     EXECUTABLE,
     GITLINK,
@@ -325,6 +326,7 @@ async def stage_changes(
     """
     changed: list[tuple[str, str]] = []
     added: list[str] = []
+    mounts = mount_view(vfs)
     for path in sorted(stage):
         before = state.entries.get(path.encode())
         if path in found.repos:
@@ -370,7 +372,8 @@ async def stage_changes(
         sha = await store_blob(vfs, location.commondir, data)
         info = found.files[path]
         if info.fingerprint and (
-            await still_stats(vfs, location.worktree.join(path), info) is None
+            await still_stats(vfs, location.worktree.join(path), info, mounts)
+            is None
         ):
             info = replace(info, fingerprint=None)
         entry = staged_entry(sha, info, len(data))

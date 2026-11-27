@@ -46,3 +46,44 @@ async def test_a_same_size_rewrite_moves_it_on_a_clock_that_stands_still():
     )
     assert first.fingerprint != second.fingerprint
     assert listed.fingerprint == second.fingerprint
+
+
+async def _set_back(vfs: RAMVFS) -> tuple[FileStat, FileStat]:
+    await vfs.write(at("/f"), b"one")
+    first = await vfs.stat(at("/f"))
+    await vfs.write(at("/f"), b"two")
+    assert first.modified is not None
+    await vfs.setattr(at("/f"), mtime=first.modified)
+    return first, await vfs.stat(at("/f"))
+
+
+@pytest.mark.asyncio
+async def test_a_time_set_back_by_hand_still_moves_it():
+    # touch -r can put back the very time the first write gave the file;
+    # the fingerprint carries the stamp of that set, so it is not the
+    # first write's.
+    first, after = await run_with_system_clock(
+        ManualClock(1_800_000_000), _set_back(RAMVFS())
+    )
+    assert after.modified == first.modified
+    assert after.fingerprint != first.fingerprint
+
+
+async def _reloaded(vfs: RAMVFS) -> tuple[FileStat, FileStat]:
+    await vfs.write(at("/f"), b"one")
+    saved = await vfs.stat(at("/f"))
+    loaded = RAMVFS()
+    loaded.load_state(vfs.get_state())
+    await loaded.write(at("/f"), b"two")
+    return saved, await loaded.stat(at("/f"))
+
+
+@pytest.mark.asyncio
+async def test_a_loaded_store_stamps_past_the_one_it_was_saved_from():
+    # The saved store's last stamp comes back with it: a store that
+    # started again from zero would give its first rewrite, under the
+    # same frozen clock, the time the saved store gave the file.
+    saved, rewritten = await run_with_system_clock(
+        ManualClock(1_800_000_000), _reloaded(RAMVFS())
+    )
+    assert saved.fingerprint != rewritten.fingerprint

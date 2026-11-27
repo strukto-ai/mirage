@@ -43,6 +43,8 @@ import { scan, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
+export const logger: { debug?: (message: string) => void } = {}
+
 const UNCHANGED = ' '
 // What git diff adds to the commit of a gitlink whose repository has changes
 // of its own.
@@ -393,8 +395,9 @@ async function current(
   try {
     return await lstat(vfs, where, true)
   } catch (err) {
-    if (isEacces(err)) return null
-    throw err
+    if (!isEacces(err)) throw err
+    logger.debug?.(`git: no fresh stat of ${where.virtual}: ${String(err)}`)
+    return null
   }
 }
 
@@ -509,7 +512,7 @@ export async function workChanges(
     ) {
       // Kept only when the backend still gives the walk's fingerprint once the
       // bytes are read, so it describes the bytes hashed.
-      const after = await stillStats(vfs, worktree.join(path), info)
+      const after = await stillStats(vfs, worktree.join(path), info, mounts)
       if (after !== null) refreshed.set(path, withFingerprint(entry, after))
     }
   }

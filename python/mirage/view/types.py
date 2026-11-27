@@ -232,6 +232,10 @@ class MountView:
     # Whether the mount serving a path keeps listings past the command
     # that fetched them, so a stat it answers may be as old as one.
     keeps_listings: Callable[[str], bool] | None = None
+    # Whether the mount serving a path answers a read from cached bytes
+    # without asking the backend first, so the bytes may be older than a
+    # stat taken beside the read.
+    keeps_bodies: Callable[[str], bool] | None = None
 
 
 @runtime_checkable

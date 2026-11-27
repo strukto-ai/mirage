@@ -22,6 +22,7 @@ from dulwich.objects import Blob
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
+from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.status import parse_flags
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
@@ -30,7 +31,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 )
 from mirage.commands.spec.flag_view import FlagView
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
-from mirage.types import Limit, MountMode
+from mirage.types import Limit, MountMode, PathSpec
 from mirage.utils.clock import ManualClock, run_with_system_clock
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -457,6 +458,72 @@ async def test_a_checkout_keeps_the_fingerprint_of_a_file_it_had_to_read(
         before, after = await _touch_then_checkout(ws)
     assert before == ["/w/dst/a.txt"]
     assert after == []
+
+
+async def _edit_then_set_the_time_back(ws: Workspace) -> bytes:
+    cloned = await ws.shell("git clone -q /src/work /w/dst")
+    assert cloned.exit_code == 0, cloned.stderr
+    before = await ws.vfs.stat("/w/dst/a.txt")
+    edited = await ws.shell("sed -i s/one/ONE/ /w/dst/a.txt")
+    assert edited.exit_code == 0, edited.stderr
+    assert before.modified is not None
+    await ws.vfs.setattr("/w/dst/a.txt", mtime=before.modified)
+    changed = await ws.shell("git -C /w/dst status --porcelain")
+    return changed.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_time_set_back_by_hand_still_shows_the_edit_under_it(
+    repo_path: Path,
+):
+    # touch -r after a same-size edit puts back the time the clone gave
+    # the file; the RAM fingerprint carries the stamp of that set, so it
+    # is not the one the index kept.
+    with Workspace(
+        {
+            "/src/": DiskVFS(root=str(repo_path.parent)),
+            "/w/": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        changed = await run_with_system_clock(
+            ManualClock(1_800_000_000), _edit_then_set_the_time_back(ws)
+        )
+    assert changed == b" M a.txt\n"
+
+
+class CachedRAM(RAMVFS):
+    """Serves reads from the workspace's file cache, as a bucket mount
+    does under ``read: bounded``."""
+
+    caches_reads = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("vfs", "kept"), [(RAMVFS, True), (CachedRAM, False)])
+async def test_an_add_keeps_a_fingerprint_only_where_reads_ask_the_backend(
+    repo_path: Path, vfs: type[RAMVFS], kept: bool
+):
+    # A body the cache serves unasked may be older than the fingerprint a
+    # stat gives beside the read, so add keeps none there: kept beside
+    # the old bytes' blob, it would let a status trust an edit away once
+    # the cache let the old bytes go.
+    with Workspace(
+        {"/src/": DiskVFS(root=str(repo_path.parent)), "/w/": vfs()},
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        cloned = await ws.shell("git clone -q /src/work /w/dst")
+        assert cloned.exit_code == 0, cloned.stderr
+        edited = await ws.shell("sed -i s/one/ONE/ /w/dst/a.txt")
+        assert edited.exit_code == 0, edited.stderr
+        added = await ws.shell("git -C /w/dst add a.txt")
+        assert added.exit_code == 0, added.stderr
+        state = await read_index(ws.vfs, PathSpec.from_str_path("/w/dst/.git"))
+    entry = state.entries[b"a.txt"]
+    assert isinstance(entry, IndexEntry)
+    assert (entry.dev != 0 or entry.ino != 0) is kept
 
 
 class KeptRAM(RAMVFS):

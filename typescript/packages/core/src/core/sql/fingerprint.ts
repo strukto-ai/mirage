@@ -19,7 +19,10 @@
  * Every write lands past the time the database gave the write before
  * (`nowStamp`), so a rewrite always moves it, a same-size one in the same
  * instant included; the inode tells a file renamed over the name from the
- * one it replaced. Mirrors Python's `token_of`.
+ * one it replaced. The limit: a time set by hand (`touch -r`) lands in the
+ * same columns, and the table keeps no change time a caller cannot set, so a
+ * same-size rewrite whose time is then set back to the one the file had is not
+ * seen. Mirrors Python's `token_of`.
  *
  * @param ino the file's inode
  * @param seconds its `mtime`

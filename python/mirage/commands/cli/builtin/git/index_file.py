@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+import logging
 from dataclasses import replace
 from io import BytesIO
 from typing import IO, BinaryIO, cast
@@ -32,7 +33,10 @@ from mirage.commands.cli.builtin.git.io import (
 )
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.types import FileStat, PathSpec
+from mirage.view.types import MountView
 from mirage.workspace.files import Files
+
+logger = logging.getLogger(__name__)
 
 MERGE_HEAD = "MERGE_HEAD"
 
@@ -73,26 +77,36 @@ def with_fingerprint(entry: IndexEntry, info: FileStat) -> IndexEntry:
 
 
 async def still_stats(
-    vfs: Files, path: PathSpec, info: FileStat
+    vfs: Files, path: PathSpec, info: FileStat, mounts: MountView | None
 ) -> FileStat | None:
     """The backend's own stat of a file just read, when it still gives the
     fingerprint ``info`` had before the read; None when it gives another,
-    none, or refuses the stat.
+    none, or refuses the stat, or when the read may not have asked it.
 
     A fingerprint kept with a blob has to describe the bytes hashed, and
     a stat from before the read may be older than they are: a kept
     listing's row, or a file another writer changed in between. One more
     stat after the read catches either; a file that changed and changed
-    back within the read is the window that remains.
+    back within the read is the window that remains. A mount that keeps
+    bodies may have answered the read from bytes older than either stat,
+    so its fingerprints are not kept from a read at all.
 
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path of the file.
         info (FileStat): the stat taken before the read.
+        mounts (MountView | None): the session's mount boundaries.
     """
+    if (
+        mounts is not None
+        and mounts.keeps_bodies is not None
+        and mounts.keeps_bodies(path.virtual)
+    ):
+        return None
     try:
         after = await lstat(vfs, path, fresh=True)
-    except PermissionError:
+    except PermissionError as exc:
+        logger.debug("git: no fresh stat of %s: %s", path.virtual, exc)
         return None
     if after is None or not after.fingerprint:
         return None

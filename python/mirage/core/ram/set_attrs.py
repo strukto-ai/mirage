@@ -15,6 +15,7 @@
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.dest import lookup_error
 from mirage.types import PathSpec
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -60,4 +61,5 @@ async def set_attrs(
         entry["atime"] = atime
     if mtime is not None:
         store.modified[p] = mtime
+        entry["times_set_at"] = stamp_iso(accessor.stamped())
     return {}

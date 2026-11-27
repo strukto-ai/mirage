@@ -408,6 +408,10 @@ class NamespaceReader:
             row = owner(virtual)
             return row is not None and row.keeps_listings
 
+        def keeps_bodies(virtual: str) -> bool:
+            row = owner(virtual)
+            return row is not None and row.keeps_bodies
+
         return MountView(
             descendants=below,
             visible_descendants=visible_below,
@@ -417,4 +421,5 @@ class NamespaceReader:
             searchable=searchable,
             walk_limit=walk_limit,
             keeps_listings=keeps_listings,
+            keeps_bodies=keeps_bodies,
         )

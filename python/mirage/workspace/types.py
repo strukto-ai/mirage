@@ -55,6 +55,10 @@ class MountRow:
         keeps_listings (bool): the mount keeps listings past the command
             that fetched them (an index ttl above zero), so a stat it
             answers may come from one as it was then.
+        keeps_bodies (bool): the mount serves a file's bytes from the
+            workspace's file cache without asking the backend first
+            (reads cached under ``read: bounded``), so a read may answer
+            bytes older than a stat taken beside it.
     """
 
     prefix: str
@@ -70,6 +74,7 @@ class MountRow:
     workspace_limits: Mapping[str, Limit] = field(default_factory=dict)
     calls: frozenset[str] = frozenset()
     keeps_listings: bool = False
+    keeps_bodies: bool = False
 
     @property
     def default_limit(self) -> Limit:

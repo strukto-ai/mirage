@@ -40,6 +40,10 @@ export interface MountRow {
   /** The mount keeps listings past the command that fetched them (an index
    * ttl above zero), so a stat it answers may come from one as it was then. */
   readonly keepsListings?: boolean
+  /** The mount serves a file's bytes from the workspace's file cache without
+   * asking the backend first (reads cached under `read: bounded`), so a read
+   * may answer bytes older than a stat taken beside it. */
+  readonly keepsBodies?: boolean
 }
 
 export class ExecutionNode {

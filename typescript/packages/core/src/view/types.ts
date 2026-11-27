@@ -108,6 +108,10 @@ export interface MountView {
   // Whether the mount serving a path keeps listings past the command that
   // fetched them, so a stat it answers may be as old as one.
   keepsListings?(path: string): boolean
+  // Whether the mount serving a path answers a read from cached bytes without
+  // asking the backend first, so the bytes may be older than a stat taken
+  // beside the read.
+  keepsBodies?(path: string): boolean
 }
 
 // The session-plane facts a command may consult, as one injected object.

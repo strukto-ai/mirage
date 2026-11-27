@@ -20,11 +20,17 @@ import type { RAMStore } from '../../vfs/ram/store.ts'
  *
  * Every write lands past the time the store gave the write before
  * (`RAMStore.stamped`), so a rewrite always moves it, a same-size one in the
- * same instant included. Mirrors Python's `token_of`.
+ * same instant included. A time set by hand (`touch -d`, `touch -r`) can be
+ * one the file had before, so the stamp the store gave that set
+ * (`timesSetAt`) goes with it, and a rewrite whose time is set back to the old
+ * one still moves the fingerprint. Mirrors Python's `token_of`.
  *
  * @param store the mount's store
  * @param p the file's normalized key
  */
 export function tokenOf(store: RAMStore, p: string): string | null {
-  return store.modified.get(p) ?? null
+  const modified = store.modified.get(p)
+  if (modified === undefined) return null
+  const setAt = store.attrs.get(p)?.timesSetAt
+  return setAt === undefined ? modified : `${modified}~${setAt}`
 }

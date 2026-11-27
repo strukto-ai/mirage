@@ -332,6 +332,7 @@ export class NamespaceReader implements NamespaceLinks {
         )
       },
       keepsListings: (path: string) => owner(path)?.keepsListings ?? false,
+      keepsBodies: (path: string) => owner(path)?.keepsBodies ?? false,
     }
   }
 }

@@ -398,6 +398,12 @@ class KeptRAM extends RAMVFS {
   override readonly indexTtl: number = 600
 }
 
+/** Serves reads from the workspace's file cache, as a bucket mount does under
+ * `read: bounded`. */
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads: boolean = true
+}
+
 /** A one-commit repository mirrored into RAM at `/w/work`, git installed. */
 async function source(vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
   const repo = mkdtempSync(join(tmp, 'src-'))
@@ -458,6 +464,54 @@ describe('fingerprints the index keeps', () => {
       )
       expect(reads).toEqual([])
       expect(changed).toBe(' M a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('still show an edit under a time set back by hand', async () => {
+    // touch -r after a same-size edit puts back the time the clone gave the
+    // file; the RAM fingerprint carries the stamp of that set, so it is not the
+    // one the index kept. Mirrors Python's
+    // test_a_time_set_back_by_hand_still_shows_the_edit_under_it.
+    const ws = await source()
+    try {
+      const changed = await runWithSystemClock(new ManualClock(1_800_000_000), async () => {
+        const cloned = await ws.shell('git clone -q /w/work /w/dst')
+        expect(cloned.exitCode).toBe(0)
+        const before = await ws.vfs.stat('/w/dst/a.txt')
+        const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+        expect(edited.exitCode).toBe(0)
+        await ws.vfs.setattr('/w/dst/a.txt', { mtime: before.modified ?? '' })
+        return DEC.decode((await ws.shell('git -C /w/dst status --porcelain')).stdout)
+      })
+      expect(changed).toBe(' M a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['RAM', () => new RAMVFS(), true],
+    ['a cache-served mount', () => new CachedRAM(), false],
+  ] as const)('are kept by add on %s only where reads ask the backend', async (_, make, kept) => {
+    // A body the cache serves unasked may be older than the fingerprint a stat
+    // gives beside the read, so add keeps none there: kept beside the old
+    // bytes' blob, it would let a status trust an edit away once the cache let
+    // the old bytes go. The index's first entry is a.txt; its dev and ino sit
+    // at bytes 28 and 32. Mirrors Python's
+    // test_an_add_keeps_a_fingerprint_only_where_reads_ask_the_backend.
+    const ws = await source(make())
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+      expect(edited.exitCode).toBe(0)
+      const added = await ws.shell('git -C /w/dst add a.txt')
+      expect(added.exitCode).toBe(0)
+      const index = await ws.vfs.read('/w/dst/.git/index')
+      const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
+      expect(view.getUint32(28) !== 0 || view.getUint32(32) !== 0).toBe(kept)
     } finally {
       await ws.close()
     }

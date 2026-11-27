@@ -23,7 +23,10 @@ import { Digest } from '../../../../utils/hash.ts'
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, IndexEntry, IndexState } from './types.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
+import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
 
 const MERGE_HEAD = 'MERGE_HEAD'
 
@@ -72,29 +75,35 @@ export function withFingerprint(entry: StagedEntry, info: FileStat): StagedEntry
 /**
  * The backend's own stat of a file just read, when it still gives the
  * fingerprint `info` had before the read; null when it gives another, none, or
- * refuses the stat.
+ * refuses the stat, or when the read may not have asked it.
  *
  * A fingerprint kept with a blob has to describe the bytes hashed, and a stat
  * from before the read may be older than they are: a kept listing's row, or a
  * file another writer changed in between. One more stat after the read catches
  * either; a file that changed and changed back within the read is the window
- * that remains. Mirrors Python's `still_stats`.
+ * that remains. A mount that keeps bodies may have answered the read from bytes
+ * older than either stat, so its fingerprints are not kept from a read at all.
+ * Mirrors Python's `still_stats`.
  *
  * @param vfs the session's files
  * @param path absolute virtual path of the file
  * @param info the stat taken before the read
+ * @param mounts the session's mount boundaries
  */
 export async function stillStats(
   vfs: Files,
   path: PathSpec,
   info: FileStat,
+  mounts: MountView | undefined,
 ): Promise<FileStat | null> {
+  if (mounts?.keepsBodies?.(path.virtual) === true) return null
   let after: FileStat | null
   try {
     after = await lstat(vfs, path, true)
   } catch (err) {
-    if (isEacces(err)) return null
-    throw err
+    if (!isEacces(err)) throw err
+    logger.debug?.(`git: no fresh stat of ${path.virtual}: ${String(err)}`)
+    return null
   }
   if (after === null || (after.fingerprint ?? '') === '') return null
   return after.fingerprint === info.fingerprint ? after : null

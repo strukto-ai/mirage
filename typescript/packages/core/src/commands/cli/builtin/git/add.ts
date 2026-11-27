@@ -51,6 +51,7 @@ import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, gitBool, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { mountView } from '../../../builtin/utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -228,6 +229,7 @@ export async function stageChanges(
   const staged = new Map<string, StagedEntry>()
   const changed: [string, string][] = []
   const added: string[] = []
+  const mounts = mountView(vfs)
   for (const path of [...stage].sort(compareCodePoints)) {
     const before = entries.get(path)
     if (found.repos.includes(path)) {
@@ -258,7 +260,7 @@ export async function stageChanges(
     const kept =
       info.fingerprint === null ||
       info.fingerprint === '' ||
-      (await stillStats(vfs, repo.location.worktree.join(path), info)) !== null
+      (await stillStats(vfs, repo.location.worktree.join(path), info, mounts)) !== null
         ? info
         : info.with({ fingerprint: null })
     const entry = stagedEntry(oid, kept, data.length)
