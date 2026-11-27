@@ -125,12 +125,14 @@ export function processResponse(
     }
     clearTimeout(grace)
     lease.stopped.removeEventListener('abort', revoke)
+    closed.removeEventListener('abort', disconnect)
     canceled.abort()
     void source.return(undefined).catch((cause: unknown) => {
       console.debug('sandbox command events closed', cause)
     })
   }
   let stall = (): void => undefined
+  let disconnect = (): void => undefined
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       stall = () => {
@@ -138,6 +140,11 @@ export function processResponse(
         const error = new DOMException('command stream stalled', 'AbortError')
         controller.error(error)
         finish(error)
+      }
+      disconnect = () => {
+        if (!open) return
+        controller.error(closed.reason)
+        finish()
       }
     },
     async pull(controller) {
@@ -163,5 +170,7 @@ export function processResponse(
   })
   if (lease.stopped.aborted) revoke()
   else lease.stopped.addEventListener('abort', revoke, { once: true })
+  if (closed.aborted) disconnect()
+  else closed.addEventListener('abort', disconnect, { once: true })
   return reply.type(constants.CONNECT_STREAM).send(body)
 }

@@ -1,4 +1,3 @@
-import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { RAW_BODIES } from '../constants.ts'
 import { HttpError } from '../errors.ts'
@@ -9,21 +8,30 @@ export async function* bodyChunks(
   signal: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   signal.throwIfAborted()
-  const source = request.raw[Symbol.asyncIterator]()
+  const { raw } = request
+  if (!(raw instanceof ReadableStream)) throw new TypeError('E2B request body is not a web stream')
+  const reader = (raw as ReadableStream<Uint8Array>).getReader()
+  const cancel = (): void => {
+    reader.cancel(signal.reason).catch((error: unknown) => {
+      console.debug('sandbox request body cancel failed', error)
+    })
+  }
+  signal.addEventListener('abort', cancel, { once: true })
+  let ended = false
   try {
     for (;;) {
-      const chunk = await abortable(source.next(), signal)
-      if (chunk.done === true) return
+      const chunk = await reader.read()
+      signal.throwIfAborted()
+      if (chunk.done) {
+        ended = true
+        return
+      }
       yield chunk.value
     }
-  } catch (error) {
-    signal.throwIfAborted()
-    throw error
   } finally {
-    // A pending read unwinds when the response closes the connection.
-    void source.return?.().catch((error: unknown) => {
-      console.debug('sandbox request body closed', error)
-    })
+    signal.removeEventListener('abort', cancel)
+    if (ended) reader.releaseLock()
+    else cancel()
   }
 }
 

@@ -223,8 +223,15 @@ class E2BRoutes<C> implements RouteApp {
     return this.contexts.get(request) as C
   }
 
-  /** Answer `request` as `account` (null when the auth mode names none). */
+  /** Answer `request` as `account` (null when the auth mode names none); HEAD answers no body. */
   async fetch(request: Request, account: string | null, context: C): Promise<Response> {
+    const response = await this.answer(request, account, context)
+    if (request.method !== 'HEAD' || response.body === null) return response
+    await response.body.cancel()
+    return new Response(null, { status: response.status, headers: response.headers })
+  }
+
+  private async answer(request: Request, account: string | null, context: C): Promise<Response> {
     const url = new URL(request.url)
     const method = request.method === 'HEAD' ? 'GET' : request.method
     let found: [Route, Record<string, string>] | null
