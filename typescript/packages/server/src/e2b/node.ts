@@ -121,7 +121,7 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   setExpiry(id: string, expiresAtMs: number, onlyExtend: boolean): Promise<SandboxRecord | null> {
     const held = this.sandboxes.get(id)
-    if (held === undefined) return Promise.resolve(null)
+    if (held === undefined || !isLive(held.record)) return Promise.resolve(null)
     held.record = {
       ...held.record,
       expiresAtMs: onlyExtend ? Math.max(held.record.expiresAtMs, expiresAtMs) : expiresAtMs,

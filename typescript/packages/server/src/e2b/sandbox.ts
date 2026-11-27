@@ -34,8 +34,9 @@ export interface LifecycleBackend {
   put(record: SandboxRecord): Promise<void>
   /**
    * Set a stored record's expiry in one step against its stored value,
-   * keeping the later of the two when `onlyExtend`. Answer the updated
-   * record, or null when it is gone; never insert one.
+   * keeping the later of the two when `onlyExtend`, and only while the
+   * record is still live. Answer the updated record, or null when it is
+   * gone or already expired; never insert one.
    */
   setExpiry(
     sandboxId: string,

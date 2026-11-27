@@ -34,7 +34,9 @@ class FakeBackend implements LifecycleBackend {
     onlyExtend: boolean,
   ): Promise<SandboxRecord | null> {
     const record = this.records.get(sandboxId)
-    if (record === undefined) return Promise.resolve(null)
+    if (record === undefined || record.expiresAtMs <= performance.timeOrigin + performance.now()) {
+      return Promise.resolve(null)
+    }
     const updated = {
       ...record,
       expiresAtMs: onlyExtend ? Math.max(record.expiresAtMs, expiresAtMs) : expiresAtMs,
@@ -270,18 +272,30 @@ it('cancels a running command and refuses file work once the host stops the sand
   expect(await stat.json()).toMatchObject({ code: 'unauthenticated' })
 })
 
-/** A backend whose next reads answer only once released, as slow storage would. */
+function gate(): [Promise<undefined>, () => void] {
+  let release = (): void => undefined
+  const released = new Promise<undefined>((resolve) => {
+    release = () => {
+      resolve(undefined)
+    }
+  })
+  return [released, release]
+}
+
+/** A backend whose next reads, or next stop, answer only once released, as slow storage would. */
 class SlowBackend extends FakeBackend {
   private readonly held: Promise<undefined>[] = []
+  private stopping: Promise<undefined> | null = null
 
   holdReads(count: number): () => void {
-    let release = (): void => undefined
-    const released = new Promise<undefined>((resolve) => {
-      release = () => {
-        resolve(undefined)
-      }
-    })
+    const [released, release] = gate()
     for (let i = 0; i < count; i++) this.held.push(released)
+    return release
+  }
+
+  holdStop(): () => void {
+    const [released, release] = gate()
+    this.stopping = released
     return release
   }
 
@@ -290,6 +304,11 @@ class SlowBackend extends FakeBackend {
     const hold = this.held.shift()
     if (hold !== undefined) await hold
     return record
+  }
+
+  override async stop(workspaceId: string): Promise<void> {
+    if (this.stopping !== null) await this.stopping
+    await super.stop(workspaceId)
   }
 }
 
@@ -344,5 +363,26 @@ it('answers 404 and keeps no record for a reconnect that read before a kill', as
   expect(killed.status).toBe(204)
   release()
   expect((await reconnect).status).toBe(404)
+  expect(store.records.has(id)).toBe(false)
+})
+
+it('answers 404 to a reconnect that read before a kill expired the record', async () => {
+  const store = new SlowBackend()
+  stores.push(store)
+  const id = await createdSandbox(store)
+  const releaseRead = store.holdReads(1)
+  const reconnect = connect(store, id, 600)
+  await tick()
+  const releaseStop = store.holdStop()
+  const killed = lifecycleRoutes(store)(
+    new Request(`${ORIGIN}/sandboxes/${id}`, { method: 'DELETE' }),
+    'alice',
+  )
+  await tick()
+  releaseRead()
+  expect((await reconnect).status).toBe(404)
+  expect(store.records.get(id)?.expiresAtMs).toBeLessThan(Date.now() + 500_000)
+  releaseStop()
+  expect((await killed).status).toBe(204)
   expect(store.records.has(id)).toBe(false)
 })
