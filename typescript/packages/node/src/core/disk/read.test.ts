@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { execFileSync } from 'node:child_process'
-import { mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, symlink, writeFile } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import type * as FsPromises from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -120,7 +122,7 @@ describe('core/disk/readMany', () => {
     // reached through one, a name spelled unlike its entry, a directory, a
     // FIFO (whose open would wait for a writer) and a file gone or longer
     // than the limit are left for that read; the rest are recorded once each,
-    // as their own reads record them.
+    // as their own reads record them, a file named twice too.
     await mkdir(join(root, 'a', 'sub'), { recursive: true })
     await mkdir(join(root, 'b'))
     await writeFile(join(root, 'a', 'x'), 'x\n')
@@ -142,6 +144,7 @@ describe('core/disk/readMany', () => {
       '/gone/x',
       '/a/y',
       '/b/c',
+      '/a/x',
     ]
     const [got, records] = await recordingScope(() => readMany(accessor, keys.map(spec), 8))
     const enc = new TextEncoder()
@@ -173,5 +176,58 @@ describe('core/disk/readMany', () => {
     expect([...(await readMany(accessor, files, 64, 20)).keys()]).toEqual(['/f', '/h'])
     expect((await readMany(accessor, files, 64, -1)).size).toBe(0)
     expect((await readMany(accessor, files, 64)).size).toBe(3)
+  })
+
+  it('reads on past a short read', async () => {
+    // A read may answer fewer bytes than it was asked for before the end of
+    // the file, so the batch reads again from where it stopped until a read
+    // answers none.
+    await writeFile(join(root, 'f'), '0123456789')
+    const probe = await open(join(root, 'f'))
+    const proto = Object.getPrototypeOf(probe) as FileHandle
+    await probe.close()
+    type Read = (
+      this: FileHandle,
+      buf: Buffer,
+      offset: number,
+      length: number,
+      position: number,
+    ) => Promise<{ bytesRead: number; buffer: Buffer }>
+    const real = Reflect.get(proto, 'read') as Read
+    const short: Read = function (buf, offset, length, position) {
+      return real.call(this, buf, offset, Math.min(length, 3), position)
+    }
+    const reads = vi.spyOn(proto, 'read').mockImplementation(short as unknown as FileHandle['read'])
+    try {
+      const got = await readMany(accessor, [spec('/f')], 64)
+      expect(new TextDecoder().decode(got.get('/f'))).toBe('0123456789')
+      expect(reads.mock.calls.length).toBeGreaterThan(1)
+    } finally {
+      reads.mockRestore()
+    }
+  })
+
+  it('proves a leaf is no link where the open cannot refuse one', async () => {
+    // Without O_NOFOLLOW (Windows) the open would follow a link at the leaf,
+    // so the batch looks at the name first and keeps a file only when the
+    // open reached the very file it saw.
+    await mkdir(join(root, 'a'))
+    await writeFile(join(root, 'a', 'x'), 'x\n')
+    await symlink(join(root, 'a', 'x'), join(root, 'a', 'link'))
+    vi.resetModules()
+    vi.doMock('node:fs/promises', async (importOriginal) => {
+      const real = await importOriginal<typeof FsPromises>()
+      const constants: Record<string, number> = { ...real.constants }
+      delete constants.O_NOFOLLOW
+      return { ...real, constants }
+    })
+    try {
+      const fresh = await import('./read.ts')
+      const got = await fresh.readMany(accessor, ['/a/x', '/a/link'].map(spec), 8)
+      expect([...got.keys()]).toEqual(['/a/x'])
+    } finally {
+      vi.doUnmock('node:fs/promises')
+      vi.resetModules()
+    }
   })
 })

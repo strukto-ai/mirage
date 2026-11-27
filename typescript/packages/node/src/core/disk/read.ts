@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { constants, open, stat } from 'node:fs/promises'
+import { constants, lstat, open, stat } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import { join } from 'node:path'
 import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -26,7 +27,10 @@ import { exactName, probeName, resolveInside } from './utils.ts'
 const CHUNK = 1 << 20
 
 // How a batch opens a file it checks: never through a link, and never waiting
-// on a FIFO that replaced it since.
+// on a FIFO that replaced it since. Where the open cannot refuse a link (no
+// `O_NOFOLLOW`, as on Windows), the batch looks at the name first and proves
+// the open reached the very file it saw.
+const OPEN_REFUSES_LINK = 'O_NOFOLLOW' in constants
 const OPEN_CHECKED = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 
 /**
@@ -93,8 +97,8 @@ export async function read(
  * opened once. A file is read only while it is the regular file its check
  * saw; one longer than `limit`, one that does not fit in `room` beside the
  * files read before it, and one whose check or read fails is left out for its
- * own read to meet. Each file read is recorded as a whole streamed read
- * records it. Mirrors Python's `read_many`.
+ * own read to meet. A path named twice is read once. Each file read is
+ * recorded as a whole streamed read records it. Mirrors Python's `read_many`.
  *
  * @param accessor the mount's disk handle
  * @param paths the files, all on this mount
@@ -112,7 +116,7 @@ export async function readMany(
   const folders = new Map<string, string | null>()
   const read = new Map<string, Uint8Array>()
   let total = 0
-  for (const spec of paths) {
+  for (const spec of new Map(paths.map((p) => [p.virtual, p])).values()) {
     const key = norm(spec.mountPath)
     const cut = key.lastIndexOf('/')
     const folder = key.slice(0, cut) || '/'
@@ -168,9 +172,11 @@ async function folderInside(
  * or null when it is no regular file spelled so, is longer than `most` bytes,
  * or grew past its stat while it was read. The file is opened before its name
  * is proved, so the proof is of the file that is read; a link refuses the
- * open. One read asks for the size its stat gives and one byte more, never
- * `most`, so no buffer outgrows the file; a short read of a regular file is
- * its end. Mirrors Python's `_read_checked`.
+ * open, or where it cannot, the name's own lstat must show a regular file and
+ * the open reach that very file. It reads up to the size its stat gives and
+ * one byte more (`readUpto`), never `most`, so no buffer outgrows the file,
+ * and that one byte more tells a file that grew. Mirrors Python's
+ * `_read_checked`.
  */
 async function readChecked(
   parent: string,
@@ -178,20 +184,41 @@ async function readChecked(
   most: number,
   opened: Map<string, Promise<void>>,
 ): Promise<Uint8Array | null> {
-  const handle = await open(join(parent, name), OPEN_CHECKED)
+  const host = join(parent, name)
+  const seen = OPEN_REFUSES_LINK ? null : await lstat(host)
+  if (seen !== null && !seen.isFile()) return null
+  const handle = await open(host, OPEN_CHECKED)
   try {
     const info = await handle.stat()
     if (!info.isFile() || info.size > most) return null
+    if (seen !== null && (seen.dev !== info.dev || seen.ino !== info.ino)) return null
     const buf = Buffer.allocUnsafe(info.size + 1)
     const [exact, filled] = await Promise.allSettled([
       exactName(probeName(parent, name, opened, info), info),
-      handle.read(buf, 0, buf.byteLength, 0),
+      readUpto(handle, buf),
     ])
     if (exact.status === 'rejected') throw exact.reason
     if (filled.status === 'rejected') throw filled.reason
-    if (!exact.value || filled.value.bytesRead > info.size) return null
-    return new Uint8Array(buf.buffer, buf.byteOffset, filled.value.bytesRead)
+    if (!exact.value || filled.value > info.size) return null
+    return new Uint8Array(buf.buffer, buf.byteOffset, filled.value)
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * How many bytes of `handle` from its start fill `buf`: all of them up to its
+ * end, or as many as `buf` holds when it holds more. A read may answer fewer
+ * bytes than it was asked for before the end, so it reads again from where the
+ * last one stopped until one answers none or `buf` is full. Mirrors Python's
+ * `_read_upto`.
+ */
+async function readUpto(handle: FileHandle, buf: Buffer): Promise<number> {
+  let got = 0
+  while (got < buf.byteLength) {
+    const { bytesRead } = await handle.read(buf, got, buf.byteLength - got, got)
+    if (bytesRead === 0) break
+    got += bytesRead
+  }
+  return got
 }

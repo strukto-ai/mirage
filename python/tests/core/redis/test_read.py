@@ -195,10 +195,17 @@ async def test_read_bytes_directory_is_eisdir(accessor):
 @pytest.mark.asyncio
 async def test_a_batch_read_answers_the_files_their_own_reads_would(accessor):
     # A folder and a file gone are left for their own reads to answer;
-    # each file read is recorded once, as its own read records it.
+    # each file read is recorded once, as its own read records it, one
+    # named twice too.
     files = [
         PathSpec.from_str_path(p)
-        for p in ("/hello.txt", "/sub", "/gone", "/sub/nested.txt")
+        for p in (
+            "/hello.txt",
+            "/sub",
+            "/gone",
+            "/sub/nested.txt",
+            "/hello.txt",
+        )
     ]
     scope = RecordingScope()
     try:

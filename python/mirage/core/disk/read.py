@@ -29,7 +29,10 @@ from mirage.utils.path import norm
 logger = logging.getLogger(__name__)
 
 # How a batch opens a file it checked: never through a link, and never
-# waiting on a FIFO that replaced it since.
+# waiting on a FIFO that replaced it since. Where the open cannot refuse a
+# link (no ``O_NOFOLLOW``, as on Windows), the batch looks at the name
+# first and proves the open reached the very file it saw.
+_OPEN_REFUSES_LINK = hasattr(os, "O_NOFOLLOW")
 _OPEN_CHECKED = (
     os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
 )
@@ -79,7 +82,8 @@ async def read_many(
     it is the regular file its check saw; one longer than ``limit``, one
     that does not fit in ``room`` beside the files read before it, and
     one whose check or read fails is left out for its own read to meet.
-    Each file read is recorded as a whole streamed read records it.
+    A path named twice is read once. Each file read is recorded as a whole
+    streamed read records it.
 
     Args:
         accessor (DiskAccessor): the mount's disk handle.
@@ -95,7 +99,7 @@ async def read_many(
         folders: dict[str, str | None] = {}
         out: list[tuple[PathSpec, bytes]] = []
         total = 0
-        for spec in paths:
+        for spec in {p.virtual: p for p in paths}.values():
             folder, name = posixpath.split(norm(spec.mount_path))
             if folder not in folders:
                 folders[folder] = _folder_inside(root, spec, folder, opened)
@@ -155,9 +159,11 @@ def _read_checked(
     ``parent``, or None when it is no regular file spelled so, is longer
     than ``most`` bytes, or grew past its stat while it was read. The file
     is opened before its name is proven, so the proof is of the file that
-    is read; a link refuses the open. One read asks for the size its stat
-    gives and one byte more, never ``most``, so no buffer outgrows the
-    file; a short read of a regular file is its end.
+    is read; a link refuses the open, or where it cannot, the name's own
+    lstat must show a regular file and the open reach that very file. It
+    reads up to the size its stat gives and one byte more (``_read_upto``),
+    never ``most``, so no buffer outgrows the file, and that one byte more
+    tells a file that grew.
 
     Args:
         parent (str): the checked host folder.
@@ -165,16 +171,42 @@ def _read_checked(
         most (int): the most bytes worth reading.
         opened (set[str]): the parents the batch has proven readable.
     """
-    fd = os.open(os.path.join(parent, name), _OPEN_CHECKED)
+    host = os.path.join(parent, name)
+    seen = None if _OPEN_REFUSES_LINK else os.lstat(host)
+    if seen is not None and not stat.S_ISREG(seen.st_mode):
+        return None
+    fd = os.open(host, _OPEN_CHECKED)
     try:
         info = os.fstat(fd)
         if (
             not stat.S_ISREG(info.st_mode)
             or info.st_size > most
+            or (seen is not None and not os.path.samestat(seen, info))
             or not exact_name(parent, name, info, opened)
         ):
             return None
-        data = os.read(fd, info.st_size + 1)
+        data = _read_upto(fd, info.st_size + 1)
     finally:
         os.close(fd)
     return data if len(data) <= info.st_size else None
+
+
+def _read_upto(fd: int, want: int) -> bytes:
+    """The bytes of ``fd`` from where it stands to its end, or its first
+    ``want`` bytes when it holds more. A read may answer fewer bytes than
+    it was asked for before the end, so it reads again until one answers
+    none or ``want`` have come.
+
+    Args:
+        fd (int): the open file.
+        want (int): the most bytes to read.
+    """
+    parts: list[bytes] = []
+    got = 0
+    while got < want:
+        part = os.read(fd, want - got)
+        if not part:
+            break
+        parts.append(part)
+        got += len(part)
+    return b"".join(parts)

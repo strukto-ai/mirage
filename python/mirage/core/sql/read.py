@@ -66,7 +66,8 @@ async def read_many(
     its inode says, before its rows are asked for: one that is gone or no
     file, one longer than ``limit``, and one that does not fit in ``room``
     beside the files kept before it is left out for its own read to meet.
-    Each file read is recorded as a whole streamed read records it.
+    A path named twice is kept once. Each file read is recorded as a whole
+    streamed read records it.
 
     Args:
         accessor (SqlAccessor): the database.
@@ -76,7 +77,7 @@ async def read_many(
             together, None for no bound.
     """
     folders: dict[str, list[tuple[PathSpec, str]]] = {}
-    for spec in paths:
+    for spec in {p.virtual: p for p in paths}.values():
         names = names_of(norm(spec.mount_path))
         if names:
             folder = "/" + "/".join(names[:-1])
@@ -107,7 +108,8 @@ async def read_many(
     for run in _runs(kept):
         rows = await _rows_by_ino(
             accessor,
-            [e.ino for _, e in run if e.size and e.ino not in built],
+            [e for _, e in run if e.size and e.ino not in built],
+            cs,
         )
         for spec, entry in run:
             data = built.get(entry.ino)
@@ -126,8 +128,8 @@ def _runs(
     kept: list[tuple[PathSpec, Inode]],
 ) -> list[list[tuple[PathSpec, Inode]]]:
     """``kept`` cut into runs whose rows one query fetches: at most
-    ``READ_RUN_BYTES`` of files, a longer file alone, and at most
-    ``MAX_PARAMS`` files.
+    ``READ_RUN_BYTES`` of files, a longer file alone, and at most the
+    files ``MAX_PARAMS`` binds at two parameters a file (``rows_of``).
 
     Args:
         kept (list[tuple[PathSpec, Inode]]): the files kept, in order.
@@ -138,7 +140,7 @@ def _runs(
         last = runs[-1] if runs else None
         if (
             last is None
-            or len(last) == MAX_PARAMS
+            or len(last) == MAX_PARAMS // 2
             or size + entry.size > READ_RUN_BYTES
         ):
             runs.append([(spec, entry)])
@@ -174,17 +176,21 @@ async def _inodes_named(
 
 
 async def _rows_by_ino(
-    accessor: SqlAccessor, inos: list[int]
+    accessor: SqlAccessor, files: list[Inode], cs: int
 ) -> dict[int, list[SqlRow]]:
-    """Every ``fs_data`` row of the files ``inos`` names, by inode.
+    """The ``fs_data`` rows of ``files``, by inode, each file's only as
+    far as the size its inode gave when it was kept (``rows_of``).
 
     Args:
         accessor (SqlAccessor): the database.
-        inos (list[int]): the files' inodes.
+        files (list[Inode]): the files, each with bytes.
+        cs (int): the bytes one row holds.
     """
     out: dict[int, list[SqlRow]] = {}
-    for at in range(0, len(inos), MAX_PARAMS):
-        part = inos[at : at + MAX_PARAMS]
-        for row in await accessor.query(rows_of(len(part)), part):
+    step = MAX_PARAMS // 2
+    for at in range(0, len(files), step):
+        part = files[at : at + step]
+        params = [v for e in part for v in (e.ino, (e.size - 1) // cs)]
+        for row in await accessor.query(rows_of(len(part)), params):
             out.setdefault(int(row["ino"] or 0), []).append(row)
     return out

@@ -83,11 +83,14 @@ describe.skipIf(skip)('core/redis ops', () => {
 
   it('a batch read answers the files their own reads would, recording each', async () => {
     // A folder and a file gone are left for their own reads to answer; each
-    // file read is recorded once, as its own read records it.
+    // file read is recorded once, as its own read records it, one named twice
+    // too.
     await write(acc, spec('/hello.txt'), ENC.encode('hello world'))
     await mkdir(acc, spec('/sub'))
     await write(acc, spec('/sub/nested.txt'), ENC.encode('nested'))
-    const files = ['/hello.txt', '/sub', '/gone', '/sub/nested.txt'].map((p) => spec(p))
+    const files = ['/hello.txt', '/sub', '/gone', '/sub/nested.txt', '/hello.txt'].map((p) =>
+      spec(p),
+    )
     const [got, records] = await recordingScope(() => readMany(acc, files, 64))
     expect(got).toEqual(
       new Map([

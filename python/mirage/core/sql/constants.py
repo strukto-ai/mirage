@@ -226,10 +226,13 @@ def entries_named(count: int) -> str:
 
 
 def rows_of(count: int) -> str:
-    """Every ``fs_data`` row of a batch of files, in order within each."""
-    slots = ", ".join("?" for _ in range(count))
+    """The ``fs_data`` rows of a batch of files, in order within each, a
+    file's only up to the chunk its checked size ends in, so a file that
+    grew since is fetched no further: two parameters a file, its inode
+    and that last chunk's index."""
+    files = " OR ".join("(ino = ? AND chunk_index <= ?)" for _ in range(count))
     return f"""SELECT ino, chunk_index, data FROM fs_data
-    WHERE ino IN ({slots}) ORDER BY ino, chunk_index"""
+    WHERE {files} ORDER BY ino, chunk_index"""
 
 
 def children_of(count: int) -> str:

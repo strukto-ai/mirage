@@ -62,8 +62,8 @@ async def read_many(
     their number (``RedisStore.get_files``): one that is absent, empty or
     no file, one longer than ``limit``, and one that does not fit in
     ``room`` beside the files read before it is left out for its own read
-    to meet. Each file read is recorded as a whole streamed read records
-    it.
+    to meet. A path named twice is read once. Each file read is recorded
+    as a whole streamed read records it.
 
     Args:
         accessor (RedisAccessor): Redis accessor.
@@ -72,11 +72,12 @@ async def read_many(
         room (int | None): the most bytes the files read may come to
             together, None for no bound.
     """
+    files = list({p.virtual: p for p in paths}.values())
     found = await accessor.store.get_files(
-        [norm(raw_path_of(p)) for p in paths], limit, room
+        [norm(raw_path_of(p)) for p in files], limit, room
     )
     read: dict[str, bytes] = {}
-    for spec, data in zip(paths, found, strict=True):
+    for spec, data in zip(files, found, strict=True):
         if data is None:
             continue
         rec = record_stream("read", spec.virtual, "redis")

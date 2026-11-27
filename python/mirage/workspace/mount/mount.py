@@ -439,6 +439,33 @@ async def _as_stream(
         await close_quietly(found)
 
 
+def _in_room(
+    scopes: list[PathSpec], read: dict[str, bytes], held_bytes: int
+) -> dict[str, bytes]:
+    """The files of a batch read that fit together, in ``scopes``' order,
+    in what the workspace's ``max_memory`` has left beside ``held_bytes``
+    now; one that does not fit is left out for its own read to meet, and
+    a smaller one after it may still fit.
+
+    Args:
+        scopes (list[PathSpec]): the files the batch asked for, in order.
+        read (dict[str, bytes]): what the batch read, by virtual path.
+        held_bytes (int): the bytes the batch already holds.
+    """
+    room = memory_room()
+    if room is None:
+        return read
+    kept: dict[str, bytes] = {}
+    left = room - held_bytes
+    for spec in scopes:
+        data = read.get(spec.virtual)
+        if data is None or spec.virtual in kept or len(data) > left:
+            continue
+        kept[spec.virtual] = data
+        left -= len(data)
+    return kept
+
+
 async def _collected(
     answer: Awaitable[ByteSource] | AsyncIterator[bytes],
     path: PathSpec,
@@ -2950,10 +2977,12 @@ class MountEntry:
         folder as the stored listings name them, and the bytes the files
         may come to together (``room``: what the workspace's
         ``max_memory`` has left beside ``held_bytes``), where it takes
-        them; a VFS with no batch read has each file read as its own whole
-        read reads it (``_read_each``), and one longer than ``limit``, one
-        that does not fit in what is left, or one that fails is left out.
-        Either way the index is observed once.
+        them; what it answers is kept only as far as it fits in what is
+        left once it is done (``_in_room``), since the stores may have
+        grown while it read. A VFS with no batch read has each file read
+        as its own whole read reads it (``_read_each``), and one longer
+        than ``limit``, one that does not fit in what is left, or one that
+        fails is left out. Either way the index is observed once.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
@@ -2981,7 +3010,9 @@ class MountEntry:
         if names is None or "room" in names:
             room = memory_room()
             kwargs["room"] = None if room is None else room - held_bytes
-        result = await fn(scopes, limit, **kwargs)
+        result = _in_room(
+            scopes, await fn(scopes, limit, **kwargs), held_bytes
+        )
         await self._observe(
             self.index, [s for s in scopes if s.virtual in result]
         )

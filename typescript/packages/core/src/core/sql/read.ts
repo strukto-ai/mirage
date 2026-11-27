@@ -52,8 +52,9 @@ export async function read(
  * never pass a run. A file is kept only from what its inode says, before its
  * rows are asked for: one that is gone or no file, one longer than `limit`,
  * and one that does not fit in `room` beside the files kept before it is left
- * out for its own read to meet. Each file read is recorded as a whole
- * streamed read records it. Mirrors Python's `read_many`.
+ * out for its own read to meet. A path named twice is kept once. Each file
+ * read is recorded as a whole streamed read records it. Mirrors Python's
+ * `read_many`.
  *
  * Args:
  *   accessor: the database.
@@ -69,7 +70,7 @@ export async function readMany(
   room: number | null = null,
 ): Promise<Map<string, Uint8Array>> {
   const folders = new Map<string, [PathSpec, string][]>()
-  for (const spec of paths) {
+  for (const spec of new Map(paths.map((p) => [p.virtual, p])).values()) {
     const names = namesOf(norm(spec.mountPath))
     const name = names.pop()
     if (name === undefined) continue
@@ -108,7 +109,8 @@ export async function readMany(
   for (const run of runs(kept)) {
     const rows = await rowsByIno(
       accessor,
-      run.filter(([, e]) => e.size > 0 && !built.has(e.ino)).map(([, e]) => e.ino),
+      run.filter(([, e]) => e.size > 0 && !built.has(e.ino)).map(([, e]) => e),
+      cs,
     )
     for (const [spec, entry] of run) {
       let data = built.get(entry.ino)
@@ -130,15 +132,19 @@ export async function readMany(
 
 /**
  * `kept` cut into runs whose rows one query fetches: at most `READ_RUN_BYTES`
- * of files, a longer file alone, and at most `MAX_PARAMS` files. Mirrors
- * Python's `_runs`.
+ * of files, a longer file alone, and at most the files `MAX_PARAMS` binds at
+ * two parameters a file (`rowsOf`). Mirrors Python's `_runs`.
  */
 function runs(kept: readonly [PathSpec, Inode][]): [PathSpec, Inode][][] {
   const out: [PathSpec, Inode][][] = []
   let size = 0
   for (const [spec, entry] of kept) {
     const last = out[out.length - 1]
-    if (last === undefined || last.length === MAX_PARAMS || size + entry.size > READ_RUN_BYTES) {
+    if (
+      last === undefined ||
+      last.length === Math.floor(MAX_PARAMS / 2) ||
+      size + entry.size > READ_RUN_BYTES
+    ) {
       out.push([[spec, entry]])
       size = entry.size
     } else {
@@ -170,15 +176,21 @@ async function inodesNamed(
   return out
 }
 
-/** Every `fs_data` row of the files `inos` names, by inode. Mirrors Python's `_rows_by_ino`. */
+/**
+ * The `fs_data` rows of `files`, by inode, each file's only as far as the size
+ * its inode gave when it was kept (`rowsOf`). Mirrors Python's `_rows_by_ino`.
+ */
 async function rowsByIno(
   accessor: SqlAccessor,
-  inos: readonly number[],
+  files: readonly Inode[],
+  cs: number,
 ): Promise<Map<number, SqlRow[]>> {
   const out = new Map<number, SqlRow[]>()
-  for (let at = 0; at < inos.length; at += MAX_PARAMS) {
-    const part = inos.slice(at, at + MAX_PARAMS)
-    for (const row of await accessor.query(rowsOf(part.length), part)) {
+  const step = Math.floor(MAX_PARAMS / 2)
+  for (let at = 0; at < files.length; at += step) {
+    const part = files.slice(at, at + step)
+    const params = part.flatMap((e) => [e.ino, Math.floor((e.size - 1) / cs)])
+    for (const row of await accessor.query(rowsOf(part.length), params)) {
       const ino = Number(row.ino ?? 0)
       const list = out.get(ino) ?? []
       list.push(row)

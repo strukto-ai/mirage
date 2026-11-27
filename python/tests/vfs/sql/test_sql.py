@@ -160,11 +160,11 @@ async def test_a_batch_read_answers_its_files_in_a_few_queries(vfs: SqlVFS):
     # However many files a batch names, each folder is walked once, the
     # entries it names come in one query and the rows of the files kept in
     # one more, each split where a statement's parameters run out (120
-    # names here: two entry queries in /b, two row queries); the walks of
-    # /a, /b and the missing /gone make 3, so 8 in all. A file across rows
-    # reads whole, the same file named twice reads whole both times, and a
-    # folder, a file gone or one longer than the limit is left for its own
-    # read. Each file kept is recorded once.
+    # names here: two entry queries in /b, and three row queries for the
+    # 121 files kept at two parameters a file); the walks of /a, /b and the
+    # missing /gone make 3, so 9 in all. A file across rows reads whole,
+    # and a folder, a file gone or one longer than the limit is left for
+    # its own read. Each file kept is recorded once, one named twice too.
     data = bytes(i % 251 for i in range(CS * 2 + 5))
     await vfs.mkdir(at("/a"))
     await vfs.mkdir(at("/a/sub"))
@@ -191,10 +191,15 @@ async def test_a_batch_read_answers_its_files_in_a_few_queries(vfs: SqlVFS):
     finally:
         scope.close()
     assert got == {"/a/big": data, **small}
-    assert len(queries) <= 8
+    assert len(queries) <= 9
     assert sorted(r.path for r in scope.records) == sorted(got)
-    twice = await vfs.read_many([at("/a/big"), at("/a/big")], len(data))
+    scope = RecordingScope()
+    try:
+        twice = await vfs.read_many([at("/a/big"), at("/a/big")], len(data))
+    finally:
+        scope.close()
     assert twice == {"/a/big": data}
+    assert [r.path for r in scope.records] == ["/a/big"]
 
 
 @pytest.mark.asyncio
@@ -220,6 +225,32 @@ async def test_a_batch_read_fetches_its_rows_a_run_at_a_time(vfs: SqlVFS):
     got = await vfs.read_many([at(k) for k in files], 1 << 20)
     assert got == files
     assert sum("FROM fs_data" in q for q in queries) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_fetches_no_row_past_the_size_it_kept(
+    vfs: SqlVFS,
+):
+    # The rows come in a query after the sizes were checked, so a file
+    # that grew between them is fetched only as far as the size the batch
+    # kept it at: here its inode answers CS + 1 bytes of a file that is
+    # three rows long now, so only its first two rows come.
+    await vfs.write(at("/g"), b"g" * (CS * 3))
+    fetched: list[SqlRow] = []
+    query = vfs.accessor.query
+
+    async def grown(sql: str, params: Sequence[SqlValue] = ()) -> list[SqlRow]:
+        rows = await query(sql, params)
+        if "d.name IN" in sql:
+            return [{**r, "size": CS + 1} for r in rows]
+        if "FROM fs_data" in sql:
+            fetched.extend(rows)
+        return rows
+
+    vfs.accessor.query = grown  # type: ignore[method-assign]
+    got = await vfs.read_many([at("/g")], CS * 3)
+    assert got == {"/g": b"g" * (CS + 1)}
+    assert sorted(int(r["chunk_index"] or 0) for r in fetched) == [0, 1]
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ import os
 
 import pytest
 import pytest_asyncio
+from redis.asyncio import Redis
 
 from mirage.vfs.redis.store import RedisStore
 
@@ -212,3 +213,25 @@ async def test_get_files_sizes_each_file_before_it_reads_it(store):
     ]
     assert await store.get_files(["/f"], 64, -1) == [None]
     assert await store.get_files([], 8, None) == []
+
+
+@pytest.mark.asyncio
+async def test_get_files_leaves_out_a_file_on_a_resp3_client(redis_prefix):
+    # The script answers a file it leaves out with Lua's false. It never
+    # switches its replies to RESP3 (redis.setresp), so that false reaches
+    # a client speaking RESP3 as nil too, and the file is None on either
+    # protocol.
+    client = Redis.from_url(REDIS_URL, protocol=3)
+    s = RedisStore(client=client, key_prefix=redis_prefix)
+    await s.clear()
+    try:
+        await s.set_file("/a", b"a\n")
+        await s.set_file("/long", b"x" * 9)
+        assert await s.get_files(["/a", "/gone", "/long"], 8, None) == [
+            b"a\n",
+            None,
+            None,
+        ]
+    finally:
+        await s.clear()
+        await client.aclose()

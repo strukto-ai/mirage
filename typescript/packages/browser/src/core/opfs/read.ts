@@ -16,7 +16,7 @@ import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/co
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { openError, resolveDirHandle, resolveFileHandle, splitSegments } from './utils.ts'
+import { openError, resolveFileHandle, splitSegments } from './utils.ts'
 
 /**
  * Read a file, optionally only a byte range of it.
@@ -61,12 +61,13 @@ export async function read(
 
 /**
  * Several whole files by virtual path, each folder handle resolved once for
- * the batch instead of once a file, and the files' handles taken and read
+ * the batch instead of once a file, from its own parent's, so folders the
+ * files share are opened once too, and the files' handles taken and read
  * together. A file is kept only from the size its `File` gives, before its
  * bytes are read: one that is gone or no file, one longer than `limit`, one
  * that does not fit in `room` beside the files kept before it, and one whose
- * read fails is left out for its own read to meet. Each file read is recorded
- * as a whole streamed read records it.
+ * read fails is left out for its own read to meet. A path named twice is read
+ * once. Each file read is recorded as a whole streamed read records it.
  *
  * Args:
  *   accessor: OPFS accessor.
@@ -83,24 +84,32 @@ export async function readMany(
 ): Promise<Map<string, Uint8Array>> {
   const root = await accessor.root()
   const folders = new Map<string, Promise<FileSystemDirectoryHandle | null>>()
-  const folderOf = (key: string): Promise<FileSystemDirectoryHandle | null> => {
+  const folderOf = (segs: readonly string[]): Promise<FileSystemDirectoryHandle | null> => {
+    const key = '/' + segs.join('/')
     let folder = folders.get(key)
     if (folder === undefined) {
-      folder = resolveDirHandle(root, key).catch((err: unknown) => {
-        console.debug(`batch read leaves ${key} to its own read: ${String(err)}`)
-        return null
-      })
+      const name = segs[segs.length - 1]
+      folder =
+        name === undefined
+          ? Promise.resolve(root)
+          : folderOf(segs.slice(0, -1))
+              .then((parent) => (parent === null ? null : parent.getDirectoryHandle(name)))
+              .catch((err: unknown) => {
+                console.debug(`batch read leaves ${key} to its own read: ${String(err)}`)
+                return null
+              })
       folders.set(key, folder)
     }
     return folder
   }
+  const files = [...new Map(paths.map((p) => [p.virtual, p])).values()]
   const found = await Promise.all(
-    paths.map(async (spec): Promise<File | null> => {
+    files.map(async (spec): Promise<File | null> => {
       try {
         const segs = splitSegments(spec.mountPath)
         const name = segs.pop()
         if (name === undefined) return null
-        const dir = await folderOf('/' + segs.join('/'))
+        const dir = await folderOf(segs)
         return dir === null ? null : await (await dir.getFileHandle(name)).getFile()
       } catch (err) {
         console.debug(`batch read leaves ${spec.virtual} to its own read: ${String(err)}`)
@@ -110,7 +119,7 @@ export async function readMany(
   )
   const kept: [PathSpec, File][] = []
   let total = 0
-  paths.forEach((spec, i) => {
+  files.forEach((spec, i) => {
     const file = found[i] ?? null
     if (file === null || file.size > limit || (room !== null && total + file.size > room)) return
     total += file.size

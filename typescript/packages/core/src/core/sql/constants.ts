@@ -217,11 +217,16 @@ export function entriesNamed(count: number): string {
     WHERE d.parent_ino = ? AND d.name IN (${slots})`
 }
 
-/** Every `fs_data` row of a batch of files, in order within each. */
+/**
+ * The `fs_data` rows of a batch of files, in order within each, a file's only
+ * up to the chunk its checked size ends in, so a file that grew since is
+ * fetched no further: two parameters a file, its inode and that last chunk's
+ * index.
+ */
 export function rowsOf(count: number): string {
-  const slots = Array<string>(count).fill('?').join(', ')
+  const files = Array<string>(count).fill('(ino = ? AND chunk_index <= ?)').join(' OR ')
   return `SELECT ino, chunk_index, data FROM fs_data
-    WHERE ino IN (${slots}) ORDER BY ino, chunk_index`
+    WHERE ${files} ORDER BY ino, chunk_index`
 }
 
 /** Direct children of a bounded batch of parents, with their inode rows. */

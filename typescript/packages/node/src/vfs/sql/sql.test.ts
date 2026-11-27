@@ -28,7 +28,7 @@ import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { CapacityState, FileType, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
-import { SqlDialect, type SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
+import { SqlDialect, type SqlDriver, type SqlRow } from '@struktoai/mirage-core/vfs/sql/types'
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -115,11 +115,13 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
 
   it('answers a batch read in a few queries however many files it names', async () => {
     // Each folder is walked once, the entries it names come in one query and
-    // every row of the files kept in one more, each split where a statement's
-    // parameters run out (120 names here: two entry queries in /b, two row
-    // queries); the walks of /a, /b and the missing /gone make 3, so 8 in all.
-    // A file across rows reads whole, and a folder, a file gone or one longer
-    // than the limit is left for its own read. Each file kept is recorded once.
+    // the rows of the files kept in one more, each split where a statement's
+    // parameters run out (120 names here: two entry queries in /b, and three
+    // row queries for the 121 files kept at two parameters a file); the walks
+    // of /a, /b and the missing /gone make 3, so 9 in all. A file across rows
+    // reads whole, and a folder, a file gone or one longer than the limit is
+    // left for its own read. Each file kept is recorded once, one named twice
+    // too.
     const data = new Uint8Array(DEFAULT_CHUNK_SIZE * 2 + 5).map((_, i) => i % 251)
     await ops(vfs).mkdir(at('/a'))
     await ops(vfs).mkdir(at('/a/sub'))
@@ -133,10 +135,13 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     const names = ['/a/big', '/a/sub', '/a/gone', '/a/long', '/gone/x', ...small.keys()]
     const [got, records] = await recordingScope(() => vfs.readMany(names.map(at), data.length))
     expect(got).toEqual(new Map([['/a/big', data], ...small]))
-    expect(query.mock.calls.length).toBeLessThanOrEqual(8)
+    expect(query.mock.calls.length).toBeLessThanOrEqual(9)
     expect(records.map((r) => r.path).sort()).toEqual([...got.keys()].sort())
-    const twice = await vfs.readMany([at('/a/big'), at('/a/big')], data.length)
+    const [twice, once] = await recordingScope(() =>
+      vfs.readMany([at('/a/big'), at('/a/big')], data.length),
+    )
     expect(twice).toEqual(new Map([['/a/big', data]]))
+    expect(once.map((r) => r.path)).toEqual(['/a/big'])
   })
 
   it('fetches the rows of a batch read a run at a time', async () => {
@@ -151,6 +156,26 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     const query = vi.spyOn(vfs.accessor, 'query')
     expect(await vfs.readMany([...files.keys()].map(at), 1 << 20)).toEqual(files)
     expect(query.mock.calls.filter(([sql]) => sql.includes('FROM fs_data')).length).toBe(3)
+  })
+
+  it('fetches no row of a batch read past the size it kept', async () => {
+    // The rows come in a query after the sizes were checked, so a file that
+    // grew between them is fetched only as far as the size the batch kept it
+    // at: here its inode answers one byte past a row of a file that is three
+    // rows long now, so only its first two rows come.
+    await ops(vfs).write(at('/g'), new Uint8Array(DEFAULT_CHUNK_SIZE * 3).fill(103))
+    const query = vfs.accessor.query.bind(vfs.accessor)
+    const fetched: SqlRow[] = []
+    vi.spyOn(vfs.accessor, 'query').mockImplementation(async (sql, params) => {
+      const rows = await query(sql, params)
+      if (sql.includes('d.name IN'))
+        return rows.map((r) => ({ ...r, size: DEFAULT_CHUNK_SIZE + 1 }))
+      if (sql.includes('FROM fs_data')) fetched.push(...rows)
+      return rows
+    })
+    const got = await vfs.readMany([at('/g')], DEFAULT_CHUNK_SIZE * 3)
+    expect(got).toEqual(new Map([['/g', new Uint8Array(DEFAULT_CHUNK_SIZE + 1).fill(103)]]))
+    expect(fetched.map((r) => Number(r.chunk_index)).sort()).toEqual([0, 1])
   })
 
   it('keeps the files of a batch read that fit its room', async () => {

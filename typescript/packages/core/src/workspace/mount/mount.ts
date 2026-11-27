@@ -245,6 +245,34 @@ async function* asStream(
 }
 
 /**
+ * The files of a batch read that fit together, in `scopes`' order, in what
+ * the workspace's `max_memory` has left beside `heldBytes` now; one that does
+ * not fit is left out for its own read to meet, and a smaller one after it
+ * may still fit. Mirrors Python's `_in_room`.
+ *
+ * @param scopes the files the batch asked for, in order
+ * @param read what the batch read, by virtual path
+ * @param heldBytes the bytes the batch already holds
+ */
+function inRoom(
+  scopes: readonly PathSpec[],
+  read: Map<string, Uint8Array>,
+  heldBytes: number,
+): Map<string, Uint8Array> {
+  const room = memoryRoom()
+  if (room === null) return read
+  const kept = new Map<string, Uint8Array>()
+  let left = room - heldBytes
+  for (const scope of scopes) {
+    const data = read.get(scope.virtual)
+    if (data === undefined || kept.has(scope.virtual) || data.byteLength > left) continue
+    kept.set(scope.virtual, data)
+    left -= data.byteLength
+  }
+  return kept
+}
+
+/**
  * A backend read's answer as bytes, a stream collected. A whole read's
  * stream publishes the version it recorded for the bytes collected from it,
  * as a whole read answering bytes publishes its own, so a read-modify-write
@@ -2447,8 +2475,10 @@ export class MountEntry {
    * The VFS's batch read, handed what is at each path and at its folder as
    * the stored listings name them, where it declares them, and the bytes the
    * files may come to together (`room`: what the workspace's `max_memory` has
-   * left beside `heldBytes`); a VFS with no batch read has each file read as
-   * its own whole read reads it (`readEach`), and one longer than `limit`, one
+   * left beside `heldBytes`); what it answers is kept only as far as it fits
+   * in what is left once it is done (`inRoom`), since the stores may have
+   * grown while it read. A VFS with no batch read has each file read as its
+   * own whole read reads it (`readEach`), and one longer than `limit`, one
    * that does not fit in what is left, or one that fails is left out. Either
    * way the index is observed once. Mirrors Python's `_read_many`.
    */
@@ -2475,11 +2505,10 @@ export class MountEntry {
       handed.push(one)
     }
     const free = memoryRoom()
-    const result = await this.vfs.readMany(
+    const result = inRoom(
       scopes,
-      limit,
-      handed,
-      free === null ? null : free - heldBytes,
+      await this.vfs.readMany(scopes, limit, handed, free === null ? null : free - heldBytes),
+      heldBytes,
     )
     await this.observe(
       index,

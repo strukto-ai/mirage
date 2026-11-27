@@ -53,9 +53,9 @@ export async function read(
  * Several whole files by virtual path, in one round trip whatever their
  * number (`RedisStoreLike.getFiles`): one that is absent, empty or no file,
  * one longer than `limit`, and one that does not fit in `room` beside the
- * files read before it is left out for its own read to meet. Each file read
- * is recorded as a whole streamed read records it. Mirrors Python's
- * `read_many`.
+ * files read before it is left out for its own read to meet. A path named
+ * twice is read once. Each file read is recorded as a whole streamed read
+ * records it. Mirrors Python's `read_many`.
  *
  * Args:
  *   accessor: Redis accessor.
@@ -70,13 +70,14 @@ export async function readMany(
   limit: number,
   room: number | null = null,
 ): Promise<Map<string, Uint8Array>> {
+  const files = [...new Map(paths.map((p) => [p.virtual, p])).values()]
   const found = await accessor.store.getFiles(
-    paths.map((p) => norm(p.mountPath)),
+    files.map((p) => norm(p.mountPath)),
     limit,
     room,
   )
   const read = new Map<string, Uint8Array>()
-  paths.forEach((spec, i) => {
+  files.forEach((spec, i) => {
     const data = found[i] ?? null
     if (data === null) return
     const rec = recordStream('read', spec.virtual, VFSName.REDIS)

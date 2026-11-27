@@ -968,3 +968,39 @@ async def test_a_batch_read_hands_its_vfs_the_room_its_files_must_fit():
     ) == {"/b/f": b"x"}
     await mount.read_many(["/b/f"], 64, 16)
     assert vfs.rooms == [8, None]
+
+
+class _StoresGrow(BaseVFS):
+    """Reads a batch whole, taking no room, while the workspace's stores
+    grow by ``grows`` bytes."""
+
+    name = "grows"
+
+    def __init__(self, files: dict[str, bytes], grows: int) -> None:
+        super().__init__()
+        self.files = files
+        self.grows = grows
+        self.held = 0
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int
+    ) -> dict[str, bytes]:
+        self.held += self.grows
+        return {p.virtual: self.files[p.virtual] for p in paths}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_keeps_what_fits_in_the_room_left_once_it_is_done():
+    # The stores grew by 10 bytes while the VFS read, so of what it answers
+    # the mount keeps, in the order asked, only what fits beside the 16 the
+    # batch holds in the 22 left now: /g/a, then /g/c after /g/b no longer
+    # fits.
+    vfs = _StoresGrow(
+        {"/g/a": b"a" * 4, "/g/b": b"b" * 8, "/g/c": b"c" * 2}, 10
+    )
+    mount = MountEntry("/g/", vfs)
+    budget = MemoryBudget(32, lambda: vfs.held)
+    got = await run_with_memory(
+        budget, mount.read_many(["/g/a", "/g/b", "/g/c"], 64, 16)
+    )
+    assert got == {"/g/a": b"a" * 4, "/g/c": b"c" * 2}

@@ -17,6 +17,7 @@ import os
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk import read as disk_read
 from mirage.core.disk.read import read, read_many
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
@@ -179,7 +180,7 @@ async def test_a_batch_read_answers_only_the_files_their_own_reads_would(
     # reached through one, a name spelled unlike its entry, a directory, a
     # FIFO (whose open would wait for a writer) and a file gone or longer
     # than the limit are left for that read; the rest are recorded once
-    # each, as their own reads record them.
+    # each, as their own reads record them, a file named twice too.
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     (tmp_path / "a" / "sub").mkdir()
@@ -202,6 +203,7 @@ async def test_a_batch_read_answers_only_the_files_their_own_reads_would(
         "/gone/x",
         "/a/y",
         "/b/c",
+        "/a/x",
     ]
     scope = RecordingScope()
     try:
@@ -232,3 +234,42 @@ async def test_a_batch_read_keeps_the_files_that_fit_its_room(tmp_path):
     ]
     assert await read_many(accessor, files, 64, -1) == {}
     assert len(await read_many(accessor, files, 64)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_reads_on_past_a_short_read(tmp_path, monkeypatch):
+    # A read may answer fewer bytes than it was asked for before the end of
+    # the file, so the batch reads again until a read answers none.
+    (tmp_path / "f").write_bytes(b"0123456789")
+    calls: list[int] = []
+    real = os.read
+
+    def short(fd: int, n: int) -> bytes:
+        calls.append(n)
+        return real(fd, min(n, 3))
+
+    monkeypatch.setattr(os, "read", short)
+    got = await read_many(DiskAccessor(tmp_path), [_on_d("/f")], 64)
+    monkeypatch.undo()
+    assert got == {"/d/f": b"0123456789"}
+    assert len(calls) > 1
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_proves_a_leaf_is_no_link_where_the_open_cannot(
+    tmp_path, monkeypatch
+):
+    # Without O_NOFOLLOW (Windows) the open would follow a link at the
+    # leaf, so the batch looks at the name first and keeps a file only when
+    # the open reached the very file it saw.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    (tmp_path / "a" / "link").symlink_to(tmp_path / "a" / "x")
+    monkeypatch.setattr(disk_read, "_OPEN_REFUSES_LINK", False)
+    monkeypatch.setattr(
+        disk_read, "_OPEN_CHECKED", os.O_RDONLY | os.O_NONBLOCK
+    )
+    got = await read_many(
+        DiskAccessor(tmp_path), [_on_d("/a/x"), _on_d("/a/link")], 8
+    )
+    assert got == {"/d/a/x": b"x\n"}
