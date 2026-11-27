@@ -17,8 +17,9 @@ import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { FILE } from './constants.ts'
 import { cutBytes } from './data.ts'
-import { byIno, makeNode, nowStamp, resized } from './inode.ts'
+import { makeNode, nowStamp, resizedFrom } from './inode.ts'
 import { checkDestParents, checkWriteTarget, leaf, parentRef, target, walk } from './path.ts'
+import { landFresh } from './write.ts'
 
 /**
  * Resize a file to `length` bytes: cut its rows, or grow it by its size alone,
@@ -36,14 +37,15 @@ export async function truncate(
   checkDestParents(w, path)
   checkWriteTarget(w, path)
   const node = target(w)
-  const now = nowStamp(accessor, node)
   if (node === null) {
     if (noCreate) return
-    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, length, now))
+    await accessor.batch(
+      makeNode(accessor, parentRef(w), leaf(w), FILE, length, nowStamp(accessor)),
+    )
   } else {
-    await accessor.batch([
-      ...(await cutBytes(accessor, node, length)),
-      resized(byIno(node.ino), length, now),
+    await landFresh(accessor, node, async (n) => [
+      ...(await cutBytes(accessor, n, length)),
+      resizedFrom(n, length, nowStamp(accessor, n)),
     ])
   }
   record('truncate', path.virtual, VFSName.SQL, 0, timer)

@@ -485,6 +485,27 @@ describe('fingerprints the index keeps', () => {
     }
   })
 
+  it('see a mode change their kept listing missed', async () => {
+    // chmod moves a mode, not the bytes or their fingerprint, so the fresh stat
+    // status takes past the kept listing is what carries it. Mirrors Python's
+    // test_a_status_sees_a_mode_change_its_kept_listing_missed.
+    const vfs = new KeptRAM()
+    const ws = await source(vfs)
+    const other = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const clean = await ws.shell('git -C /w/dst status --porcelain')
+      expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+      await other.vfs.setattr('/w/dst/a.txt', { mode: 0o755 })
+      const changed = await ws.shell('git -C /w/dst status --porcelain')
+      expect(DEC.decode(changed.stdout)).toBe(' M a.txt\n')
+    } finally {
+      await other.close()
+      await ws.close()
+    }
+  })
+
   it('are kept by a checkout for a file it had to read', async () => {
     // touch moves a file's time and so its fingerprint, not its bytes: status
     // reads it to find it unchanged, and the checkout that reads it too keeps

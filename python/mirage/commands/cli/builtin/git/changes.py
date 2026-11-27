@@ -37,6 +37,7 @@ from mirage.commands.cli.builtin.git.embedded import (
 from mirage.commands.cli.builtin.git.errors import UnhashableFileError
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
+    still_stats,
     unchanged,
     with_fingerprint,
 )
@@ -359,16 +360,18 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
     return bool(entry.mode & S_IXUSR) != bool(info.mode & S_IXUSR)
 
 
-async def _still(
-    vfs: Files, where: PathSpec, entry: IndexEntry, mounts: MountView | None
-) -> bool:
-    """Whether the backend itself still stats the fingerprint ``entry``
-    kept, where the mount keeps listings a walk may have answered from.
+async def _current(
+    vfs: Files, where: PathSpec, info: FileStat, mounts: MountView | None
+) -> FileStat | None:
+    """The row a kept fingerprint is judged by: the walk's own where the
+    mount keeps no listings, since the backend answered it; the backend's
+    own stat where it does, since a kept listing may be older than the
+    file. None when the backend has none or refuses it.
 
     Args:
         vfs (Files): the session's files.
         where (PathSpec): absolute virtual path of the file.
-        entry (IndexEntry): what the index staged for it.
+        info (FileStat): what the walk found there.
         mounts (MountView | None): the session's mount boundaries.
     """
     if (
@@ -376,9 +379,23 @@ async def _still(
         or mounts.keeps_listings is None
         or not mounts.keeps_listings(where.virtual)
     ):
-        return True
-    current = await lstat(vfs, where, fresh=True)
-    return current is not None and unchanged(entry, current)
+        return info
+    try:
+        return await lstat(vfs, where, fresh=True)
+    except PermissionError:
+        return None
+
+
+def _sized_apart(entry: IndexEntry, info: FileStat) -> bool:
+    """Whether a stated size settles the file as changed.
+
+    Args:
+        entry (IndexEntry): what the index staged for it.
+        info (FileStat): what the mount says about it.
+    """
+    return (
+        info.size is not None and bool(entry.size) and info.size != entry.size
+    )
 
 
 async def _differs(
@@ -415,15 +432,19 @@ async def _differs(
         info (FileStat): what the mount says about it now.
         mounts (MountView | None): the session's mount boundaries.
     """
-    if _mode_differs(entry, info):
-        return True
-    if info.size is not None and entry.size and info.size != entry.size:
+    if _mode_differs(entry, info) or _sized_apart(entry, info):
         return True
     where = worktree.join(path)
-    if unchanged(entry, info) and await _still(vfs, where, entry, mounts):
-        return False
+    if unchanged(entry, info):
+        current = await _current(vfs, where, info, mounts)
+        if current is not None and (
+            _mode_differs(entry, current) or _sized_apart(entry, current)
+        ):
+            return True
+        if current is not None and unchanged(entry, current):
+            return False
     try:
-        data = await entry_bytes(vfs, worktree.join(path), info)
+        data = await entry_bytes(vfs, where, info)
     except MISS_ERRORS:
         return True
     except PermissionError:
@@ -568,7 +589,13 @@ async def work_changes(
             and found.files[name].fingerprint
             and not unchanged(entry, found.files[name])
         ):
-            refreshed[path] = with_fingerprint(entry, found.files[name])
+            # Kept only when the backend still gives the walk's fingerprint
+            # once the bytes are read, so it describes the bytes hashed.
+            after = await still_stats(
+                vfs, worktree.join(name), found.files[name]
+            )
+            if after is not None:
+                refreshed[path] = with_fingerprint(entry, after)
     return changes
 
 

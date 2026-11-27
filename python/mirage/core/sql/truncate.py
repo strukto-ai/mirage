@@ -15,7 +15,7 @@
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import FILE
 from mirage.core.sql.data import cut_bytes
-from mirage.core.sql.inode import by_ino, make_node, now_stamp, resized
+from mirage.core.sql.inode import Inode, make_node, now_stamp, resized_from
 from mirage.core.sql.path import (
     check_dest_parents,
     check_write_target,
@@ -24,8 +24,10 @@ from mirage.core.sql.path import (
     target,
     walk,
 )
+from mirage.core.sql.write import land_fresh
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
+from mirage.vfs.sql.types import SqlStatement
 
 
 async def truncate(
@@ -42,18 +44,20 @@ async def truncate(
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
-    now = now_stamp(accessor, node)
     if node is None:
         if no_create:
             return
+        now = now_stamp(accessor)
         await accessor.batch(
             make_node(accessor, parent_ref(w), leaf(w), FILE, length, now)
         )
     else:
-        await accessor.batch(
-            [
-                *await cut_bytes(accessor, node, length),
-                resized(by_ino(node.ino), length, now),
+
+        async def resized_to(n: Inode) -> list[SqlStatement]:
+            return [
+                *await cut_bytes(accessor, n, length),
+                resized_from(n, length, now_stamp(accessor, n)),
             ]
-        )
+
+        await land_fresh(accessor, node, resized_to)
     record("truncate", path.virtual, VFSName.SQL, 0, timer)

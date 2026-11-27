@@ -34,7 +34,13 @@ import {
 import { embeddedHead, embeddedLocation } from './embedded.ts'
 import { configValues } from './fs.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readIndex, updateIndex, withFingerprint, type StagedEntry } from './index_file.ts'
+import {
+  readIndex,
+  stillStats,
+  updateIndex,
+  withFingerprint,
+  type StagedEntry,
+} from './index_file.ts'
 import { entryBytes, lstat, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
@@ -249,13 +255,12 @@ export async function stageChanges(
       )
     }
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
-    // The bytes read are the walk's version only if the backend still stats
-    // its fingerprint once they are read.
-    let kept = info
-    if (info.fingerprint !== null && info.fingerprint !== '') {
-      const after = await lstat(vfs, repo.location.worktree.join(path), true)
-      if (after?.fingerprint !== info.fingerprint) kept = info.with({ fingerprint: null })
-    }
+    const kept =
+      info.fingerprint === null ||
+      info.fingerprint === '' ||
+      (await stillStats(vfs, repo.location.worktree.join(path), info)) !== null
+        ? info
+        : info.with({ fingerprint: null })
     const entry = stagedEntry(oid, kept, data.length)
     if (before === undefined) added.push(path)
     else if (before.oid !== entry.oid || before.mode !== entry.mode) changed.push([path, 'add'])

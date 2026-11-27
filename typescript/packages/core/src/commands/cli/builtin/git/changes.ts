@@ -19,7 +19,13 @@ import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../
 import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
 import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK } from './constants.ts'
-import { readIndex, unchanged, withFingerprint, type StagedEntry } from './index_file.ts'
+import {
+  readIndex,
+  stillStats,
+  unchanged,
+  withFingerprint,
+  type StagedEntry,
+} from './index_file.ts'
 import { entryBytes, lstat } from './io.ts'
 import { mountView } from '../../../builtin/utils/links.ts'
 import type { MountView } from '../../../../view/types.ts'
@@ -350,14 +356,16 @@ async function differs(
   info: FileStat,
   mounts: MountView | undefined,
 ): Promise<boolean> {
-  if (modeDiffers(entry, info)) return true
-  if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
-  if (unchanged(entry, info) && (await still(vfs, worktree.join(path), entry, mounts))) {
-    return false
+  if (modeDiffers(entry, info) || sizedApart(entry, info)) return true
+  const where = worktree.join(path)
+  if (unchanged(entry, info)) {
+    const now = await current(vfs, where, info, mounts)
+    if (now !== null && (modeDiffers(entry, now) || sizedApart(entry, now))) return true
+    if (now !== null && unchanged(entry, now)) return false
   }
   let data: Uint8Array
   try {
-    data = await entryBytes(vfs, worktree.join(path), info)
+    data = await entryBytes(vfs, where, info)
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return true
     // git counts a file it cannot read as changed; a command that needs its
@@ -370,19 +378,29 @@ async function differs(
 }
 
 /**
- * Whether the backend itself still stats the fingerprint `entry` kept, where
- * the mount keeps listings a walk may have answered from. Mirrors Python's
- * `_still`.
+ * The row a kept fingerprint is judged by: the walk's own where the mount keeps
+ * no listings, since the backend answered it; the backend's own stat where it
+ * does, since a kept listing may be older than the file. Null when the backend
+ * has none or refuses it. Mirrors Python's `_current`.
  */
-async function still(
+async function current(
   vfs: Files,
   where: PathSpec,
-  entry: IndexEntry,
+  info: FileStat,
   mounts: MountView | undefined,
-): Promise<boolean> {
-  if (mounts?.keepsListings?.(where.virtual) !== true) return true
-  const current = await lstat(vfs, where, true)
-  return current !== null && unchanged(entry, current)
+): Promise<FileStat | null> {
+  if (mounts?.keepsListings?.(where.virtual) !== true) return info
+  try {
+    return await lstat(vfs, where, true)
+  } catch (err) {
+    if (isEacces(err)) return null
+    throw err
+  }
+}
+
+/** Whether a stated size settles the file as changed. Mirrors Python's `_sized_apart`. */
+function sizedApart(entry: IndexEntry, info: FileStat): boolean {
+  return info.size !== null && entry.size !== 0 && info.size !== entry.size
 }
 
 /** What changed in the repository a gitlink records, and the commit it has out. */
@@ -489,7 +507,10 @@ export async function workChanges(
       info.fingerprint !== '' &&
       !unchanged(entry, info)
     ) {
-      refreshed.set(path, withFingerprint(entry, info))
+      // Kept only when the backend still gives the walk's fingerprint once the
+      // bytes are read, so it describes the bytes hashed.
+      const after = await stillStats(vfs, worktree.join(path), info)
+      if (after !== null) refreshed.set(path, withFingerprint(entry, after))
     }
   }
   return changes

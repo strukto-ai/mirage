@@ -42,6 +42,7 @@ from mirage.commands.cli.builtin.git.errors import (
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
+    still_stats,
     with_fingerprint,
     write_index,
 )
@@ -368,12 +369,10 @@ async def stage_changes(
             ) from exc
         sha = await store_blob(vfs, location.commondir, data)
         info = found.files[path]
-        # The bytes read are the walk's version only if the backend still
-        # stats its fingerprint once they are read.
-        if info.fingerprint:
-            after = await lstat(vfs, location.worktree.join(path), fresh=True)
-            if after is None or after.fingerprint != info.fingerprint:
-                info = replace(info, fingerprint=None)
+        if info.fingerprint and (
+            await still_stats(vfs, location.worktree.join(path), info) is None
+        ):
+            info = replace(info, fingerprint=None)
         entry = staged_entry(sha, info, len(data))
         if before is None:
             added.append(path)

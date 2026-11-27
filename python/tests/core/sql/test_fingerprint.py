@@ -14,7 +14,10 @@
 
 import pytest
 
+from mirage.core.sql.create import create
 from mirage.core.sql.fingerprint import token_of
+from mirage.core.sql.path import walk
+from mirage.core.sql.write import write
 from mirage.types import FileStat, PathSpec
 from mirage.utils.clock import ManualClock, run_with_system_clock
 from mirage.vfs.sql import SqlVFS
@@ -76,5 +79,59 @@ async def test_a_rewrite_through_another_driver_moves_it(tmp_path):
     before, after = await run_with_system_clock(
         ManualClock(1_800_000_000),
         _rewritten_by_another(str(tmp_path / "db.sqlite")),
+    )
+    assert before.fingerprint != after.fingerprint
+
+
+async def _crossed(path: str) -> tuple[FileStat, FileStat]:
+    first_driver, second_driver = SqliteDriver(path), SqliteDriver(path)
+    first, second = SqlVFS(driver=first_driver), SqlVFS(driver=second_driver)
+    try:
+        await first.write(at("/f"), b"one")
+        read = await walk(first.accessor, at("/f"))
+        await second.write(at("/f"), b"two")
+        theirs = await first.stat(at("/f"))
+        await write(first.accessor, at("/f"), b"six", walked=read)
+        return theirs, await first.stat(at("/f"))
+    finally:
+        await first.close()
+        await second.close()
+        first_driver.close()
+        second_driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_replacement_over_a_file_changed_since_its_walk_moves_it(
+    tmp_path,
+):
+    # Both writes start from the same inode as the walk read it; the guard
+    # sends the second back to the inode as it is, so it lands past the
+    # first instead of on the same time.
+    theirs, ours = await run_with_system_clock(
+        ManualClock(1_800_000_000), _crossed(str(tmp_path / "db.sqlite"))
+    )
+    assert theirs.fingerprint != ours.fingerprint
+
+
+async def _emptied_by_another(path: str) -> tuple[FileStat, FileStat]:
+    first_driver, second_driver = SqliteDriver(path), SqliteDriver(path)
+    first, second = SqlVFS(driver=first_driver), SqlVFS(driver=second_driver)
+    try:
+        await first.write(at("/f"), b"")
+        before = await first.stat(at("/f"))
+        await create(second.accessor, at("/f"))
+        return before, await first.stat(at("/f"))
+    finally:
+        await first.close()
+        await second.close()
+        first_driver.close()
+        second_driver.close()
+
+
+@pytest.mark.asyncio
+async def test_create_over_a_file_another_driver_wrote_moves_it(tmp_path):
+    before, after = await run_with_system_clock(
+        ManualClock(1_800_000_000),
+        _emptied_by_another(str(tmp_path / "db.sqlite")),
     )
     assert before.fingerprint != after.fingerprint

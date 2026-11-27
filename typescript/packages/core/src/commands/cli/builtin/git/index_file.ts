@@ -16,12 +16,13 @@ import { GitIndexManager } from 'isomorphic-git/managers'
 import { FileSystem } from 'isomorphic-git/models'
 
 import { ResolveIndexError } from './errors.ts'
-import { exists } from './io.ts'
+import { isEacces } from '../../../../errors/fs.ts'
+import { exists, lstat } from './io.ts'
 import { Digest } from '../../../../utils/hash.ts'
 
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, IndexEntry, IndexState } from './types.ts'
-import type { FileStat } from '../../../../types.ts'
+import type { FileStat, PathSpec } from '../../../../types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
 const MERGE_HEAD = 'MERGE_HEAD'
@@ -66,6 +67,37 @@ export function withFingerprint(entry: StagedEntry, info: FileStat): StagedEntry
   if (info.fingerprint === null || info.fingerprint === '') return { ...entry, dev: 0, ino: 0 }
   const [dev, ino] = kept(info.fingerprint)
   return { ...entry, dev, ino }
+}
+
+/**
+ * The backend's own stat of a file just read, when it still gives the
+ * fingerprint `info` had before the read; null when it gives another, none, or
+ * refuses the stat.
+ *
+ * A fingerprint kept with a blob has to describe the bytes hashed, and a stat
+ * from before the read may be older than they are: a kept listing's row, or a
+ * file another writer changed in between. One more stat after the read catches
+ * either; a file that changed and changed back within the read is the window
+ * that remains. Mirrors Python's `still_stats`.
+ *
+ * @param vfs the session's files
+ * @param path absolute virtual path of the file
+ * @param info the stat taken before the read
+ */
+export async function stillStats(
+  vfs: Files,
+  path: PathSpec,
+  info: FileStat,
+): Promise<FileStat | null> {
+  let after: FileStat | null
+  try {
+    after = await lstat(vfs, path, true)
+  } catch (err) {
+    if (isEacces(err)) return null
+    throw err
+  }
+  if (after === null || (after.fingerprint ?? '') === '') return null
+  return after.fingerprint === info.fingerprint ? after : null
 }
 
 /**

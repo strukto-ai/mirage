@@ -16,8 +16,9 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { FILE } from './constants.ts'
-import { byIno, makeNode, nowStamp, resized } from './inode.ts'
+import { byIno, makeNode, nowStamp, resizedFrom } from './inode.ts'
 import { checkDestParents, checkWriteTarget, leaf, parentRef, target, walk } from './path.ts'
+import { landFresh } from './write.ts'
 
 /** Make an empty file, or empty the one there. Mirrors Python's `create`. */
 export async function create(accessor: SqlAccessor, path: PathSpec): Promise<void> {
@@ -26,15 +27,15 @@ export async function create(accessor: SqlAccessor, path: PathSpec): Promise<voi
   checkDestParents(w, path)
   checkWriteTarget(w, path)
   const node = target(w)
-  const now = nowStamp(accessor)
   if (node === null) {
-    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, 0, now))
+    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, 0, nowStamp(accessor)))
   } else {
-    const ino = byIno(node.ino)
-    await accessor.batch([
-      { sql: `DELETE FROM fs_data WHERE ino = ${ino.sql}` },
-      resized(ino, 0, now),
-    ])
+    await landFresh(accessor, node, (n) =>
+      Promise.resolve([
+        { sql: `DELETE FROM fs_data WHERE ino = ${byIno(n.ino).sql}` },
+        resizedFrom(n, 0, nowStamp(accessor, n)),
+      ]),
+    )
   }
   record('create', path.virtual, VFSName.SQL, 0, timer)
 }

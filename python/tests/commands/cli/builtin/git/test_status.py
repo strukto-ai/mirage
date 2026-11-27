@@ -486,3 +486,27 @@ async def test_a_status_asks_past_the_listings_a_mount_keeps(repo_path: Path):
         await other.vfs.write("/w/dst/a.txt", b"ONE\n")
         changed = await ws.shell("git -C /w/dst status --porcelain")
     assert changed.stdout == b" M a.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_a_status_sees_a_mode_change_its_kept_listing_missed(
+    repo_path: Path,
+):
+    # chmod moves a mode, not the bytes or their fingerprint, so the fresh
+    # stat status takes past the kept listing is what carries it.
+    vfs = KeptRAM()
+    with (
+        Workspace(
+            {"/src/": DiskVFS(root=str(repo_path.parent)), "/w/": vfs},
+            mode=MountMode.WRITE,
+        ) as ws,
+        Workspace({"/w/": vfs}, mode=MountMode.WRITE) as other,
+    ):
+        ws.register_cli("git", GIT)
+        cloned = await ws.shell("git clone -q /src/work /w/dst")
+        assert cloned.exit_code == 0, cloned.stderr
+        clean = await ws.shell("git -C /w/dst status --porcelain")
+        assert (clean.exit_code, clean.stdout) == (0, b"")
+        await other.vfs.setattr("/w/dst/a.txt", mode=0o755)
+        changed = await ws.shell("git -C /w/dst status --porcelain")
+    assert changed.stdout == b" M a.txt\n"

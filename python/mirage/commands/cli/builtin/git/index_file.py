@@ -25,7 +25,11 @@ from dulwich.index import (
 )
 
 from mirage.commands.cli.builtin.git.errors import ResolveIndexError
-from mirage.commands.cli.builtin.git.io import read_optional, write_file
+from mirage.commands.cli.builtin.git.io import (
+    lstat,
+    read_optional,
+    write_file,
+)
 from mirage.commands.cli.builtin.git.types import IndexState
 from mirage.types import FileStat, PathSpec
 from mirage.workspace.files import Files
@@ -66,6 +70,33 @@ def with_fingerprint(entry: IndexEntry, info: FileStat) -> IndexEntry:
         return replace(entry, dev=0, ino=0)
     dev, ino = _kept(info.fingerprint)
     return replace(entry, dev=dev, ino=ino)
+
+
+async def still_stats(
+    vfs: Files, path: PathSpec, info: FileStat
+) -> FileStat | None:
+    """The backend's own stat of a file just read, when it still gives the
+    fingerprint ``info`` had before the read; None when it gives another,
+    none, or refuses the stat.
+
+    A fingerprint kept with a blob has to describe the bytes hashed, and
+    a stat from before the read may be older than they are: a kept
+    listing's row, or a file another writer changed in between. One more
+    stat after the read catches either; a file that changed and changed
+    back within the read is the window that remains.
+
+    Args:
+        vfs (Files): the session's files.
+        path (PathSpec): absolute virtual path of the file.
+        info (FileStat): the stat taken before the read.
+    """
+    try:
+        after = await lstat(vfs, path, fresh=True)
+    except PermissionError:
+        return None
+    if after is None or not after.fingerprint:
+        return None
+    return after if after.fingerprint == info.fingerprint else None
 
 
 def unchanged(entry: IndexEntry, info: FileStat) -> bool:
