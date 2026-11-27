@@ -1,8 +1,3 @@
-/**
- * The Node server's side of the E2B adapter: its in-memory sandbox table,
- * the lookups its Fastify hooks make, and its command stream transport.
- * Only the server imports this module; the ./e2b export does not.
- */
 import { Readable } from 'node:stream'
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { HttpError } from '../errors.ts'
@@ -167,11 +162,7 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 
   private entryOf(workspaceId: string): WorkspaceEntry | null {
-    try {
-      return this.registry.get(workspaceId)
-    } catch {
-      return null
-    }
+    return this.registry.has(workspaceId) ? this.registry.get(workspaceId) : null
   }
 
   private active(id: string): SandboxEntry | null {

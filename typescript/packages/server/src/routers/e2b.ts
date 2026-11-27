@@ -120,7 +120,9 @@ function queryOf(params: URLSearchParams): Record<string, string | string[]> {
   const query: Record<string, string | string[]> = {}
   for (const [key, value] of params) {
     const held = query[key]
-    query[key] = held === undefined ? value : Array.isArray(held) ? [...held, value] : [held, value]
+    if (held === undefined) query[key] = value
+    else if (Array.isArray(held)) held.push(value)
+    else query[key] = [held, value]
   }
   return query
 }
