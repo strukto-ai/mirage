@@ -31,6 +31,11 @@ class RAMAttrs(TypedDict, total=False):
     uid: int | str
     gid: int | str
     atime: str
+    # The stamp the store gave when a caller last set the file's mtime
+    # by hand, which its fingerprint carries: a time set back keeps
+    # the fingerprint off every one the file had before. One word, so
+    # a snapshot either host saves names it as the other reads it.
+    retimed: str
 
 
 class _FileStore(Protocol):
@@ -268,6 +273,9 @@ class RAMStore:
     # When the store was made: the time of a folder no write dated (its
     # root) and of a device it serves.
     made: str = field(default_factory=now_iso)
+    # The time the store's last write landed at, in nanoseconds,
+    # through any mount on it.
+    stamp: int = 0
 
     @property
     def lock(self) -> AbstractContextManager[bool | None]:

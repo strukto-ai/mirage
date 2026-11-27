@@ -14,6 +14,7 @@
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.dest import lookup_error
+from mirage.core.ram.fingerprint import token_of
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import norm
@@ -65,6 +66,7 @@ def key_stat(store: RAMStore, p: str) -> FileStat | None:
             name=p.rsplit("/", 1)[-1],
             size=store.files.size(p),
             modified=store.modified.get(p),
+            fingerprint=token_of(store, p),
             type=FileType.FILE,
             content=content_type_for_path(p),
             mode=attrs.get("mode"),

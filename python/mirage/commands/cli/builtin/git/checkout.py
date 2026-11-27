@@ -15,6 +15,7 @@
 import asyncio
 import posixpath
 from collections.abc import Sequence
+from dataclasses import replace
 
 from dulwich.index import IndexEntry
 from dulwich.objects import Commit, ObjectID
@@ -58,6 +59,7 @@ from mirage.commands.cli.builtin.git.format import oneline, short
 from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
+    with_fingerprint,
     write_index,
 )
 from mirage.commands.cli.builtin.git.io import (
@@ -124,7 +126,11 @@ from mirage.commands.cli.builtin.git.util import (
     split_marked,
     start_point,
 )
-from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
+from mirage.commands.cli.builtin.git.worktree import (
+    UNTRACKED_ALL,
+    UNTRACKED_NO,
+    scan,
+)
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -350,6 +356,7 @@ async def switch_to(
     location: RepoLocation,
     before: Tree,
     after: Tree,
+    refreshed: dict[bytes, IndexEntry] | None = None,
 ) -> list[str]:
     """Make the working tree and index match the tree being switched to.
 
@@ -361,12 +368,19 @@ async def switch_to(
     the caller if anything uncommitted stands on it, so the tree diff is
     the whole decision here.
 
+    Each file written is statted after, as git does to fill its entry,
+    and the entry keeps the mount's fingerprint, so the next status and
+    checkout know it unchanged without reading it back.
+
     Args:
         vfs (Files): the session's files.
         repo (BaseRepo): the opened repository.
         location (RepoLocation): the discovered repository.
         before (Tree): the tree HEAD records.
         after (Tree): the tree being switched to.
+        refreshed (dict[bytes, IndexEntry] | None): entries the caller's
+            comparison found unchanged and refreshed, kept where the move
+            leaves the path's entry as it was.
     """
     state = await read_index(vfs, location.gitdir)
     state.conflicts.clear()
@@ -418,6 +432,8 @@ async def switch_to(
     # The leading directories, each looked at once for every entry below
     # it, and after the removals above, which change them.
     dirs = LeadingDirs()
+    sizes: dict[bytes, int] = {}
+    written: dict[bytes, IndexEntry] = {}
     for path in changed:
         name = path.decode("utf-8", errors="replace")
         mode, sha = after[path]
@@ -454,6 +470,35 @@ async def switch_to(
             dirs.missing(where)
             standing = None
         await restore_entry(vfs, where, mode, blob, standing, dirs)
+        sizes[path] = len(blob)
+    # A tree nothing was checked out in before (a clone) is walked once
+    # for what was written, as one listing of it costs about what a stat
+    # of one file does; otherwise each file written is statted.
+    if before:
+        stats = {
+            path: await lstat(
+                vfs,
+                location.worktree.join(path.decode("utf-8", errors="replace")),
+                fresh=True,
+            )
+            for path in sizes
+        }
+    else:
+        names = {path.decode("utf-8", errors="replace") for path in sizes}
+        found = await scan(vfs, location, names, UNTRACKED_NO)
+        stats = {
+            path: found.files.get(path.decode("utf-8", errors="replace"))
+            for path in sizes
+        }
+    for path, size in sizes.items():
+        mode, sha = after[path]
+        entry = restored(ObjectID(sha), mode)
+        info = stats[path]
+        # A file that stats other than what was written is not the blob,
+        # so its entry keeps nothing to trust.
+        if info is not None and info.size == size:
+            entry = with_fingerprint(replace(entry, size=size), info)
+        written[path] = entry
     # The index is git's two-way merge, not a copy of the target tree:
     # only a path the two trees disagree about is decided by the
     # target, and where they agree the entry is left exactly as it
@@ -462,9 +507,15 @@ async def switch_to(
     # staged addition, which is in neither tree, and resurrected a
     # staged deletion, which is in both and in no entry, turning both
     # into unstaged changes a later commit would silently omit.
+    for path, entry in (refreshed or {}).items():
+        held = state.entries.get(path)
+        if held is not None and held.sha == entry.sha:
+            state.entries[path] = entry
     for path in changed:
         mode, sha = after[path]
-        state.entries[path] = restored(ObjectID(sha), mode)
+        state.entries[path] = written.get(path) or restored(
+            ObjectID(sha), mode
+        )
     for path in set(before) - set(after):
         state.entries.pop(path, None)
     await write_index(vfs, location.gitdir, state)
@@ -725,7 +776,10 @@ async def _carry_across(
     unseen = decoded({*(head or {}), *state.entries}) - decoded(
         {*before, *seen}
     )
-    unstaged = await work_changes(vfs, location.worktree, seen, found)
+    refreshed: dict[bytes, IndexEntry] = {}
+    unstaged = await work_changes(
+        vfs, location.worktree, seen, found, refreshed=refreshed
+    )
     staged = _stage_letters(before, seen)
     # Both kinds of uncommitted change count: an edit in the working
     # tree, and one already staged. Leaving the staged ones out is
@@ -745,7 +799,9 @@ async def _carry_across(
     lost = _lost_directories(writing, found.untracked)
     if blocked or overwritten or lost:
         raise CheckoutConflictError(blocked, overwritten, lost)
-    return carried, await switch_to(vfs, repo, location, before, after)
+    return carried, await switch_to(
+        vfs, repo, location, before, after, refreshed
+    )
 
 
 async def tracking_report(

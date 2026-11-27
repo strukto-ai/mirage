@@ -14,12 +14,13 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { msToRfc3339 } from '../../utils/dates.ts'
+import { msToRfc3339, wallNs } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { refusal } from '../posix/errors.ts'
 import { parseEntries, treeCommand } from '../posix/stat.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 import type { Holder } from './types.ts'
 import { runChecked, leaf, mountPrefix, machinePath, virtualPath } from './utils.ts'
 import { currentCaller } from '../../context/session_context.ts'
@@ -33,8 +34,9 @@ import { singleQuote } from '../../utils/quote.ts'
  *
  * @param name the entry's name.
  * @param entry what find printed for it.
+ * @param machine the machine holding it.
  */
-export function entryStat(name: string, entry: PosixEntry): FileStat {
+export function entryStat(name: string, entry: PosixEntry, machine: string): FileStat {
   const kind = KINDS[entry.kind] ?? FileType.FILE
   const modified = msToRfc3339(entry.mtimeMs)
   const regular = kind === FileType.FILE
@@ -42,7 +44,7 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
     name,
     size: regular ? entry.size : null,
     modified,
-    fingerprint: modified,
+    fingerprint: tokenOf(entry, machine),
     type: kind,
     ...(regular ? { content: contentTypeForPath(name) } : {}),
     mode: entry.mode,
@@ -63,7 +65,7 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
  */
 export function holderStat(name: string, one: Holder): FileStat {
   if (one.entry === null) throw new Error(`${one.machine}: no entry was asked for ${name}`)
-  return entryStat(name, one.entry)
+  return entryStat(name, one.entry, one.machine)
 }
 
 /**
@@ -82,13 +84,14 @@ export async function entries(
   path: PathSpec,
   depth: number | null,
 ): Promise<PosixEntry[]> {
+  const askedNs = wallNs()
   const out = await runChecked(
     accessor,
     machine,
     treeCommand(machinePath(accessor, path), depth),
     path,
   )
-  const found = parseEntries(out)
+  const found = parseEntries(out, askedNs)
   if (found?.[0]?.rel !== '') throw refusal(path, new Uint8Array())
   return found
 }
@@ -122,7 +125,7 @@ export async function stat(
   machine: string,
   path: PathSpec,
 ): Promise<FileStat> {
-  return entryStat(leaf(path), await statEntry(accessor, machine, path))
+  return entryStat(leaf(path), await statEntry(accessor, machine, path), machine)
 }
 
 /**

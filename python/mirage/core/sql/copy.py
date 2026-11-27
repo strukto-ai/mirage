@@ -15,12 +15,14 @@
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import FILE
 from mirage.core.sql.inode import (
+    Inode,
+    InoRef,
     by_entry,
     by_ino,
     is_dir,
     make_node,
     now_stamp,
-    resized,
+    resized_from,
 )
 from mirage.core.sql.path import (
     check_dest_parents,
@@ -30,6 +32,7 @@ from mirage.core.sql.path import (
     target,
     walk,
 )
+from mirage.core.sql.write import land_fresh
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
 from mirage.vfs.sql.types import SqlStatement
@@ -49,28 +52,38 @@ async def copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
         raise eisdir(dst)
     if there is not None and there.ino == node.ino:
         return
-    now = now_stamp()
-    ino = (
-        by_ino(there.ino)
-        if there is not None
-        else by_entry(parent_ref(to), leaf(to))
-    )
-    statements: list[SqlStatement] = (
-        [
-            SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
-            resized(ino, node.size, now),
-        ]
-        if there is not None
-        else make_node(
-            accessor, parent_ref(to), leaf(to), FILE, node.size, now
-        )
-    )
-    statements.append(
-        SqlStatement(
+
+    def rows_into(ino: InoRef) -> SqlStatement:
+        return SqlStatement(
             "INSERT INTO fs_data (ino, chunk_index, data)"
             f" SELECT {ino.sql}, chunk_index, data FROM fs_data"
             f" WHERE ino = {by_ino(node.ino).sql}",
             ino.params,
         )
-    )
-    await accessor.batch(statements)
+
+    if there is None:
+        made = by_entry(parent_ref(to), leaf(to))
+        await accessor.batch(
+            [
+                *make_node(
+                    accessor,
+                    parent_ref(to),
+                    leaf(to),
+                    FILE,
+                    node.size,
+                    now_stamp(accessor),
+                ),
+                rows_into(made),
+            ]
+        )
+    else:
+
+        async def replaced(n: Inode) -> list[SqlStatement]:
+            ino = by_ino(n.ino)
+            return [
+                SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
+                resized_from(n, node.size, now_stamp(accessor, n)),
+                rows_into(ino),
+            ]
+
+        await land_fresh(accessor, there, replaced)

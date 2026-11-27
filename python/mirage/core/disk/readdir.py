@@ -19,11 +19,12 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_error
-from mirage.core.disk.listing_version import folder_version, wall_ns
+from mirage.core.disk.listing_version import folder_version
 from mirage.core.disk.stat import stat_of
 from mirage.core.disk.utils import read_entries, resolve_inside_sync
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import DirListing, FileStat, PathSpec
+from mirage.utils.dates import wall_ns
 from mirage.utils.key_prefix import raw_path_of
 
 logger = logging.getLogger(__name__)

@@ -134,12 +134,8 @@ DISCORD_OPS = frozenset(
 )
 
 RAM_CLOCKED = (
-    "copy",
-    "create",
     "mkdir",
-    "pwrite",
     "rename",
-    "truncate",
     "write",
 )
 
@@ -1286,9 +1282,15 @@ def route_ram(clock: SimClock) -> Iterator[None]:
     def now_iso() -> str:
         return to_iso_z(datetime.fromtimestamp(clock.now(), timezone.utc))
 
+    def stamp_after(last: int) -> int:
+        return max(round(clock.now() * 1_000_000_000), last + 1)
+
     with ExitStack() as stack:
         for mod in RAM_CLOCKED:
             stack.enter_context(
                 patch(f"mirage.core.ram.{mod}.now_iso", new=now_iso)
             )
+        stack.enter_context(
+            patch("mirage.accessor.ram.stamp_after", new=stamp_after)
+        )
         yield

@@ -453,6 +453,25 @@ class _Checker:
             return True
         return False
 
+    async def check_fingerprint(self) -> None:
+        """Check that a same-size rewrite moves the fingerprint a VFS
+        stats. A VFS that stats none promises nothing, so is not probed."""
+        content = self.fixture.content
+        if not content:
+            return
+        path = self.path("fingerprint")
+        await self.put(path, content)
+        handed = await self.handed(self.vfs.stat, path)
+        before = (await self.vfs.stat(path, **handed)).fingerprint
+        if before is None:
+            return
+        await self.put(path, bytes(byte ^ 0xFF for byte in content))
+        handed = await self.handed(self.vfs.stat, path)
+        after = (await self.vfs.stat(path, **handed)).fingerprint
+        assert after != before, (
+            "a same-size rewrite must move the fingerprint the VFS stats"
+        )
+
     async def version(self, path: PathSpec) -> str:
         handed = await self.handed(self.vfs.stat, path)
         info = await self.vfs.stat(path, **handed)
@@ -634,6 +653,7 @@ class _Checker:
                     await self.check_copy(mode)
                 elif kind == "delete" and mode == "match":
                     await self.check_delete()
+        await self.check_fingerprint()
         for op in ("rename", "copy"):
             if self.vfs.supports(op):
                 await self.check_moved(op)
@@ -654,7 +674,8 @@ async def check_mutation_contract(
     ``run_with_versions`` as a ``write: conditional`` mount runs it: a
     declared condition lands when it holds and raises StaleWriteError,
     writing nothing, when it does not. An undeclared condition is refused
-    by the mount before the VFS sees it, so it is not probed. ``rename``
+    by the mount before the VFS sees it, so it is not probed. A
+    fingerprint the VFS stats must move on a same-size rewrite. ``rename``
     and ``copy`` are checked where the VFS defines them: onto a fresh name
     and over an existing file the destination holds the source's bytes,
     ``rename`` removes the source and ``copy`` keeps it, and a missing

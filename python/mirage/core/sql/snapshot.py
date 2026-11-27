@@ -96,7 +96,7 @@ def restore(
     holds. Blocking, as ``load_state`` is. Mirrors TypeScript's
     ``restore``."""
     cs = accessor.ready()
-    now = now_stamp()
+    now = now_stamp(accessor)
     root = accessor.root_ino()
     statements = [
         SqlStatement(SQL["drop_base"]),

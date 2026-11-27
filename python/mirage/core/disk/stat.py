@@ -21,10 +21,10 @@ from stat import S_ISDIR
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.listing_version import stamp, wall_ns
+from mirage.core.disk.fingerprint import token_of
 from mirage.core.disk.utils import resolve_inside_sync
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import ns_to_iso
+from mirage.utils.dates import ns_to_iso, wall_ns
 from mirage.utils.filetype import content_type_for_path
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ def stat_of(
             name=name,
             size=None,
             modified=modified,
-            fingerprint=stamp(st, now_ns) if versioned else None,
+            fingerprint=token_of(st, now_ns) if versioned else None,
             type=FileType.DIRECTORY,
             mode=st.st_mode & 0o7777,
             atime=ns_to_iso(st.st_atime_ns),
@@ -102,7 +102,7 @@ def stat_of(
         name=name,
         size=st.st_size,
         modified=modified,
-        fingerprint=modified,
+        fingerprint=token_of(st, now_ns),
         type=FileType.FILE,
         content=content_type_for_path(name),
         mode=st.st_mode & 0o7777,

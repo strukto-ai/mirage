@@ -27,4 +27,7 @@ export interface DevFileState {
   tombstones: Set<string>
   inputs: Map<string, PipeRow>
   nextAllocation: number
+  /** The time the store's last write landed at, in nanoseconds, kept here
+   * so every session's view of /dev stamps past it. */
+  stamp: bigint
 }

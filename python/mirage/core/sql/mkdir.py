@@ -58,7 +58,7 @@ async def mkdir(
     TypeScript's ``mkdir``.
     """
     w = await walk(accessor, path)
-    now = now_stamp()
+    now = now_stamp(accessor)
     if not parents:
         if target(w) is not None:
             raise eexist(path)

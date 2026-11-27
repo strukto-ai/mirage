@@ -22,7 +22,7 @@ from mirage.core.ram.dest import (
 )
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -63,7 +63,7 @@ async def pwrite(
                 end = max(store.files.size(p), offset + len(data))
                 check_capacity(store, path_spec, p, end)
             store.files.splice(p, offset, data)
-    now = now_iso()
+    now = stamp_iso(accessor.stamped())
     store.modified[p] = now
     if made:
         touch_parent(store, p, now)

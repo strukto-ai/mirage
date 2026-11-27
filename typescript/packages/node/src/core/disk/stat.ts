@@ -20,7 +20,8 @@ import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import { diskError } from './errors.ts'
-import { stamp, wallNs } from './listing_version.ts'
+import { wallNs } from '@struktoai/mirage-core/utils/dates'
+import { tokenOf } from './fingerprint.ts'
 import { resolveInside } from './utils.ts'
 
 // Linux counts a folder's links as itself, its "." and each subfolder's
@@ -71,7 +72,7 @@ export async function statOf(
       name,
       size: null,
       modified,
-      fingerprint: versioned ? stamp(st, nowNs) : null,
+      fingerprint: versioned ? tokenOf(st, nowNs) : null,
       type: FileType.DIRECTORY,
       mode,
       atime: st.atime.toISOString(),
@@ -85,7 +86,7 @@ export async function statOf(
     name,
     size: Number(st.size),
     modified,
-    fingerprint: modified,
+    fingerprint: tokenOf(st, nowNs),
     type: FileType.FILE,
     content: contentTypeForPath(name),
     mode,

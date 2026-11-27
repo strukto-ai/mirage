@@ -82,6 +82,11 @@ export interface RAMAttrs {
   uid?: number | string
   gid?: number | string
   atime?: string
+  /** The stamp the store gave when a caller last set the file's mtime by
+   * hand, which its fingerprint carries: a time set back keeps the
+   * fingerprint off every one the file had before. One word, so a
+   * snapshot either host saves names it as the other reads it. */
+  retimed?: string
 }
 
 /**
@@ -169,6 +174,9 @@ export class RAMStore {
   /** When the store was made: the time of a folder no write dated (its
    * root) and of a device it serves. */
   readonly made = nowIso()
+  /** The time the store's last write landed at, in nanoseconds, through
+   * any mount on it. */
+  stamp = 0n
 
   /** `usage` is the store's capacity and counted bytes, null when uncapped. */
   constructor(readonly usage: StorageUsage | null = null) {

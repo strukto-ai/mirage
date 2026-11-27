@@ -50,7 +50,7 @@ async def rmdir(accessor: SqlAccessor, path: PathSpec) -> None:
                 (parent.ino, leaf(w)),
             ),
             *drop_inodes([node.ino]),
-            touched(by_ino(parent.ino), now_stamp()),
+            touched(by_ino(parent.ino), now_stamp(accessor)),
         ]
     )
     if await accessor.query(SQL["has_entry"], (parent.ino, leaf(w))):

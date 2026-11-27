@@ -20,6 +20,7 @@ import { byteView, encodeText, decodeText } from '../shell/bytes.ts'
 import { concat } from './bytes.ts'
 import { posixTransitions, resolveTz, type Zone } from './timezone.ts'
 import { systemDate } from './clock.ts'
+import { RACY_WINDOW_NS } from './constants.ts'
 
 /** The UTC day `ts` (epoch milliseconds) falls on, as `YYYY-MM-DD`. */
 export function utcDateFolder(ts: number): string {
@@ -35,6 +36,64 @@ export function toIsoZ(date: Date): string {
 
 export function nowIso(): string {
   return toIsoZ(systemDate())
+}
+
+/**
+ * Now in nanoseconds since the epoch, or `last + 1` when the clock has not
+ * moved past `last`.
+ *
+ * A store Mirage keeps stamps each write with this, past the stamp it gave
+ * the write before, so no two writes to it share a time. A clock that stands
+ * still (a Durable Object's stops for a whole request) or one too coarse to
+ * part two writes would otherwise give a rewrite the time its file already
+ * had, and a reader that compares times would take the file for unchanged.
+ * Mirrors Python's `stamp_after`.
+ *
+ * @param last the stamp the store gave its previous write, 0n for none
+ */
+export function stampAfter(last: bigint): bigint {
+  const now = BigInt(systemDate().getTime()) * 1_000_000n
+  return now > last ? now : last + 1n
+}
+
+/**
+ * The host's wall clock in nanoseconds: the clock a file's times are judged
+ * against, not the workspace's. Mirrors Python's `wall_ns`.
+ */
+export function wallNs(): bigint {
+  return BigInt(Date.now()) * 1_000_000n
+}
+
+/**
+ * Whether an entry last changed at `changedNs` is old enough that a second
+ * change could not have kept its time.
+ *
+ * A clock ticks coarser than the changes it dates, so two writes inside one
+ * tick share a time, and a fingerprint built from it would not move. git calls
+ * such an entry racy and reads it rather than trust its stat; a backend whose
+ * fingerprint is a time gives none until the entry is `window` old. Mirrors
+ * Python's `settled`.
+ *
+ * @param changedNs when the entry last changed, in nanoseconds
+ * @param nowNs the wall clock, read before the entry's stat
+ * @param window how old it must be: `REMOTE_RACY_WINDOW_NS` for a time
+ *   another host's clock gave
+ */
+export function settled(changedNs: bigint, nowNs: bigint, window = RACY_WINDOW_NS): boolean {
+  return nowNs - changedNs >= window
+}
+
+/**
+ * A stamp as ISO text in UTC, to the nanosecond. Mirrors Python's
+ * `stamp_iso`.
+ *
+ * @param ns nanoseconds since the epoch, as `stampAfter` gives
+ */
+export function stampIso(ns: bigint): string {
+  const seconds = ns / 1_000_000_000n
+  const fraction = (ns % 1_000_000_000n).toString().padStart(9, '0')
+  const whole = new Date(Number(seconds) * 1000).toISOString().slice(0, 19)
+  return `${whole}.${fraction}Z`
 }
 
 // An ISO 8601 date-time as backends spell one: a date, an optional time

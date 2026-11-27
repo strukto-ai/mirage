@@ -317,6 +317,15 @@ class DevStore(RAMStore):
         self.attrs = {}
         self.made = now_iso()
 
+    @property
+    def stamp(self) -> int:
+        """The last write's stamp, shared by every session's view."""
+        return self.files.state.stamp
+
+    @stamp.setter
+    def stamp(self, ns: int) -> None:
+        self.files.state.stamp = ns
+
     def for_session(self, owner: str) -> "DevStore":
         store = DevStore(self.files.for_session(owner))
         store.modified = self.modified

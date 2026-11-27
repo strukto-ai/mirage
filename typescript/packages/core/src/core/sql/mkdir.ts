@@ -38,7 +38,7 @@ const LEVELS_PER_BATCH = 6
  */
 export async function mkdir(accessor: SqlAccessor, path: PathSpec, parents = false): Promise<void> {
   const w = await walk(accessor, path)
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   if (!parents) {
     if (target(w) !== null) throw eexist(path)
     checkDestParents(w, path)

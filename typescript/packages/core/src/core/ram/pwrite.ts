@@ -15,7 +15,7 @@
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 import { activeDevice, activePipe, refuseTty } from '../dev/device.ts'
@@ -57,7 +57,7 @@ export async function pwrite(
     }
     accessor.store.files.splice(p, offset, data)
   }
-  const now = nowIso()
+  const now = stampIso(accessor.stamped())
   accessor.store.modified.set(p, now)
   if (made) touchParent(accessor.store, p, now)
   record('pwrite', path.virtual, VFSName.RAM, data.byteLength, timer)

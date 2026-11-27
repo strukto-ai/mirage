@@ -17,8 +17,9 @@ import { eisdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { FILE } from './constants.ts'
-import { byEntry, byIno, isDir, makeNode, nowStamp, resized } from './inode.ts'
+import { byEntry, byIno, isDir, makeNode, nowStamp, resizedFrom, type InoRef } from './inode.ts'
 import { checkDestParents, found, leaf, parentRef, target, walk } from './path.ts'
+import { landFresh } from './write.ts'
 
 /**
  * Copy a file's bytes to `dst` inside the database, row for row: nothing
@@ -33,16 +34,23 @@ export async function copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec):
   const there = target(to)
   if (there !== null && isDir(there)) throw eisdir(dst)
   if (there?.ino === node.ino) return
-  const now = nowStamp()
-  const ino = there !== null ? byIno(there.ino) : byEntry(parentRef(to), leaf(to))
-  const statements: SqlStatement[] =
-    there !== null
-      ? [{ sql: `DELETE FROM fs_data WHERE ino = ${ino.sql}` }, resized(ino, node.size, now)]
-      : makeNode(accessor, parentRef(to), leaf(to), FILE, node.size, now)
-  statements.push({
+  const rowsInto = (ino: InoRef): SqlStatement => ({
     sql: `INSERT INTO fs_data (ino, chunk_index, data)
       SELECT ${ino.sql}, chunk_index, data FROM fs_data WHERE ino = ${byIno(node.ino).sql}`,
     params: ino.params,
   })
-  await accessor.batch(statements)
+  if (there === null) {
+    await accessor.batch([
+      ...makeNode(accessor, parentRef(to), leaf(to), FILE, node.size, nowStamp(accessor)),
+      rowsInto(byEntry(parentRef(to), leaf(to))),
+    ])
+    return
+  }
+  await landFresh(accessor, there, (n) =>
+    Promise.resolve([
+      { sql: `DELETE FROM fs_data WHERE ino = ${byIno(n.ino).sql}` },
+      resizedFrom(n, node.size, nowStamp(accessor, n)),
+      rowsInto(byIno(n.ino)),
+    ]),
+  )
 }

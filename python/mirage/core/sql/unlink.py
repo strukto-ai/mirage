@@ -43,7 +43,7 @@ async def unlink(accessor: SqlAccessor, path: PathSpec) -> None:
             ),
             *drop_inodes([node.ino]),
             *(
-                [touched(by_ino(parent.ino), now_stamp())]
+                [touched(by_ino(parent.ino), now_stamp(accessor))]
                 if parent is not None
                 else []
             ),

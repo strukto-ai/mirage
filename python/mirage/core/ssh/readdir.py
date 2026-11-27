@@ -24,6 +24,7 @@ from mirage.core.ssh.constants import SCOPE_ERROR
 from mirage.core.ssh.stat import attrs_to_file_stat
 from mirage.errors.fs import eacces, listing_error
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import wall_ns
 from mirage.utils.key_prefix import raw_path_of
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,11 @@ async def _is_dir(accessor: SSHAccessor, key: str) -> bool:
 
 
 async def _row_of(
-    accessor: SSHAccessor, remote: str, name: str, attrs: asyncssh.SFTPAttrs
+    accessor: SSHAccessor,
+    remote: str,
+    name: str,
+    attrs: asyncssh.SFTPAttrs,
+    now_ns: int,
 ) -> FileStat:
     """A listed entry as ``stat`` answers it.
 
@@ -72,12 +77,13 @@ async def _row_of(
         remote (str): the entry's remote path.
         name (str): its name.
         attrs (asyncssh.SFTPAttrs): its listed attributes.
+        now_ns (int): this host's wall clock, read before the listing.
     """
     if attrs.type != asyncssh.FILEXFER_TYPE_SYMLINK:
-        return attrs_to_file_stat(name, attrs)
+        return attrs_to_file_stat(name, attrs, now_ns)
     sftp = await accessor.sftp()
     try:
-        return attrs_to_file_stat(name, await sftp.stat(remote))
+        return attrs_to_file_stat(name, await sftp.stat(remote), now_ns)
     except (*UNRESOLVED, asyncssh.SFTPPermissionDenied) as exc:
         logger.debug("ssh readdir: %s resolves to nothing: %s", remote, exc)
         return FileStat(name=name, type=FileType.FILE)
@@ -89,6 +95,7 @@ async def readdir(
     virtual = path_spec.virtual
     path = raw_path_of(path_spec.dir if path_spec.pattern else path_spec)
     sftp = await accessor.sftp()
+    now_ns = wall_ns()
     try:
         remote_path = join_root(accessor.config.root, path)
         entries = await sftp.readdir(remote_path)
@@ -112,7 +119,7 @@ async def readdir(
         return list(
             await asyncio.gather(
                 *(
-                    _row_of(accessor, f"{base}/{name}", name, attrs)
+                    _row_of(accessor, f"{base}/{name}", name, attrs, now_ns)
                     for name, attrs in found
                 )
             )

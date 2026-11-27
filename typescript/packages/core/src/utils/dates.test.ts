@@ -22,9 +22,14 @@ import {
   parseDateExprAsync,
   parsePosixTimeAsync,
   rfc3339Of,
+  settled,
+  stampAfter,
+  stampIso,
   toIsoZ,
   utcDateFolder,
 } from './dates.ts'
+import { ManualClock, runWithSystemClock } from './clock.ts'
+import { RACY_WINDOW_NS } from './constants.ts'
 import { UTC_ZONE, resolveTz } from './timezone.ts'
 
 describe('inMtimeWindow', () => {
@@ -642,5 +647,40 @@ describe('rfc3339Of', () => {
     [null, null],
   ] as const)('reads %s as %s', (text, want) => {
     expect(rfc3339Of(text)).toBe(want)
+  })
+})
+
+function stamps(count: number): Promise<bigint[]> {
+  const out: bigint[] = []
+  for (let i = 0; i < count; i++) out.push(stampAfter(out.at(-1) ?? 0n))
+  return Promise.resolve(out)
+}
+
+describe('stampAfter', () => {
+  it('still gives every write its own stamp on a clock that stands still', async () => {
+    const got = await runWithSystemClock(new ManualClock(1_800_000_000), () => stamps(3))
+    const now = 1_800_000_000n * 1_000_000_000n
+    expect(got).toEqual([now, now + 1n, now + 2n])
+  })
+
+  it('follows the clock once it moves past the last stamp', async () => {
+    const clock = new ManualClock(1_800_000_000)
+    const [first = 0n] = await runWithSystemClock(clock, () => stamps(1))
+    clock.advance(2)
+    const [later = 0n] = await runWithSystemClock(clock, () => stamps(1))
+    expect(later - first).toBe(2_000_000_000n)
+  })
+})
+
+describe('stampIso', () => {
+  it('spells every nanosecond', () => {
+    expect(stampIso(1_800_000_000_000_000_001n)).toBe('2027-01-15T08:00:00.000000001Z')
+  })
+})
+
+describe('settled', () => {
+  it('settles an entry once it is a racy window old', () => {
+    expect(settled(0n, RACY_WINDOW_NS - 1n)).toBe(false)
+    expect(settled(0n, RACY_WINDOW_NS)).toBe(true)
   })
 })

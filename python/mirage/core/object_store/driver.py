@@ -124,12 +124,16 @@ class ChildEntry:
         size (int | None): file byte size; None when the store did not
             report one.
         modified (str): ISO-8601 mtime; empty when unknown.
+        fingerprint (str | None): the file's content identity (ETag,
+            revision id), as ``stat`` reports it; None when the listing
+            carries none.
     """
 
     key: str
     kind: Literal["f", "d", "marker"]
     size: int | None = None
     modified: str = ""
+    fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,11 +145,14 @@ class TreeEntry:
             trailing slash.
         size (int | None): byte size; None when unknown, markers report 0.
         modified (str): ISO-8601 mtime, empty when unknown.
+        fingerprint (str | None): the key's content identity, as ``stat``
+            reports it; None when the listing carries none.
     """
 
     key: str
     size: int | None = 0
     modified: str = ""
+    fingerprint: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

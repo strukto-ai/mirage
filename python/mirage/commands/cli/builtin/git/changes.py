@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from dataclasses import dataclass, replace
 from stat import S_IFMT, S_IFREG, S_IXUSR
 
@@ -23,6 +24,7 @@ from dulwich.objects import Blob, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
 
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.cli.builtin.git.add import entry_mode
 from mirage.commands.cli.builtin.git.constants import (
     GITLINK,
@@ -34,8 +36,13 @@ from mirage.commands.cli.builtin.git.embedded import (
     embedded_location,
 )
 from mirage.commands.cli.builtin.git.errors import UnhashableFileError
-from mirage.commands.cli.builtin.git.index_file import read_index
-from mirage.commands.cli.builtin.git.io import entry_bytes
+from mirage.commands.cli.builtin.git.index_file import (
+    read_index,
+    still_stats,
+    unchanged,
+    with_fingerprint,
+)
+from mirage.commands.cli.builtin.git.io import entry_bytes, lstat
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
 from mirage.commands.cli.builtin.git.repo import open_repo
@@ -56,7 +63,10 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView
 from mirage.workspace.files import Files, reader_of
+
+logger = logging.getLogger(__name__)
 
 UNCHANGED = " "
 # What git diff adds to the commit of a gitlink whose repository has
@@ -353,23 +363,63 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
     return bool(entry.mode & S_IXUSR) != bool(info.mode & S_IXUSR)
 
 
+async def _current(
+    vfs: Files, where: PathSpec, info: FileStat, mounts: MountView | None
+) -> FileStat | None:
+    """The row a kept fingerprint is judged by: the walk's own where the
+    mount keeps no listings, since the backend answered it; the backend's
+    own stat where it does, since a kept listing may be older than the
+    file. None when the backend has none or refuses it.
+
+    Args:
+        vfs (Files): the session's files.
+        where (PathSpec): absolute virtual path of the file.
+        info (FileStat): what the walk found there.
+        mounts (MountView | None): the session's mount boundaries.
+    """
+    if (
+        mounts is None
+        or mounts.keeps_listings is None
+        or not mounts.keeps_listings(where.virtual)
+    ):
+        return info
+    try:
+        return await lstat(vfs, where, fresh=True)
+    except PermissionError as exc:
+        logger.debug("git: no fresh stat of %s: %s", where.virtual, exc)
+        return None
+
+
+def _sized_apart(entry: IndexEntry, info: FileStat) -> bool:
+    """Whether a stated size settles the file as changed.
+
+    Args:
+        entry (IndexEntry): what the index staged for it.
+        info (FileStat): what the mount says about it.
+    """
+    return (
+        info.size is not None and bool(entry.size) and info.size != entry.size
+    )
+
+
 async def _differs(
     vfs: Files,
     worktree: PathSpec,
     path: str,
     entry: IndexEntry,
     info: FileStat,
+    mounts: MountView | None,
 ) -> bool:
     """Whether a working-tree file differs from what the index staged.
 
     A size the mount already reported settles most of it for free, since
     an edit that keeps the byte count is the exception. When the sizes
-    agree the file is read and hashed, because that is the only thing
-    that actually answers the question. git normally skips even that by
-    trusting the stat data it cached (device, inode, mtime to the
-    nanosecond); a mount serves none of those meaningfully, so the cheap
-    answer is not available here and a wrong one is worse than a slow
-    one.
+    agree, the fingerprint the entry kept settles it if the mount still
+    stats the same one: git skips the read the same way, trusting the
+    stat data it cached. A mount that keeps listings may have answered
+    the walk from one as old as the listing, so its stat is asked again
+    of the backend first. Otherwise the file is read and hashed, because
+    that is the only thing that actually answers the question.
 
     A recorded size of zero is read as "not stated" rather than "empty",
     because that is what mirage writes for an entry it restored from a
@@ -384,13 +434,21 @@ async def _differs(
         path (str): repository-relative path.
         entry (IndexEntry): what the index staged for it.
         info (FileStat): what the mount says about it now.
+        mounts (MountView | None): the session's mount boundaries.
     """
-    if _mode_differs(entry, info):
+    if _mode_differs(entry, info) or _sized_apart(entry, info):
         return True
-    if info.size is not None and entry.size and info.size != entry.size:
-        return True
+    where = worktree.join(path)
+    if unchanged(entry, info):
+        current = await _current(vfs, where, info, mounts)
+        if current is not None and (
+            _mode_differs(entry, current) or _sized_apart(entry, current)
+        ):
+            return True
+        if current is not None and unchanged(entry, current):
+            return False
     try:
-        data = await entry_bytes(vfs, worktree.join(path), info)
+        data = await entry_bytes(vfs, where, info)
     except MISS_ERRORS:
         return True
     except PermissionError:
@@ -474,6 +532,7 @@ async def work_changes(
     found: WorkTree,
     embedded: dict[str, EmbeddedChange] | None = None,
     mode: str = UNTRACKED_NORMAL,
+    refreshed: dict[bytes, IndexEntry] | None = None,
 ) -> dict[str, str]:
     """Compare the index with the working tree: what is not staged yet.
 
@@ -486,6 +545,11 @@ async def work_changes(
     which keeps a branch switch from being refused over a file that was
     never missing.
 
+    With ``refreshed``, a file that had to be read and matched its entry
+    gets an entry keeping its fingerprint there, as git refreshes a stat
+    it had to look behind; a caller that writes the index keeps them, so
+    the next comparison skips the read.
+
     Args:
         vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
@@ -496,8 +560,11 @@ async def work_changes(
             unchanged.
         mode (str): the untracked mode, which a gitlink's own status takes
             for ``no``.
+        refreshed (dict[bytes, IndexEntry] | None): where to keep the
+            entries of files read and found unchanged; None keeps none.
     """
     changes: dict[str, str] = {}
+    mounts = mount_view(vfs)
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
         if entry.mode == GITLINK:
@@ -517,8 +584,22 @@ async def work_changes(
         ):
             # A symlink and a file holding its target text hash alike.
             changes[name] = TYPE_CHANGED
-        elif await _differs(vfs, worktree, name, entry, found.files[name]):
+        elif await _differs(
+            vfs, worktree, name, entry, found.files[name], mounts
+        ):
             changes[name] = MODIFIED
+        elif (
+            refreshed is not None
+            and found.files[name].fingerprint
+            and not unchanged(entry, found.files[name])
+        ):
+            # Kept only when the backend still gives the walk's fingerprint
+            # once the bytes are read, so it describes the bytes hashed.
+            after = await still_stats(
+                vfs, worktree.join(name), found.files[name], mounts
+            )
+            if after is not None:
+                refreshed[path] = with_fingerprint(entry, after)
     return changes
 
 

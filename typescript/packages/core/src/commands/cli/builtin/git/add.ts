@@ -34,7 +34,13 @@ import {
 import { embeddedHead, embeddedLocation } from './embedded.ts'
 import { configValues } from './fs.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
+import {
+  readIndex,
+  stillStats,
+  updateIndex,
+  withFingerprint,
+  type StagedEntry,
+} from './index_file.ts'
 import { entryBytes, lstat, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
@@ -45,6 +51,7 @@ import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, gitBool, startPoint, requireVfs } from './util.ts'
 import { scan, UNTRACKED_ALL, UNTRACKED_NO } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { mountView } from '../../../builtin/utils/links.ts'
 
 const ENC = new TextEncoder()
 
@@ -79,14 +86,14 @@ export function entryMode(info: FileStat): number {
 /**
  * An index entry for a file just written into the object database.
  *
- * The stat fields git caches to avoid re-hashing (device, inode, timestamps) are
- * recorded as zero, because a mount serves none of them meaningfully. That is
- * not a corrupt entry: it is exactly what git calls a smudged one, and the only
- * consequence is that git re-hashes the file next time instead of trusting the
- * cache. A wrong value there would be far worse, since git would trust it.
+ * The entry keeps the mount's fingerprint of the file, taken before it was
+ * read, where git caches the stat it hashes past next time (`withFingerprint`).
+ * Times stay zero, because a mount serves none git could hold a later stat
+ * against; that is not a corrupt entry but what git calls a smudged one, which
+ * it re-hashes rather than trusts.
  */
 function stagedEntry(oid: string, info: FileStat, size: number): StagedEntry {
-  return { oid, mode: entryMode(info), size }
+  return withFingerprint({ oid, mode: entryMode(info), size }, info)
 }
 
 /**
@@ -222,6 +229,7 @@ export async function stageChanges(
   const staged = new Map<string, StagedEntry>()
   const changed: [string, string][] = []
   const added: string[] = []
+  const mounts = mountView(vfs)
   for (const path of [...stage].sort(compareCodePoints)) {
     const before = entries.get(path)
     if (found.repos.includes(path)) {
@@ -249,7 +257,13 @@ export async function stageChanges(
       )
     }
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
-    const entry = stagedEntry(oid, info, data.length)
+    const kept =
+      info.fingerprint === null ||
+      info.fingerprint === '' ||
+      (await stillStats(vfs, repo.location.worktree.join(path), info, mounts)) !== null
+        ? info
+        : info.with({ fingerprint: null })
+    const entry = stagedEntry(oid, kept, data.length)
     if (before === undefined) added.push(path)
     else if (before.oid !== entry.oid || before.mode !== entry.mode) changed.push([path, 'add'])
     staged.set(path, entry)

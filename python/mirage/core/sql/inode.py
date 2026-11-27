@@ -27,8 +27,8 @@ from mirage.core.sql.constants import (
     SQL,
     subdirs_of,
 )
+from mirage.core.sql.fingerprint import token_of
 from mirage.types import FileStat, FileType
-from mirage.utils.clock import system_date
 from mirage.utils.dates import to_iso_z
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import gnu_basename
@@ -68,10 +68,21 @@ def is_file(node: Inode) -> bool:
     return node.mode == FILE
 
 
-def now_stamp() -> Stamp:
-    """Now, as ``fs_inode`` keeps a time."""
-    now = system_date()
-    return math.floor(now.timestamp()), now.microsecond * 1000
+def now_stamp(accessor: SqlAccessor, after: Inode | None = None) -> Stamp:
+    """Now, as ``fs_inode`` keeps a time: past every time the mount's
+    driver gave a write before, and past ``after``'s own, so a rewrite
+    always moves its file's time, whichever driver or process last wrote
+    it.
+
+    Args:
+        accessor (SqlAccessor): the mount whose database is written.
+        after (Inode | None): the inode the write lands on, as read.
+    """
+    floor = (
+        0 if after is None else after.mtime * 1_000_000_000 + after.mtime_nsec
+    )
+    seconds, nanoseconds = divmod(accessor.stamped(floor), 1_000_000_000)
+    return seconds, nanoseconds
 
 
 def stamp_of(iso: str) -> Stamp:
@@ -108,6 +119,7 @@ def inode_stat(p: str, node: Inode, subdirs: int = 0) -> FileStat:
         name=gnu_basename(p),
         size=node.size,
         modified=modified,
+        fingerprint=token_of(node.ino, node.mtime, node.mtime_nsec),
         type=FileType.FILE,
         content=content_type_for_path(p),
         nlink=1,
@@ -191,21 +203,11 @@ def touched(ino: InoRef, stamp: Stamp) -> SqlStatement:
     )
 
 
-def resized(ino: InoRef, size: int, stamp: Stamp) -> SqlStatement:
-    """Set the inode's size, and its mtime to ``stamp``."""
-    seconds, nanoseconds = stamp
-    return SqlStatement(
-        "UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ?"
-        f" WHERE ino = {ino.sql}",
-        (size, seconds, nanoseconds, *ino.params),
-    )
-
-
 def resized_from(node: Inode, size: int, stamp: Stamp) -> SqlStatement:
-    """``resized``, landing only on the inode as ``node`` read it: a size
-    or mtime another writer changed since leaves the size NULL, which its
-    column refuses, so the batch fails whole and the caller reads the file
-    again."""
+    """Set the inode's size, and its mtime to ``stamp``, landing only on
+    the inode as ``node`` read it: a size or mtime another writer changed
+    since leaves the size NULL, which its column refuses, so the batch
+    fails whole and the caller reads the file again."""
     seconds, nanoseconds = stamp
     return SqlStatement(
         "UPDATE fs_inode SET size = CASE WHEN size = ? AND mtime = ?"

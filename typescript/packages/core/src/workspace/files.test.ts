@@ -237,6 +237,8 @@ describe('fresh stat', () => {
           .index.setDir('/data', [['f.txt', listed]], new Date(Date.now() + 3_600_000))
         if (replacement === null) await other.vfs.unlink('/data/f.txt')
         else await other.vfs.write('/data/f.txt', replacement)
+        const current =
+          replacement === null ? null : (await other.vfs.stat('/data/f.txt')).fingerprint
         const result =
           fresh === undefined
             ? ws.vfs.stat('/data/f.txt')
@@ -248,7 +250,9 @@ describe('fresh stat', () => {
           expect(row.name).toBe('f.txt')
           expect(row.type).toBe(FileType.FILE)
           expect(row.size).toBe(fresh ? 6 : 3)
-          expect(row.fingerprint).toBeNull()
+          // The fingerprint is the answering row's: the kept listing's, or
+          // the backend's under fresh.
+          expect(row.fingerprint).toBe(fresh === true ? current : listed.fingerprint)
           expect(row.revision).toBeNull()
         }
       } finally {

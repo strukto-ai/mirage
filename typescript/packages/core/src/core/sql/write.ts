@@ -27,9 +27,9 @@ import {
   inodeAt,
   makeNode,
   nowStamp,
-  resized,
   resizedFrom,
   type Inode,
+  type Stamp,
 } from './inode.ts'
 import {
   checkDestParents,
@@ -49,7 +49,7 @@ const TRIES = 3
 // changed it since (the guard in `resizedFrom` failed the batch whole), read
 // the same inode again, wherever it went, as an open file follows its inode,
 // and build afresh; the file as the batch found it.
-async function landFresh(
+export async function landFresh(
   accessor: SqlAccessor,
   node: Inode,
   build: (node: Inode) => Promise<SqlStatement[]>,
@@ -80,7 +80,7 @@ async function landing(
   data: Uint8Array,
   append: boolean,
 ): Promise<SqlStatement[]> {
-  const now = nowStamp()
+  const now = nowStamp(accessor, node)
   if (node === null) {
     const ref = byEntry(parentRef(w), leaf(w))
     return [
@@ -98,8 +98,24 @@ async function landing(
   return [
     { sql: `DELETE FROM fs_data WHERE ino = ${ino.sql}` },
     ...(await placeBytes(accessor, ino, null, 0, data)),
-    resized(ino, data.byteLength, now),
+    resizedFrom(node, data.byteLength, now),
   ]
+}
+
+// Land `data` as the whole file: a new one made with it, or an existing one's
+// rows replaced, retried on the inode as it is now when another writer
+// changed it after the walk read it. Mirrors Python's `_replace`.
+async function replace(
+  accessor: SqlAccessor,
+  w: Walk,
+  existing: Inode | null,
+  data: Uint8Array,
+): Promise<void> {
+  if (existing === null) {
+    await accessor.batch(await landing(accessor, w, null, data, false))
+    return
+  }
+  await landFresh(accessor, existing, (n) => landing(accessor, w, n, data, false))
 }
 
 /**
@@ -131,13 +147,13 @@ export async function write(
     if (append && existing !== null) {
       await landFresh(accessor, existing, (n) => landing(accessor, w, n, whole, true))
     } else {
-      await accessor.batch(await landing(accessor, w, existing, whole, append))
+      await replace(accessor, w, existing, whole)
     }
     record(op, path.virtual, VFSName.SQL, whole.byteLength, timer)
     return
   }
   if (existing === null || !append) {
-    await accessor.batch(await landing(accessor, w, existing, new Uint8Array(0), false))
+    await replace(accessor, w, existing, new Uint8Array(0))
   }
   let node = found(await walk(accessor, path), path)
   let offset = append ? node.size : 0
@@ -149,10 +165,12 @@ export async function write(
   const flush = async (): Promise<void> => {
     if (held === 0) return
     const block = concat(pending)
-    const stamp = nowStamp()
+    let stamp: Stamp = [node.mtime, node.mtimeNsec]
     let at = offset
     let size = 0
+    // Stamped on each try, past the inode as that try finds it.
     const used = await landFresh(accessor, node, async (n) => {
+      stamp = nowStamp(accessor, n)
       at = append ? n.size : offset
       size = Math.max(n.size, at + block.byteLength)
       return [

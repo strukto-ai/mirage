@@ -38,3 +38,11 @@ SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
 SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9
 SPLITMIX_MUL2 = 0x94D049BB133111EB
 UINT64_MASK = (1 << 64) - 1
+
+# An entry changed this recently has no fingerprint: a clock's time is
+# coarser than the changes it would have to tell apart (git's racy-clean
+# rule).
+RACY_WINDOW_NS = 2_000_000_000
+# The same for a time another host's clock gave, judged by this one's: the
+# racy window plus the drift two clocks kept by NTP stay well within.
+REMOTE_RACY_WINDOW_NS = 60_000_000_000

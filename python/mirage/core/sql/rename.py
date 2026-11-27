@@ -89,7 +89,7 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
     )
     if there is not None:
         statements += drop_inodes([there.ino])
-    now = now_stamp()
+    now = now_stamp(accessor)
     statements += [
         touched(by_ino(ino), now)
         for ino in dict.fromkeys((from_parent.ino, to_parent.ino))

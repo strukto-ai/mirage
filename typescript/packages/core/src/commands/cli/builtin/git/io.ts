@@ -44,9 +44,9 @@ export async function statOf(vfs: Files, path: PathSpec): Promise<FileStat | nul
  * records mode 120000 and the target string, and reports a link to nothing as
  * untracked rather than as absent.
  */
-export async function lstat(vfs: Files, path: PathSpec): Promise<FileStat | null> {
+export async function lstat(vfs: Files, path: PathSpec, fresh = false): Promise<FileStat | null> {
   try {
-    return await vfs.stat(path, undefined, { nofollow: true })
+    return await vfs.stat(path, undefined, { nofollow: true, ...(fresh ? { fresh } : {}) })
   } catch (err) {
     if (isMissingPath(err) || isEnotdir(err) || isEisdir(err)) return null
     throw err

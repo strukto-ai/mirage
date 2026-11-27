@@ -48,6 +48,7 @@ export class DevFiles extends PipeFiles {
       tombstones: new Set(),
       inputs: new Map(),
       nextAllocation: 0,
+      stamp: 0n,
     },
   ) {
     super()
@@ -271,6 +272,16 @@ export class DevStore {
     readonly made = nowIso(),
   ) {
     this.dirs = new DevDirs(files)
+  }
+
+  /** The last write's stamp, shared by every session's view. Read as
+   * RAMStore's. */
+  get stamp(): bigint {
+    return this.files.state.stamp
+  }
+
+  set stamp(ns: bigint) {
+    this.files.state.stamp = ns
   }
 
   forSession(owner: string): DevStore {

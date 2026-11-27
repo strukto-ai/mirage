@@ -437,7 +437,7 @@ current = await session.vfs.stat("/s3/report.csv", fresh=True)
   <ResponseField name="mode" type="int | None">The permission bits.</ResponseField>
   <ResponseField name="uid, gid" type="int | str | None" />
   <ResponseField name="atime, ctime, birthtime" type="str | None" />
-  <ResponseField name="fingerprint, revision" type="str | None">The backend's ETag and version, when it has them.</ResponseField>
+  <ResponseField name="fingerprint, revision" type="str | None">A token that changes whenever the file's bytes change, such as an ETag or a write time no second write shares, and the backend's version; each is absent when the backend cannot promise it.</ResponseField>
   <ResponseField name="extra" type="dict">Backend-specific fields.</ResponseField>
 </Expandable>
 
