@@ -2408,13 +2408,23 @@ export class MountEntry {
    * read-ahead, once it has walked and followed each path; keyed by virtual
    * path, a file left out is read on its own later. Mirrors Python's
    * `read_many`.
+   *
+   * @param paths the files, as virtual paths.
+   * @param limit the most bytes worth fetching for one file.
+   * @param heldBytes the bytes the batch this read is for already holds,
+   *   which what it builds must fit beside.
    */
-  async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
+  async readMany(
+    paths: readonly string[],
+    limit: number,
+    heldBytes = 0,
+  ): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
       this.framed(() =>
         this.batchRead(
           paths.map((p) => this.scope(p)),
           limit,
+          heldBytes,
         ),
       ),
     )
@@ -2441,10 +2451,14 @@ export class MountEntry {
    * fails is left out. Either way the index is observed once. Mirrors Python's
    * `_read_many`.
    */
-  private async batchRead(scopes: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {
+  private async batchRead(
+    scopes: PathSpec[],
+    limit: number,
+    heldBytes: number,
+  ): Promise<Map<string, Uint8Array>> {
     const index = this.index
     if (!this.vfs.supports('readMany')) {
-      const read = await this.readEach(scopes, limit)
+      const read = await this.readEach(scopes, limit, heldBytes)
       await this.observe(
         index,
         scopes.filter((scope) => read.has(scope.virtual)),
@@ -2469,19 +2483,21 @@ export class MountEntry {
 
   /**
    * Each file's whole bytes as its own whole read answers them, by virtual
-   * path. The bytes built for the batch must fit together in what the
-   * workspace's `max_memory` has left, as one file's must for its own read
-   * (`collected`), what a RAM store holds already counted; one longer than
-   * `limit` bytes, one that does not fit, or one whose read fails, is left out
-   * for its own read to meet. Mirrors Python's `_read_each`.
+   * path. The bytes built for the batch must fit together, and beside what it
+   * already holds (`heldBytes`), in what the workspace's `max_memory` has left,
+   * as one file's must for its own read (`collected`), what a RAM store holds
+   * already counted; one longer than `limit` bytes, one that does not fit, or
+   * one whose read fails, is left out for its own read to meet. Mirrors
+   * Python's `_read_each`.
    */
   private async readEach(
     scopes: readonly PathSpec[],
     limit: number,
+    heldBytes: number,
   ): Promise<Map<string, Uint8Array>> {
     const counted = this.vfs instanceof RAMVFS
     const read = new Map<string, Uint8Array>()
-    let built = 0
+    let built = heldBytes
     for (const scope of scopes) {
       const parts: Uint8Array[] = []
       let size = 0

@@ -1700,7 +1700,11 @@ export class Dispatcher {
     }
     const held = new Map<string, HeldFile>()
     for (const [mount, pairs] of local.values()) {
-      for (const [name, file] of await this.readHeld(mount, pairs, stats)) held.set(name, file)
+      let heldBytes = 0
+      for (const file of held.values()) heldBytes += file.data.byteLength
+      for (const [name, file] of await this.readHeld(mount, pairs, stats, heldBytes)) {
+        held.set(name, file)
+      }
     }
     const answer = new ReadBatch({
       kept: batches.size > 0,
@@ -1788,11 +1792,14 @@ export class Dispatcher {
    * @param pairs each file as the caller named it, with its walked and
    *   followed read.
    * @param stats the caller's stats of them, by the path it named.
+   * @param heldBytes the bytes the batch already holds from the mounts read
+   *   before this one.
    */
   private async readHeld(
     mount: MountEntry,
     pairs: readonly [PathSpec, Call][],
     stats: ReadonlyMap<string, FileStat>,
+    heldBytes: number,
   ): Promise<Map<string, HeldFile>> {
     const held = new Map<string, HeldFile>()
     await mount.ensureReady()
@@ -1800,7 +1807,7 @@ export class Dispatcher {
     const mark = declared(mount.vfs.constructor, 'read') ?? CALLS.get('read')
     if (mark === undefined) throw new Error('missing read call definition')
     const admitted: [PathSpec, Call, Boundary][] = []
-    let room = READ_AHEAD_BYTES
+    let room = READ_AHEAD_BYTES - heldBytes
     for (const [path, call] of pairs) {
       const row = entries.get(call.path.virtual) ?? stats.get(path.virtual) ?? null
       if (row?.type !== FileType.FILE || row.size === null || row.size === 0 || row.size > room) {
@@ -1823,6 +1830,7 @@ export class Dispatcher {
       read = await mount.readMany(
         admitted.map(([, call]) => call.path.virtual),
         READ_AHEAD_BYTES,
+        heldBytes,
       )
     } catch (err) {
       console.debug(`read-ahead on ${mount.prefix} dropped: ${String(err)}`)

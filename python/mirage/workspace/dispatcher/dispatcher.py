@@ -1916,7 +1916,8 @@ class Dispatcher:
             )
         held: dict[str, HeldFile] = {}
         for mount, pairs in local.values():
-            held.update(await self._read_held(mount, pairs, stats))
+            held_bytes = sum(len(file.data) for file in held.values())
+            held.update(await self._read_held(mount, pairs, stats, held_bytes))
         batch = ReadBatch(
             kept=bool(batches),
             holds=holdable,
@@ -2000,6 +2001,7 @@ class Dispatcher:
         mount: MountEntry,
         pairs: list[tuple[PathSpec, _Call]],
         stats: Mapping[str, FileStat],
+        held_bytes: int,
     ) -> dict[str, HeldFile]:
         """Read files on a mount that holds its data locally for the
         caller, each past the checks its own read meets: admitted as that
@@ -2019,6 +2021,8 @@ class Dispatcher:
                 named it, with its walked and followed read.
             stats (Mapping[str, FileStat]): the caller's stats of them, by
                 the path it named.
+            held_bytes (int): the bytes the batch already holds from the
+                mounts read before this one.
         """
         await mount.ensure_ready()
         entries = await mount.index.get_many(
@@ -2026,7 +2030,7 @@ class Dispatcher:
         )
         mark = declared(type(mount.vfs), "read") or CALLS["read"]
         admitted: list[tuple[PathSpec, _Call, Boundary]] = []
-        room = READ_AHEAD_BYTES
+        room = READ_AHEAD_BYTES - held_bytes
         for path, call in pairs:
             row = entries.get(call.path.virtual) or stats.get(path.virtual)
             if (
@@ -2052,6 +2056,7 @@ class Dispatcher:
             read = await mount.read_many(
                 [call.path.virtual for _, call, _ in admitted],
                 READ_AHEAD_BYTES,
+                held_bytes,
             )
         except Exception as exc:
             logger.debug("read-ahead on %s dropped: %s", mount.prefix, exc)

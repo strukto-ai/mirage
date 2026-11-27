@@ -1127,9 +1127,9 @@ it('reads each file of a batch read the VFS has none of', async () => {
 })
 
 // Twin of test_a_batch_read_leaves_out_what_its_own_read_could_not_fit: the
-// files a batch reads must fit together in what the workspace has left, as one
-// file must for its own read, so a read of one left out meets the refusal; what
-// a RAM store holds is already counted.
+// files a batch reads must fit together, beside what the batch already holds,
+// in what the workspace has left, as one file must for its own read, so a read
+// of one left out meets the refusal; what a RAM store holds is already counted.
 it('leaves out of a batch read what its own read could not fit', async () => {
   class Built extends StubVFS {
     override read(): Promise<Uint8Array> {
@@ -1157,6 +1157,7 @@ it('leaves out of a batch read what its own read could not fit', async () => {
   expect(await runWithMemory(both, () => built.readMany(['/b/f', '/b/g'], 64))).toEqual(
     new Map([['/b/f', new Uint8Array(16)]]),
   )
+  expect(await runWithMemory(both, () => built.readMany(['/b/f'], 64, 16))).toEqual(new Map())
   expect(await runWithMemory(both, () => streamed.readMany(['/s/f', '/s/g'], 64))).toEqual(
     new Map([['/s/f', new Uint8Array(16)]]),
   )

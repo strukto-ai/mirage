@@ -3077,6 +3077,33 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  // Twin of test_a_read_ahead_across_mounts_holds_one_batch_of_bytes: the room
+  // is the batch's, not each mount's, so a file on the second mount past what
+  // the first left is left to its own read.
+  it('holds one batch of bytes on a read-ahead across mounts', async () => {
+    const size = Math.floor(READ_AHEAD_BYTES / 2) + 1
+    const first = new HeldRAM(false)
+    const second = new HeldRAM(false)
+    first.store.files.set('/big', new Uint8Array(size).fill(120))
+    second.store.files.set('/big', new Uint8Array(size).fill(121))
+    const stats = new Map(
+      ['r', 's'].map((m) => [
+        `/${m}/big`,
+        new FileStat({ name: 'big', type: FileType.FILE, size }),
+      ]),
+    )
+    const ws = new Workspace({ '/r': first, '/s': second })
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/big', [], {
+        paths: [spec('/s/big')],
+        stats,
+      })) as ReadBatch
+      expect([[...batch.held.keys()].sort(), second.reads]).toEqual([['/r/big'], []])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_link_changed_since_the_read_ahead_drops_the_held_files:
   // /r/one reaches /r/a through /r/two; pointing /r/two at /r/b changes
   // neither the name read nor the file it reached, and the read must still

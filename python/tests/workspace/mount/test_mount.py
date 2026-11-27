@@ -914,9 +914,10 @@ class _Streamed(BaseVFS):
 
 @pytest.mark.asyncio
 async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
-    # The files a batch reads must fit together in what the workspace has
-    # left, as one file must for its own read, so a read of one left out
-    # meets the refusal; what a RAM store holds is already counted.
+    # The files a batch reads must fit together, beside what the batch
+    # already holds, in what the workspace has left, as one file must for
+    # its own read, so a read of one left out meets the refusal; what a RAM
+    # store holds is already counted.
     ram = RAMVFS()
     ram._store.files.update({"/f": b"x" * 16, "/g": b"x" * 16})
     one = MemoryBudget(8, lambda: 0)
@@ -929,6 +930,7 @@ async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
     assert await run_with_memory(
         both, built.read_many(["/b/f", "/b/g"], 64)
     ) == {"/b/f": b"x" * 16}
+    assert await run_with_memory(both, built.read_many(["/b/f"], 64, 16)) == {}
     assert await run_with_memory(
         both, streamed.read_many(["/s/f", "/s/g"], 64)
     ) == {"/s/f": b"x" * 16}

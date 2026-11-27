@@ -2907,7 +2907,7 @@ class MountEntry:
             )
 
     async def read_many(
-        self, paths: list[str], limit: int
+        self, paths: list[str], limit: int, held_bytes: int = 0
     ) -> dict[str, bytes]:
         """Read several whole files on this mount, in one request where
         its VFS reads a batch and one file after another otherwise.
@@ -2919,11 +2919,13 @@ class MountEntry:
         Args:
             paths (list[str]): the files, as virtual paths.
             limit (int): the most bytes worth fetching for one file.
+            held_bytes (int): the bytes the batch this read is for
+                already holds, which what it builds must fit beside.
         """
         async with self.use():
             return await self._framed(
                 lambda: self._read_many(
-                    [self._scope(p) for p in paths], limit
+                    [self._scope(p) for p in paths], limit, held_bytes
                 ),
             )
 
@@ -2942,7 +2944,7 @@ class MountEntry:
             reset_caller(token)
 
     async def _read_many(
-        self, scopes: list[PathSpec], limit: int
+        self, scopes: list[PathSpec], limit: int, held_bytes: int
     ) -> dict[str, bytes]:
         """The VFS's batch read, handed what is at each path and at its
         folder as the stored listings name them, where it takes them; a
@@ -2954,9 +2956,11 @@ class MountEntry:
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
             limit (int): the most bytes worth fetching for one file.
+            held_bytes (int): the bytes the batch this read is for
+                already holds, which what it builds must fit beside.
         """
         if not self.vfs.supports("read_many"):
-            read = await self._read_each(scopes, limit)
+            read = await self._read_each(scopes, limit, held_bytes)
             await self._observe(
                 self.index, [s for s in scopes if s.virtual in read]
             )
@@ -2979,22 +2983,24 @@ class MountEntry:
         return result
 
     async def _read_each(
-        self, scopes: list[PathSpec], limit: int
+        self, scopes: list[PathSpec], limit: int, held_bytes: int
     ) -> dict[str, bytes]:
         """Each file's whole bytes as its own whole read answers them, by
-        virtual path. The bytes built for the batch must fit together in
-        what the workspace's ``max_memory`` has left, as one file's must
-        for its own read (``_collected``), what a RAM store holds already
-        counted; one longer than ``limit`` bytes, one that does not fit,
-        or one whose read fails, is left out for its own read to meet.
+        virtual path. The bytes built for the batch must fit together, and
+        beside what it already holds, in what the workspace's
+        ``max_memory`` has left, as one file's must for its own read
+        (``_collected``), what a RAM store holds already counted; one
+        longer than ``limit`` bytes, one that does not fit, or one whose
+        read fails, is left out for its own read to meet.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
             limit (int): the most bytes worth holding for one file.
+            held_bytes (int): the bytes the batch already holds.
         """
         counted = isinstance(self.vfs, RAMVFS)
         read: dict[str, bytes] = {}
-        built = 0
+        built = held_bytes
         for scope in scopes:
             parts: list[bytes] = []
             size = 0

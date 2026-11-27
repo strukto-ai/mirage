@@ -3031,6 +3031,28 @@ async def test_a_copy_since_the_read_ahead_keeps_its_held_source():
 
 
 @pytest.mark.asyncio
+async def test_a_read_ahead_across_mounts_holds_one_batch_of_bytes():
+    # The room is the batch's, not each mount's: a file on the second mount
+    # past what the first left is left to its own read.
+    size = READ_AHEAD_BYTES // 2 + 1
+    first, second = HeldRAM(batched=False), HeldRAM(batched=False)
+    first._store.files["/big"] = b"x" * size
+    second._store.files["/big"] = b"y" * size
+    stats = {
+        f"/{m}/big": FileStat(name="big", type=FileType.FILE, size=size)
+        for m in ("r", "s")
+    }
+    with Workspace({"/r/": first, "/s/": second}) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/big"),
+            paths=[_path("/s/big")],
+            stats=stats,
+        )
+    assert (sorted(batch.held), second.reads) == (["/r/big"], [])
+
+
+@pytest.mark.asyncio
 async def test_a_link_changed_since_the_read_ahead_drops_the_held_files():
     # /r/one reaches /r/a through /r/two; pointing /r/two at /r/b changes
     # neither the name read nor the file it reached, and the read must
