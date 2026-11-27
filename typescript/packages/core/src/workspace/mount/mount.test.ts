@@ -1126,10 +1126,10 @@ it('reads each file of a batch read the VFS has none of', async () => {
   )
 })
 
-// Twin of test_a_batch_read_leaves_out_what_its_own_read_could_not_fit: each
-// file a batch reads must fit in what the workspace has left, as its own whole
-// read must, so that read meets the refusal; what a RAM store holds is already
-// counted.
+// Twin of test_a_batch_read_leaves_out_what_its_own_read_could_not_fit: the
+// files a batch reads must fit together in what the workspace has left, as one
+// file must for its own read, so a read of one left out meets the refusal; what
+// a RAM store holds is already counted.
 it('leaves out of a batch read what its own read could not fit', async () => {
   class Built extends StubVFS {
     override read(): Promise<Uint8Array> {
@@ -1146,14 +1146,25 @@ it('leaves out of a batch read what its own read could not fit', async () => {
   }
   const ram = new RAMVFS()
   ram.store.files.set('/f', new Uint8Array(16))
-  const budget = new MemoryBudget(8, () => 0)
+  ram.store.files.set('/g', new Uint8Array(16))
+  const one = new MemoryBudget(8, () => 0)
+  const both = new MemoryBudget(24, () => 0)
   const built = new MountEntry({ prefix: '/b/', vfs: new Built() })
   const streamed = new MountEntry({ prefix: '/s/', vfs: new Streamed() })
   const stored = new MountEntry({ prefix: '/r/', vfs: ram })
-  expect(await runWithMemory(budget, () => built.readMany(['/b/f'], 64))).toEqual(new Map())
-  expect(await runWithMemory(budget, () => streamed.readMany(['/s/f'], 64))).toEqual(new Map())
-  expect(await runWithMemory(budget, () => stored.readMany(['/r/f'], 64))).toEqual(
-    new Map([['/r/f', new Uint8Array(16)]]),
+  expect(await runWithMemory(one, () => built.readMany(['/b/f'], 64))).toEqual(new Map())
+  expect(await runWithMemory(one, () => streamed.readMany(['/s/f'], 64))).toEqual(new Map())
+  expect(await runWithMemory(both, () => built.readMany(['/b/f', '/b/g'], 64))).toEqual(
+    new Map([['/b/f', new Uint8Array(16)]]),
+  )
+  expect(await runWithMemory(both, () => streamed.readMany(['/s/f', '/s/g'], 64))).toEqual(
+    new Map([['/s/f', new Uint8Array(16)]]),
+  )
+  expect(await runWithMemory(one, () => stored.readMany(['/r/f', '/r/g'], 64))).toEqual(
+    new Map([
+      ['/r/f', new Uint8Array(16)],
+      ['/r/g', new Uint8Array(16)],
+    ]),
   )
   expect(await streamed.readMany(['/s/f'], 64)).toEqual(new Map([['/s/f', new Uint8Array(16)]]))
 })

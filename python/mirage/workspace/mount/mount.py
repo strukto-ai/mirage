@@ -2982,10 +2982,11 @@ class MountEntry:
         self, scopes: list[PathSpec], limit: int
     ) -> dict[str, bytes]:
         """Each file's whole bytes as its own whole read answers them, by
-        virtual path, which must fit in what the workspace's
-        ``max_memory`` has left as they must there (``_collected``); one
-        longer than ``limit`` bytes, one that does not fit, or one whose
-        read fails, is left out for its own read to meet.
+        virtual path. The bytes built for the batch must fit together in
+        what the workspace's ``max_memory`` has left, as one file's must
+        for its own read (``_collected``), what a RAM store holds already
+        counted; one longer than ``limit`` bytes, one that does not fit,
+        or one whose read fails, is left out for its own read to meet.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
@@ -2993,6 +2994,7 @@ class MountEntry:
         """
         counted = isinstance(self.vfs, RAMVFS)
         read: dict[str, bytes] = {}
+        built = 0
         for scope in scopes:
             parts: list[bytes] = []
             size = 0
@@ -3003,7 +3005,8 @@ class MountEntry:
                 if isinstance(found, bytes):
                     if len(found) <= limit:
                         if not counted:
-                            check_memory(len(found))
+                            check_memory(built + len(found))
+                            built += len(found)
                         read[scope.virtual] = found
                     continue
                 source = _as_stream(found)
@@ -3011,10 +3014,11 @@ class MountEntry:
                     size += len(chunk)
                     if size > limit:
                         break
-                    check_memory(size)
+                    check_memory(built + size)
                     parts.append(chunk)
                 else:
                     read[scope.virtual] = b"".join(parts)
+                    built += size
             except Exception as exc:
                 logger.debug(
                     "batch read leaves %s to its own read: %s",

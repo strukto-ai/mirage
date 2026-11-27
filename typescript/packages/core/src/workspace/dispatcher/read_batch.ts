@@ -36,8 +36,10 @@ export interface HeldFile {
  * one that holds its data locally it reads the files for the caller instead,
  * past each one's checks, `holds` says so, and it holds them here: each is
  * handed out once, while no change has reached it since `count`, as the
- * workspace's changes numbered them before the reads. A file the batch left
- * out is read on its own. Mirrors Python's `ReadBatch`.
+ * workspace's changes numbered them before the reads, and no link has changed
+ * since, which a path may have followed past its own name and the file it
+ * reached. A file the batch left out is read on its own. Mirrors Python's
+ * `ReadBatch`.
  */
 export class ReadBatch {
   /** A file of the batch is on a mount that keeps reads. */
@@ -53,6 +55,16 @@ export class ReadBatch {
   readonly changes: RecentChanges | null
   /** How many changes it had noted before the reads. */
   readonly count: number
+  /**
+   * The namespace's links, each with its target, as they stood before the
+   * reads; null while nothing is held.
+   */
+  readonly links: ReadonlyMap<string, string> | null
+  /**
+   * Answers the namespace's links as they stand, a new table once one
+   * changed; null while nothing is held.
+   */
+  readonly currentLinks: (() => ReadonlyMap<string, string>) | null
 
   constructor(
     fields: {
@@ -61,6 +73,8 @@ export class ReadBatch {
       held?: Map<string, HeldFile>
       changes?: RecentChanges | null
       count?: number
+      links?: ReadonlyMap<string, string> | null
+      currentLinks?: (() => ReadonlyMap<string, string>) | null
     } = {},
   ) {
     this.kept = fields.kept ?? false
@@ -68,11 +82,13 @@ export class ReadBatch {
     this.held = fields.held ?? new Map<string, HeldFile>()
     this.changes = fields.changes ?? null
     this.count = fields.count ?? 0
+    this.links = fields.links ?? null
+    this.currentLinks = fields.currentLinks ?? null
   }
 
   /**
-   * The bytes held for `virtual`, handed out once; null when none are held or
-   * a change has reached the file since they were read.
+   * The bytes held for `virtual`, handed out once; null when none are held, or
+   * a change has reached the file or a link has changed since they were read.
    *
    * @param virtual the path as the caller names it.
    */
@@ -80,6 +96,7 @@ export class ReadBatch {
     const held = this.held.get(virtual)
     this.held.delete(virtual)
     if (held === undefined || this.changes === null) return null
+    if (this.currentLinks !== null && this.currentLinks() !== this.links) return null
     if (this.changes.reachedSince(this.count, [virtual, held.followed])) return null
     return held.data
   }

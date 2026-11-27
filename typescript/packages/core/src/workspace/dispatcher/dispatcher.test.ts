@@ -3077,6 +3077,63 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  // Twin of test_a_link_changed_since_the_read_ahead_drops_the_held_files:
+  // /r/one reaches /r/a through /r/two; pointing /r/two at /r/b changes
+  // neither the name read nor the file it reached, and the read must still
+  // follow the link as it now stands.
+  it('drops the held files once a link changed since the read-ahead', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    try {
+      await ws.dispatch('symlink', '/r/two', [], { target: '/r/a' })
+      await ws.dispatch('symlink', '/r/one', [], { target: '/r/two' })
+      const batch = (await ws.dispatch('read_many', '/r/one', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ one: 2, b: 2 }),
+      })) as ReadBatch
+      expect([...batch.held.keys()].sort()).toEqual(['/r/b', '/r/one'])
+      await ws.dispatch('unlink', '/r/two')
+      await ws.dispatch('symlink', '/r/two', [], { target: '/r/b' })
+      const data = await ws.dispatch('read', '/r/one')
+      expect([batch.take('/r/one'), batch.take('/r/b')]).toEqual([null, null])
+      expect(DEC.decode(data as Uint8Array)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_streamed_write_drops_the_held_file_as_it_starts: the write
+  // has landed a chunk and waits for the next, and the held bytes are what the
+  // file held before it, so none is handed out.
+  it('drops a held file as a streamed write to it starts', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    let landed!: () => void
+    const landing = new Promise<void>((resolve) => (landed = resolve))
+    let finish!: () => void
+    const finishing = new Promise<void>((resolve) => (finish = resolve))
+    async function* body(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('ne')
+      landed()
+      await finishing
+      yield ENC.encode('w\n')
+    }
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/a', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ a: 2, b: 2 }),
+      })) as ReadBatch
+      const writing = ws.dispatch('write', '/r/b', [body()])
+      await landing
+      const taken = batch.take('/r/b')
+      finish()
+      await writing
+      expect([batch.take('/r/a'), taken]).toEqual([ENC.encode('a\n'), null])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_read_ahead_holds_no_hidden_ruled_unsized_or_empty_file: a
   // hidden or ruled file is left to a read the checks refuse, one no listing
   // sized to its own read, and an empty one to the read that asks whether a

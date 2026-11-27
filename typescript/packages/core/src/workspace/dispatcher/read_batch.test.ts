@@ -52,6 +52,29 @@ describe('ReadBatch', () => {
     expect(held.take('/r/a')).toEqual(ENC.encode('a\n'))
   })
 
+  // Twin of test_a_link_changed_since_the_reads_drops_every_held_file: a link
+  // the read followed between its name and the file it reached is neither, so
+  // a new link table drops every file held.
+  it('drops every held file once a link changed since the reads', () => {
+    const links = new Map([['/r/link', '/r/real']])
+    const tables: ReadonlyMap<string, string>[] = [links]
+    const changes = new RecentChanges(new ManualClock(), 1)
+    const held = new ReadBatch({
+      holds: true,
+      held: new Map([
+        ['/r/a', { followed: '/r/a', data: ENC.encode('a\n') }],
+        ['/r/b', { followed: '/r/b', data: ENC.encode('b\n') }],
+      ]),
+      changes,
+      count: changes.count,
+      links,
+      currentLinks: () => tables[tables.length - 1] ?? links,
+    })
+    expect(held.take('/r/a')).toEqual(ENC.encode('a\n'))
+    tables.push(new Map([['/r/link', '/r/other']]))
+    expect(held.take('/r/b')).toBeNull()
+  })
+
   // Twin of test_a_batch_that_holds_nothing_hands_out_nothing.
   it('hands out nothing from a batch that holds nothing', () => {
     const held = new ReadBatch({ kept: true })

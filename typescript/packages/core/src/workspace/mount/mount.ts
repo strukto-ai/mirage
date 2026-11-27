@@ -2469,10 +2469,11 @@ export class MountEntry {
 
   /**
    * Each file's whole bytes as its own whole read answers them, by virtual
-   * path, which must fit in what the workspace's `max_memory` has left as they
-   * must there (`collected`); one longer than `limit` bytes, one that does not
-   * fit, or one whose read fails, is left out for its own read to meet.
-   * Mirrors Python's `_read_each`.
+   * path. The bytes built for the batch must fit together in what the
+   * workspace's `max_memory` has left, as one file's must for its own read
+   * (`collected`), what a RAM store holds already counted; one longer than
+   * `limit` bytes, one that does not fit, or one whose read fails, is left out
+   * for its own read to meet. Mirrors Python's `_read_each`.
    */
   private async readEach(
     scopes: readonly PathSpec[],
@@ -2480,6 +2481,7 @@ export class MountEntry {
   ): Promise<Map<string, Uint8Array>> {
     const counted = this.vfs instanceof RAMVFS
     const read = new Map<string, Uint8Array>()
+    let built = 0
     for (const scope of scopes) {
       const parts: Uint8Array[] = []
       let size = 0
@@ -2488,7 +2490,10 @@ export class MountEntry {
         const found = await this.answer(this.vfs, this.index, scope)
         if (found instanceof Uint8Array) {
           if (found.byteLength <= limit) {
-            if (!counted) checkMemory(found.byteLength)
+            if (!counted) {
+              checkMemory(built + found.byteLength)
+              built += found.byteLength
+            }
             read.set(scope.virtual, found)
           }
           continue
@@ -2497,10 +2502,13 @@ export class MountEntry {
         for await (const chunk of source) {
           size += chunk.byteLength
           if (size > limit) break
-          checkMemory(size)
+          checkMemory(built + size)
           parts.push(chunk)
         }
-        if (size <= limit) read.set(scope.virtual, concat(parts))
+        if (size <= limit) {
+          read.set(scope.virtual, concat(parts))
+          built += size
+        }
       } catch (err) {
         console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
       } finally {

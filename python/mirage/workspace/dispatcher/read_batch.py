@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 from mirage.mount.changes import RecentChanges
@@ -47,8 +48,10 @@ class ReadBatch:
     caller instead, past each one's checks, ``holds`` says so, and it
     holds them here: each is
     handed out once, while no change has reached it since ``count``, as
-    the workspace's changes numbered them before the reads. A file the
-    batch left out is read on its own.
+    the workspace's changes numbered them before the reads, and no link
+    has changed since, which a path may have followed past its own name
+    and the file it reached. A file the batch left out is read on its
+    own.
 
     Args:
         kept (bool): a file of the batch is on a mount that keeps reads.
@@ -60,6 +63,12 @@ class ReadBatch:
         changes (RecentChanges | None): the workspace's changes; None
             while nothing is held.
         count (int): how many changes it had noted before the reads.
+        links (Mapping[str, str] | None): the namespace's links, each
+            with its target, as they stood before the reads; None while
+            nothing is held.
+        current_links (Callable[[], Mapping[str, str]] | None): answers
+            the namespace's links as they stand, a new table once one
+            changed; None while nothing is held.
     """
 
     kept: bool = False
@@ -67,16 +76,24 @@ class ReadBatch:
     held: dict[str, HeldFile] = field(default_factory=dict)
     changes: RecentChanges | None = None
     count: int = 0
+    links: Mapping[str, str] | None = None
+    current_links: Callable[[], Mapping[str, str]] | None = None
 
     def take(self, virtual: str) -> bytes | None:
         """The bytes held for ``virtual``, handed out once; None when none
-        are held or a change has reached the file since they were read.
+        are held, or a change has reached the file or a link has changed
+        since they were read.
 
         Args:
             virtual (str): the path as the caller names it.
         """
         held = self.held.pop(virtual, None)
         if held is None or self.changes is None:
+            return None
+        if (
+            self.current_links is not None
+            and self.current_links() is not self.links
+        ):
             return None
         if self.changes.reached_since(self.count, (virtual, held.followed)):
             return None

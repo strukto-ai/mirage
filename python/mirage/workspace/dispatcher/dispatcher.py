@@ -1861,6 +1861,7 @@ class Dispatcher:
         gate = caller.rule_gate
         changes = self._namespace.registry.changes
         count = changes.count
+        links = self._namespace.symlink_targets()
         judged = await policies.wants_for("post_vfs", _session_id(caller))
         holdable = False
         redirected = {
@@ -1922,6 +1923,8 @@ class Dispatcher:
             held=held,
             changes=changes if held else None,
             count=count,
+            links=links if held else None,
+            current_links=self._namespace.symlink_targets if held else None,
         )
         if not batches:
             return batch
@@ -3107,7 +3110,10 @@ class Dispatcher:
         changes beside the store (caches, the node table's links and
         attributes) changes under the same hold: a chain of renames
         finishing out of order would move one name's attributes onto
-        another. A pwrite that fails stamps the caller's report with the
+        another. A streamed write drops what the read cache keeps of its
+        file and notes the file changed as it starts, not only once it
+        ends, so nothing read before it is served while its bytes land.
+        A pwrite that fails stamps the caller's report with the
         bytes its store's own pwrites landed, from their records: what a
         store that pwrites lands window by window, and nothing for one
         that rewrites the file.
@@ -3145,6 +3151,7 @@ class Dispatcher:
                 else None
             )
             if payload is not None:
+                self._namespace.registry.changes.note(call.path.virtual)
                 await self._invalidate_stream(mount, call.path)
                 kwargs = {**kwargs, "data": payload.chunks()}
             scope = RecordingScope(

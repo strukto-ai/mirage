@@ -914,20 +914,25 @@ class _Streamed(BaseVFS):
 
 @pytest.mark.asyncio
 async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
-    # Each file a batch reads must fit in what the workspace has left, as
-    # its own whole read must, so that read meets the refusal; what a RAM
-    # store holds is already counted.
+    # The files a batch reads must fit together in what the workspace has
+    # left, as one file must for its own read, so a read of one left out
+    # meets the refusal; what a RAM store holds is already counted.
     ram = RAMVFS()
-    ram._store.files["/f"] = b"x" * 16
-    budget = MemoryBudget(8, lambda: 0)
+    ram._store.files.update({"/f": b"x" * 16, "/g": b"x" * 16})
+    one = MemoryBudget(8, lambda: 0)
+    both = MemoryBudget(24, lambda: 0)
     built = MountEntry("/b/", _Built())
     streamed = MountEntry("/s/", _Streamed())
     stored = MountEntry("/r/", ram)
-    assert await run_with_memory(budget, built.read_many(["/b/f"], 64)) == {}
-    assert (
-        await run_with_memory(budget, streamed.read_many(["/s/f"], 64)) == {}
-    )
-    assert await run_with_memory(budget, stored.read_many(["/r/f"], 64)) == {
-        "/r/f": b"x" * 16
-    }
+    assert await run_with_memory(one, built.read_many(["/b/f"], 64)) == {}
+    assert await run_with_memory(one, streamed.read_many(["/s/f"], 64)) == {}
+    assert await run_with_memory(
+        both, built.read_many(["/b/f", "/b/g"], 64)
+    ) == {"/b/f": b"x" * 16}
+    assert await run_with_memory(
+        both, streamed.read_many(["/s/f", "/s/g"], 64)
+    ) == {"/s/f": b"x" * 16}
+    assert await run_with_memory(
+        one, stored.read_many(["/r/f", "/r/g"], 64)
+    ) == {"/r/f": b"x" * 16, "/r/g": b"x" * 16}
     assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}

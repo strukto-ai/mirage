@@ -3031,6 +3031,60 @@ async def test_a_copy_since_the_read_ahead_keeps_its_held_source():
 
 
 @pytest.mark.asyncio
+async def test_a_link_changed_since_the_read_ahead_drops_the_held_files():
+    # /r/one reaches /r/a through /r/two; pointing /r/two at /r/b changes
+    # neither the name read nor the file it reached, and the read must
+    # still follow the link as it now stands.
+    vfs = HeldRAM()
+    with Workspace({"/r/": vfs}, mode=MountMode.WRITE) as ws:
+        await ws.dispatch("symlink", _path("/r/two"), target="/r/a")
+        await ws.dispatch("symlink", _path("/r/one"), target="/r/two")
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/one"),
+            paths=[_path("/r/b")],
+            stats=_sized(one=2, b=2),
+        )
+        assert sorted(batch.held) == ["/r/b", "/r/one"]
+        await ws.dispatch("unlink", _path("/r/two"))
+        await ws.dispatch("symlink", _path("/r/two"), target="/r/b")
+        data, _ = await ws.dispatch("read", _path("/r/one"))
+    assert (batch.take("/r/one"), batch.take("/r/b")) == (None, None)
+    assert data == b"b\n"
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_write_drops_the_held_file_as_it_starts():
+    # The write has landed a chunk and waits for the next: the held bytes
+    # are what the file held before it, so none is handed out.
+    vfs = HeldRAM()
+    landed = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"ne"
+        landed.set()
+        await finish.wait()
+        yield b"w\n"
+
+    with Workspace({"/r/": vfs}, mode=MountMode.WRITE) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/b")],
+            stats=_sized(a=2, b=2),
+        )
+        writing = asyncio.ensure_future(
+            ws.dispatch("write", _path("/r/b"), data=body())
+        )
+        await landed.wait()
+        taken = batch.take("/r/b")
+        finish.set()
+        await writing
+    assert (batch.take("/r/a"), taken) == (b"a\n", None)
+
+
+@pytest.mark.asyncio
 async def test_a_read_ahead_holds_no_hidden_ruled_unsized_or_empty_file():
     # A hidden or ruled file is left to a read the checks refuse, one no
     # listing sized to its own read, and an empty one to the read that

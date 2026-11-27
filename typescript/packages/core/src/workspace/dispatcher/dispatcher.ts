@@ -1645,6 +1645,7 @@ export class Dispatcher {
     const gate = this.caller?.ruleGate ?? null
     const changes = this.namespace.registry.changes
     const count = changes.count
+    const links = this.namespace.symlinkTargets()
     const judged = await this.policies.wantsFor('postVfs', this.sessionId())
     let holdable = false
     const redirected = new Set(
@@ -1707,6 +1708,8 @@ export class Dispatcher {
       held,
       changes: held.size > 0 ? changes : null,
       count,
+      links: held.size > 0 ? links : null,
+      currentLinks: held.size > 0 ? () => this.namespace.symlinkTargets() : null,
     })
     if (batches.size === 0) return answer
     const warm = async (): Promise<void> => {
@@ -2740,7 +2743,9 @@ export class Dispatcher {
         // changes beside the store (caches, the node table's links and
         // attributes) changes under the same hold: a chain of renames
         // finishing out of order would move one name's attributes onto
-        // another.
+        // another. A streamed write drops what the read cache keeps of its
+        // file and notes the file changed as it starts, not only once it
+        // ends, so nothing read before it is served while its bytes land.
         // A copy meeting a live pipe holds no name: the pipe's other end may
         // need it (`cp f >(cat > f)`).
         const meetsPipe =
@@ -2774,6 +2779,7 @@ export class Dispatcher {
             const budget = factsOf(mount).cacheable ? drainBudget(this.cache) : 0
             payload = new LentPayload(fullArgs[0] as ByteSource, holds, budget)
             fullArgs[0] = payload.chunks()
+            this.namespace.registry.changes.note(p.virtual)
             await this.invalidateStream(mount, p)
           }
           try {

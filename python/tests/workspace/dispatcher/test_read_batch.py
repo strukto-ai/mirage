@@ -48,6 +48,28 @@ def test_a_change_since_the_reads_drops_what_it_reached():
     assert batch.take("/r/a") == b"a\n"
 
 
+def test_a_link_changed_since_the_reads_drops_every_held_file():
+    # A link the read followed between its name and the file it reached is
+    # neither, so a new link table drops every file held.
+    links = {"/r/link": "/r/real"}
+    tables = [links]
+    changes = RecentChanges(ManualClock(), 1)
+    batch = ReadBatch(
+        holds=True,
+        held={
+            "/r/a": HeldFile("/r/a", b"a\n"),
+            "/r/b": HeldFile("/r/b", b"b\n"),
+        },
+        changes=changes,
+        count=changes.count,
+        links=links,
+        current_links=lambda: tables[-1],
+    )
+    assert batch.take("/r/a") == b"a\n"
+    tables.append({"/r/link": "/r/other"})
+    assert batch.take("/r/b") is None
+
+
 def test_a_batch_that_holds_nothing_hands_out_nothing():
     batch = ReadBatch(kept=True)
     assert (batch.holds, batch.take("/r/a")) == (False, None)
