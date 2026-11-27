@@ -249,7 +249,14 @@ export async function stageChanges(
       )
     }
     const oid = await git.writeBlob({ ...repoArgs(repo), blob: data })
-    const entry = stagedEntry(oid, info, data.length)
+    // The bytes read are the walk's version only if the backend still stats
+    // its fingerprint once they are read.
+    let kept = info
+    if (info.fingerprint !== null && info.fingerprint !== '') {
+      const after = await lstat(vfs, repo.location.worktree.join(path), true)
+      if (after?.fingerprint !== info.fingerprint) kept = info.with({ fingerprint: null })
+    }
+    const entry = stagedEntry(oid, kept, data.length)
     if (before === undefined) added.push(path)
     else if (before.oid !== entry.oid || before.mode !== entry.mode) changed.push([path, 'add'])
     staged.set(path, entry)

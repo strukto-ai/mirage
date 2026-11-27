@@ -37,7 +37,7 @@ from mirage.utils.path import norm
 from mirage.utils.quote import single_quote
 
 
-def entry_stat(name: str, entry: PosixEntry) -> FileStat:
+def entry_stat(name: str, entry: PosixEntry, machine: str) -> FileStat:
     """A machine's entry as ``stat`` renders it: its kind, mode, times
     and owners as the machine has them.
 
@@ -52,7 +52,7 @@ def entry_stat(name: str, entry: PosixEntry) -> FileStat:
         name=name,
         size=entry.size if regular else None,
         modified=modified,
-        fingerprint=token_of(entry),
+        fingerprint=token_of(entry, machine),
         type=kind,
         content=content_type_for_path(name) if regular else None,
         mode=entry.mode,
@@ -73,7 +73,7 @@ def holder_stat(name: str, one: Holder) -> FileStat:
         one (Holder): the machine and the entry it reported.
     """
     assert one.entry is not None
-    return entry_stat(name, one.entry)
+    return entry_stat(name, one.entry, one.machine)
 
 
 async def entries(
@@ -121,7 +121,8 @@ async def stat_entry(
 async def stat(
     accessor: MachineAccessor, machine: str, path: PathSpec
 ) -> FileStat:
-    return entry_stat(leaf(path), await stat_entry(accessor, machine, path))
+    entry = await stat_entry(accessor, machine, path)
+    return entry_stat(leaf(path), entry, machine)
 
 
 def has_hides(path: PathSpec) -> bool:

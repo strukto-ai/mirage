@@ -37,3 +37,6 @@ export const UINT64_MASK = (1n << 64n) - 1n
 // An entry changed this recently has no fingerprint: a clock's time is coarser
 // than the changes it would have to tell apart (git's racy-clean rule).
 export const RACY_WINDOW_NS = 2_000_000_000n
+// The same for a time another host's clock gave, judged by this one's: the
+// racy window plus the drift two clocks kept by NTP stay well within.
+export const REMOTE_RACY_WINDOW_NS = 60_000_000_000n

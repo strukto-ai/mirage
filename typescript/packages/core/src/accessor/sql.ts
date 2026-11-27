@@ -161,10 +161,13 @@ export class SqlAccessor extends Accessor {
 
   /**
    * The time a write lands at, in nanoseconds: now, past every time a mount
-   * on the driver gave a write before.
+   * on the driver gave a write before and past `floor`.
+   *
+   * @param floor a time the write must land past, in nanoseconds
    */
-  stamped(): bigint {
-    const ns = stampAfter(STAMPS.get(this.driver) ?? 0n)
+  stamped(floor = 0n): bigint {
+    const last = STAMPS.get(this.driver) ?? 0n
+    const ns = stampAfter(last > floor ? last : floor)
     STAMPS.set(this.driver, ns)
     return ns
   }

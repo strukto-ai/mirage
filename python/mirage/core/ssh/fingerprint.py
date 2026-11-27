@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.utils.constants import REMOTE_RACY_WINDOW_NS
 from mirage.utils.dates import settled
 
 
@@ -20,9 +21,11 @@ def token_of(size: int | None, mtime: int | None, now_ns: int) -> str | None:
     second its last write landed at.
 
     SFTP reports whole seconds, so two same-size writes in one share both
-    numbers. A file that has not ``settled`` by this host's clock gets
-    none, which takes the server's clock to agree with this one within the
-    racy window, as every tick-based check across two hosts must.
+    numbers. A file gets none until it has ``settled`` for
+    ``REMOTE_RACY_WINDOW_NS`` by this host's clock, which holds while the
+    server's clock drifts from this one by less than that window less a
+    second. SFTP gives no inode or change time, so a rename over a
+    same-size file written in the same second keeps the token.
 
     Args:
         size (int | None): the file's size.
@@ -31,6 +34,6 @@ def token_of(size: int | None, mtime: int | None, now_ns: int) -> str | None:
     """
     if size is None or mtime is None:
         return None
-    if not settled(int(mtime) * 1_000_000_000, now_ns):
+    if not settled(int(mtime) * 1_000_000_000, now_ns, REMOTE_RACY_WINDOW_NS):
         return None
     return f"{size}:{int(mtime)}"

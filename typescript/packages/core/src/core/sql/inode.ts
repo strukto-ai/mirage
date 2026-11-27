@@ -62,13 +62,16 @@ export function isFile(node: Inode): boolean {
 }
 
 /**
- * Now, as `fs_inode` keeps a time: past every time a write on the database
- * landed at before, so a rewrite always moves its file's time.
+ * Now, as `fs_inode` keeps a time: past every time the mount's driver gave a
+ * write before, and past `after`'s own, so a rewrite always moves its file's
+ * time, whichever driver or process last wrote it.
  *
  * @param accessor the mount whose database is written
+ * @param after the inode the write lands on, as read
  */
-export function nowStamp(accessor: SqlAccessor): Stamp {
-  const ns = accessor.stamped()
+export function nowStamp(accessor: SqlAccessor, after: Inode | null = null): Stamp {
+  const floor = after === null ? 0n : BigInt(after.mtime) * 1_000_000_000n + BigInt(after.mtimeNsec)
+  const ns = accessor.stamped(floor)
   return [Number(ns / 1_000_000_000n), Number(ns % 1_000_000_000n)]
 }
 

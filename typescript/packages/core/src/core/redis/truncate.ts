@@ -17,7 +17,7 @@ import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
-import { stampIso } from '../../utils/dates.ts'
+import { nowIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 export async function truncate(
@@ -31,6 +31,6 @@ export async function truncate(
   const store = accessor.store
   await checkDestParents(store, path, p)
   await checkWriteTarget(store, path, p)
-  if (!(await store.truncateFile(p, length, stampIso(accessor.stamped()), noCreate))) return
+  if (!(await store.truncateFile(p, length, nowIso(), noCreate))) return
   record('truncate', path.virtual, VFSName.REDIS, 0, timer)
 }

@@ -13,12 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { RACY_WINDOW_NS } from '../../utils/constants.ts'
+import { REMOTE_RACY_WINDOW_NS } from '../../utils/constants.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { tokenOf } from './fingerprint.ts'
 
 const WRITTEN_MS = 1_700_000_000_123
-const SETTLED = BigInt(WRITTEN_MS) * 1_000_000n + RACY_WINDOW_NS
+const SETTLED = BigInt(WRITTEN_MS) * 1_000_000n + REMOTE_RACY_WINDOW_NS
 const UNASKED: PosixEntry = {
   kind: 'f',
   mode: 0o644,
@@ -36,15 +36,19 @@ const UNASKED: PosixEntry = {
 const ENTRY: PosixEntry = { ...UNASKED, askedNs: SETTLED }
 
 describe('tokenOf', () => {
-  it('names a settled entry by its size and millisecond', () => {
-    expect(tokenOf(ENTRY)).toBe('12:1700000000123')
+  it('names a settled entry by its machine, size and millisecond', () => {
+    expect(tokenOf(ENTRY, 'box')).toBe('box:12:1700000000123')
+  })
+
+  it('names the same entry on another machine apart', () => {
+    expect(tokenOf(ENTRY, 'box')).not.toBe(tokenOf(ENTRY, 'other'))
   })
 
   it('gives an entry inside the racy window none', () => {
-    expect(tokenOf({ ...ENTRY, askedNs: SETTLED - 1n })).toBeNull()
+    expect(tokenOf({ ...ENTRY, askedNs: SETTLED - 1n }, 'box')).toBeNull()
   })
 
   it('gives an entry with no asking time kept none', () => {
-    expect(tokenOf(UNASKED)).toBeNull()
+    expect(tokenOf(UNASKED, 'box')).toBeNull()
   })
 })

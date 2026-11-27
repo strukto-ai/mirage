@@ -37,6 +37,9 @@ export interface MountRow {
   readonly commandLimits?: ReadonlyMap<string, Limit>
   /** The workspace's, which a command's walk resolves through beside the mount's. */
   readonly workspaceLimits?: Readonly<Record<string, Limit>>
+  /** The mount keeps listings past the command that fetched them (an index
+   * ttl above zero), so a stat it answers may come from one as it was then. */
+  readonly keepsListings?: boolean
 }
 
 export class ExecutionNode {

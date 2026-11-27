@@ -23,6 +23,7 @@ from dulwich.objects import Blob, ObjectID
 from dulwich.objectspec import parse_commit
 from dulwich.repo import BaseRepo
 
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.cli.builtin.git.add import entry_mode
 from mirage.commands.cli.builtin.git.constants import (
     GITLINK,
@@ -39,7 +40,7 @@ from mirage.commands.cli.builtin.git.index_file import (
     unchanged,
     with_fingerprint,
 )
-from mirage.commands.cli.builtin.git.io import entry_bytes
+from mirage.commands.cli.builtin.git.io import entry_bytes, lstat
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
 from mirage.commands.cli.builtin.git.repo import open_repo
@@ -60,6 +61,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.view.types import MountView
 from mirage.workspace.files import Files, reader_of
 
 UNCHANGED = " "
@@ -357,12 +359,35 @@ def _mode_differs(entry: IndexEntry, info: FileStat) -> bool:
     return bool(entry.mode & S_IXUSR) != bool(info.mode & S_IXUSR)
 
 
+async def _still(
+    vfs: Files, where: PathSpec, entry: IndexEntry, mounts: MountView | None
+) -> bool:
+    """Whether the backend itself still stats the fingerprint ``entry``
+    kept, where the mount keeps listings a walk may have answered from.
+
+    Args:
+        vfs (Files): the session's files.
+        where (PathSpec): absolute virtual path of the file.
+        entry (IndexEntry): what the index staged for it.
+        mounts (MountView | None): the session's mount boundaries.
+    """
+    if (
+        mounts is None
+        or mounts.keeps_listings is None
+        or not mounts.keeps_listings(where.virtual)
+    ):
+        return True
+    current = await lstat(vfs, where, fresh=True)
+    return current is not None and unchanged(entry, current)
+
+
 async def _differs(
     vfs: Files,
     worktree: PathSpec,
     path: str,
     entry: IndexEntry,
     info: FileStat,
+    mounts: MountView | None,
 ) -> bool:
     """Whether a working-tree file differs from what the index staged.
 
@@ -370,7 +395,9 @@ async def _differs(
     an edit that keeps the byte count is the exception. When the sizes
     agree, the fingerprint the entry kept settles it if the mount still
     stats the same one: git skips the read the same way, trusting the
-    stat data it cached. Otherwise the file is read and hashed, because
+    stat data it cached. A mount that keeps listings may have answered
+    the walk from one as old as the listing, so its stat is asked again
+    of the backend first. Otherwise the file is read and hashed, because
     that is the only thing that actually answers the question.
 
     A recorded size of zero is read as "not stated" rather than "empty",
@@ -386,12 +413,14 @@ async def _differs(
         path (str): repository-relative path.
         entry (IndexEntry): what the index staged for it.
         info (FileStat): what the mount says about it now.
+        mounts (MountView | None): the session's mount boundaries.
     """
     if _mode_differs(entry, info):
         return True
     if info.size is not None and entry.size and info.size != entry.size:
         return True
-    if unchanged(entry, info):
+    where = worktree.join(path)
+    if unchanged(entry, info) and await _still(vfs, where, entry, mounts):
         return False
     try:
         data = await entry_bytes(vfs, worktree.join(path), info)
@@ -510,6 +539,7 @@ async def work_changes(
             entries of files read and found unchanged; None keeps none.
     """
     changes: dict[str, str] = {}
+    mounts = mount_view(vfs)
     for path, entry in entries.items():
         name = path.decode("utf-8", errors="replace")
         if entry.mode == GITLINK:
@@ -529,7 +559,9 @@ async def work_changes(
         ):
             # A symlink and a file holding its target text hash alike.
             changes[name] = TYPE_CHANGED
-        elif await _differs(vfs, worktree, name, entry, found.files[name]):
+        elif await _differs(
+            vfs, worktree, name, entry, found.files[name], mounts
+        ):
             changes[name] = MODIFIED
         elif (
             refreshed is not None

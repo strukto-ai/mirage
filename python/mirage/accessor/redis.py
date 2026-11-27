@@ -16,7 +16,6 @@ from weakref import WeakKeyDictionary
 
 from mirage.accessor.base import Accessor
 from mirage.cache.index.scope import CommandKey
-from mirage.utils.dates import stamp_after
 from mirage.vfs.redis.store import RedisStore
 
 
@@ -26,11 +25,3 @@ class RedisAccessor(Accessor):
         self.walks: WeakKeyDictionary[
             CommandKey, tuple[str, list[str] | None]
         ] = WeakKeyDictionary()
-        # The time this mount's last write landed at, in nanoseconds.
-        self.stamp = 0
-
-    def stamped(self) -> int:
-        """The time a write lands at, in nanoseconds: now, past the time
-        this mount gave the write before."""
-        self.stamp = stamp_after(self.stamp)
-        return self.stamp

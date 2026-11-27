@@ -296,7 +296,9 @@ def wall_ns() -> int:
     return time_ns()
 
 
-def settled(changed_ns: int, now_ns: int) -> bool:
+def settled(
+    changed_ns: int, now_ns: int, window: int = RACY_WINDOW_NS
+) -> bool:
     """Whether an entry last changed at ``changed_ns`` is old enough that
     a second change could not have kept its time.
 
@@ -304,13 +306,15 @@ def settled(changed_ns: int, now_ns: int) -> bool:
     one tick share a time, and a fingerprint built from it would not
     move. git calls such an entry racy and reads it rather than trust its
     stat; a backend whose fingerprint is a time gives none until the
-    entry is ``RACY_WINDOW_NS`` old.
+    entry is ``window`` old.
 
     Args:
         changed_ns (int): when the entry last changed, in nanoseconds.
         now_ns (int): the wall clock, read before the entry's stat.
+        window (int): how old it must be: ``REMOTE_RACY_WINDOW_NS``
+            for a time another host's clock gave.
     """
-    return now_ns - changed_ns >= RACY_WINDOW_NS
+    return now_ns - changed_ns >= window
 
 
 def stamp_iso(ns: int) -> str:

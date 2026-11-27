@@ -71,14 +71,16 @@ export function wallNs(): bigint {
  * A clock ticks coarser than the changes it dates, so two writes inside one
  * tick share a time, and a fingerprint built from it would not move. git calls
  * such an entry racy and reads it rather than trust its stat; a backend whose
- * fingerprint is a time gives none until the entry is `RACY_WINDOW_NS` old.
- * Mirrors Python's `settled`.
+ * fingerprint is a time gives none until the entry is `window` old. Mirrors
+ * Python's `settled`.
  *
  * @param changedNs when the entry last changed, in nanoseconds
  * @param nowNs the wall clock, read before the entry's stat
+ * @param window how old it must be: `REMOTE_RACY_WINDOW_NS` for a time
+ *   another host's clock gave
  */
-export function settled(changedNs: bigint, nowNs: bigint): boolean {
-  return nowNs - changedNs >= RACY_WINDOW_NS
+export function settled(changedNs: bigint, nowNs: bigint, window = RACY_WINDOW_NS): boolean {
+  return nowNs - changedNs >= window
 }
 
 /**

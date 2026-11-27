@@ -33,7 +33,7 @@ export async function copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec):
   const there = target(to)
   if (there !== null && isDir(there)) throw eisdir(dst)
   if (there?.ino === node.ino) return
-  const now = nowStamp(accessor)
+  const now = nowStamp(accessor, there)
   const ino = there !== null ? byIno(there.ino) : byEntry(parentRef(to), leaf(to))
   const statements: SqlStatement[] =
     there !== null

@@ -16,10 +16,10 @@ from dataclasses import replace
 
 from mirage.core.machine.fingerprint import token_of
 from mirage.core.posix.types import PosixEntry
-from mirage.utils.constants import RACY_WINDOW_NS
+from mirage.utils.constants import REMOTE_RACY_WINDOW_NS
 
 WRITTEN_MS = 1_700_000_000_123
-SETTLED = WRITTEN_MS * 1_000_000 + RACY_WINDOW_NS
+SETTLED = WRITTEN_MS * 1_000_000 + REMOTE_RACY_WINDOW_NS
 ENTRY = PosixEntry(
     "f",
     0o644,
@@ -37,13 +37,17 @@ ENTRY = PosixEntry(
 )
 
 
-def test_a_settled_entry_is_named_by_its_size_and_millisecond():
-    assert token_of(ENTRY) == "12:1700000000123"
+def test_a_settled_entry_is_named_by_its_machine_size_and_millisecond():
+    assert token_of(ENTRY, "box") == "box:12:1700000000123"
+
+
+def test_the_same_entry_on_another_machine_is_another_token():
+    assert token_of(ENTRY, "box") != token_of(ENTRY, "other")
 
 
 def test_an_entry_inside_the_racy_window_has_none():
-    assert token_of(replace(ENTRY, asked_ns=SETTLED - 1)) is None
+    assert token_of(replace(ENTRY, asked_ns=SETTLED - 1), "box") is None
 
 
 def test_an_entry_with_no_asking_time_kept_has_none():
-    assert token_of(replace(ENTRY, asked_ns=0)) is None
+    assert token_of(replace(ENTRY, asked_ns=0), "box") is None

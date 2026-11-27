@@ -88,7 +88,7 @@ async def _landing(
 ) -> list[SqlStatement]:
     # The statements that land ``data`` whole: a new file made with it,
     # an existing one's rows replaced, or ``data`` added at its end.
-    now = now_stamp(accessor)
+    now = now_stamp(accessor, node)
     if node is None:
         ref = by_entry(parent_ref(w), leaf(w))
         return [
@@ -170,12 +170,14 @@ async def write(
         if not pending:
             return
         block = bytes(pending)
-        stamp = now_stamp(accessor)
+        stamp = node.mtime, node.mtime_nsec
         at = offset
         size = 0
 
+        # Stamped on each try, past the inode as that try finds it.
         async def placed(n: Inode) -> list[SqlStatement]:
-            nonlocal at, size
+            nonlocal at, size, stamp
+            stamp = now_stamp(accessor, n)
             at = n.size if append else offset
             size = max(n.size, at + len(block))
             return [

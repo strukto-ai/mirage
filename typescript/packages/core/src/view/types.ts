@@ -105,6 +105,9 @@ export interface MountView {
   // a path (its VFS's `walkLimit`), -1 for no cap, so a walk that crosses
   // mounts charges each entry to its own backend.
   walkLimit?(path: string): number
+  // Whether the mount serving a path keeps listings past the command that
+  // fetched them, so a stat it answers may be as old as one.
+  keepsListings?(path: string): boolean
 }
 
 // The session-plane facts a command may consult, as one injected object.

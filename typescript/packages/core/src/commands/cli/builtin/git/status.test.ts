@@ -393,8 +393,13 @@ describe('a narrow path', () => {
   )
 })
 
+/** Keeps listings past the command, as a disk or bucket mount does. */
+class KeptRAM extends RAMVFS {
+  override readonly indexTtl: number = 600
+}
+
 /** A one-commit repository mirrored into RAM at `/w/work`, git installed. */
-async function source(): Promise<Workspace> {
+async function source(vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
   const repo = mkdtempSync(join(tmp, 'src-'))
   roots.push(repo)
   const env = {
@@ -409,7 +414,7 @@ async function source(): Promise<Workspace> {
   put(repo, 'sub/b.txt', 'two\n')
   execFileSync('git', ['-C', repo, 'add', '-A'], { env })
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'first'], { env })
-  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
   for (const rel of walk(repo)) {
     const target = `/w/work/${rel}`
     await ensureDir(ws.vfs, PathSpec.fromStrPath(target).parent)
@@ -454,6 +459,28 @@ describe('fingerprints the index keeps', () => {
       expect(reads).toEqual([])
       expect(changed).toBe(' M a.txt\n')
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('are asked past the listings a mount keeps', async () => {
+    // The second workspace's write never reaches the first one's kept listing,
+    // so the walk there still answers the file's old fingerprint; status has to
+    // ask the backend before it trusts it. Mirrors Python's
+    // test_a_status_asks_past_the_listings_a_mount_keeps.
+    const vfs = new KeptRAM()
+    const ws = await source(vfs)
+    const other = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const clean = await ws.shell('git -C /w/dst status --porcelain')
+      expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+      await other.vfs.write('/w/dst/a.txt', 'ONE\n')
+      const changed = await ws.shell('git -C /w/dst status --porcelain')
+      expect(DEC.decode(changed.stdout)).toBe(' M a.txt\n')
+    } finally {
+      await other.close()
       await ws.close()
     }
   })

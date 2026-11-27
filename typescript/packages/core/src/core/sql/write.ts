@@ -30,6 +30,7 @@ import {
   resized,
   resizedFrom,
   type Inode,
+  type Stamp,
 } from './inode.ts'
 import {
   checkDestParents,
@@ -80,7 +81,7 @@ async function landing(
   data: Uint8Array,
   append: boolean,
 ): Promise<SqlStatement[]> {
-  const now = nowStamp(accessor)
+  const now = nowStamp(accessor, node)
   if (node === null) {
     const ref = byEntry(parentRef(w), leaf(w))
     return [
@@ -149,10 +150,12 @@ export async function write(
   const flush = async (): Promise<void> => {
     if (held === 0) return
     const block = concat(pending)
-    const stamp = nowStamp(accessor)
+    let stamp: Stamp = [node.mtime, node.mtimeNsec]
     let at = offset
     let size = 0
+    // Stamped on each try, past the inode as that try finds it.
     const used = await landFresh(accessor, node, async (n) => {
+      stamp = nowStamp(accessor, n)
       at = append ? n.size : offset
       size = Math.max(n.size, at + block.byteLength)
       return [

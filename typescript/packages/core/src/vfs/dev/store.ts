@@ -48,6 +48,7 @@ export class DevFiles extends PipeFiles {
       tombstones: new Set(),
       inputs: new Map(),
       nextAllocation: 0,
+      stamp: 0n,
     },
   ) {
     super()
@@ -264,9 +265,6 @@ export class DevStore {
   readonly dirs: Set<string>
   /** Never counted: a capacity refuses `/dev`. Read as RAMStore's. */
   readonly usage: StorageUsage | null = null
-  /** The time the store's last write landed at, in nanoseconds. Read as
-   * RAMStore's. */
-  stamp = 0n
   constructor(
     readonly files = new DevFiles(),
     readonly modified = new Map<string, string>(),
@@ -274,6 +272,16 @@ export class DevStore {
     readonly made = nowIso(),
   ) {
     this.dirs = new DevDirs(files)
+  }
+
+  /** The last write's stamp, shared by every session's view. Read as
+   * RAMStore's. */
+  get stamp(): bigint {
+    return this.files.state.stamp
+  }
+
+  set stamp(ns: bigint) {
+    this.files.state.stamp = ns
   }
 
   forSession(owner: string): DevStore {

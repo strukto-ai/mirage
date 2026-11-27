@@ -479,6 +479,7 @@ async def switch_to(
             path: await lstat(
                 vfs,
                 location.worktree.join(path.decode("utf-8", errors="replace")),
+                fresh=True,
             )
             for path in sizes
         }

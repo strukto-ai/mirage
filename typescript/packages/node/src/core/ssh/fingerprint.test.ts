@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RACY_WINDOW_NS } from '@struktoai/mirage-core/utils/constants'
+import { REMOTE_RACY_WINDOW_NS } from '@struktoai/mirage-core/utils/constants'
 import { describe, expect, it } from 'vitest'
 import { tokenOf } from './fingerprint.ts'
 
 const WRITTEN = 1_700_000_000
-const SETTLED = BigInt(WRITTEN) * 1_000_000_000n + RACY_WINDOW_NS
+const SETTLED = BigInt(WRITTEN) * 1_000_000_000n + REMOTE_RACY_WINDOW_NS
 
 describe('tokenOf', () => {
   it('names a settled file by its size and second', () => {

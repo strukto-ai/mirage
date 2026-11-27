@@ -809,6 +809,7 @@ export class MountRegistry {
         soleWriter: vfs.soleWriter,
         commandLimits: mount.commandLimits,
         workspaceLimits: this.commandLimits,
+        keepsListings: mount.indexStore.ttl > 0,
       }
     })
     return [...this.rowCache]

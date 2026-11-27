@@ -34,8 +34,12 @@ def test_a_settled_file_stats_its_fingerprint(tmp_path, monkeypatch):
     )
 
 
-def test_a_file_written_just_now_stats_no_fingerprint(tmp_path):
-    (tmp_path / "f.txt").write_bytes(b"hi")
+def test_a_file_written_just_now_stats_no_fingerprint(tmp_path, monkeypatch):
+    p = tmp_path / "f.txt"
+    p.write_bytes(b"hi")
+    st = os.stat(p)
+    inside = max(st.st_ctime_ns, st.st_mtime_ns) + 1_000_000_000
+    monkeypatch.setattr("mirage.utils.dates.time_ns", lambda: inside)
     accessor = DiskAccessor(root=tmp_path)
     scope = PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/")
     assert asyncio.run(stat(accessor, scope)).fingerprint is None

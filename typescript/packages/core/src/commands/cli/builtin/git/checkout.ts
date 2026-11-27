@@ -397,7 +397,7 @@ export async function switchTo(
   const stats = new Map<string, FileStat | null>()
   if (before.size > 0) {
     for (const path of sizes.keys()) {
-      stats.set(path, await lstat(vfs, repo.location.worktree.join(path)))
+      stats.set(path, await lstat(vfs, repo.location.worktree.join(path), true))
     }
   } else {
     const found = await scan(vfs, repo.location, new Set(sizes.keys()), UNTRACKED_NO)

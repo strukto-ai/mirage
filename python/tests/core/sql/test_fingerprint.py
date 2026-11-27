@@ -52,3 +52,29 @@ async def test_a_same_size_rewrite_moves_it_on_a_clock_that_stands_still():
         driver.close()
     assert first.fingerprint != second.fingerprint
     assert row.fingerprint == second.fingerprint
+
+
+async def _rewritten_by_another(path: str) -> tuple[FileStat, FileStat]:
+    first_driver, second_driver = SqliteDriver(path), SqliteDriver(path)
+    first, second = SqlVFS(driver=first_driver), SqlVFS(driver=second_driver)
+    try:
+        await first.write(at("/f"), b"one")
+        before = await first.stat(at("/f"))
+        await second.write(at("/f"), b"two")
+        return before, await first.stat(at("/f"))
+    finally:
+        await first.close()
+        await second.close()
+        first_driver.close()
+        second_driver.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rewrite_through_another_driver_moves_it(tmp_path):
+    # Each driver keeps its own last stamp, so on a clock that stands still
+    # only the file's own stored time keeps the second write past the first.
+    before, after = await run_with_system_clock(
+        ManualClock(1_800_000_000),
+        _rewritten_by_another(str(tmp_path / "db.sqlite")),
+    )
+    assert before.fingerprint != after.fingerprint

@@ -182,9 +182,13 @@ class SqlAccessor(Accessor):
         """Mark the tree as having lost or moved an entry."""
         STRUCTURE[self.driver] = self.structure() + 1
 
-    def stamped(self) -> int:
+    def stamped(self, floor: int = 0) -> int:
         """The time a write lands at, in nanoseconds: now, past every time
-        a mount on the driver gave a write before."""
-        ns = stamp_after(STAMPS.get(self.driver, 0))
+        a mount on the driver gave a write before and past ``floor``.
+
+        Args:
+            floor (int): a time the write must land past, in nanoseconds.
+        """
+        ns = stamp_after(max(STAMPS.get(self.driver, 0), floor))
         STAMPS[self.driver] = ns
         return ns

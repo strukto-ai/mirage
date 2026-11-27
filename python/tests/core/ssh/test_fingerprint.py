@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.ssh.fingerprint import token_of
-from mirage.utils.constants import RACY_WINDOW_NS
+from mirage.utils.constants import REMOTE_RACY_WINDOW_NS
 
 WRITTEN = 1_700_000_000
-SETTLED = WRITTEN * 1_000_000_000 + RACY_WINDOW_NS
+SETTLED = WRITTEN * 1_000_000_000 + REMOTE_RACY_WINDOW_NS
 
 
 def test_a_settled_file_is_named_by_its_size_and_second():

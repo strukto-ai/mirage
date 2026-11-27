@@ -457,3 +457,32 @@ async def test_a_checkout_keeps_the_fingerprint_of_a_file_it_had_to_read(
         before, after = await _touch_then_checkout(ws)
     assert before == ["/w/dst/a.txt"]
     assert after == []
+
+
+class KeptRAM(RAMVFS):
+    """Keeps listings past the command, as a disk or bucket mount does."""
+
+    index_ttl = 600
+
+
+@pytest.mark.asyncio
+async def test_a_status_asks_past_the_listings_a_mount_keeps(repo_path: Path):
+    # The second workspace's write never reaches the first one's kept
+    # listing, so the walk there still answers the file's old fingerprint;
+    # status has to ask the backend before it trusts it.
+    vfs = KeptRAM()
+    with (
+        Workspace(
+            {"/src/": DiskVFS(root=str(repo_path.parent)), "/w/": vfs},
+            mode=MountMode.WRITE,
+        ) as ws,
+        Workspace({"/w/": vfs}, mode=MountMode.WRITE) as other,
+    ):
+        ws.register_cli("git", GIT)
+        cloned = await ws.shell("git clone -q /src/work /w/dst")
+        assert cloned.exit_code == 0, cloned.stderr
+        clean = await ws.shell("git -C /w/dst status --porcelain")
+        assert (clean.exit_code, clean.stdout) == (0, b"")
+        await other.vfs.write("/w/dst/a.txt", b"ONE\n")
+        changed = await ws.shell("git -C /w/dst status --porcelain")
+    assert changed.stdout == b" M a.txt\n"

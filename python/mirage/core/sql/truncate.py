@@ -42,7 +42,7 @@ async def truncate(
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
-    now = now_stamp(accessor)
+    now = now_stamp(accessor, node)
     if node is None:
         if no_create:
             return

@@ -16,7 +16,6 @@ from typing import Any
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import lookup_error
-from mirage.core.redis.fingerprint import token_of
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import norm
@@ -69,7 +68,6 @@ def _from_fields(
         name=p.rsplit("/", 1)[-1],
         size=size,
         modified=modified,
-        fingerprint=token_of(modified),
         type=FileType.FILE,
         content=content_type_for_path(p),
         mode=attrs.get("mode"),

@@ -34,8 +34,9 @@ import { singleQuote } from '../../utils/quote.ts'
  *
  * @param name the entry's name.
  * @param entry what find printed for it.
+ * @param machine the machine holding it.
  */
-export function entryStat(name: string, entry: PosixEntry): FileStat {
+export function entryStat(name: string, entry: PosixEntry, machine: string): FileStat {
   const kind = KINDS[entry.kind] ?? FileType.FILE
   const modified = msToRfc3339(entry.mtimeMs)
   const regular = kind === FileType.FILE
@@ -43,7 +44,7 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
     name,
     size: regular ? entry.size : null,
     modified,
-    fingerprint: tokenOf(entry),
+    fingerprint: tokenOf(entry, machine),
     type: kind,
     ...(regular ? { content: contentTypeForPath(name) } : {}),
     mode: entry.mode,
@@ -64,7 +65,7 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
  */
 export function holderStat(name: string, one: Holder): FileStat {
   if (one.entry === null) throw new Error(`${one.machine}: no entry was asked for ${name}`)
-  return entryStat(name, one.entry)
+  return entryStat(name, one.entry, one.machine)
 }
 
 /**
@@ -124,7 +125,7 @@ export async function stat(
   machine: string,
   path: PathSpec,
 ): Promise<FileStat> {
-  return entryStat(leaf(path), await statEntry(accessor, machine, path))
+  return entryStat(leaf(path), await statEntry(accessor, machine, path), machine)
 }
 
 /**

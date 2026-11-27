@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from dulwich.index import IndexEntry
 from dulwich.objects import ObjectID
@@ -367,7 +367,14 @@ async def stage_changes(
                 before is not None,
             ) from exc
         sha = await store_blob(vfs, location.commondir, data)
-        entry = staged_entry(sha, found.files[path], len(data))
+        info = found.files[path]
+        # The bytes read are the walk's version only if the backend still
+        # stats its fingerprint once they are read.
+        if info.fingerprint:
+            after = await lstat(vfs, location.worktree.join(path), fresh=True)
+            if after is None or after.fingerprint != info.fingerprint:
+                info = replace(info, fingerprint=None)
+        entry = staged_entry(sha, info, len(data))
         if before is None:
             added.append(path)
         elif (before.sha, before.mode) != (entry.sha, entry.mode):

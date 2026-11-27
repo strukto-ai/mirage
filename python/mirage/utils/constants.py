@@ -43,3 +43,6 @@ UINT64_MASK = (1 << 64) - 1
 # coarser than the changes it would have to tell apart (git's racy-clean
 # rule).
 RACY_WINDOW_NS = 2_000_000_000
+# The same for a time another host's clock gave, judged by this one's: the
+# racy window plus the drift two clocks kept by NTP stay well within.
+REMOTE_RACY_WINDOW_NS = 60_000_000_000

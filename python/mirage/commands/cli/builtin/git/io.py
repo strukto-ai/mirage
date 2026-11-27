@@ -54,7 +54,9 @@ async def stat_of(vfs: Files, path: PathSpec) -> FileStat | None:
         return None
 
 
-async def lstat(vfs: Files, path: PathSpec) -> FileStat | None:
+async def lstat(
+    vfs: Files, path: PathSpec, fresh: bool = False
+) -> FileStat | None:
     """What sits at a path, a link reported as itself, None when
     nothing does.
 
@@ -65,9 +67,10 @@ async def lstat(vfs: Files, path: PathSpec) -> FileStat | None:
     Args:
         vfs (Files): the session's files.
         path (PathSpec): absolute virtual path.
+        fresh (bool): ask the backend past the mount's kept listings.
     """
     try:
-        return await vfs.stat(path, nofollow=True)
+        return await vfs.stat(path, nofollow=True, fresh=fresh)
     except MISS_ERRORS:
         return None
 

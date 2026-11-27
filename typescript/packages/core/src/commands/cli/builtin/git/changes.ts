@@ -20,7 +20,9 @@ import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
 import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK } from './constants.ts'
 import { readIndex, unchanged, withFingerprint, type StagedEntry } from './index_file.ts'
-import { entryBytes } from './io.ts'
+import { entryBytes, lstat } from './io.ts'
+import { mountView } from '../../../builtin/utils/links.ts'
+import type { MountView } from '../../../../view/types.ts'
 import { visibleEntries } from './pathspec.ts'
 
 import { embeddedHead, embeddedLocation } from './embedded.ts'
@@ -327,8 +329,10 @@ function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
  * A size the mount already reported settles most of it for free, since an edit
  * that keeps the byte count is the exception. When the sizes agree, the
  * fingerprint the entry kept settles it if the mount still stats the same one:
- * git skips the read the same way, trusting the stat data it cached. Otherwise
- * the file is read and hashed, because that is the only thing that actually
+ * git skips the read the same way, trusting the stat data it cached. A mount
+ * that keeps listings may have answered the walk from one as old as the
+ * listing, so its stat is asked again of the backend first. Otherwise the
+ * file is read and hashed, because that is the only thing that actually
  * answers the question.
  *
  * A recorded size of zero is read as "not stated" rather than "empty", because
@@ -344,10 +348,13 @@ async function differs(
   path: string,
   entry: IndexEntry,
   info: FileStat,
+  mounts: MountView | undefined,
 ): Promise<boolean> {
   if (modeDiffers(entry, info)) return true
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
-  if (unchanged(entry, info)) return false
+  if (unchanged(entry, info) && (await still(vfs, worktree.join(path), entry, mounts))) {
+    return false
+  }
   let data: Uint8Array
   try {
     data = await entryBytes(vfs, worktree.join(path), info)
@@ -360,6 +367,22 @@ async function differs(
   }
   const oid = await git.hashBlob({ object: data })
   return oid.oid !== entry.oid
+}
+
+/**
+ * Whether the backend itself still stats the fingerprint `entry` kept, where
+ * the mount keeps listings a walk may have answered from. Mirrors Python's
+ * `_still`.
+ */
+async function still(
+  vfs: Files,
+  where: PathSpec,
+  entry: IndexEntry,
+  mounts: MountView | undefined,
+): Promise<boolean> {
+  if (mounts?.keepsListings?.(where.virtual) !== true) return true
+  const current = await lstat(vfs, where, true)
+  return current !== null && unchanged(entry, current)
 }
 
 /** What changed in the repository a gitlink records, and the commit it has out. */
@@ -443,6 +466,7 @@ export async function workChanges(
   refreshed: Map<string, StagedEntry> | null = null,
 ): Promise<Map<string, string>> {
   const changes = new Map<string, string>()
+  const mounts = mountView(vfs)
   for (const [path, entry] of entries) {
     if (entry.mode === Number.parseInt(GITLINK_MODE, 8)) {
       if (embedded === null || !found.repos.includes(path)) continue
@@ -457,7 +481,7 @@ export async function workChanges(
     // A symlink and a file holding its target text hash alike.
     else if ((info.type === FileType.SYMLINK) !== ((entry.mode & 0o170000) === SYMLINK)) {
       changes.set(path, TYPE_CHANGED)
-    } else if (await differs(repo, vfs, worktree, path, entry, info)) {
+    } else if (await differs(repo, vfs, worktree, path, entry, info, mounts)) {
       changes.set(path, MODIFIED)
     } else if (
       refreshed !== null &&

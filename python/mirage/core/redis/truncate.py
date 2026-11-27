@@ -16,7 +16,7 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import stamp_iso
+from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
 
 
@@ -31,7 +31,6 @@ async def truncate(
     p = norm(path.mount_path)
     await check_dest_parents(store, path, p)
     await check_write_target(store, path, p)
-    now = stamp_iso(accessor.stamped())
-    if not await store.truncate_file(p, length, now, no_create):
+    if not await store.truncate_file(p, length, now_iso(), no_create):
         return
     record("truncate", path.virtual, "redis", 0, timer)

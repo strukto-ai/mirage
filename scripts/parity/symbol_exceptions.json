@@ -1862,6 +1862,11 @@
    "typescript_only": {
     "remainingSeconds": "Node converts an absolute timer deadline to remaining seconds for its abort timer."
    }
+  },
+  "accessor/ram": {
+   "python_only": {
+    "_STAMPING": "Python stores may be written from several threads, so a store's last stamp is read and advanced under a lock; TypeScript runs one thread and advances it in one step."
+   }
   }
  }
 }

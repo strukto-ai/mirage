@@ -404,6 +404,10 @@ class NamespaceReader:
                 row, command, declared, row.workspace_limits, profile
             )
 
+        def keeps_listings(virtual: str) -> bool:
+            row = owner(virtual)
+            return row is not None and row.keeps_listings
+
         return MountView(
             descendants=below,
             visible_descendants=visible_below,
@@ -412,4 +416,5 @@ class NamespaceReader:
             answers=answers,
             searchable=searchable,
             walk_limit=walk_limit,
+            keeps_listings=keeps_listings,
         )

@@ -12,6 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { PathSpec, type FileStat } from '../../types.ts'
@@ -22,11 +25,12 @@ import { tokenOf } from './fingerprint.ts'
 
 const ENC = new TextEncoder()
 
-// A SQLite database in memory, as the inode tests read one.
-function memoryDriver(): SqlDriver {
-  const db = new DatabaseSync(':memory:')
+// A SQLite database, in memory unless a file is named, as the inode tests
+// read one.
+function memoryDriver(file = ':memory:'): SqlDriver {
+  const db = new DatabaseSync(file)
   return {
-    location: ':memory:',
+    location: file,
     dialect: SqlDialect.SQLITE,
     exclusive: true,
     query: (sql, params = []) =>
@@ -69,6 +73,27 @@ describe('tokenOf', () => {
       expect(listed?.fingerprint).toBe(second.fingerprint)
     } finally {
       await vfs.close()
+    }
+  })
+
+  it('moves on a rewrite through another driver on the same database', async () => {
+    // Each driver keeps its own last stamp, so on a clock that stands still
+    // only the file's own stored time keeps the second write past the first.
+    const file = join(mkdtempSync(join(tmpdir(), 'fp-sql-')), 'db.sqlite')
+    const first = new SqlVFS(memoryDriver(file), { ownsDriver: true })
+    const second = new SqlVFS(memoryDriver(file), { ownsDriver: true })
+    try {
+      const [before, after] = await runWithSystemClock(new ManualClock(1_800_000_000), async () => {
+        const at = PathSpec.fromStrPath('/f')
+        await first.write(at, ENC.encode('one'))
+        const was = await first.stat(at)
+        await second.write(at, ENC.encode('two'))
+        return [was, await first.stat(at)] as const
+      })
+      expect(before.fingerprint).not.toBe(after.fingerprint)
+    } finally {
+      await first.close()
+      await second.close()
     }
   })
 })

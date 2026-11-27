@@ -16,7 +16,7 @@ from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import check_dest_parents
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import stamp_iso
+from mirage.utils.dates import now_iso
 from mirage.utils.path import norm
 
 
@@ -26,5 +26,5 @@ async def create(accessor: RedisAccessor, path: PathSpec) -> None:
     p = norm(path.mount_path)
     await check_dest_parents(store, path, p)
     await store.set_file(p, b"")
-    await store.set_modified(p, stamp_iso(accessor.stamped()))
+    await store.set_modified(p, now_iso())
     record("create", path.virtual, "redis", 0, timer)

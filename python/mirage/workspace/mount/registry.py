@@ -1195,6 +1195,7 @@ class MountRegistry:
                 command_limits=m.command_limits,
                 workspace_limits=self.command_limits,
                 calls=m.calls,
+                keeps_listings=m.index_store.ttl > 0,
             )
             for m in self._mounts
         ]

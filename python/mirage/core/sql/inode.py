@@ -68,14 +68,20 @@ def is_file(node: Inode) -> bool:
     return node.mode == FILE
 
 
-def now_stamp(accessor: SqlAccessor) -> Stamp:
-    """Now, as ``fs_inode`` keeps a time: past every time a write on the
-    database landed at before, so a rewrite always moves its file's time.
+def now_stamp(accessor: SqlAccessor, after: Inode | None = None) -> Stamp:
+    """Now, as ``fs_inode`` keeps a time: past every time the mount's
+    driver gave a write before, and past ``after``'s own, so a rewrite
+    always moves its file's time, whichever driver or process last wrote
+    it.
 
     Args:
         accessor (SqlAccessor): the mount whose database is written.
+        after (Inode | None): the inode the write lands on, as read.
     """
-    seconds, nanoseconds = divmod(accessor.stamped(), 1_000_000_000)
+    floor = (
+        0 if after is None else after.mtime * 1_000_000_000 + after.mtime_nsec
+    )
+    seconds, nanoseconds = divmod(accessor.stamped(floor), 1_000_000_000)
     return seconds, nanoseconds
 
 
