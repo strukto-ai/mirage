@@ -12,13 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.read import read
+from mirage.core.disk.read import read, read_many
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _on_d(key: str) -> PathSpec:
+    """The file ``key`` names on a mount at ``/d``."""
+    return PathSpec(
+        virtual="/d" + key,
+        directory="/d" + key.rsplit("/", 1)[0] + "/",
+        vfs_path=key.lstrip("/"),
+    )
 
 
 @pytest.mark.asyncio
@@ -158,3 +169,66 @@ async def test_read_bytes_under_a_plain_file_is_not_a_directory(tmp_path):
         await read(DiskAccessor(tmp_path), spec)
     assert exc.value.filename == "/a.txt/x"
     assert str(tmp_path) not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_answers_only_the_files_their_own_reads_would(
+    tmp_path,
+):
+    # Each file is checked as its own read checks it, so a link, a folder
+    # reached through one, a name spelled unlike its entry, a directory, a
+    # FIFO (whose open would wait for a writer) and a file gone or longer
+    # than the limit are left for that read; the rest are recorded once
+    # each, as their own reads record them.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "sub").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    (tmp_path / "a" / "y").write_bytes(b"y\n")
+    (tmp_path / "a" / "long").write_bytes(b"z" * 9)
+    (tmp_path / "b" / "c").write_bytes(b"c\n")
+    (tmp_path / "a" / "link").symlink_to(tmp_path / "a" / "x")
+    (tmp_path / "linked").symlink_to(tmp_path / "a")
+    os.mkfifo(tmp_path / "a" / "pipe")
+    keys = [
+        "/a/x",
+        "/a/link",
+        "/linked/y",
+        "/a/X",
+        "/a/sub",
+        "/a/pipe",
+        "/a/gone",
+        "/a/long",
+        "/gone/x",
+        "/a/y",
+        "/b/c",
+    ]
+    scope = RecordingScope()
+    try:
+        got = await read_many(
+            DiskAccessor(tmp_path), [_on_d(k) for k in keys], 8
+        )
+    finally:
+        scope.close()
+    assert got == {"/d/a/x": b"x\n", "/d/a/y": b"y\n", "/d/b/c": b"c\n"}
+    assert [(r.path, r.bytes, r.complete) for r in scope.records] == [
+        ("/d/a/x", 2, True),
+        ("/d/a/y", 2, True),
+        ("/d/b/c", 2, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_keeps_the_files_that_fit_its_room(tmp_path):
+    # A file that would take the batch past its room is left out before
+    # it is read, and a smaller one after it still fits.
+    for name, size in (("f", 16), ("g", 16), ("h", 4)):
+        (tmp_path / name).write_bytes(b"x" * size)
+    accessor = DiskAccessor(tmp_path)
+    files = [_on_d("/f"), _on_d("/g"), _on_d("/h")]
+    assert sorted(await read_many(accessor, files, 64, 20)) == [
+        "/d/f",
+        "/d/h",
+    ]
+    assert await read_many(accessor, files, 64, -1) == {}
+    assert len(await read_many(accessor, files, 64)) == 3

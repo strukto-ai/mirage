@@ -14,7 +14,7 @@
 
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
-import { TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
+import { READ_FILES_SCRIPT, TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
 import { escapeGlob } from '@struktoai/mirage-core/vfs/redis/store'
 import { RespClient, RespError, type Connect, type RespArg, type RespReply } from './resp.ts'
 
@@ -146,6 +146,24 @@ export class RedisStore implements RedisStoreLike {
 
   async getFile(path: string): Promise<Uint8Array | null> {
     return bytes(await this.call('GET', this.fk(path)))
+  }
+
+  async getFiles(
+    paths: readonly string[],
+    limit: number,
+    room: number | null,
+  ): Promise<(Uint8Array | null)[]> {
+    if (paths.length === 0) return []
+    const keys = paths.map((p) => this.fk(p))
+    const reply = await this.call(
+      'EVAL',
+      READ_FILES_SCRIPT,
+      keys.length,
+      ...keys,
+      String(limit),
+      room === null ? '' : String(room),
+    )
+    return list(reply).map((item) => bytes(item))
   }
 
   /**

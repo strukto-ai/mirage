@@ -108,6 +108,46 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect((await chunks()) - before).toBe(3)
   })
 
+  it('answers a batch read in a few queries however many files it names', async () => {
+    // Each folder is walked once, the entries it names come in one query and
+    // every row of the files kept in one more, each split where a statement's
+    // parameters run out (120 names here: two entry queries in /b, two row
+    // queries); the walks of /a, /b and the missing /gone make 3, so 8 in all.
+    // A file across rows reads whole, and a folder, a file gone or one longer
+    // than the limit is left for its own read. Each file kept is recorded once.
+    const data = new Uint8Array(DEFAULT_CHUNK_SIZE * 2 + 5).map((_, i) => i % 251)
+    await ops(vfs).mkdir(at('/a'))
+    await ops(vfs).mkdir(at('/a/sub'))
+    await ops(vfs).mkdir(at('/b'))
+    await ops(vfs).write(at('/a/big'), data)
+    await ops(vfs).write(at('/a/long'), new Uint8Array(DEFAULT_CHUNK_SIZE * 3))
+    const small = new Map<string, Uint8Array>()
+    for (let i = 0; i < 120; i++) small.set(`/b/${String(i)}`, enc.encode(`${String(i)}\n`))
+    for (const [key, body] of small) await ops(vfs).write(at(key), body)
+    const query = vi.spyOn(vfs.accessor, 'query')
+    const names = ['/a/big', '/a/sub', '/a/gone', '/a/long', '/gone/x', ...small.keys()]
+    const [got, records] = await recordingScope(() => vfs.readMany(names.map(at), data.length))
+    expect(got).toEqual(new Map([['/a/big', data], ...small]))
+    expect(query.mock.calls.length).toBeLessThanOrEqual(8)
+    expect(records.map((r) => r.path).sort()).toEqual([...got.keys()].sort())
+  })
+
+  it('keeps the files of a batch read that fit its room', async () => {
+    // A file that would take the batch past its room is left out before its
+    // rows are asked for, and a smaller one after it still fits.
+    for (const [key, size] of [
+      ['/f', 16],
+      ['/g', 16],
+      ['/h', 4],
+    ] as const) {
+      await ops(vfs).write(at(key), new Uint8Array(size))
+    }
+    const files = ['/f', '/g', '/h'].map(at)
+    expect([...(await vfs.readMany(files, 64, [], 20)).keys()].sort()).toEqual(['/f', '/h'])
+    expect((await vfs.readMany(files, 64, [], -1)).size).toBe(0)
+    expect((await vfs.readMany(files, 64)).size).toBe(3)
+  })
+
   it('declines a subtree over the listing limit and never returns a partial tree', async () => {
     await ops(vfs).mkdir(at('/folder'))
     await ops(vfs).write(at('/folder/a'), enc.encode('a'))

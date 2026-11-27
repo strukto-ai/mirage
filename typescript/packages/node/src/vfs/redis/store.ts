@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
+import { READ_FILES_SCRIPT, TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
 import { escapeGlob } from '@struktoai/mirage-core/vfs/redis/store'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -82,6 +82,34 @@ export class RedisStore implements RedisStoreLike {
     const raw = await typed.withTypeMapping(mapping).get(this.fk(path))
     if (raw === null) return null
     return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
+  }
+
+  async getFiles(
+    paths: readonly string[],
+    limit: number,
+    room: number | null,
+  ): Promise<(Uint8Array | null)[]> {
+    if (paths.length === 0) return []
+    const c = await this.client()
+    const mod = (await import('redis')) as unknown as {
+      RESP_TYPES: { readonly BLOB_STRING: number }
+    }
+    const typed = c as unknown as {
+      withTypeMapping: (m: Record<number, unknown>) => {
+        eval: (
+          script: string,
+          options: { keys: string[]; arguments: string[] },
+        ) => Promise<(Buffer | null)[]>
+      }
+    }
+    const mapping: Record<number, unknown> = { [mod.RESP_TYPES.BLOB_STRING]: Buffer }
+    const replies = await typed.withTypeMapping(mapping).eval(READ_FILES_SCRIPT, {
+      keys: paths.map((p) => this.fk(p)),
+      arguments: [String(limit), room === null ? '' : String(room)],
+    })
+    return replies.map((raw) =>
+      raw === null ? null : new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength),
+    )
   }
 
   /**

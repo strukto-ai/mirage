@@ -18,7 +18,8 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.read import read
+from mirage.core.redis.read import read, read_many
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -189,3 +190,26 @@ async def test_read_bytes_window_on_a_missing_key_still_raises(accessor):
 async def test_read_bytes_directory_is_eisdir(accessor):
     with pytest.raises(IsADirectoryError):
         await read(accessor, PathSpec.from_str_path("/sub"))
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_answers_the_files_their_own_reads_would(accessor):
+    # A folder and a file gone are left for their own reads to answer;
+    # each file read is recorded once, as its own read records it.
+    files = [
+        PathSpec.from_str_path(p)
+        for p in ("/hello.txt", "/sub", "/gone", "/sub/nested.txt")
+    ]
+    scope = RecordingScope()
+    try:
+        got = await read_many(accessor, files, 64)
+    finally:
+        scope.close()
+    assert got == {"/hello.txt": b"hello world", "/sub/nested.txt": b"nested"}
+    assert [(r.path, r.bytes, r.complete) for r in scope.records] == [
+        ("/hello.txt", 11, True),
+        ("/sub/nested.txt", 6, True),
+    ]
+    assert await read_many(accessor, files, 64, 11) == {
+        "/hello.txt": b"hello world"
+    }

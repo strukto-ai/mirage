@@ -64,7 +64,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
 import { type Egress, withEgress } from '../../io/gateway.ts'
-import { checkMemory } from '../../io/memory.ts'
+import { checkMemory, memoryRoom } from '../../io/memory.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { closeQuietly, OutputStream, rechunk } from '../../io/stream.ts'
@@ -2445,11 +2445,12 @@ export class MountEntry {
 
   /**
    * The VFS's batch read, handed what is at each path and at its folder as
-   * the stored listings name them, where it declares them; a VFS with no batch
-   * read has each file read as its own whole read reads it (`readEach`), and
-   * one longer than `limit`, one that does not fit in what is left, or one that
-   * fails is left out. Either way the index is observed once. Mirrors Python's
-   * `_read_many`.
+   * the stored listings name them, where it declares them, and the bytes the
+   * files may come to together (`room`: what the workspace's `max_memory` has
+   * left beside `heldBytes`); a VFS with no batch read has each file read as
+   * its own whole read reads it (`readEach`), and one longer than `limit`, one
+   * that does not fit in what is left, or one that fails is left out. Either
+   * way the index is observed once. Mirrors Python's `_read_many`.
    */
   private async batchRead(
     scopes: PathSpec[],
@@ -2473,7 +2474,13 @@ export class MountEntry {
       if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
       handed.push(one)
     }
-    const result = await this.vfs.readMany(scopes, limit, handed)
+    const free = memoryRoom()
+    const result = await this.vfs.readMany(
+      scopes,
+      limit,
+      handed,
+      free === null ? null : free - heldBytes,
+    )
     await this.observe(
       index,
       scopes.filter((scope) => result.has(scope.virtual)),

@@ -22,7 +22,8 @@ import { copy } from '@struktoai/mirage-core/core/redis/copy'
 import { create } from '@struktoai/mirage-core/core/redis/create'
 import { exists } from '@struktoai/mirage-core/core/redis/exists'
 import { mkdir } from '@struktoai/mirage-core/core/redis/mkdir'
-import { read } from '@struktoai/mirage-core/core/redis/read'
+import { read, readMany } from '@struktoai/mirage-core/core/redis/read'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { readdir, tree } from '@struktoai/mirage-core/core/redis/readdir'
 import { rename } from '@struktoai/mirage-core/core/redis/rename'
 import { rmR } from '@struktoai/mirage-core/core/redis/rm'
@@ -78,6 +79,27 @@ describe.skipIf(skip)('core/redis ops', () => {
   it('writeBytes + read round-trip', async () => {
     await write(acc, spec('/hi.txt'), ENC.encode('hello'))
     expect(DEC.decode(await read(acc, spec('/hi.txt')))).toBe('hello')
+  })
+
+  it('a batch read answers the files their own reads would, recording each', async () => {
+    // A folder and a file gone are left for their own reads to answer; each
+    // file read is recorded once, as its own read records it.
+    await write(acc, spec('/hello.txt'), ENC.encode('hello world'))
+    await mkdir(acc, spec('/sub'))
+    await write(acc, spec('/sub/nested.txt'), ENC.encode('nested'))
+    const files = ['/hello.txt', '/sub', '/gone', '/sub/nested.txt'].map((p) => spec(p))
+    const [got, records] = await recordingScope(() => readMany(acc, files, 64))
+    expect(got).toEqual(
+      new Map([
+        ['/hello.txt', ENC.encode('hello world')],
+        ['/sub/nested.txt', ENC.encode('nested')],
+      ]),
+    )
+    expect(records.map((r) => [r.path, r.bytes, r.complete])).toEqual([
+      ['/hello.txt', 11, true],
+      ['/sub/nested.txt', 6, true],
+    ])
+    expect([...(await readMany(acc, files, 64, 11)).keys()]).toEqual(['/hello.txt'])
   })
 
   // Each chunk is appended where it lands, so a reader watches a slow

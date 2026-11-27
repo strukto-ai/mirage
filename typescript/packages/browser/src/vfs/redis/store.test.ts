@@ -121,6 +121,36 @@ describe('UpstashRedisStore', () => {
     }
   })
 
+  it('getFiles reads a batch in one EVAL, sizing each file before it reads it', async () => {
+    // A file absent, empty or longer than the limit is null, and so is one
+    // past what is left of the room once the files before it took theirs; a
+    // smaller one after it still fits. Every byte survives the base64 reply.
+    const { fake, store } = make()
+    await store.setFile('/bin', ALL_BYTES)
+    await store.setFile('/e', new Uint8Array(0))
+    for (const [p, size] of [
+      ['/f', 16],
+      ['/g', 16],
+      ['/h', 4],
+    ] as const) {
+      await store.setFile(p, new Uint8Array(size).fill(7))
+    }
+    const start = fake.commands.length
+    expect(await store.getFiles(['/bin', '/gone', '/e'], 256, null)).toEqual([
+      ALL_BYTES,
+      null,
+      null,
+    ])
+    expect(fake.commands.slice(start)).toEqual(['EVAL'])
+    expect(await store.getFiles(['/f', '/g', '/h'], 64, 20)).toEqual([
+      new Uint8Array(16).fill(7),
+      null,
+      new Uint8Array(4).fill(7),
+    ])
+    expect(await store.getFiles(['/bin'], 255, null)).toEqual([null])
+    expect(await store.getFiles([], 8, null)).toEqual([])
+  })
+
   it('no-create leaves a missing file and mtime absent', async () => {
     const { store } = make()
     expect(await store.truncateFile('/missing', 4, 'modified', true)).toBe(false)

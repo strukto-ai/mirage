@@ -211,6 +211,22 @@ def subdirs_of(count: int) -> str:
     GROUP BY d.parent_ino"""
 
 
+def entries_named(count: int) -> str:
+    """The entries of one folder that a batch of names names, with their
+    inode rows."""
+    slots = ", ".join("?" for _ in range(count))
+    return f"""SELECT d.name, {columns("i")}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino = ? AND d.name IN ({slots})"""
+
+
+def rows_of(count: int) -> str:
+    """Every ``fs_data`` row of a batch of files, in order within each."""
+    slots = ", ".join("?" for _ in range(count))
+    return f"""SELECT ino, chunk_index, data FROM fs_data
+    WHERE ino IN ({slots}) ORDER BY ino, chunk_index"""
+
+
 def children_of(count: int) -> str:
     """Direct children of a bounded batch of parents, with their inode rows."""
     slots = ", ".join("?" for _ in range(count))

@@ -182,3 +182,33 @@ async def test_stat_many_answers_what_the_single_getters_do(store):
     assert await store.stat_many(paths) == singles
     assert singles[0] == ({"mode": "420"}, 5, "2026-01-01T00:00:00+00:00")
     assert await store.stat_many([]) == []
+
+
+@pytest.mark.asyncio
+async def test_get_files_sizes_each_file_before_it_reads_it(store):
+    # One round trip answers every file: one absent or empty, or longer
+    # than the limit, is None, and so is one past what is left of the
+    # room once the files before it took theirs; a smaller one after it
+    # still fits.
+    for path, data in (
+        ("/a", b"a\n"),
+        ("/e", b""),
+        ("/long", b"x" * 9),
+        ("/f", b"x" * 16),
+        ("/g", b"x" * 16),
+        ("/h", b"x" * 4),
+    ):
+        await store.set_file(path, data)
+    assert await store.get_files(["/a", "/gone", "/e", "/long"], 8, None) == [
+        b"a\n",
+        None,
+        None,
+        None,
+    ]
+    assert await store.get_files(["/f", "/g", "/h"], 64, 20) == [
+        b"x" * 16,
+        None,
+        b"x" * 4,
+    ]
+    assert await store.get_files(["/f"], 64, -1) == [None]
+    assert await store.get_files([], 8, None) == []

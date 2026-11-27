@@ -42,6 +42,7 @@ from mirage.vfs.sql.sql import SqlVFS
 from mirage.vfs.sql.types import (
     SqlDialect,
     SqlDriver,
+    SqlRow,
     SqlStatement,
     SqlValue,
 )
@@ -151,6 +152,57 @@ async def test_a_file_across_chunk_boundaries_reads_whole_and_in_windows(
     assert await vfs.read(at("/big"), CS * 2, None) == data[CS * 2 :]
     rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_data")
     assert rows[0]["n"] - before == 3
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_answers_its_files_in_a_few_queries(vfs: SqlVFS):
+    # However many files a batch names, each folder is walked once, the
+    # entries it names come in one query and every row of the files kept
+    # in one more, each split where a statement's parameters run out (120
+    # names here: two entry queries in /b, two row queries); the walks of
+    # /a, /b and the missing /gone make 3, so 8 in all. A file across rows
+    # reads whole, and a folder, a file gone or one longer than the limit
+    # is left for its own read. Each file kept is recorded once.
+    data = bytes(i % 251 for i in range(CS * 2 + 5))
+    await vfs.mkdir(at("/a"))
+    await vfs.mkdir(at("/a/sub"))
+    await vfs.mkdir(at("/b"))
+    await vfs.write(at("/a/big"), data)
+    await vfs.write(at("/a/long"), b"x" * (CS * 3))
+    small = {f"/b/{i}": f"{i}\n".encode() for i in range(120)}
+    for key, body in small.items():
+        await vfs.write(at(key), body)
+    queries: list[str] = []
+    query = vfs.accessor.query
+
+    async def counting(
+        sql: str, params: Sequence[SqlValue] = ()
+    ) -> list[SqlRow]:
+        queries.append(sql)
+        return await query(sql, params)
+
+    vfs.accessor.query = counting  # type: ignore[method-assign]
+    names = ["/a/big", "/a/sub", "/a/gone", "/a/long", "/gone/x", *small]
+    scope = RecordingScope()
+    try:
+        got = await vfs.read_many([at(p) for p in names], len(data))
+    finally:
+        scope.close()
+    assert got == {"/a/big": data, **small}
+    assert len(queries) <= 8
+    assert sorted(r.path for r in scope.records) == sorted(got)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_keeps_the_files_that_fit_its_room(vfs: SqlVFS):
+    # A file that would take the batch past its room is left out before
+    # its rows are asked for, and a smaller one after it still fits.
+    for key, size in (("/f", 16), ("/g", 16), ("/h", 4)):
+        await vfs.write(at(key), b"x" * size)
+    files = [at("/f"), at("/g"), at("/h")]
+    assert sorted(await vfs.read_many(files, 64, 20)) == ["/f", "/h"]
+    assert await vfs.read_many(files, 64, -1) == {}
+    assert len(await vfs.read_many(files, 64)) == 3
 
 
 @pytest.mark.asyncio

@@ -202,6 +202,21 @@ export function subdirsOf(count: number): string {
     GROUP BY d.parent_ino`
 }
 
+/** The entries of one folder that a batch of names names, with their inode rows. */
+export function entriesNamed(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT d.name, ${columns('i')}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino = ? AND d.name IN (${slots})`
+}
+
+/** Every `fs_data` row of a batch of files, in order within each. */
+export function rowsOf(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT ino, chunk_index, data FROM fs_data
+    WHERE ino IN (${slots}) ORDER BY ino, chunk_index`
+}
+
 /** Direct children of a bounded batch of parents, with their inode rows. */
 export function childrenOf(count: number): string {
   const slots = Array<string>(count).fill('?').join(', ')

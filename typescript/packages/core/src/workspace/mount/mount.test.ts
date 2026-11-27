@@ -1169,3 +1169,28 @@ it('leaves out of a batch read what its own read could not fit', async () => {
   )
   expect(await streamed.readMany(['/s/f'], 64)).toEqual(new Map([['/s/f', new Uint8Array(16)]]))
 })
+
+it('hands a VFS that reads a batch itself the room its files must fit', async () => {
+  // It is handed what the workspace has left beside what the batch already
+  // holds, and no bound without a budget.
+  class Batched extends StubVFS {
+    readonly rooms: (number | null | undefined)[] = []
+    override readMany(
+      paths: PathSpec[],
+      _limit: number,
+      _handed?: readonly Handed[],
+      room?: number | null,
+    ): Promise<Map<string, Uint8Array>> {
+      this.rooms.push(room)
+      return Promise.resolve(new Map(paths.map((p) => [p.virtual, new Uint8Array([1])])))
+    }
+  }
+  const vfs = new Batched()
+  const mount = new MountEntry({ prefix: '/b/', vfs })
+  const budget = new MemoryBudget(24, () => 0)
+  expect(await runWithMemory(budget, () => mount.readMany(['/b/f'], 64, 16))).toEqual(
+    new Map([['/b/f', new Uint8Array([1])]]),
+  )
+  await mount.readMany(['/b/f'], 64, 16)
+  expect(vfs.rooms).toEqual([8, null])
+})

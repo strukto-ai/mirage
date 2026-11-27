@@ -17,7 +17,7 @@ import weakref
 from collections.abc import AsyncIterator, Awaitable
 from typing import cast
 
-from mirage.vfs.redis.constants import TRUNCATE_SCRIPT
+from mirage.vfs.redis.constants import READ_FILES_SCRIPT, TRUNCATE_SCRIPT
 
 try:
     from redis.asyncio import Redis
@@ -99,6 +99,41 @@ class RedisStore:
         return await cast(
             "Awaitable[bytes | None]", self._client.get(self._fk(path))
         )
+
+    async def get_files(
+        self, paths: list[str], limit: int, room: int | None
+    ) -> list[bytes | None]:
+        """The bytes of each file ``paths`` names, in one round trip that
+        sizes each on the server before reading it: None for one that is
+        absent or empty, longer than ``limit``, or past what is left of
+        ``room`` once the files before it took theirs.
+
+        Args:
+            paths (list[str]): mount-relative paths of the files.
+            limit (int): the most bytes worth reading for one file.
+            room (int | None): the most bytes the files may come to
+                together, None for no bound.
+        """
+        if not paths:
+            return []
+        replies = await cast(
+            "Awaitable[list[bytes | str | None]]",
+            self._client.eval(
+                READ_FILES_SCRIPT,
+                len(paths),
+                *(self._fk(p) for p in paths),
+                limit,
+                "" if room is None else room,
+            ),
+        )
+        return [
+            None
+            if data is None
+            else data
+            if isinstance(data, bytes)
+            else str(data).encode()
+            for data in replies
+        ]
 
     async def get_file_range(
         self, path: str, offset: int, size: int | None

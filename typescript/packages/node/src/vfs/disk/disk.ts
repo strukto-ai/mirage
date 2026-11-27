@@ -42,7 +42,7 @@ import { create as diskCreate } from '../../core/disk/create.ts'
 import { exists as diskExists } from '../../core/disk/exists.ts'
 import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
 import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
-import { read as diskRead } from '../../core/disk/read.ts'
+import { read as diskRead, readMany as diskReadMany } from '../../core/disk/read.ts'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
 import { rename as diskRename } from '../../core/disk/rename.ts'
 import { rmR as diskRmR } from '../../core/disk/rm.ts'
@@ -179,6 +179,15 @@ export class DiskVFS extends BaseVFS {
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return diskStream(this.accessor, path)
     return diskRead(this.accessor, path, offset, size)
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    _handed?: readonly Handed[],
+    room: number | null = null,
+  ): Promise<Map<string, Uint8Array>> {
+    return diskReadMany(this.accessor, paths, limit, room)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

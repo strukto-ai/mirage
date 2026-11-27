@@ -15,8 +15,9 @@
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
-from mirage.observe.context import record, start_op
+from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
+from mirage.utils.key_prefix import raw_path_of
 from mirage.utils.path import norm
 
 
@@ -49,3 +50,38 @@ async def read(
         raise await lookup_error(store, path_spec, key)
     record("read", virtual, "redis", len(data), timer)
     return data
+
+
+async def read_many(
+    accessor: RedisAccessor,
+    paths: list[PathSpec],
+    limit: int,
+    room: int | None = None,
+) -> dict[str, bytes]:
+    """Several whole files by virtual path, in one round trip whatever
+    their number (``RedisStore.get_files``): one that is absent, empty or
+    no file, one longer than ``limit``, and one that does not fit in
+    ``room`` beside the files read before it is left out for its own read
+    to meet. Each file read is recorded as a whole streamed read records
+    it.
+
+    Args:
+        accessor (RedisAccessor): Redis accessor.
+        paths (list[PathSpec]): the files, all on this mount.
+        limit (int): the most bytes worth fetching for one file.
+        room (int | None): the most bytes the files read may come to
+            together, None for no bound.
+    """
+    found = await accessor.store.get_files(
+        [norm(raw_path_of(p)) for p in paths], limit, room
+    )
+    read: dict[str, bytes] = {}
+    for spec, data in zip(paths, found, strict=True):
+        if data is None:
+            continue
+        rec = record_stream("read", spec.virtual, "redis")
+        if rec is not None:
+            rec.bytes = len(data)
+            rec.complete = True
+        read[spec.virtual] = data
+    return read

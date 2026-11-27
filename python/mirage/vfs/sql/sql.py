@@ -27,6 +27,7 @@ from mirage.core.sql.mkdir import mkdir as _mkdir
 from mirage.core.sql.path import Walk
 from mirage.core.sql.path import walk as _walk
 from mirage.core.sql.read import read as _read
+from mirage.core.sql.read import read_many as _read_many
 from mirage.core.sql.readdir import readdir as _readdir
 from mirage.core.sql.readdir import tree as _tree
 from mirage.core.sql.rename import rename as _rename
@@ -213,6 +214,11 @@ class SqlVFS(BaseVFS):
         if not offset and size is None:
             return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int, room: int | None = None
+    ) -> dict[str, bytes]:
+        return await _read_many(self.accessor, paths, limit, room)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)

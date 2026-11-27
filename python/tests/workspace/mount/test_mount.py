@@ -938,3 +938,33 @@ async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
         one, stored.read_many(["/r/f", "/r/g"], 64)
     ) == {"/r/f": b"x" * 16, "/r/g": b"x" * 16}
     assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}
+
+
+class _Batched(BaseVFS):
+    """Reads a batch itself, keeping the room each batch read was handed."""
+
+    name = "batched"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rooms: list[int | None] = []
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int, room: int | None = None
+    ) -> dict[str, bytes]:
+        self.rooms.append(room)
+        return {p.virtual: b"x" for p in paths}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_hands_its_vfs_the_room_its_files_must_fit():
+    # A VFS that reads a batch itself is handed what the workspace has left
+    # beside what the batch already holds, and no bound without a budget.
+    vfs = _Batched()
+    mount = MountEntry("/b/", vfs)
+    budget = MemoryBudget(24, lambda: 0)
+    assert await run_with_memory(
+        budget, mount.read_many(["/b/f"], 64, 16)
+    ) == {"/b/f": b"x"}
+    await mount.read_many(["/b/f"], 64, 16)
+    assert vfs.rooms == [8, None]

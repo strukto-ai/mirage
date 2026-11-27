@@ -75,6 +75,36 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(await store.getFile('/nope')).toBeNull()
   })
 
+  it('getFiles sizes each file on the server before it reads it', async () => {
+    // A file absent, empty or longer than the limit is null, and so is one
+    // past what is left of the room once the files before it took theirs; a
+    // smaller one after it still fits, and binary bytes come back whole.
+    const bytes = new Uint8Array([0, 1, 2, 3, 0xff, 0xfe])
+    await store.setFile('/a.bin', bytes)
+    await store.setFile('/e', new Uint8Array(0))
+    await store.setFile('/long', new Uint8Array(9))
+    for (const [p, size] of [
+      ['/f', 16],
+      ['/g', 16],
+      ['/h', 4],
+    ] as const) {
+      await store.setFile(p, new Uint8Array(size).fill(7))
+    }
+    expect(await store.getFiles(['/a.bin', '/gone', '/e', '/long'], 8, null)).toEqual([
+      bytes,
+      null,
+      null,
+      null,
+    ])
+    expect(await store.getFiles(['/f', '/g', '/h'], 64, 20)).toEqual([
+      new Uint8Array(16).fill(7),
+      null,
+      new Uint8Array(4).fill(7),
+    ])
+    expect(await store.getFiles(['/f'], 64, -1)).toEqual([null])
+    expect(await store.getFiles([], 8, null)).toEqual([])
+  })
+
   it('getFileRange returns empty for zero-length reads and preserves missing', async () => {
     await store.setFile('/data', new TextEncoder().encode('payload'))
     await store.setFile('/empty', new Uint8Array(0))

@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
-import { openError, resolveFileHandle } from './utils.ts'
+import { openError, resolveDirHandle, resolveFileHandle, splitSegments } from './utils.ts'
 
 /**
  * Read a file, optionally only a byte range of it.
@@ -57,4 +57,85 @@ export async function read(
   const bytes = new Uint8Array(await window.arrayBuffer())
   record('read', path.virtual, VFSName.OPFS, bytes.byteLength, timer)
   return bytes
+}
+
+/**
+ * Several whole files by virtual path, each folder handle resolved once for
+ * the batch instead of once a file, and the files' handles taken and read
+ * together. A file is kept only from the size its `File` gives, before its
+ * bytes are read: one that is gone or no file, one longer than `limit`, one
+ * that does not fit in `room` beside the files kept before it, and one whose
+ * read fails is left out for its own read to meet. Each file read is recorded
+ * as a whole streamed read records it.
+ *
+ * Args:
+ *   accessor: OPFS accessor.
+ *   paths: the files, all on this mount.
+ *   limit: the most bytes worth reading for one file.
+ *   room: the most bytes the files read may come to together, null for no
+ *     bound.
+ */
+export async function readMany(
+  accessor: OPFSAccessor,
+  paths: readonly PathSpec[],
+  limit: number,
+  room: number | null = null,
+): Promise<Map<string, Uint8Array>> {
+  const root = await accessor.root()
+  const folders = new Map<string, Promise<FileSystemDirectoryHandle | null>>()
+  const folderOf = (key: string): Promise<FileSystemDirectoryHandle | null> => {
+    let folder = folders.get(key)
+    if (folder === undefined) {
+      folder = resolveDirHandle(root, key).catch((err: unknown) => {
+        console.debug(`batch read leaves ${key} to its own read: ${String(err)}`)
+        return null
+      })
+      folders.set(key, folder)
+    }
+    return folder
+  }
+  const found = await Promise.all(
+    paths.map(async (spec): Promise<File | null> => {
+      try {
+        const segs = splitSegments(spec.mountPath)
+        const name = segs.pop()
+        if (name === undefined) return null
+        const dir = await folderOf('/' + segs.join('/'))
+        return dir === null ? null : await (await dir.getFileHandle(name)).getFile()
+      } catch (err) {
+        console.debug(`batch read leaves ${spec.virtual} to its own read: ${String(err)}`)
+        return null
+      }
+    }),
+  )
+  const kept: [PathSpec, File][] = []
+  let total = 0
+  paths.forEach((spec, i) => {
+    const file = found[i] ?? null
+    if (file === null || file.size > limit || (room !== null && total + file.size > room)) return
+    total += file.size
+    kept.push([spec, file])
+  })
+  const bytes = await Promise.all(
+    kept.map(async ([spec, file]): Promise<Uint8Array | null> => {
+      try {
+        return new Uint8Array(await file.arrayBuffer())
+      } catch (err) {
+        console.debug(`batch read leaves ${spec.virtual} to its own read: ${String(err)}`)
+        return null
+      }
+    }),
+  )
+  const read = new Map<string, Uint8Array>()
+  kept.forEach(([spec], i) => {
+    const data = bytes[i] ?? null
+    if (data === null) return
+    const rec = recordStream('read', spec.virtual, VFSName.OPFS)
+    if (rec !== null) {
+      rec.bytes = data.byteLength
+      rec.complete = true
+    }
+    read.set(spec.virtual, data)
+  })
+  return read
 }

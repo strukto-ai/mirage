@@ -103,7 +103,7 @@ from mirage.core.generic.rewrite import (
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
 from mirage.io.gateway import with_egress
-from mirage.io.memory import check_memory
+from mirage.io.memory import check_memory, memory_room
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -2947,10 +2947,12 @@ class MountEntry:
         self, scopes: list[PathSpec], limit: int, held_bytes: int
     ) -> dict[str, bytes]:
         """The VFS's batch read, handed what is at each path and at its
-        folder as the stored listings name them, where it takes them; a
-        VFS with no batch read has each file read as its own whole read
-        reads it (``_read_each``), and one longer than ``limit``, one that
-        does not fit in what is left, or one that fails is left out.
+        folder as the stored listings name them, and the bytes the files
+        may come to together (``room``: what the workspace's
+        ``max_memory`` has left beside ``held_bytes``), where it takes
+        them; a VFS with no batch read has each file read as its own whole
+        read reads it (``_read_each``), and one longer than ``limit``, one
+        that does not fit in what is left, or one that fails is left out.
         Either way the index is observed once.
 
         Args:
@@ -2967,7 +2969,7 @@ class MountEntry:
             return read
         fn = self.vfs.read_many
         names = _parameters(getattr(fn, "__func__", fn))
-        kwargs: dict[str, list[FileStat | None]] = {}
+        kwargs: dict[str, list[FileStat | None] | int | None] = {}
         if names is None or "entries" in names:
             kwargs["entries"] = [
                 await self._entry(s, self.index) for s in scopes
@@ -2976,6 +2978,9 @@ class MountEntry:
             kwargs["parents"] = [
                 await self._entry(self._folder(s), self.index) for s in scopes
             ]
+        if names is None or "room" in names:
+            room = memory_room()
+            kwargs["room"] = None if room is None else room - held_bytes
         result = await fn(scopes, limit, **kwargs)
         await self._observe(
             self.index, [s for s in scopes if s.virtual in result]
