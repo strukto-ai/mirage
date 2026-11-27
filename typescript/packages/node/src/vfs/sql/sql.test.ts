@@ -158,6 +158,19 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect(query.mock.calls.filter(([sql]) => sql.includes('FROM fs_data')).length).toBe(3)
   })
 
+  it('keeps an inode two paths of a batch read reach once', async () => {
+    // Two paths can reach one inode (a file moved between the folders'
+    // lookups, or a spec keyed by another path, as here), each with the size
+    // it saw then; the first is kept and the later one is left for its own
+    // read, so neither is answered with the size the other saw.
+    await ops(vfs).mkdir(at('/a'))
+    await ops(vfs).write(at('/a/f'), enc.encode('ffffff'))
+    const alias = PathSpec.fromStrPath('/b/f', 'a/f')
+    const [got, records] = await recordingScope(() => vfs.readMany([at('/a/f'), alias], 64))
+    expect(got).toEqual(new Map([['/a/f', enc.encode('ffffff')]]))
+    expect(records.map((r) => r.path)).toEqual(['/a/f'])
+  })
+
   it('fetches no row of a batch read past the size it kept', async () => {
     // The rows come in a query after the sizes were checked, so a file that
     // grew between them is fetched only as far as the size the batch kept it

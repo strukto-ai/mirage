@@ -15,6 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { constants, lstat, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
+import type { Stats } from 'node:fs'
 import { join } from 'node:path'
 import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -113,7 +114,7 @@ export async function readMany(
   room: number | null = null,
 ): Promise<Map<string, Uint8Array>> {
   const opened = new Map<string, Promise<void>>()
-  const folders = new Map<string, string | null>()
+  const folders = new Map<string, [string, Stats] | null>()
   const read = new Map<string, Uint8Array>()
   let total = 0
   for (const spec of new Map(paths.map((p) => [p.virtual, p])).values()) {
@@ -121,16 +122,16 @@ export async function readMany(
     const cut = key.lastIndexOf('/')
     const folder = key.slice(0, cut) || '/'
     const name = key.slice(cut + 1)
-    let parent = folders.get(folder)
-    if (parent === undefined) {
-      parent = await folderInside(accessor.root, spec, folder, opened)
-      folders.set(folder, parent)
+    let proven = folders.get(folder)
+    if (proven === undefined) {
+      proven = await folderInside(accessor.root, spec, folder, opened)
+      folders.set(folder, proven)
     }
     const most = room === null ? limit : Math.min(limit, room - total)
-    if (parent === null || name === '' || most < 0) continue
+    if (proven === null || name === '' || most < 0) continue
     let data: Uint8Array | null
     try {
-      data = await readChecked(parent, name, most, opened)
+      data = await readChecked(...proven, name, most, opened)
     } catch (err) {
       console.debug(`batch read leaves ${spec.virtual} to its own read: ${String(err)}`)
       continue
@@ -149,18 +150,20 @@ export async function readMany(
 
 /**
  * The host directory a batch's `folder` names, checked as a read of a file in
- * it checks it, or null when it is no directory there. Mirrors Python's
- * `_folder_inside`.
+ * it checks it, with the stat it was proven as, or null when it is no
+ * directory there. The stat follows a link, as the mount root itself may be
+ * one. Mirrors Python's `_folder_inside`.
  */
 async function folderInside(
   root: string,
   spec: PathSpec,
   folder: string,
   opened: Map<string, Promise<void>>,
-): Promise<string | null> {
+): Promise<[string, Stats] | null> {
   try {
     const host = await resolveInside(root, spec, folder, opened)
-    return (await stat(host)).isDirectory() ? host : null
+    const info = await stat(host)
+    return info.isDirectory() ? [host, info] : null
   } catch (err) {
     console.debug(`batch read leaves ${folder} to its own read: ${String(err)}`)
     return null
@@ -173,13 +176,17 @@ async function folderInside(
  * or grew past its stat while it was read. The file is opened before its name
  * is proved, so the proof is of the file that is read; a link refuses the
  * open, or where it cannot, the name's own lstat must show a regular file and
- * the open reach that very file. It reads up to the size its stat gives and
- * one byte more (`readUpto`), never `most`, so no buffer outgrows the file,
- * and that one byte more tells a file that grew. Mirrors Python's
- * `_read_checked`.
+ * the open reach that very file. The folder was proven once for the batch, so
+ * once the file is open the folder's path must still name the directory
+ * proven: an ancestor swapped for a link since then leads elsewhere and is
+ * refused, which keeps the batch's window to a single read's. It reads up to
+ * the size its stat gives and one byte more (`readUpto`), never `most`, so no
+ * buffer outgrows the file, and that one byte more tells a file that grew.
+ * Mirrors Python's `_read_checked`.
  */
 async function readChecked(
   parent: string,
+  proven: Stats,
   name: string,
   most: number,
   opened: Map<string, Promise<void>>,
@@ -193,13 +200,16 @@ async function readChecked(
     if (!info.isFile() || info.size > most) return null
     if (seen !== null && (seen.dev !== info.dev || seen.ino !== info.ino)) return null
     const buf = Buffer.allocUnsafe(info.size + 1)
-    const [exact, filled] = await Promise.allSettled([
+    const [exact, filled, folder] = await Promise.allSettled([
       exactName(probeName(parent, name, opened, info), info),
       readUpto(handle, buf),
+      stat(parent),
     ])
     if (exact.status === 'rejected') throw exact.reason
     if (filled.status === 'rejected') throw filled.reason
-    if (!exact.value || filled.value > info.size) return null
+    if (folder.status === 'rejected') throw folder.reason
+    const elsewhere = folder.value.dev !== proven.dev || folder.value.ino !== proven.ino
+    if (elsewhere || !exact.value || filled.value > info.size) return null
     return new Uint8Array(buf.buffer, buf.byteOffset, filled.value)
   } finally {
     await handle.close()

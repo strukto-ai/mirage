@@ -17,7 +17,6 @@ from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import raw_path_of
 from mirage.utils.path import norm
 
 
@@ -74,7 +73,7 @@ async def read_many(
     """
     files = list({p.virtual: p for p in paths}.values())
     found = await accessor.store.get_files(
-        [norm(raw_path_of(p)) for p in files], limit, room
+        [norm(p.mount_path) for p in files], limit, room
     )
     read: dict[str, bytes] = {}
     for spec, data in zip(files, found, strict=True):

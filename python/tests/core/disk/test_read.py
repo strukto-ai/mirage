@@ -273,3 +273,41 @@ async def test_a_batch_read_proves_a_leaf_is_no_link_where_the_open_cannot(
         DiskAccessor(tmp_path), [_on_d("/a/x"), _on_d("/a/link")], 8
     )
     assert got == {"/d/a/x": b"x\n"}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_refuses_a_folder_swapped_for_a_link_mid_batch(
+    tmp_path, monkeypatch
+):
+    # The batch proves /a once, so a file opened after /a was swapped for
+    # a link to a folder outside the mount would come from outside; once
+    # each file is open the folder's path must still name the directory
+    # proven, so /a/y is left for its own read, which refuses the link.
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "x").write_bytes(b"x\n")
+    (root / "a" / "y").write_bytes(b"y\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "y").write_bytes(b"outside\n")
+    real = disk_read.exact_name
+    swapped: list[bool] = []
+
+    def swapping(
+        parent: str,
+        part: str,
+        info: os.stat_result,
+        opened: set[str] | None = None,
+    ) -> bool:
+        exact = real(parent, part, info, opened)
+        if not swapped:
+            swapped.append(True)
+            os.rename(root / "a", tmp_path / "moved")
+            os.symlink(outside, root / "a")
+        return exact
+
+    monkeypatch.setattr(disk_read, "exact_name", swapping)
+    got = await read_many(
+        DiskAccessor(root), [_on_d("/a/x"), _on_d("/a/y")], 8
+    )
+    assert got == {"/d/a/x": b"x\n"}

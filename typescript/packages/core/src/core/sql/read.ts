@@ -52,9 +52,11 @@ export async function read(
  * never pass a run. A file is kept only from what its inode says, before its
  * rows are asked for: one that is gone or no file, one longer than `limit`,
  * and one that does not fit in `room` beside the files kept before it is left
- * out for its own read to meet. A path named twice is kept once. Each file
- * read is recorded as a whole streamed read records it. Mirrors Python's
- * `read_many`.
+ * out for its own read to meet. A path named twice is kept once, and so is an
+ * inode two paths reach (one moved between the folders' lookups): the later
+ * path is left for its own read, so no file is answered with the size another
+ * path saw. Each file read is recorded as a whole streamed read records it.
+ * Mirrors Python's `read_many`.
  *
  * Args:
  *   accessor: the database.
@@ -80,6 +82,7 @@ export async function readMany(
     folders.set(folder, files)
   }
   const kept: [PathSpec, Inode][] = []
+  const inos = new Set<number>()
   let total = 0
   for (const [folder, files] of folders) {
     const node = target(await walk(accessor, folder))
@@ -94,31 +97,28 @@ export async function readMany(
       if (
         entry === undefined ||
         !isFile(entry) ||
+        inos.has(entry.ino) ||
         entry.size > limit ||
         (room !== null && total + entry.size > room)
       ) {
         continue
       }
       total += entry.size
+      inos.add(entry.ino)
       kept.push([spec, entry])
     }
   }
   const cs = await accessor.chunkSize()
   const read = new Map<string, Uint8Array>()
-  const built = new Map<number, Uint8Array>()
   for (const run of runs(kept)) {
     const rows = await rowsByIno(
       accessor,
-      run.filter(([, e]) => e.size > 0 && !built.has(e.ino)).map(([, e]) => e),
+      run.filter(([, e]) => e.size > 0).map(([, e]) => e),
       cs,
     )
     for (const [spec, entry] of run) {
-      let data = built.get(entry.ino)
-      if (data === undefined) {
-        data = fillBytes(rows.get(entry.ino) ?? [], cs, 0, entry.size)
-        rows.delete(entry.ino)
-        built.set(entry.ino, data)
-      }
+      const data = fillBytes(rows.get(entry.ino) ?? [], cs, 0, entry.size)
+      rows.delete(entry.ino)
       const rec = recordStream('read', spec.virtual, VFSName.SQL)
       if (rec !== null) {
         rec.bytes = data.byteLength

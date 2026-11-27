@@ -228,6 +228,24 @@ async def test_a_batch_read_fetches_its_rows_a_run_at_a_time(vfs: SqlVFS):
 
 
 @pytest.mark.asyncio
+async def test_a_batch_read_keeps_an_inode_two_paths_reach_once(vfs: SqlVFS):
+    # Two paths can reach one inode (a file moved between the folders'
+    # lookups, or a spec keyed by another path, as here), each with the
+    # size it saw then; the first is kept and the later one is left for its
+    # own read, so neither is answered with the size the other saw.
+    await vfs.mkdir(at("/a"))
+    await vfs.write(at("/a/f"), b"f" * 6)
+    alias = PathSpec.from_str_path("/b/f", vfs_path="a/f")
+    scope = RecordingScope()
+    try:
+        got = await vfs.read_many([at("/a/f"), alias], 64)
+    finally:
+        scope.close()
+    assert got == {"/a/f": b"f" * 6}
+    assert [r.path for r in scope.records] == ["/a/f"]
+
+
+@pytest.mark.asyncio
 async def test_a_batch_read_fetches_no_row_past_the_size_it_kept(
     vfs: SqlVFS,
 ):

@@ -96,19 +96,19 @@ async def read_many(
 
     def take() -> list[tuple[PathSpec, bytes]]:
         opened: set[str] = set()
-        folders: dict[str, str | None] = {}
+        folders: dict[str, tuple[str, os.stat_result] | None] = {}
         out: list[tuple[PathSpec, bytes]] = []
         total = 0
         for spec in {p.virtual: p for p in paths}.values():
             folder, name = posixpath.split(norm(spec.mount_path))
             if folder not in folders:
                 folders[folder] = _folder_inside(root, spec, folder, opened)
-            parent = folders[folder]
+            proven = folders[folder]
             most = limit if room is None else min(limit, room - total)
-            if parent is None or not name or most < 0:
+            if proven is None or not name or most < 0:
                 continue
             try:
-                data = _read_checked(parent, name, most, opened)
+                data = _read_checked(*proven, name, most, opened)
             except OSError as exc:
                 logger.debug(
                     "batch read leaves %s to its own read: %s",
@@ -133,9 +133,11 @@ async def read_many(
 
 def _folder_inside(
     root: Path, spec: PathSpec, folder: str, opened: set[str]
-) -> str | None:
+) -> tuple[str, os.stat_result] | None:
     """The host directory a batch's ``folder`` names, checked as a read of
-    a file in it checks it, or None when it is no directory there.
+    a file in it checks it, with the stat it was proven as, or None when
+    it is no directory there. The stat follows a link, as the mount root
+    itself may be one.
 
     Args:
         root (Path): the mount root on the host.
@@ -145,28 +147,38 @@ def _folder_inside(
     """
     try:
         host = resolve_inside_sync(root, spec, folder, opened)
-        if stat.S_ISDIR(os.stat(host).st_mode):
-            return str(host)
+        info = os.stat(host)
+        if stat.S_ISDIR(info.st_mode):
+            return str(host), info
     except (OSError, ValueError) as exc:
         logger.debug("batch read leaves %s to its own read: %s", folder, exc)
     return None
 
 
 def _read_checked(
-    parent: str, name: str, most: int, opened: set[str]
+    parent: str,
+    proven: os.stat_result,
+    name: str,
+    most: int,
+    opened: set[str],
 ) -> bytes | None:
     """The bytes of the regular file ``name`` in the checked host folder
     ``parent``, or None when it is no regular file spelled so, is longer
     than ``most`` bytes, or grew past its stat while it was read. The file
     is opened before its name is proven, so the proof is of the file that
     is read; a link refuses the open, or where it cannot, the name's own
-    lstat must show a regular file and the open reach that very file. It
-    reads up to the size its stat gives and one byte more (``_read_upto``),
-    never ``most``, so no buffer outgrows the file, and that one byte more
-    tells a file that grew.
+    lstat must show a regular file and the open reach that very file. The
+    folder was proven once for the batch, so once the file is open the
+    folder's path must still name the directory proven: an ancestor
+    swapped for a link since then leads elsewhere and is refused, which
+    keeps the batch's window to a single read's. It reads up to the size
+    its stat gives and one byte more (``_read_upto``), never ``most``, so
+    no buffer outgrows the file, and that one byte more tells a file that
+    grew.
 
     Args:
         parent (str): the checked host folder.
+        proven (os.stat_result): the stat ``parent`` was proven as.
         name (str): the file's name in it.
         most (int): the most bytes worth reading.
         opened (set[str]): the parents the batch has proven readable.
@@ -182,6 +194,7 @@ def _read_checked(
             not stat.S_ISREG(info.st_mode)
             or info.st_size > most
             or (seen is not None and not os.path.samestat(seen, info))
+            or not os.path.samestat(os.stat(parent), proven)
             or not exact_name(parent, name, info, opened)
         ):
             return None

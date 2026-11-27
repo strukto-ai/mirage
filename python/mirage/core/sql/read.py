@@ -66,8 +66,10 @@ async def read_many(
     its inode says, before its rows are asked for: one that is gone or no
     file, one longer than ``limit``, and one that does not fit in ``room``
     beside the files kept before it is left out for its own read to meet.
-    A path named twice is kept once. Each file read is recorded as a whole
-    streamed read records it.
+    A path named twice is kept once, and so is an inode two paths reach
+    (one moved between the folders' lookups): the later path is left for
+    its own read, so no file is answered with the size another path saw.
+    Each file read is recorded as a whole streamed read records it.
 
     Args:
         accessor (SqlAccessor): the database.
@@ -83,6 +85,7 @@ async def read_many(
             folder = "/" + "/".join(names[:-1])
             folders.setdefault(folder, []).append((spec, names[-1]))
     kept: list[tuple[PathSpec, Inode]] = []
+    inos: set[int] = set()
     total = 0
     for folder, files in folders.items():
         node = target(await walk(accessor, folder))
@@ -96,26 +99,20 @@ async def read_many(
             if (
                 entry is None
                 or not is_file(entry)
+                or entry.ino in inos
                 or entry.size > limit
                 or (room is not None and total + entry.size > room)
             ):
                 continue
             total += entry.size
+            inos.add(entry.ino)
             kept.append((spec, entry))
     cs = await accessor.chunk_size()
     read: dict[str, bytes] = {}
-    built: dict[int, bytes] = {}
     for run in _runs(kept):
-        rows = await _rows_by_ino(
-            accessor,
-            [e for _, e in run if e.size and e.ino not in built],
-            cs,
-        )
+        rows = await _rows_by_ino(accessor, [e for _, e in run if e.size], cs)
         for spec, entry in run:
-            data = built.get(entry.ino)
-            if data is None:
-                data = fill_bytes(rows.pop(entry.ino, []), cs, 0, entry.size)
-                built[entry.ino] = data
+            data = fill_bytes(rows.pop(entry.ino, []), cs, 0, entry.size)
             rec = record_stream("read", spec.virtual, VFSName.SQL)
             if rec is not None:
                 rec.bytes = len(data)

@@ -19,6 +19,7 @@ import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.read import read, read_many
+from mirage.core.redis.stream import read_stream
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
@@ -220,3 +221,14 @@ async def test_a_batch_read_answers_the_files_their_own_reads_would(accessor):
     assert await read_many(accessor, files, 64, 11) == {
         "/hello.txt": b"hello world"
     }
+
+
+@pytest.mark.asyncio
+async def test_every_read_finds_a_file_by_its_backend_key(accessor):
+    # A spec carries its backend key (vfs_path), which need not be the tail
+    # of its virtual path; a batch read, a whole read and a ranged read all
+    # find the file at that key, as every TypeScript read does.
+    spec = PathSpec.from_str_path("/view/name", vfs_path="sub/nested.txt")
+    assert await read_many(accessor, [spec], 64) == {"/view/name": b"nested"}
+    assert [c async for c in read_stream(accessor, spec)] == [b"nested"]
+    assert await read(accessor, spec, 1, 3) == b"est"

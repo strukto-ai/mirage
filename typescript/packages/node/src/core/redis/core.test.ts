@@ -105,6 +105,22 @@ describe.skipIf(skip)('core/redis ops', () => {
     expect([...(await readMany(acc, files, 64, 11)).keys()]).toEqual(['/hello.txt'])
   })
 
+  it('every read finds a file by its backend key', async () => {
+    // A spec carries its backend key (vfsPath), which need not be the tail of
+    // its virtual path; a batch read, a whole read and a ranged read all find
+    // the file at that key, as every Python read does.
+    await mkdir(acc, spec('/sub'))
+    await write(acc, spec('/sub/nested.txt'), ENC.encode('nested'))
+    const keyed = PathSpec.fromStrPath('/view/name', 'sub/nested.txt')
+    expect(await readMany(acc, [keyed], 64)).toEqual(
+      new Map([['/view/name', ENC.encode('nested')]]),
+    )
+    const chunks: Uint8Array[] = []
+    for await (const chunk of readStream(acc, keyed)) chunks.push(chunk)
+    expect(chunks.map((c) => DEC.decode(c))).toEqual(['nested'])
+    expect(DEC.decode(await read(acc, keyed, { offset: 1, size: 3 }))).toBe('est')
+  })
+
   // Each chunk is appended where it lands, so a reader watches a slow
   // program's log grow; another appender's bytes stay; an atomic write
   // shows nothing until it ends whole.

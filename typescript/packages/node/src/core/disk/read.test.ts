@@ -13,16 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { mkdir, open, symlink, writeFile } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import type * as FsPromises from 'node:fs/promises'
-import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { read, readMany } from './read.ts'
+import type * as DiskUtils from './utils.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -228,6 +231,46 @@ describe('core/disk/readMany', () => {
     } finally {
       vi.doUnmock('node:fs/promises')
       vi.resetModules()
+    }
+  })
+
+  it('refuses a folder swapped for a link mid-batch', async () => {
+    // The batch proves /a once, so a file opened after /a was swapped for a
+    // link to a folder outside the mount would come from outside; once each
+    // file is open the folder's path must still name the directory proven,
+    // so /a/y is left for its own read, which refuses the link.
+    await mkdir(join(root, 'a'))
+    await writeFile(join(root, 'a', 'x'), 'x\n')
+    await writeFile(join(root, 'a', 'y'), 'y\n')
+    const elsewhere = mkdtempSync(join(tmpdir(), 'mirage-disk-outside-'))
+    writeFileSync(join(elsewhere, 'y'), 'outside\n')
+    vi.resetModules()
+    vi.doMock('./utils.ts', async (importOriginal) => {
+      const real = await importOriginal<typeof DiskUtils>()
+      let swapped = false
+      return {
+        ...real,
+        exactName: async (...args: Parameters<typeof real.exactName>) => {
+          const exact = await real.exactName(...args)
+          if (!swapped) {
+            swapped = true
+            renameSync(join(root, 'a'), join(root, '..', `${basename(root)}-moved`))
+            symlinkSync(elsewhere, join(root, 'a'))
+          }
+          return exact
+        },
+      }
+    })
+    try {
+      const fresh = await import('./read.ts')
+      const got = await fresh.readMany(accessor, ['/a/x', '/a/y'].map(spec), 8)
+      expect(got.has('/a/y')).toBe(false)
+      expect([...got.values()].map((b) => new TextDecoder().decode(b))).not.toContain('outside\n')
+    } finally {
+      vi.doUnmock('./utils.ts')
+      vi.resetModules()
+      rmSync(elsewhere, { recursive: true, force: true })
+      rmSync(join(root, '..', `${basename(root)}-moved`), { recursive: true, force: true })
     }
   })
 })
