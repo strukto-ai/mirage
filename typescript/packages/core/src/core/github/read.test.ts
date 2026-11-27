@@ -28,7 +28,6 @@ import { GitHubVFS } from '../../vfs/github/github.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-const FETCH = globalThis.fetch
 
 let origin: string
 let repo: GitHubRepo
@@ -59,17 +58,7 @@ function at(rel: string, prefix: string): PathSpec {
 // github.com's API and raw hosts, reached on the fake's run instead: the
 // accessor names them itself, so only the network under it is rerouted.
 function onGithubCom(): void {
-  const api = 'https://api.github.com'
-  const raw = 'https://raw.githubusercontent.com'
-  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = input instanceof Request ? input.url : String(input)
-    const routed = url.startsWith(raw)
-      ? `${repo.run.url}/raw${url.slice(raw.length)}`
-      : url.startsWith(api)
-        ? `${repo.run.url}${url.slice(api.length)}`
-        : url
-    return FETCH(input instanceof Request ? new Request(routed, input) : routed, init)
-  })
+  vi.stubGlobal('fetch', repo.githubComFetch())
 }
 
 function anonymous(baseUrl?: string): GitHubAccessor {

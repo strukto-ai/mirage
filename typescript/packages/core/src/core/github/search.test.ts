@@ -27,7 +27,6 @@ import { ensureTree } from './tree.ts'
 // GitHub's documented code-search limit; files at or over it are not indexed.
 const SEARCH_LIMIT = 384 * 1024
 const SOURCES = { 'src/main.py': 'import os\n', 'src/utils.py': 'import os, sys\n' }
-const FETCH = globalThis.fetch
 
 let origin: string
 let repo: GitHubRepo
@@ -98,12 +97,7 @@ describe('filesContaining', () => {
   // on the fake's run, so a request the account made would be listed.
   it('asks nothing of an anonymous account', async () => {
     await repo.create({ 'src/a.py': 'needle\n' })
-    const api = 'https://api.github.com'
-    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : String(input)
-      const routed = url.startsWith(api) ? `${repo.run.url}${url.slice(api.length)}` : url
-      return FETCH(input instanceof Request ? new Request(routed, input) : routed, init)
-    })
+    vi.stubGlobal('fetch', repo.githubComFetch())
     const accessor = new GitHubAccessor({
       account: new GitHubAccount({}),
       owner: repo.owner,

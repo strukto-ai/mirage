@@ -27,6 +27,8 @@ export const UNTIL_CLEARED = 1_000_000
 
 const ENC = new TextEncoder()
 const SHA40 = /^[0-9a-fA-F]{40}$/
+// Taken before any test stubs the global, so a reroute reaches the network.
+const FETCH = globalThis.fetch
 
 // What `refuse` and `answer` name a request by: its method, its route, and
 // the query string it is asked with, null for any.
@@ -95,6 +97,27 @@ export class GitHubRepo {
   /** A mount config for this repository with a token, plus `fields`. */
   config(fields: Record<string, JsonValue> = {}): Record<string, JsonValue> {
     return { token: TOKEN, owner: this.owner, repo: this.name, base_url: this.run.url, ...fields }
+  }
+
+  /**
+   * A fetch that sends a request for github.com's API or raw host to this
+   * repository's run instead, and any other request on as it is. A mount on
+   * github.com names those hosts itself, so only the network under it moves.
+   */
+  githubComFetch(): (input: string | URL | Request, init?: RequestInit) => Promise<Response> {
+    return (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      const onto =
+        url.protocol !== 'https:'
+          ? null
+          : url.host === 'api.github.com'
+            ? this.run.url
+            : url.host === 'raw.githubusercontent.com'
+              ? `${this.run.url}/raw`
+              : null
+      const routed = onto === null ? url.href : `${onto}${url.pathname}${url.search}`
+      return FETCH(input instanceof Request ? new Request(routed, input) : routed, init)
+    }
   }
 
   /**

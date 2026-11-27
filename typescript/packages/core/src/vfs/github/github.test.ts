@@ -47,7 +47,6 @@ import { parseConfigWithSchema } from '../secrets.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
-const FETCH = globalThis.fetch
 const REFUSED_AT_4 = 'more than 4 files in scope (walk_limit); narrow the path\n'
 const STOPPED_AT_4 = 'stopped after 4 files (walk_limit); narrow the path\n'
 // The tree git names an empty folder by.
@@ -260,17 +259,7 @@ async function read(): Promise<string[]> {
 // github.com's API and raw hosts, reached on the fake's run instead: the
 // accessor names them itself, so only the network under it is rerouted.
 function onGithubCom(): void {
-  const api = 'https://api.github.com'
-  const raw = 'https://raw.githubusercontent.com'
-  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = input instanceof Request ? input.url : String(input)
-    const routed = url.startsWith(raw)
-      ? `${repo.run.url}/raw${url.slice(raw.length)}`
-      : url.startsWith(api)
-        ? `${repo.run.url}${url.slice(api.length)}`
-        : url
-    return FETCH(input instanceof Request ? new Request(routed, input) : routed, init)
-  })
+  vi.stubGlobal('fetch', repo.githubComFetch())
 }
 
 describe('grep and rg over code search', () => {
