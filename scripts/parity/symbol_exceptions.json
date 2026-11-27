@@ -47,8 +47,7 @@
     "ListenCallback": "The Fastify listen overloads use a Node callback; Uvicorn starts the companion inside the native ASGI lifespan.",
     "listenTogether": "The Fastify listen entry point coordinates the two socket binds and rolls them back on failure.",
     "requestGuards": "Fastify registers shared origin and host checks plus disconnect tracking as request hooks; ASGI uses middleware.",
-    "e2bError": "Fastify translates companion HTTP, rate-limit, and Connect errors in one reply function.",
-    "NO_ACCOUNT": "The daemon gives sandboxes an owner when its auth mode names no account, as the E2B routes require one; Python's store keeps null."
+    "e2bError": "Fastify translates companion HTTP, rate-limit, and Connect errors in one reply function."
    }
   },
   "server/metrics": {
@@ -1844,7 +1843,6 @@
     "checkSandboxAccess": "A host without Fastify refuses a data request through the server's ./e2b export with the daemon's answers; Python has one host.",
     "errorBody": "The daemon's error handler and the web adapter answer a route's error with one body; FastAPI's router builds it in its exception handlers.",
     "headersOf": "The web adapter reads a web Request's headers into the record the routes take; FastAPI reads them from its request.",
-    "DataAccess": "The data routes find a request's sandbox through the host that registers them, the daemon's lease table or the web adapter; FastAPI resolves it in a dependency.",
     "newRecord": "The lifecycle routes make a new sandbox's id and token for every host's backend; Python's store makes them itself.",
     "ownedSandbox": "The lifecycle routes apply the owner and expiry check over any host's backend; Python's store answers owned sandboxes itself.",
     "Sandbox": "The server's ./e2b export re-exports the Sandbox class a TypeScript host holds and passes to dataRoutes; Python's single host imports it from its sandbox module."
@@ -1877,7 +1875,8 @@
     "isProcessRequest": "Fastify uses the registered command path in its authentication and parser hooks.",
     "readStart": "The Fastify start route joins and caps raw stream chunks before decoding the frame.",
     "registerStart": "The command stream registers with the data routes every host serves through ./e2b; FastAPI registers its handler on the router.",
-    "registerControl": "Process control registers only on the daemon, which keeps a command past its request; FastAPI registers its handler on the router."
+    "registerControl": "Process control registers only on the daemon, which keeps a command past its request; FastAPI registers its handler on the router.",
+    "DataAccess": "The data routes find a request's sandbox through the host that registers them, the daemon's lease table or the web adapter; FastAPI resolves it in a dependency."
    }
   },
   "server/e2b/stream": {

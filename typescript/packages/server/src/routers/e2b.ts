@@ -18,7 +18,13 @@ import {
 import * as constants from '../e2b/constants.ts'
 import { CONNECT_STATUS, FileError, connectCode, fileError } from '../e2b/errors.ts'
 import { SandboxFiles } from '../e2b/files.ts'
-import { isProcessRequest, isProcessStart, registerControl, registerStart } from '../e2b/process.ts'
+import {
+  type DataAccess,
+  isProcessRequest,
+  isProcessStart,
+  registerControl,
+  registerStart,
+} from '../e2b/process.ts'
 import {
   isLive,
   type LifecycleBackend,
@@ -27,7 +33,6 @@ import {
   type SandboxRecord,
   verifyAccess,
 } from '../e2b/sandbox.ts'
-import type { CommandTransport } from '../e2b/stream.ts'
 import { errorOf, HttpError } from '../errors.ts'
 import { MAX_REQUEST_PART, partEvents } from '../multipart.ts'
 import type {
@@ -40,17 +45,9 @@ import type {
   RouteRequest,
 } from '../routes.ts'
 
+export type { DataAccess } from '../e2b/process.ts'
 export type { LifecycleBackend, SandboxRecord } from '../e2b/sandbox.ts'
 export { Sandbox }
-
-/** How the data routes reach the sandbox a request runs against. */
-export interface DataAccess {
-  /** The sandbox `request` names, or throw the refusal the daemon answers. */
-  sandbox(request: RouteRequest): Sandbox
-  /** Whether the host is shutting down and starts no new command. */
-  draining(): boolean
-  readonly transport: CommandTransport
-}
 
 export function isLifecycleRequest(method: string, path: string): boolean {
   return (

@@ -10,8 +10,7 @@ import { closeUnreadBody, readBody, readJsonBody, unaryContentType } from './bod
 import { decodeStart, endStream, type StartCommand } from './connect.ts'
 import * as constants from './constants.ts'
 import { InvalidConnectRequest, UnsupportedProcessOption } from './errors.ts'
-import { processResponse, remainingSeconds } from './stream.ts'
-import type { DataAccess } from '../routers/e2b.ts'
+import { type CommandTransport, processResponse, remainingSeconds } from './stream.ts'
 import type { Sandbox } from './sandbox.ts'
 
 const PROCESS_PATHS = new Set([
@@ -127,6 +126,15 @@ async function control(
     return failure(reply, 400, 'failed_precondition', 'command stdin is closed')
   }
   return reply.send({})
+}
+
+/** How the data routes reach the sandbox a request runs against. */
+export interface DataAccess {
+  /** The sandbox `request` names, or throw the refusal the daemon answers. */
+  sandbox(request: RouteRequest): Sandbox
+  /** Whether the host is shutting down and starts no new command. */
+  draining(): boolean
+  readonly transport: CommandTransport
 }
 
 /** The command stream: run one command and stream its output. */
