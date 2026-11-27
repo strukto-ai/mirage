@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { GitHubApiError, type GitHubTransport } from './client.ts'
 import { fetchDirTree, fetchTree, refreshTree } from './tree.ts'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
@@ -22,55 +22,71 @@ import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
 import { IndexView } from '../../cache/index/view.ts'
 import { PathSpec } from '../../types.ts'
 import { keepListing } from '../../workspace/mount/listing.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { readdir } from './readdir.ts'
 import { pointRow, treeRows } from './tree.ts'
-import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
+import { GitHubRepo, TREES, blobSha } from '../../../tests/core/github/repo.ts'
+
+// A commit no tree holds, for a submodule to pin.
+const PINNED = 'c'.repeat(40)
+
+let origin: string
+let repo: GitHubRepo
+
+beforeAll(async () => {
+  origin = await serve('github')
+})
+
+beforeEach(() => {
+  repo = new GitHubRepo(origin)
+})
+
+afterEach(async () => {
+  await repo.run.close()
+})
 
 function root(prefix: string): PathSpec {
   return new PathSpec({ virtual: prefix, directory: prefix, vfsPath: '' })
 }
 
-const ITEMS = [
-  { path: 'extern', mode: '160000', type: 'commit', sha: 'ccc' },
-  { path: 'main.py', mode: '100644', type: 'blob', sha: 'bbb', size: 7 },
-  { path: 'src', mode: '040000', type: 'tree', sha: 'aaa' },
-]
-
 function transport(): GitHubTransport {
-  return {
-    get: () => Promise.resolve({ tree: ITEMS, truncated: false }),
-  } as unknown as GitHubTransport
+  return repo.accessor().account.transport
 }
 
 describe('github tree fetch', () => {
   it.each([{}, { tree: null }, { tree: {} }])(
     'refuses a missing recursive listing',
     async (value) => {
-      const service = { ...transport(), get: () => Promise.resolve(value) }
-      await expect(fetchTree(service, 'acme', 'proj', 'main')).rejects.toThrow('carries no tree')
+      await repo.create({ 'a.txt': 'a' })
+      await repo.answer('recursive', value)
+      await expect(fetchTree(transport(), repo.owner, repo.name, 'main')).rejects.toThrow(
+        'carries no tree',
+      )
     },
   )
 
   it('preserves a blob named __proto__ when indexing its directory', async () => {
-    const service = {
-      ...transport(),
-      get: () =>
-        Promise.resolve({ tree: [{ path: '__proto__', type: 'blob', sha: 'abc', size: 2 }] }),
-    }
-    const { tree } = await fetchTree(service, 'acme', 'proj', 'main')
+    await repo.create(Object.fromEntries([['__proto__', 'ab']]))
+    const { tree } = await fetchTree(transport(), repo.owner, repo.name, 'main')
     expect(Object.keys(tree)).toEqual(['__proto__'])
     expect(treeRows(tree).get('')).toHaveLength(1)
   })
 
   it('excludes submodule gitlinks from the recursive tree', async () => {
-    const { tree, truncated } = await fetchTree(transport(), 'acme', 'proj', 'main')
+    await repo.create({ 'main.py': 'x = 1\n', 'src/a.py': 'a' })
+    await repo.link('extern', PINNED)
+    expect((await repo.tree('main', true)).tree.map((row) => row.path)).toContain('extern')
+    const { tree, truncated } = await fetchTree(transport(), repo.owner, repo.name, 'main')
     expect(truncated).toBe(false)
-    expect(Object.keys(tree)).toEqual(['main.py', 'src'])
+    expect(Object.keys(tree)).toEqual(['main.py', 'src', 'src/a.py'])
   })
 
   it('excludes submodule gitlinks from per-directory trees', async () => {
-    const entries = await fetchDirTree(transport(), 'acme', 'proj', 'sha1')
-    expect(entries.map((e) => e.path)).toEqual(['main.py', 'src'])
+    await repo.create({ 'pkg/main.py': 'x = 1\n' })
+    await repo.link('pkg/extern', PINNED)
+    const pkg = (await repo.tree('main:pkg')).sha
+    const entries = await fetchDirTree(transport(), repo.owner, repo.name, pkg)
+    expect(entries.map((e) => e.path)).toEqual(['main.py'])
   })
 })
 
@@ -79,28 +95,17 @@ describe('a listing', () => {
     // The build tree is only true at build time: a mount's first listing can
     // come long after it, so reusing it would answer a repository several
     // external writes ago.
-    let calls = 0
+    await repo.create({ 'data/keep.txt': 'keep' })
     const accessor = new GitHubAccessor({
-      account: new GitHubAccount({ token: 't' }, {
-        get: () => {
-          calls += 1
-          return Promise.resolve({
-            tree: [
-              { path: 'data', type: 'tree' as const, sha: 't1' },
-              { path: 'data/keep.txt', type: 'blob' as const, sha: 'b1', size: 4 },
-            ],
-            truncated: false,
-          })
-        },
-      } as unknown as GitHubTransport),
-      owner: 'acme',
-      repo: 'proj',
+      account: repo.accessor().account,
+      owner: repo.owner,
+      repo: repo.name,
       ref: 'main',
       defaultBranch: 'main',
       tree: { data: { path: 'data', type: 'tree', sha: 't0', size: null } },
     })
     const listing = await readdir(accessor, root('/gh'))
-    expect(calls).toBe(1)
+    expect(await repo.count('recursive')).toBe(1)
     expect(listing.seeds.get('data')?.map((row) => row.name)).toEqual(['keep.txt'])
   })
 })
@@ -109,21 +114,10 @@ describe('a listing', () => {
 // the caller gets the tree, and the accessor does not keep it.
 describe('a tree answered after a drop', () => {
   it('reaches its caller unkept', async () => {
-    const transport = {
-      get: () => {
-        accessor.forget()
-        return Promise.resolve({
-          tree: [{ path: 'a.txt', type: 'blob' as const, sha: 'b1', size: 1 }],
-          truncated: false,
-        })
-      },
-    } as unknown as GitHubTransport
-    const accessor: GitHubAccessor = new GitHubAccessor({
-      account: new GitHubAccount({ token: 't' }, transport),
-      owner: 'acme',
-      repo: 'proj',
-      ref: 'main',
-      defaultBranch: 'main',
+    await repo.create({ 'a.txt': 'a' })
+    const accessor = repo.accessor()
+    await repo.run.beforeNext([['GET', TREES]], () => {
+      accessor.forget()
     })
     const fetched = await refreshTree(accessor)
     expect(Object.keys(fetched?.tree ?? {})).toEqual(['a.txt'])
@@ -168,58 +162,49 @@ const ENCODED: [string, string][] = [
 ]
 
 describe('the point request', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   for (const [ref, parent] of ENCODED) {
     it(`sends ${ref}:${parent} as one segment`, async () => {
-      const gh = new FakeGitHub({ [`${parent}/f.txt`]: 'payload', 'src/decoy.txt': 'decoy' })
-      gh.ref = ref
-      const seen: string[] = []
-      vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-        seen.push(new Request(input, init).url)
-        return gh.fetch(input, init)
-      })
-      const found = await pointRow(servedAccessor(ref), `${parent}/f.txt`)
-      expect(found?.entry?.sha).toBe(await blobSha('payload'))
-      expect(seen).toHaveLength(1)
-      const segment = (seen[0] ?? '').split('/git/trees/')[1] ?? ''
+      await repo.create({ [`${parent}/f.txt`]: 'payload', 'src/decoy.txt': 'decoy' })
+      if (ref !== 'main') await repo.branch(ref)
+      const found = await pointRow(repo.accessor(ref), `${parent}/f.txt`)
+      expect(found?.entry?.sha).toBe(blobSha('payload'))
+      const log = await repo.log()
+      expect(log).toHaveLength(1)
+      const [name, segment] = log[0] ?? ['', '']
+      expect(name).toBe('dir')
       expect(segment).not.toContain('/')
       expect(decodeURIComponent(segment)).toBe(`${ref}:${parent}`)
-      if (parent === 'src')
-        expect(seen[0]).toBe('http://github.test/repos/o/r/git/trees/main%3Asrc')
+      if (parent === 'src') expect(segment).toBe('main%3Asrc')
     })
   }
 
   it('asks a root child through the ref itself', async () => {
-    const gh = new FakeGitHub({ 'a.txt': 'a' })
-    vi.stubGlobal('fetch', gh.fetch)
-    expect((await pointRow(servedAccessor(), 'a.txt'))?.entry).not.toBeNull()
-    expect(gh.log).toEqual([['dir', 'main']])
+    await repo.create({ 'a.txt': 'a' })
+    expect((await pointRow(repo.accessor(), 'a.txt'))?.entry).not.toBeNull()
+    expect(await repo.log()).toEqual([['dir', 'main']])
   })
 
   it('answers each kind of listing', async () => {
-    const gh = new FakeGitHub({ 'docs/a.txt': 'alpha', 'docs/b.txt': 'bravo' })
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = servedAccessor()
+    await repo.create({ 'docs/a.txt': 'alpha', 'docs/b.txt': 'bravo' })
+    const accessor = repo.accessor()
     const found = await pointRow(accessor, 'docs/a.txt')
-    expect([found?.entry?.sha, found?.truncated]).toEqual([await blobSha('alpha'), false])
+    expect([found?.entry?.sha, found?.truncated]).toEqual([blobSha('alpha'), false])
     expect(await pointRow(accessor, 'docs/nope.txt')).toEqual({ entry: null, truncated: false })
-    gh.truncatedDirs.set('docs', 1)
+    await repo.cutShort('docs', 1)
     expect(await pointRow(accessor, 'docs/b.txt')).toEqual({ entry: null, truncated: true })
-    gh.truncatedDirs.clear()
+    await repo.run.clearAnswers()
     // A missing directory, a deleted ref and a path through a file all
     // defer to the tree rather than answering absent.
     expect(await pointRow(accessor, 'gone/a.txt')).toBeNull()
     expect(await pointRow(accessor, 'docs/a.txt/x')).toBeNull()
-    expect(await pointRow(servedAccessor('deleted'), 'docs/a.txt')).toBeNull()
+    expect(await pointRow(repo.accessor('deleted'), 'docs/a.txt')).toBeNull()
     for (const status of [401, 403]) {
-      gh.fail.set('dir', [status, 'refused'])
+      await repo.refuse('dir', status, 'refused')
       const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
       expect((err as GitHubApiError).status).toBe(status)
+      await repo.run.clearAnswers()
     }
-    gh.fail.set('dir', [404, 'Not Found'])
+    await repo.refuse('dir', 404, 'Not Found')
     expect(await pointRow(accessor, 'docs/a.txt')).toBeNull()
   })
 
@@ -227,12 +212,12 @@ describe('the point request', () => {
   // backoff, so they are raised by a transport rather than served.
   for (const status of [409, 429, 500]) {
     it(`raises ${String(status)} rather than deferring`, async () => {
-      const transport = {
+      const refusing = {
         get: () => Promise.reject(new GitHubApiError('refused', status)),
         request: () => Promise.reject(new Error('unused')),
       } as unknown as GitHubTransport
       const accessor = new GitHubAccessor({
-        account: new GitHubAccount({ token: 't' }, transport),
+        account: new GitHubAccount({ token: 't' }, refusing),
         owner: 'o',
         repo: 'r',
         ref: 'main',
@@ -244,18 +229,9 @@ describe('the point request', () => {
   }
 
   it('refuses an answer that carries no tree', async () => {
-    const transport = {
-      get: () => Promise.resolve({ message: 'something else' }),
-      request: () => Promise.reject(new Error('unused')),
-    } as unknown as GitHubTransport
-    const accessor = new GitHubAccessor({
-      account: new GitHubAccount({ token: 't' }, transport),
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      defaultBranch: 'main',
-    })
-    const err = await pointRow(accessor, 'docs/a.txt').catch((e: unknown) => e)
+    await repo.create({ 'docs/a.txt': 'a' })
+    await repo.answer('dir', { message: 'something else' })
+    const err = await pointRow(repo.accessor(), 'docs/a.txt').catch((e: unknown) => e)
     expect(err).toBeInstanceOf(GitHubApiError)
     expect((err as GitHubApiError).status).toBe(0)
     expect((err as GitHubApiError).message).toContain('carries no tree')
@@ -284,39 +260,27 @@ async function relist(accessor: GitHubAccessor, index: IndexView): Promise<void>
 }
 
 describe('a relisting reports what left the repository', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   // The seeds replace each folder's listing, so without the diff a file
   // removed upstream keeps its cached bytes and overlay.
   it.each([
     ['a removed file', ['d1/a.txt'], [{ path: '/gh/d1/a.txt', folder: false }]],
     ['a removed folder once', ['d1/a.txt', 'd1/b.txt'], [{ path: '/gh/d1', folder: true }]],
   ])('reports %s', async (_label, removed, reported) => {
-    const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'd1/b.txt': 'b', 'top.txt': 't' })
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = servedAccessor()
+    await repo.create({ 'd1/a.txt': 'a', 'd1/b.txt': 'b', 'top.txt': 't' })
+    const accessor = repo.accessor()
     const { gone, index } = recording()
     await relist(accessor, index)
     expect(gone).toEqual([])
-    for (const path of removed) gh.files.delete(path)
+    await repo.commit(Object.fromEntries(removed.map((path) => [path, null])))
     await relist(accessor, index)
     expect(gone).toEqual(reported)
   })
 })
 
 describe('the head commit a tree response names', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('versions the listing and every seed with its head', async () => {
-    const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'd1/sub/b.txt': 'b', 'top.txt': 't' })
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = servedAccessor()
-    const listing = await readdir(accessor, root('/gh'))
-    const head = await gh.head()
+    const head = await repo.create({ 'd1/a.txt': 'a', 'd1/sub/b.txt': 'b', 'top.txt': 't' })
+    const listing = await readdir(repo.accessor(), root('/gh'))
     expect(listing.version).toBe(head)
     const index = new RAMIndexCacheStore()
     await keepListing(index, '/gh', listing)
@@ -325,16 +289,22 @@ describe('the head commit a tree response names', () => {
     }
   })
 
+  // The second is GitHub's tree with its top-level sha left out.
   it.each([
-    ['truncated', true, false],
-    ['without a head', false, true],
-  ])('names no version for a listing %s', async (_label, truncated, dropSha) => {
-    const gh = new FakeGitHub({ 'd1/a.txt': 'a', 'top.txt': 't' })
-    gh.truncatedRecursive = truncated
-    gh.dropSha = dropSha
-    vi.stubGlobal('fetch', gh.fetch)
-    const accessor = servedAccessor()
-    const listing = await readdir(accessor, root('/gh'))
+    ['truncated', true],
+    ['without a head', false],
+  ])('names no version for a listing %s', async (_label, truncated) => {
+    await repo.create({ 'd1/a.txt': 'a', 'top.txt': 't' })
+    if (truncated) {
+      await repo.truncate()
+    } else {
+      const whole = await repo.tree('main', true)
+      await repo.answer(
+        'recursive',
+        Object.fromEntries(Object.entries(whole).filter(([key]) => key !== 'sha')),
+      )
+    }
+    const listing = await readdir(repo.accessor(), root('/gh'))
     expect(listing.version).toBeNull()
   })
 })

@@ -13,9 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Iterator
-from contextlib import contextmanager
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -35,69 +32,18 @@ from mirage.types import (
 )
 from mirage.vfs.github.github import GitHubVFS
 from mirage.workspace import Workspace
+from tests.core.github.conftest import (
+    TREES,
+    UNTIL_CLEARED,
+    GitHubRepo,
+    blob_sha,
+)
 
 CONFIG = GitHubConfig(token="test-token")
 OWNER = "test-owner"
 REPO = "test-repo"
-
-
-@pytest.fixture(autouse=True)
-def no_network() -> Iterator[None]:
-    with patch(
-        "mirage.core.github.client.api_request",
-        side_effect=AssertionError("unexpected GitHub network request"),
-    ) as request:
-        yield
-        request.assert_not_called()
-
-
-@contextmanager
-def _offline(
-    tree: dict, truncated: bool = False, default_branch: str = "main"
-) -> Iterator[tuple[AsyncMock, AsyncMock]]:
-    """Patch branch discovery, recursive trees, and directory lookups together.
-
-    Args:
-        tree (dict): The recursive tree to answer with.
-        truncated (bool): Whether to report it truncated.
-        default_branch (str): Branch the repo endpoint reports.
-    """
-    with (
-        patch(
-            "mirage.core.github.repo.fetch_default_branch",
-            return_value=default_branch,
-        ) as branch,
-        patch(
-            "mirage.core.github.tree.fetch_tree",
-            return_value=(tree, truncated, None),
-        ) as fetch,
-        _listing(tree),
-    ):
-        yield branch, fetch
-
-
-def _listing(tree: dict):
-    """Patch the one-directory listing a stat asks an empty index for.
-
-    Args:
-        tree (dict): The recursive tree each listing is cut from.
-    """
-
-    async def page(config, owner, repo, tree_sha):
-        at = tree_sha.partition(":")[2]
-        stem = at + "/" if at else ""
-        return [
-            TreeEntry(
-                path=path[len(stem) :],
-                type=entry.type,
-                sha=entry.sha,
-                size=entry.size,
-            )
-            for path, entry in tree.items()
-            if path.startswith(stem) and "/" not in path[len(stem) :]
-        ], False
-
-    return patch("mirage.core.github.tree.fetch_dir_page", new=page)
+# The tree git names an empty folder by.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def _make_vfs(
@@ -114,6 +60,14 @@ def _make_vfs(
         default_branch=default_branch,
         tree=tree,
         truncated=truncated,
+    )
+
+
+def _on(repo: GitHubRepo, default_branch: str | None = "main") -> GitHubVFS:
+    return GitHubVFS(
+        config=repo.config(),
+        ref="main",
+        default_branch=default_branch,
     )
 
 
@@ -180,103 +134,105 @@ async def _stat_at(vfs: GitHubVFS, path: str) -> FileStat:
 
 
 @pytest.mark.asyncio
-async def test_stat_returns_sha_fingerprint() -> None:
-    tree = {
-        "src/main.py": TreeEntry(
-            path="src/main.py", type="blob", sha="abc123", size=100
-        ),
-    }
-    with _offline(tree):
-        result = await _stat_at(_make_vfs(tree=tree), "/gh/src/main.py")
-    assert result.fingerprint == "abc123"
+async def test_stat_returns_sha_fingerprint(repo) -> None:
+    await repo.create({"src/main.py": b"m" * 100})
+    result = await _stat_at(_on(repo), "/gh/src/main.py")
+    assert result.fingerprint == blob_sha(b"m" * 100)
 
 
 @pytest.mark.asyncio
-async def test_a_check_store_asks_the_parent_directory() -> None:
-    tree = {
-        "src/main.py": TreeEntry(
-            path="src/main.py", type="blob", sha="abc123", size=100
-        ),
-    }
-    vfs = _make_vfs(tree=tree)
+async def test_a_check_store_asks_the_parent_directory(repo) -> None:
+    await repo.create({"src/main.py": b"m" * 100})
+    vfs = _on(repo)
 
     # A check's private store holds no listing and is handed no row, so
     # the stat asks the parent directory rather than reporting the path
     # gone.
-    with _offline(tree):
-        result = await stat(
-            vfs.accessor,
-            PathSpec.from_str_path("/src/main.py"),
-            None,
-            ListingCheckStore(),
-        )
-    assert result.fingerprint == "abc123"
+    result = await stat(
+        vfs.accessor,
+        PathSpec.from_str_path("/src/main.py"),
+        None,
+        ListingCheckStore(),
+    )
+    assert result.fingerprint == blob_sha(b"m" * 100)
+    assert await repo.log() == [("dir", "main:src")]
 
 
 @pytest.mark.asyncio
-async def test_stat_raises_when_path_not_in_tree() -> None:
-    with _offline({}), pytest.raises(FileNotFoundError):
-        await _stat_at(_make_vfs(), "/gh/nonexistent.py")
+async def test_stat_raises_when_path_not_in_tree(repo) -> None:
+    await repo.create({"top.txt": b"t"})
+    with pytest.raises(FileNotFoundError):
+        await _stat_at(_on(repo), "/gh/nonexistent.py")
 
 
-def test_the_constructor_reaches_no_network() -> None:
+@pytest.mark.asyncio
+async def test_the_constructor_reaches_no_network(repo) -> None:
     # The rule the lazy split exists to keep: naming a repository costs
     # nothing, so building a mount never blocks the caller's event loop
     # and build_vfs can stay synchronous.
-    with _offline({}) as (branch_m, fetch_m):
-        vfs = GitHubVFS(CONFIG, OWNER, REPO, "main")
-    branch_m.assert_not_called()
-    fetch_m.assert_not_called()
+    await repo.create({"top.txt": b"t"})
+    vfs = GitHubVFS(repo.config(), ref="main")
+    assert await repo.log() == []
     assert vfs.accessor.default_branch is None
     assert vfs.accessor.tree == {}
 
 
 @pytest.mark.asyncio
-async def test_ensure_default_branch_fetches_once_and_caches() -> None:
-    vfs = _make_vfs(default_branch=None)
-    with patch(
-        "mirage.core.github.repo.fetch_default_branch", return_value="develop"
-    ) as mock_branch:
-        assert await ensure_default_branch(vfs.accessor) == "develop"
-        assert await ensure_default_branch(vfs.accessor) == "develop"
+async def test_ensure_default_branch_fetches_once_and_caches(repo) -> None:
+    await repo.create({"top.txt": b"t"})
+    await repo.branch("develop")
+    await repo.set_default_branch("develop")
+    vfs = _on(repo, default_branch=None)
+    assert await ensure_default_branch(vfs.accessor) == "develop"
+    assert await ensure_default_branch(vfs.accessor) == "develop"
     assert vfs.accessor.default_branch == "develop"
-    mock_branch.assert_awaited_once_with(vfs.accessor.account, OWNER, REPO)
+    assert await repo.log() == [("repo", "")]
 
 
 @pytest.mark.asyncio
-async def test_ensure_tree_fetches_once_and_caches() -> None:
-    tree = {
-        "src/main.py": TreeEntry(
-            path="src/main.py", type="blob", sha="abc123", size=100
-        ),
-    }
-    vfs = _make_vfs()
-    with patch(
-        "mirage.core.github.tree.fetch_tree", return_value=(tree, False, None)
-    ) as mock_tree:
-        await ensure_tree(vfs.accessor)
-        await ensure_tree(vfs.accessor)
-    assert vfs.accessor.tree == tree
-    assert mock_tree.await_count == 1
+async def test_ensure_tree_fetches_once_and_caches(repo) -> None:
+    await repo.create({"src/main.py": b"m" * 100})
+    vfs = _on(repo)
+    await ensure_tree(vfs.accessor)
+    await ensure_tree(vfs.accessor)
+    assert vfs.accessor.tree["src/main.py"] == TreeEntry(
+        path="src/main.py", type="blob", sha=blob_sha(b"m" * 100), size=100
+    )
+    assert await repo.count("recursive") == 1
 
 
 @pytest.mark.asyncio
-async def test_concurrent_ensure_tree_fetches_once() -> None:
+async def test_concurrent_ensure_tree_fetches_once(repo) -> None:
     # The lock is the whole reason a first `find` and a first `du` racing
     # on a cold mount cost one tree fetch rather than two.
-    vfs = _make_vfs()
-    with patch(
-        "mirage.core.github.tree.fetch_tree", return_value=({}, False, None)
-    ) as mock_tree:
-        mock_tree.return_value = (
-            {
-                "a.py": TreeEntry(path="a.py", type="blob", sha="s", size=1),
-            },
-            False,
-            None,
+    await repo.create({"a.py": b"a"})
+    vfs = _on(repo)
+    await asyncio.gather(*(ensure_tree(vfs.accessor) for _ in range(8)))
+    assert await repo.count("recursive") == 1
+
+
+async def _with_an_empty_folder(repo: GitHubRepo, name: str) -> None:
+    # GitHub holds an empty folder as an empty tree written through the git
+    # database; the fake's trees hold files only, so its answers carry the
+    # folder's row, and the folder lists as empty.
+    row = {"path": name, "mode": "040000", "type": "tree", "sha": EMPTY_TREE}
+    whole = await repo.tree("main", recursive=True)
+    root = await repo.tree("main")
+    empty = {"sha": EMPTY_TREE, "tree": [], "truncated": False}
+    answers = [
+        ("recursive=1", repo.tree_path("main"), whole),
+        ("", repo.tree_path("main"), root),
+        ("", repo.tree_path("main:"), root),
+    ]
+    for query, path, listing in answers:
+        grown = {**listing, "tree": [*listing["tree"], row]}
+        await repo.run.answer_next(
+            "GET", TREES, 200, grown, UNTIL_CLEARED, path, query
         )
-        await asyncio.gather(*(ensure_tree(vfs.accessor) for _ in range(8)))
-    assert mock_tree.await_count == 1
+    for segment in (EMPTY_TREE, f"main:{name}"):
+        await repo.run.answer_next(
+            "GET", TREES, 200, empty, UNTIL_CLEARED, repo.tree_path(segment)
+        )
 
 
 @pytest.mark.asyncio
@@ -288,16 +244,14 @@ async def test_concurrent_ensure_tree_fetches_once() -> None:
     ],
 )
 async def test_removing_a_tree_entry_is_refused_not_missing(
-    mode: MountMode, refusal: str
+    repo, mode: MountMode, refusal: str
 ) -> None:
     # Cold stats and warmed listings must agree on existence, so removal
     # reports the mount's refusal rather than ENOENT, including with -f.
-    tree = {
-        "top.txt": TreeEntry(path="top.txt", type="blob", sha="a", size=2),
-        "empty": TreeEntry(path="empty", type="tree", sha="b", size=None),
-    }
-    with _offline(tree):
-        ws = Workspace({"/gh": _make_vfs()}, mode=mode)
+    await repo.create({"top.txt": b"to"})
+    await _with_an_empty_folder(repo, "empty")
+    ws = Workspace({"/gh": _on(repo)}, mode=mode)
+    try:
         lines = {
             "rm /gh/top.txt": f"rm: cannot remove '/gh/top.txt': {refusal}\n",
             "rm -f /gh/top.txt": f"rm: cannot remove '/gh/top.txt': {refusal}\n",
@@ -312,35 +266,30 @@ async def test_removing_a_tree_entry_is_refused_not_missing(
         assert (result.exit_code, await result.stderr_str()) == (0, "")
         result = await ws.shell("ls /gh")
         assert await result.stdout_str() == "empty\ntop.txt\n"
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_find_judges_a_directory_by_what_the_session_sees() -> None:
+async def test_find_judges_a_directory_by_what_the_session_sees(repo) -> None:
     # A walk asks read_tree, which the dispatcher declines under a hide,
     # so -empty sees the directory as the session does.
-    tree = {
-        "docs": TreeEntry(path="docs", type="tree", sha="d", size=None),
-        "docs/guide.md": TreeEntry(
-            path="docs/guide.md", type="blob", sha="g", size=3
-        ),
-        "top.txt": TreeEntry(path="top.txt", type="blob", sha="t", size=2),
-    }
-    with _offline(tree):
-        ws = Workspace({"/gh": _make_vfs()}, mode=MountMode.READ)
-        try:
-            result = await ws.shell("find /gh; find /gh -type d -empty")
-            assert await result.stdout_str() == (
-                "/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n"
-            )
-            session = ws.create_session("veiled")
-            session.visibility = Visibility(
-                paths=HiddenPaths(paths=("/gh/docs/guide.md",))
-            )
-            result = await ws.shell(
-                "find /gh; find /gh -type d -empty", session_id="veiled"
-            )
-            assert await result.stdout_str() == (
-                "/gh\n/gh/docs\n/gh/top.txt\n/gh/docs\n"
-            )
-        finally:
-            await ws.close()
+    await repo.create({"docs/guide.md": b"gui", "top.txt": b"to"})
+    ws = Workspace({"/gh": _on(repo)}, mode=MountMode.READ)
+    try:
+        result = await ws.shell("find /gh; find /gh -type d -empty")
+        assert await result.stdout_str() == (
+            "/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n"
+        )
+        session = ws.create_session("veiled")
+        session.visibility = Visibility(
+            paths=HiddenPaths(paths=("/gh/docs/guide.md",))
+        )
+        result = await ws.shell(
+            "find /gh; find /gh -type d -empty", session_id="veiled"
+        )
+        assert await result.stdout_str() == (
+            "/gh\n/gh/docs\n/gh/top.txt\n/gh/docs\n"
+        )
+    finally:
+        await ws.close()

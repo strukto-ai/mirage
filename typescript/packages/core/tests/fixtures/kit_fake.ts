@@ -215,7 +215,8 @@ export class KitRun {
   /**
    * Answer the next `times` requests to `route` with `status`, and `body`
    * when given: bytes are sent as written. With `path`, only requests to
-   * that one path.
+   * that one path; with `query`, only requests asked with exactly that
+   * query string, `''` for none.
    */
   async answerNext(
     method: string,
@@ -224,9 +225,11 @@ export class KitRun {
     body?: JsonValue | Uint8Array,
     times = 1,
     path?: string,
+    query?: string,
   ): Promise<void> {
     const plan: Record<string, JsonValue> = { method, route, status, times }
     if (path !== undefined) plan.path = path
+    if (query !== undefined) plan.query = query
     if (body instanceof Uint8Array) plan.text = new TextDecoder().decode(body)
     else if (body !== undefined) plan.body = body
     await this.call('POST', '/_kit/faults', { json: { plans: [plan] } })
@@ -247,13 +250,18 @@ export class KitRun {
    * @param routes `[method, route]` pairs, each route as the fake declares it.
    * @param change what happens while the request waits.
    * @param status the status to answer it with instead of serving it.
+   * @param query the one query string a held request is asked with, `''`
+   *   for none; any when not given.
    */
   async beforeNext(
     routes: [string, string][],
     change: () => unknown,
     status?: number,
+    query?: string,
   ): Promise<void> {
-    const armed = await this.call<{ hold: number }>('POST', '/_kit/holds', { json: { routes } })
+    const armed = await this.call<{ hold: number }>('POST', '/_kit/holds', {
+      json: query === undefined ? { routes } : { routes, query },
+    })
     const hold = `/_kit/holds/${String(armed.hold)}`
     const changed = this.changeWhenHeld(hold, change, status)
     // Handled here so a change that throws is not an unhandled rejection

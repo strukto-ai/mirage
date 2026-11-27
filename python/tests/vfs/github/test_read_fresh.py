@@ -12,13 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from urllib.parse import unquote
 
 import pytest
 
-from mirage.accessor.github import GitHubAccount
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.api.errors import ApiError
-from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.tree import fetch_tree
 from mirage.types import (
     HiddenPaths,
@@ -36,33 +35,41 @@ from mirage.workspace.mount import Mount
 from mirage.workspace.snapshot.drift import ContentDriftError
 from mirage.workspace.snapshot.keys import StateKey
 from mirage.workspace.snapshot.state import to_state_dict
-from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
+from tests.core.github.conftest import TOKEN, GitHubRepo, blob_sha
 
 OLD = b"version one\n"
 NEW = b"version two, longer\n"
 PATH = "/gh/docs/a.txt"
+FILES = {"docs/a.txt": OLD, "docs/b.txt": b"bravo", "top.txt": b"top"}
 
 
-def _hub(files: dict[str, bytes] | None = None, **kwargs) -> FakeGitHub:
-    return FakeGitHub(
-        files=dict(
-            files
-            or {"docs/a.txt": OLD, "docs/b.txt": b"bravo", "top.txt": b"top"}
-        ),
-        **kwargs,
-    )
-
-
-def _vfs(hub: FakeGitHub):
+def _vfs(repo: GitHubRepo):
     return build_vfs(
         "github",
         {
-            "token": "t",
-            "owner": "o",
-            "repo": "r",
+            "token": TOKEN,
+            "owner": repo.owner,
+            "repo": repo.name,
             "ref": "main",
-            "base_url": hub.url,
+            "base_url": repo.run.url,
         },
+    )
+
+
+async def _truncated_vfs(repo: GitHubRepo) -> GitHubVFS:
+    # Built truncated, as TypeScript's create builds it.
+    async with repo.accessor().account as account:
+        tree, truncated, _ = await fetch_tree(
+            account, repo.owner, repo.name, "main"
+        )
+    return GitHubVFS(
+        repo.config(),
+        repo.owner,
+        repo.name,
+        "main",
+        default_branch="main",
+        tree=tree,
+        truncated=truncated,
     )
 
 
@@ -103,15 +110,15 @@ async def _fails(ws: Workspace, line: str) -> str:
 # never asks for, so the entry would carry no token.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("prefix", ["/", "/gh", "/src"])
-async def test_a_read_leaves_its_sha_on_the_cache_entry(prefix):
-    with serve(_hub({"src/a.txt": OLD})) as hub:
-        ws = _ws(_vfs(hub), prefix=prefix)
-        path = prefix.rstrip("/") + "/src/a.txt"
-        try:
-            assert await _out(ws, f"cat {path}") == OLD
-            assert await ws.cache.is_fresh(path, blob_sha(OLD))
-        finally:
-            await ws.close()
+async def test_a_read_leaves_its_sha_on_the_cache_entry(repo, prefix):
+    await repo.create({"src/a.txt": OLD})
+    ws = _ws(_vfs(repo), prefix=prefix)
+    path = prefix.rstrip("/") + "/src/a.txt"
+    try:
+        assert await _out(ws, f"cat {path}") == OLD
+        assert await ws.cache.is_fresh(path, blob_sha(OLD))
+    finally:
+        await ws.close()
 
 
 # Each cell is (dir listings, whole-tree walks, blob downloads) for one line
@@ -128,193 +135,195 @@ WARM = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("line,cost", WARM)
-async def test_a_warm_fresh_read_costs_one_listing_per_probe(line, cost):
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            hub.log.clear()
-            await _out(ws, line)
-            assert hub.counts() == cost
-        finally:
-            await ws.close()
+async def test_a_warm_fresh_read_costs_one_listing_per_probe(repo, line, cost):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await repo.run.record_requests()
+        await _out(ws, line)
+        assert await repo.counts() == cost
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_warm_fresh_stat_prints_what_a_bounded_one_does():
+async def test_a_warm_fresh_stat_prints_what_a_bounded_one_does(repo):
     # The command's stat now comes from the freshness probe rather than from
     # the command's own lookup; what it prints must not change with it.
+    await repo.create(FILES)
     outs = []
     for policy in (ReadPolicy.FRESH, ReadPolicy.BOUNDED):
-        with serve(_hub()) as hub:
-            ws = _ws(_vfs(hub), policy=policy)
-            try:
-                await _out(ws, f"cat {PATH}")
-                outs.append(await _out(ws, f"stat {PATH}"))
-            finally:
-                await ws.close()
+        ws = _ws(_vfs(repo), policy=policy)
+        try:
+            await _out(ws, f"cat {PATH}")
+            outs.append(await _out(ws, f"stat {PATH}"))
+        finally:
+            await ws.close()
     assert outs[0] == outs[1]
     assert outs[0]
 
 
 @pytest.mark.asyncio
-async def test_a_warm_probe_does_not_bypass_a_sessions_hidden_path():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            assert await _out(ws, f"cat {PATH}") == OLD
-            session = ws.create_session("hidden")
-            session.visibility = Visibility(paths=HiddenPaths(paths=(PATH,)))
-            result = await ws.shell(f"cat {PATH}", session_id="hidden")
-            assert await result.materialize_stdout() == b""
-            assert result.exit_code == 1
-            assert "No such file or directory" in await result.stderr_str()
-        finally:
-            await ws.close()
+async def test_a_warm_probe_does_not_bypass_a_sessions_hidden_path(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        assert await _out(ws, f"cat {PATH}") == OLD
+        session = ws.create_session("hidden")
+        session.visibility = Visibility(paths=HiddenPaths(paths=(PATH,)))
+        result = await ws.shell(f"cat {PATH}", session_id="hidden")
+        assert await result.materialize_stdout() == b""
+        assert result.exit_code == 1
+        assert "No such file or directory" in await result.stderr_str()
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_cold_stat_of_an_overlaid_path_prints_what_a_bounded_one_does():
+async def test_a_cold_stat_of_an_overlaid_path_prints_what_a_bounded_one_does(
+    repo,
+):
     # The operand probe checks a path that carries an attribute overlay even when
     # nothing is cached, so under fresh the command's stat of it comes from
     # the probe; the overlay must still apply on top.
+    await repo.create(FILES)
     outs = []
     for policy in (ReadPolicy.FRESH, ReadPolicy.BOUNDED):
-        with serve(_hub()) as hub:
-            ws = _ws(_vfs(hub), policy=policy)
-            try:
-                await ws.namespace.set_attrs(PATH, mode=0o600)
-                outs.append(await _out(ws, f"stat -c '%a %s %n' {PATH}"))
-            finally:
-                await ws.close()
+        ws = _ws(_vfs(repo), policy=policy)
+        try:
+            await ws.namespace.set_attrs(PATH, mode=0o600)
+            outs.append(await _out(ws, f"stat -c '%a %s %n' {PATH}"))
+        finally:
+            await ws.close()
     assert outs[0] == outs[1] == f"600 {len(OLD)} {PATH}\n".encode()
 
 
 @pytest.mark.asyncio
-async def test_a_changed_file_is_refetched_once_then_served_warm():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            assert await _out(ws, f"cat {PATH}") == OLD
-            hub.files["docs/a.txt"] = NEW
-            hub.log.clear()
-            assert await _out(ws, f"cat {PATH}") == NEW
-            # The probe finds a new sha; cat's own stat serves the probe's
-            # answer, and the read is handed it and downloads.
-            assert hub.counts() == (1, 0, 1)
-            hub.log.clear()
-            assert await _out(ws, f"cat {PATH}") == NEW
-            # Warm now: the operand probe, and nothing else.
-            assert hub.counts() == (1, 0, 0)
-        finally:
-            await ws.close()
+async def test_a_changed_file_is_refetched_once_then_served_warm(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        assert await _out(ws, f"cat {PATH}") == OLD
+        await repo.commit({"docs/a.txt": NEW})
+        await repo.run.record_requests()
+        assert await _out(ws, f"cat {PATH}") == NEW
+        # The probe finds a new sha; cat's own stat serves the probe's
+        # answer, and the read is handed it and downloads.
+        assert await repo.counts() == (1, 0, 1)
+        await repo.run.record_requests()
+        assert await _out(ws, f"cat {PATH}") == NEW
+        # Warm now: the operand probe, and nothing else.
+        assert await repo.counts() == (1, 0, 0)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_bounded_mount_serves_its_cache():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub), ReadPolicy.BOUNDED)
-        try:
-            assert await _out(ws, f"cat {PATH}") == OLD
-            hub.files["docs/a.txt"] = NEW
-            hub.log.clear()
-            assert await _out(ws, f"cat {PATH}") == OLD
-            assert hub.counts() == (0, 0, 0)
-        finally:
-            await ws.close()
+async def test_a_bounded_mount_serves_its_cache(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo), ReadPolicy.BOUNDED)
+    try:
+        assert await _out(ws, f"cat {PATH}") == OLD
+        await repo.commit({"docs/a.txt": NEW})
+        await repo.run.record_requests()
+        assert await _out(ws, f"cat {PATH}") == OLD
+        assert await repo.counts() == (0, 0, 0)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_new_mount_asks_one_directory_per_stat_until_it_lists():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"stat {PATH}")
-            await _out(ws, f"stat {PATH}")
-            await _out(ws, "ls /gh/docs")
-            assert hub.counts() == (2, 1, 0)
-            # The listing filled the index, but under fresh the next command
-            # re-checks it once: one check of the head, which replaces the
-            # tree refetch (Task 1.3).
-            await _out(ws, f"stat {PATH}")
-            assert hub.counts() == (3, 1, 0)
-        finally:
-            await ws.close()
+async def test_a_new_mount_asks_one_directory_per_stat_until_it_lists(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"stat {PATH}")
+        await _out(ws, f"stat {PATH}")
+        await _out(ws, "ls /gh/docs")
+        assert await repo.counts() == (2, 1, 0)
+        # The listing filled the index, but under fresh the next command
+        # re-checks it once: one check of the head, which replaces the
+        # tree refetch (Task 1.3).
+        await _out(ws, f"stat {PATH}")
+        assert await repo.counts() == (3, 1, 0)
+    finally:
+        await ws.close()
 
 
 # A bounded mount lists its way to the first stat with one tree, which
 # names every folder, so every stat and listing after it is free.
 @pytest.mark.asyncio
-async def test_a_bounded_mount_lists_once_for_its_stats():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub), ReadPolicy.BOUNDED)
-        try:
-            await _out(ws, f"stat {PATH}")
-            assert hub.counts() == (0, 1, 0)
-            await _out(ws, f"stat {PATH}")
-            await _out(ws, "ls /gh/docs")
-            await _out(ws, f"stat {PATH}")
-            assert hub.counts() == (0, 1, 0)
-        finally:
-            await ws.close()
+async def test_a_bounded_mount_lists_once_for_its_stats(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo), ReadPolicy.BOUNDED)
+    try:
+        await _out(ws, f"stat {PATH}")
+        assert await repo.counts() == (0, 1, 0)
+        await _out(ws, f"stat {PATH}")
+        await _out(ws, "ls /gh/docs")
+        await _out(ws, f"stat {PATH}")
+        assert await repo.counts() == (0, 1, 0)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_revert_is_read_through_both_entry_points():
+async def test_a_revert_is_read_through_both_entry_points(repo):
     # Content-addressed shas make every stamp source agree once the index is
     # refilled, so this guards that both the stream read (cat) and the
     # bytes read (cp) stamp, rather than telling stamp sources apart.
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            for step, data in enumerate((OLD, NEW, OLD)):
-                hub.files["docs/a.txt"] = data
-                assert await _out(ws, f"cat {PATH}") == data
-                await _out(ws, f"cp {PATH} /r/c{step}")
-                assert await _out(ws, f"cat /r/c{step}") == data
-                assert await ws.cache.is_fresh(PATH, blob_sha(data))
-                assert ("blob", blob_sha(data)) in hub.log
-        finally:
-            await ws.close()
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        for step, data in enumerate((OLD, NEW, OLD)):
+            await repo.commit({"docs/a.txt": data})
+            assert await _out(ws, f"cat {PATH}") == data
+            await _out(ws, f"cp {PATH} /r/c{step}")
+            assert await _out(ws, f"cat /r/c{step}") == data
+            assert await ws.cache.is_fresh(PATH, blob_sha(data))
+            assert ("blob", blob_sha(data)) in await repo.log()
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_cold_read_after_an_outside_change_reads_the_new_blob():
+async def test_a_cold_read_after_an_outside_change_reads_the_new_blob(repo):
     # The limit this used to pin (a cold read served the listed sha until
     # the next probe) is gone: fresh re-checks the listing a new command
     # reads, so even the first read resolves the current blob.
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, "ls /gh/docs")
-            hub.files["docs/a.txt"] = NEW
-            assert await _out(ws, f"cat {PATH}") == NEW
-            assert await ws.cache.is_fresh(PATH, blob_sha(NEW))
-            assert await _out(ws, f"cat {PATH}") == NEW
-        finally:
-            await ws.close()
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, "ls /gh/docs")
+        await repo.commit({"docs/a.txt": NEW})
+        assert await _out(ws, f"cat {PATH}") == NEW
+        assert await ws.cache.is_fresh(PATH, blob_sha(NEW))
+        assert await _out(ws, f"cat {PATH}") == NEW
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_probe_leaves_find_its_whole_listing():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _out(ws, f"cat {PATH}")
-            walks = hub.count("recursive")
-            listed = await _out(ws, "find /gh -type f")
-            assert sorted(listed.decode().split()) == [
-                "/gh/docs/a.txt",
-                "/gh/docs/b.txt",
-                "/gh/top.txt",
-            ]
-            # The probe left the whole listing; find, a new command, re-checks
-            # it once under fresh, with a check of the head instead of a
-            # refetch of the tree (Task 1.3).
-            assert hub.count("recursive") == walks
-        finally:
-            await ws.close()
+async def test_a_probe_leaves_find_its_whole_listing(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _out(ws, f"cat {PATH}")
+        walks = await repo.count("recursive")
+        listed = await _out(ws, "find /gh -type f")
+        assert sorted(listed.decode().split()) == [
+            "/gh/docs/a.txt",
+            "/gh/docs/b.txt",
+            "/gh/top.txt",
+        ]
+        # The probe left the whole listing; find, a new command, re-checks
+        # it once under fresh, with a check of the head instead of a
+        # refetch of the tree (Task 1.3).
+        assert await repo.count("recursive") == walks
+    finally:
+        await ws.close()
 
 
 async def _overlaid(ws: Workspace) -> None:
@@ -327,215 +336,183 @@ def _kept(ws: Workspace) -> bool:
 
 
 @pytest.mark.asyncio
-async def test_a_repository_it_cannot_see_keeps_the_overlay():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _overlaid(ws)
-            # Lost access answers 404 on both endpoints: cannot verify, so the
-            # copy is dropped and the cold read fails, but nothing is gone.
-            hub.fail.update(
-                {"dir": (404, "Not Found"), "recursive": (404, "Not Found")}
-            )
-            err = await _fails(ws, f"cat {PATH}")
-            # The HTTP error propagates as the cold read's message, unchanged
-            # from any other refused github read; it is never ENOENT.
-            assert err == "cat: Not Found\n"
-            assert _kept(ws)
-            err = await _fails(ws, f"cp {PATH} /r/x")
-            # A copy across mounts words the backend error as cp, as cat
-            # words its own.
-            assert err == "cp: Not Found\n"
-            assert _kept(ws)
-        finally:
-            await ws.close()
+async def test_a_repository_it_cannot_see_keeps_the_overlay(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _overlaid(ws)
+        # Lost access answers 404 on both endpoints: cannot verify, so the
+        # copy is dropped and the cold read fails, but nothing is gone.
+        await repo.refuse("dir", 404, "Not Found")
+        await repo.refuse("recursive", 404, "Not Found")
+        err = await _fails(ws, f"cat {PATH}")
+        # The HTTP error propagates as the cold read's message, unchanged
+        # from any other refused github read; it is never ENOENT.
+        assert err == "cat: Not Found\n"
+        assert _kept(ws)
+        err = await _fails(ws, f"cp {PATH} /r/x")
+        # A copy across mounts words the backend error as cp, as cat
+        # words its own.
+        assert err == "cp: Not Found\n"
+        assert _kept(ws)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_refused_token_keeps_the_overlay():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _overlaid(ws)
-            # A refused token refuses every route: the read fails with the
-            # refusal, and the refusal never reads as the file gone.
-            hub.fail.update(
-                {
-                    "dir": (401, "Bad credentials"),
-                    "recursive": (401, "Bad credentials"),
-                }
-            )
-            err = await _fails(ws, f"cat {PATH}")
-            assert err == "cat: Bad credentials\n"
-            assert _kept(ws)
-        finally:
-            await ws.close()
+async def test_a_refused_token_keeps_the_overlay(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _overlaid(ws)
+        # A refused token refuses every route: the read fails with the
+        # refusal, and the refusal never reads as the file gone.
+        await repo.refuse("dir", 401, "Bad credentials")
+        await repo.refuse("recursive", 401, "Bad credentials")
+        err = await _fails(ws, f"cat {PATH}")
+        assert err == "cat: Bad credentials\n"
+        assert _kept(ws)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_parent_directory_gone_upstream_is_gone():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _overlaid(ws)
-            del hub.files["docs/a.txt"]
-            del hub.files["docs/b.txt"]
-            err = await _fails(ws, f"cat {PATH}")
-            assert err == f"cat: {PATH}: No such file or directory\n"
-            assert ws.namespace.meta_for(PATH) is None
-            assert not await ws.cache.exists(PATH)
-        finally:
-            await ws.close()
+async def test_a_parent_directory_gone_upstream_is_gone(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _overlaid(ws)
+        await repo.commit({"docs/a.txt": None, "docs/b.txt": None})
+        err = await _fails(ws, f"cat {PATH}")
+        assert err == f"cat: {PATH}: No such file or directory\n"
+        assert ws.namespace.meta_for(PATH) is None
+        assert not await ws.cache.exists(PATH)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_file_gone_from_a_live_directory_is_gone():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _overlaid(ws)
-            del hub.files["docs/a.txt"]
-            hub.log.clear()
-            err = await _fails(ws, f"cat {PATH}")
-            assert err == f"cat: {PATH}: No such file or directory\n"
-            assert ws.namespace.meta_for(PATH) is None
-            # The probe answers absent from one listing of docs/ and drops
-            # the stale row; cat's own stat then lists its way there once,
-            # and that tree names the file absent too.
-            assert hub.counts() == (1, 1, 0)
-        finally:
-            await ws.close()
+async def test_a_file_gone_from_a_live_directory_is_gone(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _overlaid(ws)
+        await repo.commit({"docs/a.txt": None})
+        await repo.run.record_requests()
+        err = await _fails(ws, f"cat {PATH}")
+        assert err == f"cat: {PATH}: No such file or directory\n"
+        assert ws.namespace.meta_for(PATH) is None
+        # The probe answers absent from one listing of docs/ and drops
+        # the stale row; cat's own stat then lists its way there once,
+        # and that tree names the file absent too.
+        assert await repo.counts() == (1, 1, 0)
+    finally:
+        await ws.close()
 
 
-async def _cleared_with_overlay(ws: Workspace, hub: FakeGitHub) -> None:
+async def _cleared_with_overlay(ws: Workspace, repo: GitHubRepo) -> None:
     await _out(ws, f"cat {PATH}")
     await ws.cache.remove(PATH)
     mount = ws._registry.mount_for(PATH)
     await mount.index.clear()
     await _overlaid(ws)
-    hub.fail.update(
-        {"dir": (404, "Not Found"), "recursive": (401, "Bad credentials")}
-    )
+    await repo.refuse("dir", 404, "Not Found")
+    await repo.refuse("recursive", 401, "Bad credentials")
 
 
 @pytest.mark.asyncio
-async def test_the_dispatcher_never_reads_cannot_see_as_gone():
+async def test_the_dispatcher_never_reads_cannot_see_as_gone(repo):
     # No cached copy, so cp's own stat is the op that reaches the backend:
     # an ENOENT there goes through on_enoent, which drops the overlay.
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _cleared_with_overlay(ws, hub)
-            err = await _fails(ws, f"cp {PATH} /r/x")
-            assert err == "cp: Bad credentials\n"
-            assert _kept(ws)
-        finally:
-            await ws.close()
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _cleared_with_overlay(ws, repo)
+        err = await _fails(ws, f"cp {PATH} /r/x")
+        assert err == "cp: Bad credentials\n"
+        assert _kept(ws)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_the_xattr_call_never_reads_cannot_see_as_gone():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _cleared_with_overlay(ws, hub)
-            err = await _fails(ws, f"getfattr -d {PATH}")
-            assert err == f"getfattr: {PATH}: Bad credentials\n"
-            assert _kept(ws)
-        finally:
-            await ws.close()
+async def test_the_xattr_call_never_reads_cannot_see_as_gone(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _cleared_with_overlay(ws, repo)
+        err = await _fails(ws, f"getfattr -d {PATH}")
+        assert err == f"getfattr: {PATH}: Bad credentials\n"
+        assert _kept(ws)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_parent_listing_is_not_absence():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, f"cat {PATH}")
-            await _overlaid(ws)
-            hub.truncated_dirs["docs"] = 0
-            hub.log.clear()
-            assert await _out(ws, f"cat {PATH}") == OLD
-            assert _kept(ws)
-            # The operand probe's listing of docs/ is cut short, so it defers
-            # to one walk of the whole tree, which finds the file; cat's own
-            # stat and the cache stage reuse its answer.
-            assert hub.counts() == (1, 1, 0)
-        finally:
-            await ws.close()
+async def test_a_truncated_parent_listing_is_not_absence(repo):
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, f"cat {PATH}")
+        await _overlaid(ws)
+        await repo.cut_short("docs", 0)
+        await repo.run.record_requests()
+        assert await _out(ws, f"cat {PATH}") == OLD
+        assert _kept(ws)
+        # The operand probe's listing of docs/ is cut short, so it defers
+        # to one walk of the whole tree, which finds the file; cat's own
+        # stat and the cache stage reuse its answer.
+        assert await repo.counts() == (1, 1, 0)
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_truncated_repository_probes_one_directory():
-    files = {"top.txt": b"t", "docs/a.txt": OLD}
-    with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
-        config = GitHubConfig(token="t", base_url=hub.url)
-        async with GitHubAccount(GhConfig(token="t", base_url=hub.url)) as acc:
-            tree, truncated, _ = await fetch_tree(acc, "o", "r", "main")
-        vfs = GitHubVFS(
-            config,
-            "o",
-            "r",
-            "main",
-            default_branch="main",
-            tree=tree,
-            truncated=truncated,
-        )
-        # Built truncated, as TypeScript's create builds it.
-        ws = _ws(vfs)
-        try:
-            assert await _out(ws, f"cat {PATH}") == OLD
-            hub.log.clear()
-            assert await _out(ws, f"cat {PATH}") == OLD
-            # One listing of docs/, by the operand probe; cat's own stat and
-            # the cache stage reuse its answer, so the truncated tree is
-            # never walked folder by folder, which would reach docs/ by its
-            # sha.
-            assert hub.counts() == (1, 0, 0)
-            assert hub.count("sha_dir") == 0
-        finally:
-            await ws.close()
+async def test_a_truncated_repository_probes_one_directory(repo):
+    await repo.create({"top.txt": b"t", "docs/a.txt": OLD})
+    await repo.truncate()
+    ws = _ws(await _truncated_vfs(repo))
+    try:
+        assert await _out(ws, f"cat {PATH}") == OLD
+        await repo.run.record_requests()
+        assert await _out(ws, f"cat {PATH}") == OLD
+        # One listing of docs/, by the operand probe; cat's own stat and
+        # the cache stage reuse its answer, so the truncated tree is
+        # never walked folder by folder, which would reach docs/ by its
+        # sha.
+        assert await repo.counts() == (1, 0, 0)
+        assert await repo.count("sha_dir") == 0
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_directory_github_cuts_short_is_not_absence():
+async def test_a_directory_github_cuts_short_is_not_absence(repo):
     # A truncated repository whose docs/ listing GitHub also cuts short: the
     # walk refuses the cut listing rather than caching it whole, so a probe
     # cannot read the file as gone, and the overlay stays.
-    files = {"top.txt": b"t", "docs/a.txt": OLD, "docs/b.txt": b"bravo"}
-    with serve(FakeGitHub(files=files, truncated_recursive=True)) as hub:
-        config = GitHubConfig(token="t", base_url=hub.url)
-        async with GitHubAccount(GhConfig(token="t", base_url=hub.url)) as acc:
-            tree, truncated, _ = await fetch_tree(acc, "o", "r", "main")
-        vfs = GitHubVFS(
-            config,
-            "o",
-            "r",
-            "main",
-            default_branch="main",
-            tree=tree,
-            truncated=truncated,
+    await repo.create({"top.txt": b"t", "docs/a.txt": OLD, "docs/b.txt": b"b"})
+    await repo.truncate()
+    ws = _ws(await _truncated_vfs(repo))
+    try:
+        assert await _out(ws, f"cat {PATH}") == OLD
+        await _overlaid(ws)
+        await repo.cut_short("docs", 0)
+        err = await _fails(ws, f"cat {PATH}")
+        assert err.startswith(
+            "cat: GitHub truncated the tree listing of integ-user/repo "
         )
-        ws = _ws(vfs)
-        try:
-            assert await _out(ws, f"cat {PATH}") == OLD
-            await _overlaid(ws)
-            hub.truncated_dirs["docs"] = 0
-            err = await _fails(ws, f"cat {PATH}")
-            assert err.startswith(
-                "cat: GitHub truncated the tree listing of o/r "
-            )
-            assert _kept(ws)
-        finally:
-            await ws.close()
+        assert _kept(ws)
+    finally:
+        await ws.close()
 
 
-async def _pinned_state(hub: FakeGitHub):
-    ws = _ws(_vfs(hub))
+async def _pinned_state(repo: GitHubRepo):
+    ws = _ws(_vfs(repo))
     try:
         await _out(ws, f"cat {PATH}")
         return await to_state_dict(ws)
@@ -552,96 +529,111 @@ async def _load(state, vfs):
 
 
 @pytest.mark.asyncio
-async def test_a_read_pins_its_sha_and_a_changed_file_drifts():
-    with serve(_hub()) as hub:
-        state = await _pinned_state(hub)
-        pins = [f for f in state[StateKey.FINGERPRINTS] if f["path"] == PATH]
-        assert [p["fingerprint"] for p in pins] == [blob_sha(OLD)]
-        assert "/gh/" not in state[StateKey.LIVE_ONLY_MOUNTS]
-        await _load(state, _vfs(hub))
-        hub.files["docs/a.txt"] = NEW
-        with pytest.raises(ContentDriftError) as caught:
-            await _load(state, _vfs(hub))
-        assert (
-            caught.value.snapshot_fingerprint,
-            caught.value.live_fingerprint,
-        ) == (blob_sha(OLD), blob_sha(NEW))
+async def test_a_read_pins_its_sha_and_a_changed_file_drifts(repo):
+    await repo.create(FILES)
+    state = await _pinned_state(repo)
+    pins = [f for f in state[StateKey.FINGERPRINTS] if f["path"] == PATH]
+    assert [p["fingerprint"] for p in pins] == [blob_sha(OLD)]
+    assert "/gh/" not in state[StateKey.LIVE_ONLY_MOUNTS]
+    await _load(state, _vfs(repo))
+    await repo.commit({"docs/a.txt": NEW})
+    with pytest.raises(ContentDriftError) as caught:
+        await _load(state, _vfs(repo))
+    assert (
+        caught.value.snapshot_fingerprint,
+        caught.value.live_fingerprint,
+    ) == (blob_sha(OLD), blob_sha(NEW))
 
 
 @pytest.mark.asyncio
-async def test_a_drift_check_on_a_live_mount_asks_one_directory():
-    with serve(_hub()) as hub:
-        vfs = _vfs(hub)
-        ws = _ws(vfs)
-        try:
-            await _out(ws, f"cat {PATH}")
-            state = await to_state_dict(ws)
-            hub.files["docs/a.txt"] = NEW
-            hub.log.clear()
-            with pytest.raises(ContentDriftError):
-                await _load(state, vfs)
-            assert (hub.count("dir"), hub.count("recursive")) == (1, 0)
-        finally:
-            await ws.close()
+async def test_a_drift_check_on_a_live_mount_asks_one_directory(repo):
+    await repo.create(FILES)
+    vfs = _vfs(repo)
+    ws = _ws(vfs)
+    try:
+        await _out(ws, f"cat {PATH}")
+        state = await to_state_dict(ws)
+        await repo.commit({"docs/a.txt": NEW})
+        await repo.run.record_requests()
+        with pytest.raises(ContentDriftError):
+            await _load(state, vfs)
+        assert (await repo.count("dir"), await repo.count("recursive")) == (
+            1,
+            0,
+        )
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_drift_check_the_token_is_refused_is_not_drift():
-    with serve(_hub()) as hub:
-        vfs = _vfs(hub)
-        ws = _ws(vfs)
-        try:
-            await _out(ws, f"cat {PATH}")
-            state = await to_state_dict(ws)
-            # The one-directory route is refused while the whole tree would
-            # answer: deferring on 401 would pass the check silently.
-            hub.fail["dir"] = (401, "Bad credentials")
-            with pytest.raises(ApiError) as caught:
-                await _load(state, vfs)
-            assert caught.value.status == 401
-        finally:
-            await ws.close()
+async def test_a_drift_check_the_token_is_refused_is_not_drift(repo):
+    await repo.create(FILES)
+    vfs = _vfs(repo)
+    ws = _ws(vfs)
+    try:
+        await _out(ws, f"cat {PATH}")
+        state = await to_state_dict(ws)
+        # The one-directory route is refused while the whole tree would
+        # answer: deferring on 401 would pass the check silently.
+        await repo.refuse("dir", 401, "Bad credentials")
+        with pytest.raises(ApiError) as caught:
+            await _load(state, vfs)
+        assert caught.value.status == 401
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_snapshot_from_before_github_pinned_still_loads():
-    with serve(_hub()) as hub:
-        state = await _pinned_state(hub)
-        state[StateKey.FINGERPRINTS] = [
-            f
-            for f in state[StateKey.FINGERPRINTS]
-            if not f["path"].startswith("/gh/")
-        ]
-        state[StateKey.LIVE_ONLY_MOUNTS] = ["/gh/"]
-        loaded = await Workspace.from_state(state, mounts={"/gh": _vfs(hub)})
-        try:
-            # No pin, so nothing is checked and nothing raises under STRICT;
-            # the override mount reads bounded and serves the restored copy.
-            assert await _out(loaded, f"cat {PATH}") == OLD
-        finally:
-            await loaded.close()
+async def test_a_snapshot_from_before_github_pinned_still_loads(repo):
+    await repo.create(FILES)
+    state = await _pinned_state(repo)
+    state[StateKey.FINGERPRINTS] = [
+        f
+        for f in state[StateKey.FINGERPRINTS]
+        if not f["path"].startswith("/gh/")
+    ]
+    state[StateKey.LIVE_ONLY_MOUNTS] = ["/gh/"]
+    loaded = await Workspace.from_state(state, mounts={"/gh": _vfs(repo)})
+    try:
+        # No pin, so nothing is checked and nothing raises under STRICT;
+        # the override mount reads bounded and serves the restored copy.
+        assert await _out(loaded, f"cat {PATH}") == OLD
+    finally:
+        await loaded.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("line", ["find /gh", "du -a /gh", "ls -R /gh"])
-async def test_truncated_walk_lists_each_directory_once_per_command(line):
-    with serve(_hub({"a/b/c/d/e.txt": b"x"}, truncated_recursive=True)) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            await _out(ws, line)
-            hub.files["a/b/c/d/new.txt"] = b"new"
-            hub.log.clear()
-            assert b"new.txt" in await _out(ws, line)
-            listings = [
-                kind for kind, _ in hub.log if kind in ("dir", "sha_dir")
-            ]
-            assert len(listings) == 5
-        finally:
-            await ws.close()
+async def test_truncated_walk_lists_each_directory_once_per_command(
+    repo, line
+):
+    await repo.create({"a/b/c/d/e.txt": b"x"})
+    await repo.truncate()
+    ws = _ws(_vfs(repo))
+    try:
+        await _out(ws, line)
+        named = await _folder_shas(repo)
+        await repo.commit({"a/b/c/d/new.txt": b"new"})
+        named |= await _folder_shas(repo)
+        await repo.run.record_requests()
+        assert b"new.txt" in await _out(ws, line)
+        listed = []
+        for kind, segment in await repo.log():
+            if kind == "sha_dir":
+                listed.append(named.get(segment, segment))
+            elif kind == "dir":
+                listed.append(unquote(segment).partition(":")[2])
+        assert sorted(listed) == FOLDERS
+    finally:
+        await ws.close()
 
 
-def _burst_hub() -> FakeGitHub:
-    return _hub({f"docs/f{n:02}.txt": b"x" for n in range(20)})
+FOLDERS = ["", "a", "a/b", "a/b/c", "a/b/c/d"]
+
+
+async def _folder_shas(repo: GitHubRepo) -> dict[str, str]:
+    # Each folder's tree sha, so a listing asked by sha names its folder.
+    return {(await repo.tree(f"main:{f}"))["sha"]: f for f in FOLDERS}
 
 
 # The dispatcher is what FUSE, ws.vfs and the agent file tools reach, and none
@@ -649,32 +641,34 @@ def _burst_hub() -> FakeGitHub:
 # a stat per entry; fresh trusts a listing that recent instead of refetching
 # the whole tree for every call.
 @pytest.mark.asyncio
-async def test_an_ops_entry_point_burst_fetches_the_tree_once():
-    with serve(_burst_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        try:
-            names = await ws.readdir("/gh/docs")
-            assert len(names) == 20
-            for name in names:
-                await ws.stat(
-                    name
-                    if name.startswith("/")
-                    else f"/gh/docs/{name.rsplit('/', 1)[-1]}"
-                )
-            assert hub.count("recursive") == 1
-        finally:
-            await ws.close()
+async def test_an_ops_entry_point_burst_fetches_the_tree_once(repo):
+    await repo.create({f"docs/f{n:02}.txt": b"x" for n in range(20)})
+    ws = _ws(_vfs(repo))
+    try:
+        names = await ws.readdir("/gh/docs")
+        assert len(names) == 20
+        for name in names:
+            await ws.stat(
+                name
+                if name.startswith("/")
+                else f"/gh/docs/{name.rsplit('/', 1)[-1]}"
+            )
+        assert await repo.count("recursive") == 1
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_an_ops_entry_point_read_sees_an_outside_change_after_the_window():
+async def test_an_ops_entry_point_read_sees_an_outside_change_after_the_window(
+    repo,
+):
     clock = ManualClock(start=100.0)
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub), clock=clock)
-        try:
-            assert "/gh/docs/c.txt" not in await ws.readdir("/gh/docs")
-            hub.files["docs/c.txt"] = b"new"
-            clock.advance(LISTING_TRUST_WINDOW)
-            assert "/gh/docs/c.txt" in await ws.readdir("/gh/docs")
-        finally:
-            await ws.close()
+    await repo.create(FILES)
+    ws = _ws(_vfs(repo), clock=clock)
+    try:
+        assert "/gh/docs/c.txt" not in await ws.readdir("/gh/docs")
+        await repo.commit({"docs/c.txt": b"new"})
+        clock.advance(LISTING_TRUST_WINDOW)
+        assert "/gh/docs/c.txt" in await ws.readdir("/gh/docs")
+    finally:
+        await ws.close()

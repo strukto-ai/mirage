@@ -12,33 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { GitHubAccessor } from '../../accessor/github.ts'
 import { type DirListing, FileType, PathSpec } from '../../types.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { readdir } from './readdir.ts'
-import { GitHubApiError, type GitHubTransport } from './client.ts'
-import { BASE, FakeGitHub, servedAccessor } from '../../../tests/core/github/_test_util.ts'
+import { GitHubApiError } from './client.ts'
+import { GitHubRepo, TREES, blobSha } from '../../../tests/core/github/repo.ts'
 
-const TREE = [
-  { path: 'src', type: 'tree', sha: 'aaa' },
-  { path: 'src/main.py', type: 'blob', sha: 'bbb', size: 120 },
-  { path: 'src/utils', type: 'tree', sha: 'ccc' },
-  { path: 'src/utils/helpers.py', type: 'blob', sha: 'ddd', size: 80 },
-  { path: 'README.md', type: 'blob', sha: 'eee', size: 50 },
-]
-
-function accessor(): GitHubAccessor {
-  const transport = {
-    get: () => Promise.resolve({ tree: TREE, truncated: false, sha: 'HEAD1' }),
-  } as unknown as GitHubTransport
-  return new GitHubAccessor({
-    account: new GitHubAccount({ token: 't' }, transport),
-    owner: 'o',
-    repo: 'r',
-    ref: 'main',
-    defaultBranch: 'main',
-  })
+const FILES = {
+  'src/main.py': 'm'.repeat(120),
+  'src/utils/helpers.py': 'h'.repeat(80),
+  'README.md': 'r'.repeat(50),
 }
+
+let origin: string
+let repo: GitHubRepo
+
+beforeAll(async () => {
+  origin = await serve('github')
+})
+
+beforeEach(() => {
+  repo = new GitHubRepo(origin)
+})
+
+afterEach(async () => {
+  await repo.run.close()
+})
 
 function spec(rel: string, prefix = ''): PathSpec {
   const virtual = rel === '' ? prefix || '/' : `${prefix}/${rel}`
@@ -55,71 +56,61 @@ describe('github readdir', () => {
     ['src', ['main.py', 'utils']],
     ['src/utils', ['helpers.py']],
   ])('lists the folder %j of the tree', async (rel, expected) => {
-    expect(names(await readdir(accessor(), spec(rel)))).toEqual(expected)
+    await repo.create(FILES)
+    expect(names(await readdir(repo.accessor(), spec(rel)))).toEqual(expected)
   })
 
   it('seeds every folder below at the head of its one tree', async () => {
-    const listing = await readdir(accessor(), spec(''))
-    expect(listing.version).toBe('HEAD1')
+    const head = await repo.create(FILES)
+    const utilsSha = (await repo.tree('main:src')).tree.find((row) => row.path === 'utils')?.sha
+    const listing = await readdir(repo.accessor(), spec(''))
+    expect(listing.version).toBe(head)
     expect(
       Object.fromEntries([...listing.seeds].map(([k, v]) => [k, v.map((r) => r.name)])),
     ).toEqual({ src: ['main.py', 'utils'], 'src/utils': ['helpers.py'] })
     const src = listing.seeds.get('src') ?? []
     const utils = src.find((row) => row.name === 'utils')
-    expect([utils?.type, utils?.extra]).toEqual([FileType.DIRECTORY, { sha: 'ccc' }])
-    expect([src[0]?.size, src[0]?.fingerprint]).toEqual([120, 'bbb'])
+    expect([utils?.type, utils?.extra]).toEqual([FileType.DIRECTORY, { sha: utilsSha }])
+    expect([src[0]?.size, src[0]?.fingerprint]).toEqual([120, blobSha('m'.repeat(120))])
   })
 
+  // Twin of test_each_listing_is_versioned_by_its_own_trees_head: two
+  // listings on one accessor whose trees answer at different heads. The first
+  // fetch is answered with the tree from before a push, and lands only after
+  // the second listing, fetched after the push, has reseated the accessor.
   it('versions each listing by the head its own tree was read at', async () => {
-    // Two listings whose trees land together: the second reseats the
-    // accessor before the first one's listing is built.
-    const heads = ['HEAD1', 'HEAD2']
-    let release = (): void => undefined
-    const landed = new Promise<void>((resolve) => {
-      release = resolve
+    const firstHead = await repo.create(FILES)
+    const beforePush = await repo.tree('main', true)
+    const shared = repo.accessor()
+    let second: DirListing | undefined
+    let pushed = ''
+    await repo.run.beforeNext([['GET', TREES]], async () => {
+      pushed = await repo.commit({ 'src/new.py': 'n' })
+      second = await readdir(shared, spec(''))
+      await repo.run.answerNext('GET', TREES, 200, beforePush, 1, undefined, 'recursive=1')
     })
-    const transport = {
-      get: async () => {
-        const sha = heads.shift()
-        await landed
-        return { tree: TREE, truncated: false, sha }
-      },
-    } as unknown as GitHubTransport
-    const shared = new GitHubAccessor({
-      account: new GitHubAccount({ token: 't' }, transport),
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      defaultBranch: 'main',
-    })
-    const both = Promise.all([readdir(shared, spec('src')), readdir(shared, spec(''))])
-    release()
-    const [first, second] = await both
-    expect([first.version, second.version]).toEqual(['HEAD1', 'HEAD2'])
+    const first = await readdir(shared, spec('src'))
+    expect([first.version, second?.version]).toEqual([firstHead, pushed])
   })
 
   it('refuses what is no folder', async () => {
-    await expect(readdir(accessor(), spec('nonexistent'))).rejects.toMatchObject({
+    await repo.create(FILES)
+    const accessor = repo.accessor()
+    await expect(readdir(accessor, spec('nonexistent'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
-    await expect(readdir(accessor(), spec('README.md'))).rejects.toMatchObject({
+    await expect(readdir(accessor, spec('README.md'))).rejects.toMatchObject({
       code: 'ENOTDIR',
     })
   })
 })
 
 describe('the truncated walk', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  function truncated(gh: FakeGitHub): GitHubAccessor {
-    gh.truncatedRecursive = true
-    vi.stubGlobal('fetch', gh.fetch)
+  function truncated(): GitHubAccessor {
     return new GitHubAccessor({
-      account: new GitHubAccount({ token: 't', baseUrl: BASE }),
-      owner: 'o',
-      repo: 'r',
+      account: repo.accessor().account,
+      owner: repo.owner,
+      repo: repo.name,
       ref: 'main',
       defaultBranch: 'main',
       truncated: true,
@@ -128,36 +119,39 @@ describe('the truncated walk', () => {
   }
 
   it('lists each folder by its sha', async () => {
-    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
-    const walker = truncated(gh)
+    await repo.create({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+    await repo.truncate()
+    const walker = truncated()
     const root = await readdir(walker, spec('', '/gh'))
     expect(names(root)).toEqual(['docs', 'top.txt'])
     const docs = await readdir(walker, spec('docs', '/gh'), root.entries[0])
     expect(names(docs)).toEqual(['sub'])
-    expect(gh.count('recursive')).toBe(0)
+    expect(await repo.count('recursive')).toBe(0)
     await expect(readdir(walker, spec('docs', '/gh'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('is no miss while the repository is lost', async () => {
     // GitHub answers a repository the token can no longer read as it answers
     // a missing path; only a ref that still resolves makes a miss.
-    const gh = new FakeGitHub({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
-    const walker = truncated(gh)
+    await repo.create({ 'top.txt': 't', 'docs/sub/b.txt': 'b' })
+    await repo.truncate()
+    const walker = truncated()
     const root = await readdir(walker, spec('', '/gh'))
-    gh.fail.set('dir', [404, 'Not Found'])
+    await repo.refuse('dir', 404, 'Not Found')
     const err = await readdir(walker, spec('docs', '/gh'), root.entries[0]).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(GitHubApiError)
-    gh.fail.delete('dir')
-    gh.files.delete('docs/sub/b.txt')
+    await repo.run.clearAnswers()
+    await repo.commit({ 'docs/sub/b.txt': null })
     await expect(readdir(walker, spec('docs', '/gh'), root.entries[0])).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
   it('refuses a directory GitHub cut short', async () => {
-    const gh = new FakeGitHub({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
-    const walker = truncated(gh)
-    gh.truncatedDirs.set('big', 1)
+    await repo.create({ 'top.txt': 't', 'big/a.txt': 'a', 'big/b.txt': 'b' })
+    await repo.truncate()
+    await repo.cutShort('big', 1)
+    const walker = truncated()
     const root = await readdir(walker, spec('', '/gh'))
     const big = root.entries.find((row) => row.name === 'big')
     const err = await readdir(walker, spec('big', '/gh'), big).catch((e: unknown) => e)
@@ -167,15 +161,11 @@ describe('the truncated walk', () => {
 })
 
 describe('a fresh tree', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('reports a folder it dropped as missing', async () => {
-    const gh = new FakeGitHub({ 'docs/a.txt': 'a', 'top.txt': 't' })
-    vi.stubGlobal('fetch', gh.fetch)
-    gh.files.delete('docs/a.txt')
-    await expect(readdir(servedAccessor(), spec('docs', '/gh'))).rejects.toMatchObject({
+    await repo.create({ 'docs/a.txt': 'a', 'top.txt': 't' })
+    const accessor = repo.accessor()
+    await repo.commit({ 'docs/a.txt': null })
+    await expect(readdir(accessor, spec('docs', '/gh'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })

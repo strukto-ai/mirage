@@ -45,6 +45,7 @@ import type { PullRequestsArgs, PullRow } from './pulls.ts'
 import {
   accountsOf,
   addBranch,
+  blobBySha,
   headOf,
   loginsOf,
   networkNames,
@@ -75,6 +76,7 @@ import {
   paged,
   pagedReply,
   param,
+  publicRead,
   route,
   str,
   withRepo,
@@ -260,6 +262,24 @@ async function namedRef(
  * refuses the way the vendor now refuses Projects (classic), and a fork names
  * the repository it was forked from as `parent`.
  */
+// A blob asked for by oid, as `object(oid:)` answers one: `text` is its bytes
+// as UTF-8 and null for bytes that are not, which GitHub documents as a binary
+// blob. The text is answered whole, never truncated, and an oid that names no
+// blob answers null: the fake answers no other object by oid.
+function blobNode(oid: string, data: Buffer | null): Record<string, unknown> | null {
+  if (data === null) return null
+  const text = data.toString('utf8')
+  const binary = Buffer.compare(Buffer.from(text, 'utf8'), data) !== 0
+  return {
+    __typename: 'Blob',
+    oid,
+    byteSize: data.length,
+    isBinary: binary,
+    isTruncated: false,
+    text: binary ? null : text,
+  }
+}
+
 export async function repositoryNode(
   ctx: { sql: Db; tenant: string },
   repo: RepoRow,
@@ -317,6 +337,8 @@ export async function repositoryNode(
     contactLinks: [],
     defaultBranchRef: refNode(ctx, repo, HEADS, repo.defaultBranch),
     ref: ({ qualifiedName }: { qualifiedName: string }) => namedRef(ctx, repo, qualifiedName),
+    object: async ({ oid }: { oid: string }) =>
+      blobNode(oid, await blobBySha(ctx.sql, ctx.tenant, repo, oid)),
     deleteBranchOnMerge: meta.delete_branch_on_merge === true,
     diskUsage: 0,
     fundingLinks: [],
@@ -608,7 +630,9 @@ export function repoRoutes(): KitRoute<C>[] {
     route<C>(
       'GET',
       `${p}/repos/:owner/:repo`,
-      authed(withRepo(async (c, r) => ({ status: 200, body: await repoJson(c.sql, c.tenant, r) }))),
+      publicRead(
+        withRepo(async (c, r) => ({ status: 200, body: await repoJson(c.sql, c.tenant, r) })),
+      ),
     ),
     route<C>('PATCH', `${p}/repos/:owner/:repo`, authed(updateRepo), { write: true }),
     route<C>('GET', `${p}/repos/:owner/:repo/topics`, repoTopics),

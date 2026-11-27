@@ -237,6 +237,7 @@ class KitRun:
         body: Any = None,
         times: int = 1,
         path: str | None = None,
+        query: str | None = None,
     ) -> None:
         """Answer the next ``times`` requests to ``route`` with ``status``.
 
@@ -249,6 +250,8 @@ class KitRun:
             times (int): how many requests it answers.
             path (str | None): the one request path it answers; any the
                 route serves if None.
+            query (str | None): the one query string it answers, ``""``
+                for none; any if None.
         """
         plan: dict[str, Any] = {
             "method": method,
@@ -258,6 +261,8 @@ class KitRun:
         }
         if path is not None:
             plan["path"] = path
+        if query is not None:
+            plan["query"] = query
         if isinstance(body, bytes):
             plan["text"] = body.decode()
         elif body is not None:
@@ -273,6 +278,7 @@ class KitRun:
         routes: list[tuple[str, str]],
         change: Callable[[], Awaitable[None] | None],
         status: int | None = None,
+        query: str | None = None,
     ) -> None:
         """Hold the next request to one of ``routes`` and run ``change``
         while it waits, then serve it, or answer it with ``status``.
@@ -287,10 +293,13 @@ class KitRun:
                 while the request waits.
             status (int | None): the status to answer it with instead of
                 serving it.
+            query (str | None): the one query string a held request is
+                asked with, ``""`` for none; any if None.
         """
-        armed = await self.call(
-            "POST", "/_kit/holds", json={"routes": [list(r) for r in routes]}
-        )
+        body: dict[str, Any] = {"routes": [list(r) for r in routes]}
+        if query is not None:
+            body["query"] = query
+        armed = await self.call("POST", "/_kit/holds", json=body)
         hold = f"/_kit/holds/{armed['hold']}"
         self.changes.append(
             asyncio.create_task(self._change_when_held(hold, change, status))

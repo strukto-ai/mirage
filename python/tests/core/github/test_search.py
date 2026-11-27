@@ -12,19 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
+import aiohttp
 import pytest
 
-from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.github.config import GhConfig
 from mirage.core.github.search import (
     SearchResult,
     files_containing,
     narrow_paths,
     search_code,
 )
-from mirage.core.github.tree_entry import TreeEntry
+from mirage.core.github.tree import ensure_tree
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import Limit, MountMode, PathSpec, ReadSpec
 from mirage.utils.key_prefix import mount_key
@@ -33,12 +30,11 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
+from tests.core.github.conftest import SEARCH, TOKEN, GitHubRepo, blob_sha
 
-
-@pytest.fixture
-def account():
-    return GitHubAccount(GhConfig(token="ghp_test"))
+# GitHub's documented code-search limit; files at or over it are not indexed.
+SEARCH_LIMIT = 384 * 1024
+SOURCES = {"src/main.py": b"import os\n", "src/utils.py": b"import os, sys\n"}
 
 
 def _item(path: str, full_name: str | int | None) -> dict:
@@ -53,182 +49,158 @@ def _body(items: list[dict], total: int | None = None) -> dict:
     }
 
 
-def _blob(path: str, size: int | None) -> TreeEntry:
-    return TreeEntry(path=path, type="blob", sha=path, size=size)
-
-
-# GitHub's documented code-search limit; files at or over it are not indexed.
-SEARCH_LIMIT = 384 * 1024
-
-_SMALL_TREE = {"src/a.py": _blob("src/a.py", 10)}
-
-
-def _accessor(
-    account: GitHubAccount, tree: dict[str, TreeEntry]
-) -> GitHubAccessor:
-    return GitHubAccessor(account, "acme", "proj", "main", "main", tree=tree)
+async def _q(repo: GitHubRepo) -> list[str]:
+    return [asked["q"] for asked in await repo.run.params("GET", SEARCH)]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_basic(mock_get, account):
-    mock_get.return_value = _body(
-        [
-            _item("src/main.py", "acme/proj") | {"sha": "aaa"},
-            _item("src/utils.py", "acme/proj") | {"sha": "bbb"},
-        ]
+async def test_search_code_basic(repo):
+    await repo.create(SOURCES)
+    result, truncated = await search_code(
+        repo.accessor().account, repo.owner, repo.name, "import os"
     )
-    result, truncated = await search_code(account, "acme", "proj", "import os")
-    assert len(result) == 2
-    assert result[0] == SearchResult(path="src/main.py", sha="aaa")
+    assert result == [
+        SearchResult(path=p, sha=blob_sha(d)) for p, d in SOURCES.items()
+    ]
     assert truncated is False
-    mock_get.assert_awaited_once_with(
-        account,
-        "/search/code",
-        params={"q": "import os repo:acme/proj", "per_page": "100"},
-    )
+    assert await repo.run.params("GET", SEARCH) == [
+        {"q": "import os repo:integ-user/repo", "per_page": "100"}
+    ]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_empty_results(mock_get, account):
-    mock_get.return_value = _body([])
-    result = await search_code(account, "acme", "proj", "nonexistent")
+async def test_search_code_empty_results(repo):
+    await repo.create(SOURCES)
+    result = await search_code(
+        repo.accessor().account, repo.owner, repo.name, "nonexistent"
+    )
     assert result == ([], False)
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_with_path_filter(mock_get, account):
-    mock_get.return_value = _body([_item("src/main.py", "acme/proj")])
-    await search_code(account, "acme", "proj", "import os", path_filter="src/")
-    mock_get.assert_awaited_once_with(
-        account,
-        "/search/code",
-        params={"q": "import os repo:acme/proj path:src/", "per_page": "100"},
+async def test_search_code_with_path_filter(repo):
+    await repo.create(SOURCES)
+    await search_code(
+        repo.accessor().account,
+        repo.owner,
+        repo.name,
+        "import os",
+        path_filter="src/",
     )
+    assert await _q(repo) == ["import os repo:integ-user/repo path:src/"]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_strips_leading_slash_in_filter(
-    mock_search, account
-):
-    mock_search.return_value = (
-        [SearchResult(path="src/main.py", sha="aaa")],
-        False,
-    )
+async def test_narrow_paths_strips_leading_slash_in_filter(repo):
+    await repo.create(SOURCES)
     paths = [PathSpec(vfs_path="src", virtual="/src", directory="/src")]
-    await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
-    _, kwargs = mock_search.await_args
-    assert kwargs["path_filter"] == "src"
+    await narrow_paths(repo.accessor(), "import", paths)
+    assert await _q(repo) == ["import repo:integ-user/repo path:src"]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_root_uses_no_filter(mock_search, account):
-    mock_search.return_value = (
-        [SearchResult(path="src/main.py", sha="aaa")],
-        False,
-    )
+async def test_narrow_paths_root_uses_no_filter(repo):
+    await repo.create(SOURCES)
     paths = [PathSpec(vfs_path="", virtual="/", directory="/")]
-    await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
-    _, kwargs = mock_search.await_args
-    assert kwargs["path_filter"] is None
+    await narrow_paths(repo.accessor(), "import", paths)
+    assert await _q(repo) == ["import repo:integ-user/repo"]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_normalizes_results_with_leading_slash(
-    mock_search, account
-):
-    mock_search.return_value = (
-        [
-            SearchResult(path="src/main.py", sha="aaa"),
-            SearchResult(path="src/utils.py", sha="bbb"),
-        ],
-        False,
-    )
+async def test_narrow_paths_normalizes_results_with_leading_slash(repo):
+    await repo.create(SOURCES)
     paths = [
         PathSpec(
             vfs_path=mount_key("/gh", "/gh"), virtual="/gh", directory="/gh"
         )
     ]
-    out = await narrow_paths(_accessor(account, _SMALL_TREE), "import", paths)
+    out = await narrow_paths(repo.accessor(), "import", paths)
     assert [p.virtual for p in out] == ["/gh/src/main.py", "/gh/src/utils.py"]
     assert [p.vfs_path for p in out] == ["src/main.py", "src/utils.py"]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_voids_the_narrowing_on_error(
-    mock_search, account, caplog
-):
-    mock_search.side_effect = RuntimeError("boom")
+async def test_narrow_paths_voids_the_narrowing_on_error(repo, caplog):
+    await repo.create(SOURCES)
+    await repo.refuse("search", 500, "boom")
     paths = [PathSpec(vfs_path="src", virtual="/src", directory="/src")]
     with caplog.at_level("DEBUG"):
-        out = await narrow_paths(
-            _accessor(account, _SMALL_TREE), "import", paths
-        )
+        out = await narrow_paths(repo.accessor(), "import", paths)
     assert out is None
     assert "falling back to per-file scan" in caplog.text
 
 
+# The mount's grep push-down rides its accessor's account, and so its pool,
+# rather than opening an aiohttp session per code search: once the pool is
+# warm, the search opens no session and still reaches GitHub.
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_narrow_paths_rides_the_mount_account(mock_get, account):
-    # The mount's grep push-down rides its accessor's account, and so its
-    # pool, rather than opening an aiohttp session per code search.
-    mock_get.return_value = _body([])
-    accessor = _accessor(account, {})
+async def test_narrow_paths_rides_the_mount_account(repo, monkeypatch):
+    await repo.create(SOURCES)
+    accessor = repo.accessor()
+    await ensure_tree(accessor)
+    opened: list[aiohttp.ClientSession] = []
+    real = aiohttp.ClientSession
+
+    def counted(*args, **kwargs) -> aiohttp.ClientSession:
+        session = real(*args, **kwargs)
+        opened.append(session)
+        return session
+
+    monkeypatch.setattr(aiohttp, "ClientSession", counted)
     await narrow_paths(accessor, "needle", [PathSpec.from_str_path("/")])
-    assert mock_get.await_args.args[0] is accessor.account
+    assert opened == []
+    assert await repo.count("search") == 1
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_asks_for_the_largest_page(mock_get, account):
+async def test_search_code_asks_for_the_largest_page(repo):
     # The default page is 30 rows, and a first page read as the whole answer
     # silently narrows grep to 30 files.
-    mock_get.return_value = _body([])
-    await search_code(account, "acme", "proj", "needle")
-    assert mock_get.await_args.kwargs["params"]["per_page"] == "100"
+    await repo.create(SOURCES)
+    await search_code(repo.accessor().account, repo.owner, repo.name, "needle")
+    ((asked,),) = [await repo.run.params("GET", SEARCH)]
+    assert asked["per_page"] == "100"
 
 
+# The answers below are code search's, with the rows or counts this case
+# needs: the fake only answers rows of its own repositories, each counted.
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_keeps_only_the_mounted_repository(
-    mock_get, account
-):
+async def test_search_code_keeps_only_the_mounted_repository(repo):
     # The pattern is sent verbatim, so a qualifier inside it can rescope the
     # search; a fork shares the repository name and a prefix is not a match.
-    mock_get.return_value = _body(
-        [
-            _item("src/a.py", "acme/proj"),
-            _item("src/a.py", "other/x"),
-            _item("src/a.py", "other/proj"),
-            _item("src/a.py", "acme/other"),
-            _item("src/a.py", "acme/proj-fork"),
-        ]
+    await repo.answer(
+        "search",
+        _body(
+            [
+                _item("src/a.py", "acme/proj"),
+                _item("src/a.py", "other/x"),
+                _item("src/a.py", "other/proj"),
+                _item("src/a.py", "acme/other"),
+                _item("src/a.py", "acme/proj-fork"),
+            ]
+        ),
     )
-    results, _ = await search_code(account, "acme", "proj", "needle")
+    results, _ = await search_code(
+        repo.accessor().account, "acme", "proj", "needle"
+    )
     assert results == [SearchResult(path="src/a.py", sha="src/a.py")]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "full_name, owner, repo",
+    "full_name, owner, name",
     [
         ("Acme/Proj", "acme", "proj"),
         ("acme/proj", "Acme", "Proj"),
     ],
 )
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_compares_the_repository_case_insensitively(
-    mock_get, full_name, owner, repo, account
+    repo, full_name, owner, name
 ):
-    mock_get.return_value = _body([_item("src/a.py", full_name)])
-    results, _ = await search_code(account, owner, repo, "needle")
+    await repo.answer("search", _body([_item("src/a.py", full_name)]))
+    results, _ = await search_code(
+        repo.accessor().account, owner, name, "needle"
+    )
     assert [r.path for r in results] == ["src/a.py"]
 
 
@@ -243,14 +215,13 @@ async def test_search_code_compares_the_repository_case_insensitively(
         _item("src/a.py", 123),
     ],
 )
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_drops_an_item_that_names_no_repository(
-    mock_get, item, account
-):
+async def test_search_code_drops_an_item_that_names_no_repository(repo, item):
     # Nothing vouches for such an item, and dropping it must not raise: a
     # raise inside narrow_paths voids the whole narrowing.
-    mock_get.return_value = _body([item])
-    results, _ = await search_code(account, "acme", "proj", "needle")
+    await repo.answer("search", _body([item]))
+    results, _ = await search_code(
+        repo.accessor().account, "acme", "proj", "needle"
+    )
     assert results == []
 
 
@@ -269,133 +240,137 @@ async def test_search_code_drops_an_item_that_names_no_repository(
         ({"total_count": 1}, True),
     ],
 )
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
 async def test_search_code_reports_an_answer_that_is_not_the_whole_set(
-    mock_get, body, truncated, account
+    repo, body, truncated
 ):
     # Only an answer that says it is complete, with a count no larger than
     # the rows it carries, is the whole set; anything else is truncated.
-    mock_get.return_value = {**body, "items": [_item("src/a.py", "acme/proj")]}
-    _, got = await search_code(account, "acme", "proj", "needle")
+    await repo.answer(
+        "search", {**body, "items": [_item("src/a.py", "acme/proj")]}
+    )
+    _, got = await search_code(
+        repo.accessor().account, "acme", "proj", "needle"
+    )
     assert got is truncated
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_reads_null_items_as_no_rows(mock_get, account):
-    mock_get.return_value = {
-        "total_count": 0,
-        "incomplete_results": False,
-        "items": None,
-    }
-    assert await search_code(account, "acme", "proj", "needle") == ([], False)
+async def test_search_code_reads_null_items_as_no_rows(repo):
+    await repo.answer(
+        "search",
+        {"total_count": 0, "incomplete_results": False, "items": None},
+    )
+    assert await search_code(
+        repo.accessor().account, "acme", "proj", "needle"
+    ) == ([], False)
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.github_get", new_callable=AsyncMock)
-async def test_search_code_judges_completeness_before_filtering(
-    mock_get, account
-):
+async def test_search_code_judges_completeness_before_filtering(repo):
     # total_count counts every row the search matched, foreign ones too.
-    mock_get.return_value = _body(
-        [_item("src/a.py", "acme/proj"), _item("src/b.py", "other/x")]
+    await repo.answer(
+        "search",
+        _body([_item("src/a.py", "acme/proj"), _item("src/b.py", "other/x")]),
     )
-    results, truncated = await search_code(account, "acme", "proj", "needle")
+    results, truncated = await search_code(
+        repo.accessor().account, "acme", "proj", "needle"
+    )
     assert [r.path for r in results] == ["src/a.py"]
     assert truncated is False
 
 
+def _cut(path: str) -> dict:
+    return _body([_item(path, "integ-user/repo")], total=2)
+
+
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_truncated_answer_returns_none(
-    mock_search, account
-):
-    mock_search.return_value = ([SearchResult(path="src/a.py", sha="a")], True)
+async def test_narrow_paths_truncated_answer_returns_none(repo):
+    await repo.create({"src/a.py": b"needle\n"})
+    await repo.answer("search", _cut("src/a.py"))
     out = await narrow_paths(
-        _accessor(account, _SMALL_TREE),
-        "needle",
-        [PathSpec.from_str_path("/")],
+        repo.accessor(), "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_stops_at_the_first_truncated_scope(
-    mock_search, account
-):
+async def test_narrow_paths_stops_at_the_first_truncated_scope(repo):
     # Code search is rate limited; a narrowing already void asks nothing more.
-    mock_search.return_value = ([], True)
+    await repo.create({"src/a.py": b"needle\n", "docs/b.md": b"needle\n"})
+    await repo.answer("search", _cut("src/a.py"), times=2)
     scopes = [
         PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
     ]
-    out = await narrow_paths(_accessor(account, _SMALL_TREE), "needle", scopes)
+    out = await narrow_paths(repo.accessor(), "needle", scopes)
     assert out is None
-    assert mock_search.await_count == 1
+    assert await repo.count("search") == 1
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_a_failed_scope_voids_the_others(
-    mock_search, account
-):
+async def test_narrow_paths_a_failed_scope_voids_the_others(repo):
     # A scope whose search failed contributes nothing, so the hits of the
     # scopes that did answer are not the whole set either.
-    mock_search.side_effect = [
-        ([SearchResult(path="src/a.py", sha="a")], False),
-        RuntimeError("boom"),
-    ]
+    await repo.create({"src/a.py": b"needle\n", "docs/b.md": b"needle\n"})
+    await repo.run.answer_next(
+        "GET",
+        SEARCH,
+        500,
+        {"message": "boom"},
+        query=repo.search_query("needle repo:integ-user/repo path:docs"),
+    )
     scopes = [
         PathSpec(vfs_path="src", virtual="/src", directory="/src"),
         PathSpec(vfs_path="docs", virtual="/docs", directory="/docs"),
     ]
-    out = await narrow_paths(_accessor(account, _SMALL_TREE), "needle", scopes)
+    out = await narrow_paths(repo.accessor(), "needle", scopes)
     assert out is None
+    assert await repo.count("search") == 2
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_adds_the_files_search_never_indexes(
-    mock_search, account
-):
-    # Code search skips files at or over the limit, so a
-    # trusted narrowing has to read them itself; one that is also a hit is
-    # listed once.
-    tree = {
-        "src/a.py": _blob("src/a.py", 10),
-        "src/big.bin": _blob("src/big.bin", SEARCH_LIMIT),
-    }
-    for hits in (["src/a.py"], ["src/a.py", "src/big.bin"]):
-        mock_search.return_value = (
-            [SearchResult(path=h, sha=h) for h in hits],
-            False,
-        )
-        out = await narrow_paths(
-            _accessor(account, tree), "needle", [PathSpec.from_str_path("/")]
-        )
-        assert out is not None
-        assert [p.virtual for p in out] == ["/src/a.py", "/src/big.bin"]
+async def test_narrow_paths_adds_the_files_search_never_indexes(repo):
+    # Code search skips files at or over the limit, so a trusted narrowing
+    # has to read them itself, off the tree the mount loaded; one an answer
+    # also names is listed once.
+    await repo.create(
+        {
+            "src/a.py": b"needle\n",
+            "src/big.bin": b"needle\n".ljust(SEARCH_LIMIT),
+        }
+    )
+    accessor = repo.accessor()
+    await ensure_tree(accessor)
+    root = [PathSpec.from_str_path("/")]
+    out = await narrow_paths(accessor, "needle", root)
+    assert out is not None
+    assert [p.virtual for p in out] == ["/src/a.py", "/src/big.bin"]
+    await repo.answer(
+        "search",
+        _body(
+            [
+                _item("src/a.py", "integ-user/repo"),
+                _item("src/big.bin", "integ-user/repo"),
+            ]
+        ),
+    )
+    out = await narrow_paths(accessor, "needle", root)
+    assert out is not None
+    assert [p.virtual for p in out] == ["/src/a.py", "/src/big.bin"]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_adds_big_files_only_from_the_scope(
-    mock_search, account
-):
+async def test_narrow_paths_adds_big_files_only_from_the_scope(repo):
     # A big file elsewhere would put lines from outside the operand in the
     # output.
-    tree = {
-        "src/a.py": _blob("src/a.py", 10),
-        "src/big.bin": _blob("src/big.bin", SEARCH_LIMIT),
-        "docs/big.md": _blob("docs/big.md", SEARCH_LIMIT),
-    }
-    mock_search.return_value = (
-        [SearchResult(path="src/a.py", sha="a")],
-        False,
+    big = b"needle\n".ljust(SEARCH_LIMIT)
+    await repo.create(
+        {"src/a.py": b"needle\n", "src/big.bin": big, "docs/big.md": big}
     )
+    accessor = repo.accessor()
+    await ensure_tree(accessor)
     out = await narrow_paths(
-        _accessor(account, tree),
+        accessor,
         "needle",
         [PathSpec(vfs_path="src", virtual="/src", directory="/src")],
     )
@@ -404,14 +379,11 @@ async def test_narrow_paths_adds_big_files_only_from_the_scope(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_narrow_paths_big_files_do_not_rescue_a_truncated_answer(
-    mock_search, account
-):
-    mock_search.return_value = ([], True)
-    tree = {"src/big.bin": _blob("src/big.bin", SEARCH_LIMIT)}
+async def test_narrow_paths_big_files_do_not_rescue_a_truncated_answer(repo):
+    await repo.create({"src/big.bin": b"needle\n".ljust(SEARCH_LIMIT)})
+    await repo.answer("search", _cut("src/a.py"))
     out = await narrow_paths(
-        _accessor(account, tree), "needle", [PathSpec.from_str_path("/")]
+        repo.accessor(), "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
 
@@ -454,34 +426,43 @@ def _ram() -> RAMVFS:
     return vfs
 
 
+def _config(repo: GitHubRepo, **fields) -> dict:
+    return {
+        "token": TOKEN,
+        "owner": repo.owner,
+        "repo": repo.name,
+        "base_url": repo.run.url,
+        **fields,
+    }
+
+
 async def _on_github(
+    repo: GitHubRepo,
     line: str,
     monkeypatch,
     pinned: bool = False,
     limit: int = 5000,
-    **hub_args,
-) -> tuple[tuple[bytes, bytes, int], FakeGitHub]:
+    refused: bool = False,
+    truncated: bool = False,
+) -> tuple[bytes, bytes, int]:
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
-    with serve(FakeGitHub(files=dict(REPO), **hub_args)) as hub:
-        config = {
-            "token": "t",
-            "owner": "o",
-            "repo": "r",
-            "base_url": hub.url,
-        }
-        if pinned:
-            config["ref"] = hub.head()
-        vfs = build_vfs("github", config)
-        hub.log.clear()
-        return await _run(vfs, line, limit), hub
+    head = await repo.create(dict(REPO))
+    if truncated:
+        await repo.truncate()
+    if refused:
+        await repo.refuse("search", 500, "boom")
+    vfs = build_vfs(
+        "github", _config(repo, **({"ref": head} if pinned else {}))
+    )
+    return await _run(vfs, line, limit)
 
 
-def _read(hub: FakeGitHub) -> list[str]:
+async def _read(repo: GitHubRepo) -> list[str]:
     # A file is read by its blob, or in a batch the read-ahead sends.
     names = {blob_sha(data): path for path, data in REPO.items()}
     return sorted(
         names[sha]
-        for route, raw in hub.log
+        for route, raw in await repo.log()
         if route in ("blob", "graphql")
         for sha in raw.split(",")
     )
@@ -499,14 +480,14 @@ def _read(hub: FakeGitHub) -> list[str]:
     ],
 )
 async def test_a_whole_word_reads_only_what_code_search_names(
-    line, read, monkeypatch
+    repo, line, read, monkeypatch
 ):
     # Code search matches whole words in any case and never indexes
     # big.txt, which is past its size limit, so that file is read anyway.
-    got, hub = await _on_github(line, monkeypatch)
+    got = await _on_github(repo, line, monkeypatch)
     assert got == await _run(_ram(), line)
-    assert hub.count("search") == 1
-    assert _read(hub) == read
+    assert await repo.count("search") == 1
+    assert await _read(repo) == read
 
 
 @pytest.mark.asyncio
@@ -522,63 +503,66 @@ async def test_a_whole_word_reads_only_what_code_search_names(
     ],
 )
 async def test_a_line_code_search_cannot_answer_reads_every_file(
-    line, monkeypatch
+    repo, line, monkeypatch
 ):
     # The last line's word is a qualifier to code search, which would
     # rescope the query instead of searching for it.
-    got, hub = await _on_github(line, monkeypatch)
+    got = await _on_github(repo, line, monkeypatch)
     assert got == await _run(_ram(), line)
-    assert hub.count("search") == 0
+    assert await repo.count("search") == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "hub_args",
-    [{"fail": {"search": (500, "boom")}}, {"truncated_recursive": True}],
+    "refused, truncated",
+    [(True, False), (False, True)],
     ids=["failed", "truncated-tree"],
 )
 async def test_a_search_that_cannot_vouch_reads_every_file(
-    hub_args, monkeypatch
+    repo, refused, truncated, monkeypatch
 ):
     # A truncated tree cannot list the files code search never indexes.
     line = "grep -rw import /gh"
-    got, hub = await _on_github(line, monkeypatch, **hub_args)
+    got = await _on_github(
+        repo, line, monkeypatch, refused=refused, truncated=truncated
+    )
     assert got == await _run(_ram(), line)
-    assert _read(hub) == sorted(REPO)
+    assert await _read(repo) == sorted(REPO)
 
 
 @pytest.mark.asyncio
-async def test_a_ref_off_the_default_branch_reads_every_file(monkeypatch):
+async def test_a_ref_off_the_default_branch_reads_every_file(
+    repo, monkeypatch
+):
     # Code search indexes the default branch only, so a mount pinned to a
     # commit reads every file as a plain scan does.
     line = "grep -rw import /gh"
-    got, hub = await _on_github(line, monkeypatch, pinned=True)
+    got = await _on_github(repo, line, monkeypatch, pinned=True)
     assert got == await _run(_ram(), line)
-    assert hub.count("search") == 0
-    assert _read(hub) == sorted(REPO)
+    assert await repo.count("search") == 0
+    assert await _read(repo) == sorted(REPO)
 
 
 @pytest.mark.asyncio
-async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
+async def test_a_ref_off_the_default_branch_stops_at_the_cap(
+    repo, monkeypatch
+):
     line = "grep -rw import /gh"
-    got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
+    got = await _on_github(repo, line, monkeypatch, pinned=True, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
     # The walk reads four and warms none past them: the two it read in a
     # row in docs set no pace for src.
-    assert _read(hub) == sorted(REPO)[:4]
+    assert await _read(repo) == sorted(REPO)[:4]
 
 
 @pytest.mark.asyncio
-async def test_a_scope_cheaper_to_read_is_not_searched():
+async def test_a_scope_cheaper_to_read_is_not_searched(repo):
     line = "grep -rw import /gh"
-    with serve(FakeGitHub(files=dict(REPO))) as hub:
-        vfs = build_vfs(
-            "github",
-            {"token": "t", "owner": "o", "repo": "r", "base_url": hub.url},
-        )
-        assert await _run(vfs, line) == await _run(_ram(), line)
-        assert hub.count("search") == 0
+    await repo.create(dict(REPO))
+    vfs = build_vfs("github", _config(repo))
+    assert await _run(vfs, line) == await _run(_ram(), line)
+    assert await repo.count("search") == 0
 
 
 @pytest.mark.asyncio
@@ -591,34 +575,34 @@ async def test_a_scope_cheaper_to_read_is_not_searched():
     ],
 )
 async def test_a_search_past_the_scope_cap_stops_there(
-    line, name, monkeypatch
+    repo, line, name, monkeypatch
 ):
-    got, hub = await _on_github(line, monkeypatch, limit=4)
+    got = await _on_github(repo, line, monkeypatch, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (f"{name}: /gh: ".encode() + STOPPED_AT_4, 2)
-    assert hub.count("blob") == 4
+    assert await repo.count("blob") == 4
 
 
 @pytest.mark.asyncio
-async def test_a_tree_diff_past_the_scope_cap_is_refused(monkeypatch):
-    (out, err, code), hub = await _on_github(
-        "diff -r /gh /gh", monkeypatch, limit=4
+async def test_a_tree_diff_past_the_scope_cap_is_refused(repo, monkeypatch):
+    out, err, code = await _on_github(
+        repo, "diff -r /gh /gh", monkeypatch, limit=4
     )
     assert (out, err, code) == (b"", b"diff: " + REFUSED_AT_4, 1)
-    assert hub.count("blob") == 0
+    assert await repo.count("blob") == 0
 
 
 @pytest.mark.asyncio
-async def test_an_archive_past_the_scope_cap_is_refused(monkeypatch):
-    (out, err, code), hub = await _on_github(
-        "tar -cf - /gh/src", monkeypatch, limit=1
+async def test_an_archive_past_the_scope_cap_is_refused(repo, monkeypatch):
+    out, err, code = await _on_github(
+        repo, "tar -cf - /gh/src", monkeypatch, limit=1
     )
     assert (out, err, code) == (
         b"",
         b"tar: more than 1 files in scope (walk_limit); narrow the path\n",
         1,
     )
-    assert hub.count("blob") == 0
+    assert await repo.count("blob") == 0
 
 
 @pytest.mark.asyncio
@@ -630,110 +614,118 @@ async def test_an_archive_past_the_scope_cap_is_refused(monkeypatch):
         "rg -w --binary import /gh",
     ],
 )
-async def test_a_narrowed_search_under_the_scope_cap_runs(line, monkeypatch):
+async def test_a_narrowed_search_under_the_scope_cap_runs(
+    repo, line, monkeypatch
+):
     # Code search names three files, so a cap of four reads them all.
-    got, hub = await _on_github(line, monkeypatch, limit=4)
+    got = await _on_github(repo, line, monkeypatch, limit=4)
     assert got == await _run(_ram(), line)
-    assert _read(hub) == ["big.txt", "docs/c.md", "src/a.py"]
+    assert await _read(repo) == ["big.txt", "docs/c.md", "src/a.py"]
 
 
 @pytest.mark.asyncio
-async def test_a_narrowed_search_past_the_scope_cap_stops_there(monkeypatch):
-    (out, err, code), hub = await _on_github(
-        "grep -rw import /gh", monkeypatch, limit=2
+async def test_a_narrowed_search_past_the_scope_cap_stops_there(
+    repo, monkeypatch
+):
+    out, err, code = await _on_github(
+        repo, "grep -rw import /gh", monkeypatch, limit=2
     )
     assert (out, err, code) == (
         b"/gh/big.txt:import\n",
         b"grep: /gh: stopped after 2 files (walk_limit); narrow the path\n",
         2,
     )
-    assert _read(hub) == ["big.txt", "docs/c.md"]
+    assert await _read(repo) == ["big.txt", "docs/c.md"]
 
 
 @pytest.mark.asyncio
-async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
+async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(
+    repo, monkeypatch
+):
     # Code search never indexes a big file, so the answer names it; the walk
     # skips a binary extension without -a, so it is not a read to cap.
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
     weights = {f"w{i}.bin": REPO["big.txt"] for i in range(2)}
     line = "grep -rw import /gh"
-    with serve(FakeGitHub(files=dict(REPO) | weights)) as hub:
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "base_url": hub.url,
-            },
-        )
-        assert await _run(vfs, line, 3) == await _run(_ram(), line)
-        assert hub.count("search") == 1
-
-
-async def _load_truncated(accessor: GitHubAccessor) -> None:
-    accessor.tree = {"src/a.py": _blob("src/a.py", 10)}
-    accessor.truncated = True
+    await repo.create(dict(REPO) | weights)
+    vfs = build_vfs("github", _config(repo))
+    assert await _run(vfs, line, 3) == await _run(_ram(), line)
+    assert await repo.count("search") == 1
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
-async def test_files_containing_judges_the_tree_it_loads(
-    mock_search, account, monkeypatch
-):
+async def test_files_containing_judges_the_tree_it_loads(repo, monkeypatch):
     # A cold mount learns its tree is truncated only once it loads it.
-    monkeypatch.setattr(
-        "mirage.core.github.search.ensure_tree", _load_truncated
-    )
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
-    accessor = _accessor(account, {})
+    await repo.create({"src/a.py": b"needle\n"})
+    await repo.truncate()
     out = await files_containing(
-        accessor, "needle", [PathSpec.from_str_path("/")]
+        repo.accessor(), "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
-    mock_search.assert_not_awaited()
+    assert await repo.count("recursive") == 1
+    assert await repo.count("search") == 0
+
+
+def _on_github_com(repo: GitHubRepo, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("mirage.accessor.github.API_BASE", repo.run.url)
+    monkeypatch.setattr(
+        "mirage.accessor.github.RAW_BASE", repo.run.url + "/raw"
+    )
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.search.search_code", new_callable=AsyncMock)
 async def test_files_containing_asks_nothing_of_an_anonymous_account(
-    mock_search, monkeypatch
+    repo, monkeypatch
 ):
     # Code search refuses a call with no credential, so it is not asked, and
     # neither is the tree its scope count would load.
-    loads: list[GitHubAccessor] = []
-
-    async def load(accessor: GitHubAccessor) -> None:
-        loads.append(accessor)
-
-    monkeypatch.setattr("mirage.core.github.search.ensure_tree", load)
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
+    await repo.create({"src/a.py": b"needle\n"})
+    _on_github_com(repo, monkeypatch)
     accessor = GitHubVFS(
-        GitHubConfig(owner="acme", repo="proj", ref="main")
+        GitHubConfig(owner=repo.owner, repo=repo.name, ref="main")
     ).accessor
     out = await files_containing(
         accessor, "needle", [PathSpec.from_str_path("/")]
     )
     assert out is None
-    mock_search.assert_not_awaited()
-    assert loads == []
+    assert await repo.log() == []
 
 
 @pytest.mark.asyncio
-async def test_an_anonymous_mount_scans_instead_of_searching(monkeypatch):
+async def test_files_containing_leaves_a_branch_off_the_default_to_the_walk(
+    repo, monkeypatch
+):
+    # Code search indexes the default branch only, so a mount on any other
+    # branch is not narrowed by it, even one named main.
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
+    await repo.create({"src/a.py": b"needle\n"})
+    await repo.branch("trunk")
+    await repo.set_default_branch("trunk")
+    out = await files_containing(
+        repo.accessor("main"), "needle", [PathSpec.from_str_path("/")]
+    )
+    assert out is None
+    assert await repo.count("search") == 0
+
+
+@pytest.mark.asyncio
+async def test_an_anonymous_mount_scans_instead_of_searching(
+    repo, monkeypatch
+):
     monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 1)
     line = "grep -rw import /gh"
-    with serve(FakeGitHub(files=dict(REPO))) as hub:
-        monkeypatch.setattr("mirage.accessor.github.API_BASE", hub.url)
-        monkeypatch.setattr(
-            "mirage.accessor.github.RAW_BASE", hub.url + "/raw"
-        )
-        got = await _run(
-            build_vfs("github", {"owner": "o", "repo": "r"}), line
-        )
+    await repo.create(dict(REPO))
+    _on_github_com(repo, monkeypatch)
+    got = await _run(
+        build_vfs("github", {"owner": repo.owner, "repo": repo.name}), line
+    )
     assert got == await _run(_ram(), line)
-    assert [hub.count(r) for r in ("search", "blob", "graphql")] == [0, 0, 0]
-    downloaded = {raw.split("/", 1)[1] for r, raw in hub.log if r == "raw"}
+    counts = [await repo.count(r) for r in ("search", "blob", "graphql")]
+    assert counts == [0, 0, 0]
+    log = await repo.log()
+    downloaded = {raw.split("/", 1)[1] for r, raw in log if r == "raw"}
     assert downloaded == set(REPO)
 
 
@@ -744,47 +736,38 @@ async def test_an_anonymous_mount_scans_instead_of_searching(monkeypatch):
     ids=["root", "subdir", "nested"],
 )
 async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
-    prefix, scope, count, monkeypatch
+    repo, prefix, scope, count
 ):
     # One under the refetched count: a count off the expired tree is
     # smaller, and would let the walk run.
-    files = {"docs/a.txt": b"a", "docs/b.txt": b"b", "top.txt": b"t"}
-    with serve(FakeGitHub(files=files)) as hub:
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "ref": "main",
-                "base_url": hub.url,
-            },
-        )
-        ws = Workspace(
-            {
-                prefix: Mount(
-                    vfs=vfs,
-                    mode=MountMode.READ,
-                    read=ReadSpec(ttl=600),
-                    command_limits={ALL_COMMANDS: Limit(walk_limit=count - 1)},
-                )
-            }
-        )
-        try:
-            assert (await ws.shell(f"ls {prefix}/docs")).exit_code == 0
-            hub.files["docs/c.txt"] = b"c"
-            hub.files["new/d.txt"] = b"d"
-            await ws._registry.mount_for(prefix).index.invalidate()
-            hub.log.clear()
-            target = f"{prefix}{scope}"
-            result = await ws.shell(f"diff -r {target} {target}")
-            assert (
-                result.stderr
-                == (
-                    f"diff: more than {count - 1} files in scope "
-                    "(walk_limit); narrow the path\n"
-                ).encode()
+    await repo.create(
+        {"docs/a.txt": b"a", "docs/b.txt": b"b", "top.txt": b"t"}
+    )
+    vfs = build_vfs("github", _config(repo, ref="main"))
+    ws = Workspace(
+        {
+            prefix: Mount(
+                vfs=vfs,
+                mode=MountMode.READ,
+                read=ReadSpec(ttl=600),
+                command_limits={ALL_COMMANDS: Limit(walk_limit=count - 1)},
             )
-            assert hub.counts() == (0, 1, 0)
-        finally:
-            await ws.close()
+        }
+    )
+    try:
+        assert (await ws.shell(f"ls {prefix}/docs")).exit_code == 0
+        await repo.commit({"docs/c.txt": b"c", "new/d.txt": b"d"})
+        await ws._registry.mount_for(prefix).index.invalidate()
+        await repo.run.record_requests()
+        target = f"{prefix}{scope}"
+        result = await ws.shell(f"diff -r {target} {target}")
+        assert (
+            result.stderr
+            == (
+                f"diff: more than {count - 1} files in scope "
+                "(walk_limit); narrow the path\n"
+            ).encode()
+        )
+        assert await repo.counts() == (0, 1, 0)
+    finally:
+        await ws.close()

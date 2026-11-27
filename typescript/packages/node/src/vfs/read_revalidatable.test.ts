@@ -93,7 +93,11 @@ import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
 import type { KitRun } from '../../../core/tests/fixtures/kit_fake.ts'
 import { BoxAccount, TOKEN as BOX_TOKEN } from '../../tests/vfs/fixtures/box.ts'
 import { DropboxAccount, TOKEN as DROPBOX_TOKEN } from '../../tests/vfs/fixtures/dropbox.ts'
-import { InlineGitHub, blobSha } from '../../tests/vfs/fixtures/github.ts'
+import {
+  GitHubRepo,
+  TOKEN as GITHUB_TOKEN,
+  blobSha,
+} from '../../../core/tests/fixtures/github_repo.ts'
 
 interface GDriveItem {
   id: string
@@ -925,23 +929,20 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     // Octokit rewrites when the point request goes unencoded; the python twin
     // keeps the same key.
     const key = shape === 'nested' ? 'docs/a.txt' : 'a.txt'
-    const gh = new InlineGitHub()
-    gh.files.set(key, data)
-    gh.files.set('other.txt', DECOY)
-    vi.stubGlobal('fetch', gh.fetch)
+    const repo = new GitHubRepo(await serve('github'))
+    runs.push(repo.run)
+    await repo.create({ [key]: data, 'other.txt': DECOY })
     const vfs = await buildVfs('github', {
-      token: 't',
-      owner: 'o',
-      repo: 'r',
+      token: GITHUB_TOKEN,
+      owner: repo.owner,
+      repo: repo.name,
       ref: 'main',
-      base_url: gh.url,
+      base_url: repo.run.url,
     })
     const ghVfs = vfs as GitHubVFS
     const accessor = ghVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
     watchWalks(vfs)
-    const blobs = (): number => gh.log.filter((r) => r === 'blob').length
-    const before = blobs()
     // The tree's rows carry each blob sha, so each direct call is handed the
     // row its parent's listing names, as the mount hands it.
     const handed = async (p: PathSpec): Promise<Handed> => ({
@@ -951,9 +952,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       vfs,
       accessor,
       key,
-      fetches: () => blobs() - before,
-      rewrite: (next) => {
-        gh.files.set(key, next)
+      fetches: () => repo.count('blob'),
+      rewrite: async (next) => {
+        await repo.commit({ [key]: next })
       },
       readBytes: async (p) => bytesOf(ghVfs.read(p, await handed(p))),
       readStream: async function* (p) {

@@ -32,9 +32,10 @@ from mirage.vfs.registry import REGISTRY, build_vfs, known_vfs_names
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from mirage.workspace.reconcile import Reconciler
-from tests.fixtures.github_api import FakeGitHub, serve
+from tests.core.github.conftest import TOKEN, GitHubRepo
 from tests.fixtures.hf_hub_api import FakeHub
 from tests.fixtures.hf_hub_api import serve as serve_hub
+from tests.fixtures.kit_fake import LoopThread
 
 disk_readdir = importlib.import_module("mirage.core.disk.readdir")
 
@@ -63,44 +64,71 @@ class Harness:
     checks: int = 1
 
 
+async def _made(origin: str) -> GitHubRepo:
+    """A repository made on the running loop, which its session belongs to."""
+    return GitHubRepo(origin)
+
+
+async def _checks_and_refills(repo: GitHubRepo) -> tuple[int, int]:
+    return (await repo.count("dir"), await repo.count("recursive"))
+
+
 @asynccontextmanager
-async def _github() -> AsyncIterator[Harness]:
-    hub = FakeGitHub(files={"docs/sub/a.txt": b"a\n", "top.txt": b"t\n"})
-    with serve(hub):
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "ref": "main",
-                "base_url": hub.url,
-            },
-        )
-        ws = Workspace(
-            {
-                "/m": Mount(
-                    vfs=vfs,
-                    mode=MountMode.READ,
-                    read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
-                )
-            }
-        )
+async def _github(request: pytest.FixtureRequest) -> AsyncIterator[Harness]:
+    # The repository runs on a loop of its own, so the harness's
+    # synchronous counts and change can wait on the fake.
+    origin = request.getfixturevalue("github_origin")
+    thread = LoopThread()
+    try:
+        repo = thread.run(_made(origin))
         try:
-            yield Harness(
-                ws=ws,
-                key="/m",
-                nested="/m/docs/sub",
-                counts=lambda: (hub.count("dir"), hub.count("recursive")),
-                change=lambda: hub.files.__setitem__("docs/new.txt", b"n\n"),
+            thread.run(
+                repo.create({"docs/sub/a.txt": b"a\n", "top.txt": b"t\n"})
             )
+            vfs = build_vfs(
+                "github",
+                {
+                    "token": TOKEN,
+                    "owner": repo.owner,
+                    "repo": repo.name,
+                    "ref": "main",
+                    "base_url": repo.run.url,
+                },
+            )
+            ws = Workspace(
+                {
+                    "/m": Mount(
+                        vfs=vfs,
+                        mode=MountMode.READ,
+                        read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
+                    )
+                }
+            )
+            try:
+                yield Harness(
+                    ws=ws,
+                    key="/m",
+                    nested="/m/docs/sub",
+                    counts=lambda: thread.run(_checks_and_refills(repo)),
+                    change=lambda: thread.run(
+                        repo.commit({"docs/new.txt": b"n\n"})
+                    ),
+                )
+            finally:
+                await ws.close()
         finally:
-            await ws.close()
+            thread.run(repo.run.close())
+    finally:
+        thread.close()
 
 
-def _hf(name: str, segment: str) -> Callable[[], AsyncIterator[Harness]]:
+def _hf(
+    name: str, segment: str
+) -> Callable[[pytest.FixtureRequest], AsyncIterator[Harness]]:
     @asynccontextmanager
-    async def harness() -> AsyncIterator[Harness]:
+    async def harness(
+        request: pytest.FixtureRequest,
+    ) -> AsyncIterator[Harness]:
         repo = (segment, "acme/widget")
         hub = FakeHub(
             repos={repo: {"docs/sub/a.txt": b"a\n", "top.txt": b"t\n"}}
@@ -135,7 +163,7 @@ def _hf(name: str, segment: str) -> Callable[[], AsyncIterator[Harness]]:
 
 
 @asynccontextmanager
-async def _disk() -> AsyncIterator[Harness]:
+async def _disk(request: pytest.FixtureRequest) -> AsyncIterator[Harness]:
     with (
         tempfile.TemporaryDirectory() as tmp,
         pytest.MonkeyPatch.context() as mp,
@@ -208,7 +236,9 @@ async def _disk() -> AsyncIterator[Harness]:
 # A declarer gets a harness proving that its check and its fill agree, so
 # the gate's stat and the stored version are one kind of token. Each
 # declaring backend adds its row with its declaration.
-HARNESSES: dict[str, Callable[[], AsyncIterator[Harness]]] = {
+HARNESSES: dict[
+    str, Callable[[pytest.FixtureRequest], AsyncIterator[Harness]]
+] = {
     "github": _github,
     "hf_models": _hf("hf_models", "models"),
     "hf_datasets": _hf("hf_datasets", "datasets"),
@@ -256,8 +286,8 @@ async def _shell(ws: Workspace, line: str) -> None:
     assert (result.exit_code, await result.stderr_str()) == (0, ""), line
 
 
-async def _check_contract(name: str) -> None:
-    async with HARNESSES[name]() as harness:
+async def _check_contract(name: str, request: pytest.FixtureRequest) -> None:
+    async with HARNESSES[name](request) as harness:
         ws = harness.ws
         mount = ws.mount(harness.key)
         await _shell(ws, f"ls {harness.key} {harness.nested}")
@@ -286,8 +316,8 @@ async def _check_contract(name: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", sorted(HARNESSES))
-async def test_a_declarers_check_answers_what_its_fill_stored(name):
-    await _check_contract(name)
+async def test_a_declarers_check_answers_what_its_fill_stored(name, request):
+    await _check_contract(name, request)
 
 
 def test_turning_folder_versions_off_leaves_the_declaration(tmp_path):

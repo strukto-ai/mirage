@@ -12,12 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { IndexView } from '../../cache/index/view.ts'
-import { FakeGitHub } from '../../../tests/core/github/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GitHubRepo, TOKEN, TREES } from '../../../tests/core/github/repo.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { RAMVFS } from '../ram/ram.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -28,28 +29,36 @@ const DEC = new TextDecoder()
 const OLD_LS = 'a.txt\nb.txt\n'
 const NEW_LS = 'a.txt\nb.txt\nc.txt\n'
 const T0 = Date.UTC(2026, 0, 1) / 1000
+const DOCS = { 'docs/a.txt': 'alpha\n', 'docs/b.txt': 'bravo\n', 'top.txt': 'top\n' }
+const THREE = Object.fromEntries(
+  ['d1', 'd2', 'd3'].flatMap((d) => ['a', 'b', 'c'].map((n) => [`${d}/${n}.txt`, 'x\n'])),
+)
 
-let gh: FakeGitHub
+let origin: string
+let repo: GitHubRepo
+
+beforeAll(async () => {
+  origin = await serve('github')
+})
 
 beforeEach(() => {
-  gh = new FakeGitHub({ 'docs/a.txt': 'alpha\n', 'docs/b.txt': 'bravo\n', 'top.txt': 'top\n' })
-  vi.stubGlobal('fetch', gh.fetch)
+  repo = new GitHubRepo(origin)
 })
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
-  vi.unstubAllGlobals()
+  await repo.run.close()
 })
 
-async function vfsOf(): Promise<GitHubVFS> {
+async function vfsOf(on: GitHubRepo = repo): Promise<GitHubVFS> {
   const vfs = await GitHubVFS.create({
-    token: 't',
-    owner: 'o',
-    repo: 'r',
+    token: TOKEN,
+    owner: on.owner,
+    repo: on.name,
     ref: 'main',
-    baseUrl: gh.url,
+    baseUrl: on.run.url,
   })
-  gh.log.length = 0
+  await on.run.recordRequests()
   return vfs
 }
 
@@ -97,8 +106,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-function delta(before: [number, number, number]): [number, number, number] {
-  const now = gh.counts()
+async function delta(before: [number, number, number]): Promise<[number, number, number]> {
+  const now = await repo.counts()
   return [now[0] - before[0], now[1] - before[1], now[2] - before[2]]
 }
 
@@ -130,14 +139,15 @@ function gateRefill(): { wiped: Promise<void>; release: () => void } {
 
 describe('github listings under a shared view', () => {
   it('refills once for seven sessions after an expiry', async () => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       const ids = sessions(w, 7)
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await indexOf(w, '/gh').invalidate()
-      const before = gh.counts()
+      const before = await repo.counts()
       const outputs = await Promise.all(ids.map((id) => out(w, 'ls /gh/docs', id)))
-      expect(delta(before)).toEqual([0, 1, 0])
+      expect(await delta(before)).toEqual([0, 1, 0])
       expect(outputs).toEqual(ids.map(() => OLD_LS))
     } finally {
       await w.close()
@@ -145,6 +155,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('waits on a refill in progress instead of duplicating it', async () => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     let first: Promise<string> | undefined
     let second: Promise<string> | undefined
@@ -154,14 +165,14 @@ describe('github listings under a shared view', () => {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await indexOf(w, '/gh').invalidate()
       gate = gateRefill()
-      const before = gh.counts()
+      const before = await repo.counts()
       first = out(w, 'ls /gh/docs', s0)
       expect(await settleWithin(gate.wiped, 2000)).toBe('done')
       second = out(w, 'ls /gh/docs', s1)
       const early = await settleWithin(second, 20)
       gate.release()
       expect(await Promise.all([first, second])).toEqual([OLD_LS, OLD_LS])
-      expect(delta(before)).toEqual([0, 1, 0])
+      expect(await delta(before)).toEqual([0, 1, 0])
       expect(early).toBe('pending')
     } finally {
       gate?.release()
@@ -171,6 +182,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('has a glob wait on a refill in progress as a listing does', async () => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     let first: Promise<string> | undefined
     let glob: Promise<string> | undefined
@@ -180,7 +192,7 @@ describe('github listings under a shared view', () => {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await indexOf(w, '/gh').invalidate()
       gate = gateRefill()
-      const before = gh.counts()
+      const before = await repo.counts()
       first = out(w, 'ls /gh/docs', s0)
       expect(await settleWithin(gate.wiped, 2000)).toBe('done')
       glob = out(w, 'echo /gh/docs/*', s1)
@@ -191,7 +203,7 @@ describe('github listings under a shared view', () => {
       // The glob lists through the dispatcher, so it waits on the refill the
       // first ls holds and answers from what that one kept.
       expect(early).toBe('pending')
-      expect(delta(before)).toEqual([0, 1, 0])
+      expect(await delta(before)).toEqual([0, 1, 0])
     } finally {
       gate?.release()
       await Promise.allSettled([first, glob])
@@ -200,6 +212,7 @@ describe('github listings under a shared view', () => {
   })
 
   it('never deadlocks mixed commands after an expiry', async () => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       const ids = sessions(w, 3)
@@ -276,15 +289,16 @@ describe('github tree walks after the listing expires', () => {
     ['subdirectory operand', SUBDIR],
   ] as const) {
     it.each(rows)(`${kind}: %s sees a remote add with one refill`, async (line, prefix, want) => {
+      await repo.create(DOCS)
       const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 }, prefix)
       try {
         expect(await out(w, `ls ${prefix}/docs`)).toBe(OLD_LS)
-        gh.set('docs/c.txt', 'charlie\n')
+        await repo.commit({ 'docs/c.txt': 'charlie\n' })
         await indexOf(w, prefix).invalidate()
-        const before = gh.counts()
+        const before = await repo.counts()
         expect(await out(w, line)).toContain(want)
         expect(await out(w, `ls ${prefix}`)).toBe('docs\ntop.txt\n')
-        expect(delta(before)).toEqual([0, 1, 0])
+        expect(await delta(before)).toEqual([0, 1, 0])
       } finally {
         await w.close()
       }
@@ -292,13 +306,14 @@ describe('github tree walks after the listing expires', () => {
   }
 
   it('never refills a truncated tree in a loop', async () => {
-    gh.truncatedRecursive = true
+    await repo.create(DOCS)
+    await repo.truncate()
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       await w.shell('find /gh -name a.txt')
-      const walks = gh.count('recursive')
+      const walks = await repo.count('recursive')
       await w.shell('find /gh -name a.txt')
-      expect(gh.count('recursive')).toBe(walks)
+      expect(await repo.count('recursive')).toBe(walks)
     } finally {
       await w.close()
     }
@@ -311,14 +326,18 @@ describe('github listings respect the mount ttl', () => {
     it.each(FIRST)(
       `${policy}: a listing first filled by %s expires with the mount`,
       async (first) => {
-        const w = wsOf(await vfsOf(), { policy, ttl: 1 })
+        // The mount's clock moves only when told, so however long the commit
+        // takes, the cached listing is still inside its ttl when it is read.
+        const clock = new ManualClock(T0)
+        await repo.create(DOCS)
+        const w = wsOf(await vfsOf(), { policy, ttl: 1 }, '/gh', clock)
         try {
           await out(w, first)
-          gh.set('docs/c.txt', 'charlie\n')
+          await repo.commit({ 'docs/c.txt': 'charlie\n' })
           // fresh checks the listing, so it sees the add at once; bounded
           // serves the cached one until the mount's ttl runs out.
           expect(await out(w, 'ls /gh/docs')).toBe(policy === ReadPolicy.BOUNDED ? OLD_LS : NEW_LS)
-          await sleep(1100)
+          clock.advance(1.1)
           expect(await out(w, 'ls /gh/docs')).toBe(NEW_LS)
         } finally {
           await w.close()
@@ -333,11 +352,11 @@ describe('github listings respect the mount ttl', () => {
     ['find /gh -name c.txt', '/gh/docs/c.txt\n'],
   ]
   it.each(PROBE)('the first command after the expiry, %s, sees the change', async (line, want) => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 1 })
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
-      gh.set('docs/c.txt', 'charlie\n')
-      gh.set('docs/a.txt', 'alpha, edited\n')
+      await repo.commit({ 'docs/c.txt': 'charlie\n', 'docs/a.txt': 'alpha, edited\n' })
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await sleep(1100)
       expect(await out(w, line)).toBe(want)
@@ -347,6 +366,7 @@ describe('github listings respect the mount ttl', () => {
   })
 
   it('bounds each mount of one repo by its own mount ttl', async () => {
+    await repo.create(DOCS)
     const w = new Workspace({
       '/a': new Mount(await vfsOf(), {
         mode: MountMode.READ,
@@ -360,7 +380,7 @@ describe('github listings respect the mount ttl', () => {
     try {
       expect(await out(w, 'ls /a/docs')).toBe(OLD_LS)
       expect(await out(w, 'ls /b/docs')).toBe(OLD_LS)
-      gh.set('docs/c.txt', 'charlie\n')
+      await repo.commit({ 'docs/c.txt': 'charlie\n' })
       await sleep(1100)
       expect(await out(w, 'ls /a/docs')).toBe(NEW_LS)
       expect(await out(w, 'ls /b/docs')).toBe(OLD_LS)
@@ -371,6 +391,7 @@ describe('github listings respect the mount ttl', () => {
 
   it('writes the listing a */ directory stat refills through the mount view', async () => {
     const clock = new ManualClock(T0)
+    await repo.create(DOCS)
     const vfs = await vfsOf()
     const w = wsOf(vfs, { policy: ReadPolicy.BOUNDED, ttl: 2 }, '/gh', clock)
     try {
@@ -382,7 +403,7 @@ describe('github listings respect the mount ttl', () => {
       })
       expect(await out(w, 'echo /gh/*/')).toBe('/gh/docs/\n')
       vi.restoreAllMocks()
-      gh.set('docs/c.txt', 'charlie\n')
+      await repo.commit({ 'docs/c.txt': 'charlie\n' })
       clock.advance(3)
       expect(await out(w, 'ls /gh/docs')).toBe(NEW_LS)
     } finally {
@@ -392,10 +413,11 @@ describe('github listings respect the mount ttl', () => {
 
   it('caps a mount with no ttl key at the default 600 s', async () => {
     const clock = new ManualClock(T0)
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), null, '/gh', clock)
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
-      gh.set('docs/c.txt', 'charlie\n')
+      await repo.commit({ 'docs/c.txt': 'charlie\n' })
       clock.advance(599)
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       clock.advance(2)
@@ -411,29 +433,21 @@ describe('github listings respect the mount ttl', () => {
 // answers locally, with no request at all.
 describe('an invalid walk after an expiry', () => {
   it.each(['du -s -a /gh', 'find /gh -maxdepth nope'])('%s fetches nothing', async (line) => {
+    await repo.create(DOCS)
     const w = wsOf(await vfsOf(), { policy: ReadPolicy.BOUNDED, ttl: 600 })
     try {
       expect(await out(w, 'ls /gh/docs')).toBe(OLD_LS)
       await indexOf(w, '/gh').invalidate()
-      const before = gh.counts()
+      const before = await repo.counts()
       const result = await w.shell(line)
       expect(result.exitCode).toBe(1)
       expect(DEC.decode(result.stderr)).not.toBe('')
-      expect(delta(before)).toEqual([0, 0, 0])
+      expect(await delta(before)).toEqual([0, 0, 0])
     } finally {
       await w.close()
     }
   })
 })
-
-function three(): void {
-  gh = new FakeGitHub(
-    Object.fromEntries(
-      ['d1', 'd2', 'd3'].flatMap((d) => ['a', 'b', 'c'].map((n) => [`${d}/${n}.txt`, 'x\n'])),
-    ),
-  )
-  vi.stubGlobal('fetch', gh.fetch)
-}
 
 function freshOf(vfs: GitHubVFS, clock?: ManualClock): Workspace {
   return new Workspace(
@@ -468,13 +482,13 @@ const FRESH_BUDGET: [string, [number, number, number]][] = [
 
 describe('a fresh mount re-lists once per command', () => {
   it.each(FRESH_BUDGET)('%s checks the version once', async (line, expected) => {
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
-      gh.log.length = 0
+      await repo.run.recordRequests()
       await out(w, line)
-      expect(gh.counts()).toEqual(expected)
+      expect(await repo.counts()).toEqual(expected)
     } finally {
       await w.close()
     }
@@ -483,112 +497,117 @@ describe('a fresh mount re-lists once per command', () => {
   // The task's own report: before, the second ls sent nothing and did not
   // show the file.
   it('sees a file added outside mirage on the next ls', async () => {
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf())
     try {
       expect(await out(w, 'ls /gh/d1')).toBe('a.txt\nb.txt\nc.txt\n')
-      gh.set('d1/new.txt', 'new\n')
-      gh.log.length = 0
+      await repo.commit({ 'd1/new.txt': 'new\n' })
+      await repo.run.recordRequests()
       expect(await out(w, 'ls /gh/d1')).toBe('a.txt\nb.txt\nc.txt\nnew.txt\n')
       // The check misses, then the tree is fetched once (Task 1.3).
-      expect(gh.counts()).toEqual([1, 1, 0])
+      expect(await repo.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
     }
   })
 
   // One line, two commands: a scope per line would serve the second ls the
-  // listing the first one fetched.
+  // listing the first one fetched. The first command's head check goes on
+  // once it has armed the add, which lands while the second command's check
+  // waits.
   it('lets each command of a loop see changes made before it', async () => {
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
-      gh.log.length = 0
-      gh.afterHead = () => {
-        if (!gh.files.has('d1/new.txt')) gh.set('d1/new.txt', 'new\n')
-      }
+      await repo.run.recordRequests()
+      await repo.run.beforeNext(
+        [['GET', TREES]],
+        () =>
+          repo.run.beforeNext(
+            [['GET', TREES]],
+            () => repo.commit({ 'd1/new.txt': 'new\n' }),
+            undefined,
+            '',
+          ),
+        undefined,
+        '',
+      )
       const listed = await out(w, 'for i in 1 2; do ls /gh/d1; done')
       expect(listed.split('new.txt').length - 1).toBe(1)
       // Each command checks the head once; the add lands after the first
       // check, so only the second misses and walks (Task 1.3).
-      expect(gh.counts()).toEqual([2, 1, 0])
+      expect(await repo.counts()).toEqual([2, 1, 0])
     } finally {
       await w.close()
     }
   })
 
   it('keeps a bounded mount next to a fresh one serving', async () => {
-    three()
-    const freshHub = gh
-    three()
-    const boundedHub = gh
-    // Two repositories behind one stubbed fetch, told apart by host.
-    const BOUNDED = 'http://bounded.test'
-    const boundedOrigin = new URL(BOUNDED).origin
-    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
-      const requestUrl = new URL(new Request(input, init).url)
-      return requestUrl.origin === boundedOrigin
-        ? boundedHub.fetch(input, init)
-        : freshHub.fetch(input, init)
-    })
-    const create = (baseUrl: string): Promise<GitHubVFS> =>
-      GitHubVFS.create({ token: 't', owner: 'o', repo: 'r', ref: 'main', baseUrl })
-    const freshVfs = await create(freshHub.url)
-    const boundedVfs = await create(BOUNDED)
-    const w = new Workspace({
-      '/gh': new Mount(freshVfs, {
-        mode: MountMode.READ,
-        read: { policy: ReadPolicy.FRESH, ttl: 600 },
-      }),
-      '/gb': new Mount(boundedVfs, {
-        mode: MountMode.READ,
-        read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
-      }),
-    })
+    const bounded = new GitHubRepo(origin)
     try {
-      await out(w, 'ls /gh/d1 /gb/d1')
-      freshHub.log.length = 0
-      boundedHub.log.length = 0
-      await out(w, 'ls /gh/d1 /gb/d1')
-      // The version check replaces the tree refetch (Task 1.3).
-      expect(freshHub.counts()).toEqual([1, 0, 0])
-      expect(boundedHub.counts()).toEqual([0, 0, 0])
+      await repo.create(THREE)
+      await bounded.create(THREE)
+      const w = new Workspace({
+        '/gh': new Mount(await vfsOf(), {
+          mode: MountMode.READ,
+          read: { policy: ReadPolicy.FRESH, ttl: 600 },
+        }),
+        '/gb': new Mount(await vfsOf(bounded), {
+          mode: MountMode.READ,
+          read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
+        }),
+      })
+      try {
+        await out(w, 'ls /gh/d1 /gb/d1')
+        await repo.run.recordRequests()
+        await bounded.run.recordRequests()
+        await out(w, 'ls /gh/d1 /gb/d1')
+        // The version check replaces the tree refetch (Task 1.3).
+        expect(await repo.counts()).toEqual([1, 0, 0])
+        expect(await bounded.counts()).toEqual([0, 0, 0])
+      } finally {
+        await w.close()
+      }
     } finally {
-      await w.close()
+      await bounded.run.close()
     }
   })
 
   // Each session may send its own small check, since one sent before its
   // command began is not trusted; the walk they all miss is fetched once.
-  // The version check replaces the tree refetch (Task 1.3).
+  // The tree is held until no session's head check is still coming. The
+  // version check replaces the tree refetch (Task 1.3).
   it('shares one refetch across seven fresh sessions', async () => {
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf())
-    let release = (): void => undefined
     try {
       const ids = sessions(w, 7)
       await out(w, 'ls /gh')
-      gh.set('d1/new.txt', 'new\n')
-      gh.log.length = 0
-      gh.holdRecursive = new Promise<void>((resolve) => {
-        release = resolve
-      })
+      await repo.commit({ 'd1/new.txt': 'new\n' })
+      await repo.run.recordRequests()
+      await repo.run.beforeNext(
+        [['GET', TREES]],
+        async () => {
+          let seen = -1
+          for (let i = 0; i < 200; i += 1) {
+            await sleep(50)
+            const now = await repo.count('dir')
+            if (now === seen) return
+            seen = now
+          }
+        },
+        undefined,
+        'recursive=1',
+      )
       const reads = Promise.all(ids.map((id) => out(w, 'ls /gh/d1', id)))
-      let seen = -1
-      for (let i = 0; i < 200; i += 1) {
-        await sleep(50)
-        if (gh.count('recursive') > 0 && gh.count('dir') === seen) break
-        seen = gh.count('dir')
-      }
-      release()
-      expect(await settleWithin(reads, 10000)).toBe('done')
+      expect(await settleWithin(reads, 20000)).toBe('done')
       expect((await reads).every((listed) => listed.includes('new.txt'))).toBe(true)
-      expect(gh.count('recursive')).toBe(1)
-      expect(gh.count('dir')).toBeGreaterThanOrEqual(1)
-      expect(gh.count('dir')).toBeLessThanOrEqual(7)
+      expect(await repo.count('recursive')).toBe(1)
+      const checks = await repo.count('dir')
+      expect(checks).toBeGreaterThanOrEqual(1)
+      expect(checks).toBeLessThanOrEqual(7)
     } finally {
-      release()
       await w.close()
     }
   })
@@ -598,24 +617,24 @@ describe('a fresh mount re-lists once per command', () => {
   // call. Task 1.3 is what makes the refetch itself cheaper.
   it('trusts a listing for the window on an unscoped read', async () => {
     const clock = new ManualClock(100)
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf(), clock)
     try {
       await out(w, 'ls /gh')
-      gh.log.length = 0
+      await repo.run.recordRequests()
       expect(await w.vfs.readdir('/gh/d1')).toEqual([
         '/gh/d1/a.txt',
         '/gh/d1/b.txt',
         '/gh/d1/c.txt',
       ])
       await w.vfs.stat('/gh/d1/a.txt')
-      expect(gh.counts()).toEqual([0, 0, 0])
+      expect(await repo.counts()).toEqual([0, 0, 0])
       clock.advance(LISTING_TRUST_WINDOW)
       await w.vfs.readdir('/gh/d1')
       await w.vfs.stat('/gh/d1/a.txt')
       // One version check answers both calls inside the window; it replaces
       // the tree refetch (Task 1.3).
-      expect(gh.counts()).toEqual([1, 0, 0])
+      expect(await repo.counts()).toEqual([1, 0, 0])
     } finally {
       await w.close()
     }
@@ -633,12 +652,12 @@ describe('a truncated tree is walked folder by folder', () => {
   // A truncated tree is never refetched and names only the top level, so
   // walking it misses whole folders; the walk goes folder by folder.
   it.each(['find /gh', 'du -a /gh'])('%s sees every folder and an outside add', async (line) => {
-    three()
-    gh.truncatedRecursive = true
+    await repo.create(THREE)
+    await repo.truncate()
     const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
-      gh.set('d1/new.txt', 'new\n')
+      await repo.commit({ 'd1/new.txt': 'new\n' })
       const listed = await out(w, line)
       const printed = line.startsWith('du') ? duPaths(listed) : listed.split('\n')
       expect(printed).toContain('/gh/d2/b.txt')
@@ -649,8 +668,8 @@ describe('a truncated tree is walked folder by folder', () => {
   })
 
   it('honours find -maxdepth 1', async () => {
-    three()
-    gh.truncatedRecursive = true
+    await repo.create(THREE)
+    await repo.truncate()
     const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
@@ -670,13 +689,13 @@ describe('a truncated tree is walked folder by folder', () => {
   // stays on the tree with no per-folder listing, and an unchanged head
   // costs one check instead of a refetch (Task 1.3).
   it('keeps a complete tree walk on the tree', async () => {
-    three()
+    await repo.create(THREE)
     const w = freshOf(await vfsOf())
     try {
       await out(w, 'ls /gh')
-      gh.log.length = 0
+      await repo.run.recordRequests()
       await out(w, 'find /gh')
-      expect(gh.counts()).toEqual([1, 0, 0])
+      expect(await repo.counts()).toEqual([1, 0, 0])
     } finally {
       await w.close()
     }

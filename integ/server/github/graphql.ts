@@ -102,11 +102,14 @@ const SCHEMA = buildSchema(`
   type Owner { id: ID!, login: String! }
   type Count { totalCount: Int! }
   scalar GitTimestamp
+  scalar GitObjectID
   interface GitObject { oid: String! }
   type Ref { name: String!, prefix: String!, target: GitObject }
   type Tag implements GitObject { oid: String!, name: String!, message: String, target: GitObject! }
   type Tree implements GitObject { oid: String! }
-  type Blob implements GitObject { oid: String! }
+  type Blob implements GitObject {
+    oid: String!, byteSize: Int!, isBinary: Boolean, isTruncated: Boolean!, text: String
+  }
   type CodeOfConduct { key: String!, name: String!, url: String }
   type ContactLink { about: String!, name: String!, url: String! }
   type FundingLink { platform: String!, url: String! }
@@ -212,6 +215,7 @@ const SCHEMA = buildSchema(`
     projectsV2(first: Int, query: String): ProjectV2Connection!
     issueOrPullRequest(number: Int!): IssueOrPullRequest
     ref(qualifiedName: String!): Ref
+    object(oid: GitObjectID!): GitObject
   }
   union IssueOrPullRequest = Issue | PullRequest
   type Issue {
