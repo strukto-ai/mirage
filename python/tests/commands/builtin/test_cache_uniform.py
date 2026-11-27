@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.builtin.generic.grep import grep_generic
 from mirage.commands.config import Context
 from mirage.io.types import materialize
@@ -73,7 +74,7 @@ async def test_a_warm_read_command_reads_nothing_from_the_backend(line):
     # whatever reader the command binds.
     ram = RAMVFS()
     ram.caches_reads = True
-    ws = Workspace({"/c": ram}, mode=MountMode.WRITE)
+    ws = Workspace({"/c": ram}, mode=MountMode.WRITE, cache=CacheConfig())
     try:
         await ws.shell("printf 'alpha\\nbeta\\n' > /c/a.txt")
         await (await ws.shell("cat /c/a.txt")).stdout_str()
@@ -107,7 +108,7 @@ async def test_sized_commands_use_the_warm_bodys_length(line, expected, code):
     ram.caches_reads = True
     ram.accessor.store.files["/a"] = b"alpha\nbeta\n"
     ram.accessor.store.files["/b"] = b"Alpha\nBeta\n"
-    ws = Workspace({"/c": ram}, mode=MountMode.WRITE)
+    ws = Workspace({"/c": ram}, mode=MountMode.WRITE, cache=CacheConfig())
     try:
         await (await ws.shell("cat /c/a /c/b")).stdout_str()
         ram.accessor.store.files["/a"] = b"x"

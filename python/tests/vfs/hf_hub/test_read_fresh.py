@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.core.hf_hub.read import read
 from mirage.core.hf_hub.readdir import readdir
 from mirage.observe.context import RecordingScope
@@ -49,7 +50,8 @@ def _ws(vfs, policy: ReadPolicy = ReadPolicy.FRESH) -> Workspace:
                 vfs=vfs, mode=MountMode.READ, read=ReadSpec(policy=policy)
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        cache=CacheConfig(),
     )
 
 

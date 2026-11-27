@@ -35,7 +35,7 @@ from mirage import (
     PathSpec,
     Workspace,
 )
-from mirage.cache.file.config import RedisCacheConfig
+from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.errors.types import QuotaExceededError
 from mirage.execution.job.handle import JobHandle
@@ -953,7 +953,9 @@ async def test_apply_state_dict_runs_the_version_check_too(version):
 async def test_a_refused_checkout_keeps_the_cache_and_document_bindings():
     state = await _saved_state({"/d/": RAMVFS()})
     state[StateKey.VERSION] = 3
-    target = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    target = Workspace(
+        {"/d": RAMVFS()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await target.cache.set("/d/live", b"x")
         await target.vfs_md("/d/VFS.md")
@@ -1395,7 +1397,7 @@ async def track() -> AsyncIterator[Callable[[Workspace], Workspace]]:
 
 
 async def _saved_state(mounts: dict[str, VFSMount]) -> dict[str, Any]:
-    ws = Workspace(mounts, mode=MountMode.WRITE)
+    ws = Workspace(mounts, mode=MountMode.WRITE, cache=CacheConfig())
     try:
         return await to_state_dict(ws)
     finally:
@@ -1416,6 +1418,7 @@ async def test_the_write_policies_survive_each_entry_point(track, route):
             },
             mode=MountMode.WRITE,
             write="conditional",
+            cache=CacheConfig(),
         )
     )
     if route == "copy":
@@ -1486,7 +1489,9 @@ async def test_a_saved_write_policy_is_judged_at_load(level, value, message):
 @pytest.mark.asyncio
 async def test_a_version_kept_without_bytes_is_not_snapshotted(track):
     # It has no bytes to restore; captured, it would come back an empty file.
-    ws = track(Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE))
+    ws = track(
+        Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE, cache=CacheConfig())
+    )
     await ws._cache.set("/d/a", b"bytes", fingerprint="v1")
     await ws._cache.keep_fingerprints({"/d/b": "v2"})
     state = await to_state_dict(ws)
@@ -1501,6 +1506,7 @@ async def test_restored_cache_entry_ages_on_the_injected_clock(track):
             {"/": RAMVFS()},
             mode=MountMode.WRITE,
             clock=ManualClock(start=1000.0),
+            cache=CacheConfig(),
         )
     )
     await src._cache.set("/c.txt", b"cached", ttl=10)
@@ -1517,7 +1523,14 @@ async def test_restored_cache_entry_ages_on_the_injected_clock(track):
 @pytest.mark.asyncio
 async def test_copy_keeps_the_workspace_clock(track):
     clock = ManualClock(start=1000.0)
-    ws = track(Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, clock=clock))
+    ws = track(
+        Workspace(
+            {"/": RAMVFS()},
+            mode=MountMode.WRITE,
+            clock=clock,
+            cache=CacheConfig(),
+        )
+    )
     copied = track(await ws.copy())
     await copied._cache.set("/c.txt", b"cached", ttl=10)
     clock.advance(9)
@@ -1791,6 +1804,24 @@ async def test_an_override_brings_its_own_capacity():
     finally:
         await over.close()
         await free.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cache, limit",
+    [(None, 0), (CacheConfig(limit="1MB"), 1048576)],
+    ids=["none", "kept"],
+)
+async def test_a_rebuilt_workspace_keeps_the_cache_it_had(track, cache, limit):
+    # The saved limit rebuilds the cache, through a copy and a load alike:
+    # a workspace that had none keeps no file content, and one that had a
+    # cache keeps as much as it did.
+    ws = track(Workspace({"/d": RAMVFS()}, cache=cache))
+    state = await to_state_dict(ws)
+    loaded = track(await Workspace.from_state(state))
+    copied = track(await ws.copy())
+    assert loaded.cache.cache_limit == limit
+    assert copied.cache.cache_limit == limit
 
 
 @pytest.mark.asyncio

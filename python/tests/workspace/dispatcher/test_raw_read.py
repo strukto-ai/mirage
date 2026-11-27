@@ -17,6 +17,7 @@ from dataclasses import replace
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.types import FileStat, PathSpec, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
@@ -40,7 +41,9 @@ class _CachingRAM(RAMVFS):
 
 def _workspace(vfs: RAMVFS) -> Workspace:
     render(vfs, ".tally", _read_tally)
-    return Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    return Workspace(
+        {"/data/": vfs}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
 
 
 @pytest.mark.asyncio
@@ -198,6 +201,7 @@ def _fresh_rendering_workspace(vfs: RAMVFS) -> Workspace:
         {"/data/": render(vfs, ".tally", _read_tally)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.FRESH),
+        cache=CacheConfig(),
     )
 
 
@@ -210,7 +214,9 @@ async def test_a_user_renderer_read_of_a_remotely_deleted_path_fails_under_fresh
     vfs = _CachingRAM()
     ws = _fresh_rendering_workspace(vfs)
     await _seed(ws, "/data/books.tally")
-    other = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    other = Workspace(
+        {"/data/": vfs}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await other.vfs.unlink("/data/books.tally")
     with pytest.raises(FileNotFoundError):
         await ws.vfs.read("/data/books.tally")
@@ -236,7 +242,9 @@ async def test_a_user_renderer_still_renders_under_fresh():
 async def test_a_renderer_registered_mid_read_is_never_served_warm():
     # The renderer lands while the read waits on the cache; the entry it
     # finds is still the command's raw bytes, not this rendering.
-    ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": _CachingRAM()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await _seed(ws, "/data/books.tally")
     original = ws.cache.get_versioned
 

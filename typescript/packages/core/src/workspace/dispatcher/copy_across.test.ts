@@ -62,6 +62,7 @@ async function seeded(
   const ws = new Workspace(
     { '/a': a, '/b': new Mount(b, { mode }) },
     {
+      cache: {},
       mode: MountMode.WRITE,
       profiles: { hiding: SessionProfile({ paths: { hide: ['/b/g'] } }) },
     },

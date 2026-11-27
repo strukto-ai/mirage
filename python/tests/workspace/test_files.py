@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_caller, set_current_session
@@ -274,7 +275,9 @@ class TestFreshStat:
     async def test_fresh_stat_drops_a_cached_copy_it_cannot_vouch_for(self):
         vfs = RAMVFS()
         vfs.caches_reads = True
-        ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
+        ws = Workspace(
+            {"/data": vfs}, mode=MountMode.WRITE, cache=CacheConfig()
+        )
         try:
             await ws.vfs.write("/data/f.txt", b"old")
             assert await ws.vfs.read("/data/f.txt") == b"old"
@@ -341,7 +344,9 @@ class TestFreshStat:
     ):
         vfs = RAMVFS()
         vfs.caches_reads = True
-        ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
+        ws = Workspace(
+            {"/data": vfs}, mode=MountMode.WRITE, cache=CacheConfig()
+        )
         try:
             await ws.vfs.write("/data/f.txt", b"old")
             await ws.cache.remove("/data/f.txt")
@@ -426,7 +431,9 @@ class TestFreshStat:
         outer = _ListedRAM()
         outer.caches_reads = True
         ws = Workspace(
-            {"/data": outer, "/data/d/inner": RAMVFS()}, mode=MountMode.WRITE
+            {"/data": outer, "/data/d/inner": RAMVFS()},
+            mode=MountMode.WRITE,
+            cache=CacheConfig(),
         )
         try:
             await ws.vfs.mkdir("/data/d")

@@ -63,13 +63,16 @@ function vfsOf(graph: FakeGraph, scoped = true): Promise<BaseVFS> {
 }
 
 function ws(vfs: BaseVFS): Workspace {
-  return new Workspace({
-    '/m': new Mount(vfs, {
-      mode: MountMode.WRITE,
-      read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
-    }),
-    '/r': [new RAMVFS(), MountMode.WRITE],
-  })
+  return new Workspace(
+    {
+      '/m': new Mount(vfs, {
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
+      }),
+      '/r': [new RAMVFS(), MountMode.WRITE],
+    },
+    { cache: {} },
+  )
 }
 
 async function out(workspace: Workspace, command: string): Promise<string> {

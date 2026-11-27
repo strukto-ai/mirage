@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.types import PathSpec
 from mirage.vfs.oci import OCIVFS, OCIConfig
 
@@ -34,7 +35,7 @@ config = OCIConfig(
 )
 
 backend = OCIVFS(config)
-ws = Workspace({"/oci/": backend}, mode=MountMode.READ)
+ws = Workspace({"/oci/": backend}, mode=MountMode.READ, cache=CacheConfig())
 
 
 def ops_summary() -> str:

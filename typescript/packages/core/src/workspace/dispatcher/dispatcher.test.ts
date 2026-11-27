@@ -255,7 +255,7 @@ it.each([
   [2, null],
 ])('keeps what a streamed write sent within drain budget %s', async (budget, kept) => {
   const destination = new StreamWritingRAM()
-  const ws = new Workspace({ '/dst': destination }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/dst': destination }, { cache: {}, mode: MountMode.WRITE })
   ws.cache.maxDrainBytes = budget
   const tokens: (string | null)[] = []
   const original = destination.write.bind(destination)
@@ -1516,7 +1516,7 @@ describe('a cold read keeps its bytes for the next reader', () => {
     const fetched: string[] = []
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': vfs }, { cache: {}, mode: MountMode.WRITE })
     const read = async (
       path: PathSpec,
       _index?: IndexCacheStore,
@@ -2076,7 +2076,7 @@ async function pullAll(stream: unknown): Promise<string[]> {
 describe('a streamed read', () => {
   it('arrives as it is pulled and fills the cache', async () => {
     const tape = new Tape()
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/tape': tape }, { cache: {}, mode: MountMode.WRITE })
     try {
       const stream = await ws.dispatch('read', TAPE, [], { stream: true })
       expect(tape.pulled).toBe(1)
@@ -2151,7 +2151,7 @@ describe('a streamed read', () => {
 
   it('keeps none of itself when a write lands during it', async () => {
     const tape = new Tape()
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/tape': tape }, { cache: {}, mode: MountMode.WRITE })
     try {
       const stream = await ws.dispatch('read', TAPE, [], { stream: true })
       await ws.dispatch('write', TAPE, [ENC.encode('new')])
@@ -2165,7 +2165,7 @@ describe('a streamed read', () => {
 
   it('keeps nothing past the drain budget', async () => {
     const tape = new Tape()
-    const ws = new Workspace({ '/tape': tape }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/tape': tape }, { cache: {}, mode: MountMode.WRITE })
     try {
       ws.cache.maxDrainBytes = 20
       const stream = await ws.dispatch('read', TAPE, [], { stream: true })
@@ -2405,7 +2405,7 @@ describe('a stat with no size', () => {
     const vfs = new UnsizedRAM()
     vfs.store.dirs.add('/')
     vfs.store.files.set('/f', new TextEncoder().encode('hello\n'))
-    const ws = new Workspace({ '/api': vfs }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/api': vfs }, { cache: {}, mode: MountMode.WRITE })
     try {
       expect((await ws.vfs.stat('/api/f')).size).toBeNull()
       await ws.vfs.read('/api/f')
@@ -2647,7 +2647,7 @@ function standIns(): [StandInRAM, Workspace] {
   vfs.store.dirs.add('/')
   vfs.store.files.set('/cold', ENC.encode('a\n'))
   vfs.store.files.set('/warm', ENC.encode('b\n'))
-  return [vfs, new Workspace({ '/m': vfs })]
+  return [vfs, new Workspace({ '/m': vfs }, { cache: {} })]
 }
 
 describe('the cache stage', () => {
@@ -2698,7 +2698,7 @@ describe('a whole write keeps its bytes', () => {
     class Kept extends RAMVFS {
       override readonly cachesReads = true
     }
-    const ws = new Workspace({ '/r': new Kept() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/r': new Kept() }, { cache: {}, mode: MountMode.WRITE })
     try {
       const data = new TextEncoder().encode('sent')
       await ws.vfs.write('/r/f', data)
@@ -2920,7 +2920,7 @@ describe('a hide filters a one-call read', () => {
   // Twin of test_a_read_ahead_keeps_what_one_batch_answers.
   it('keeps what one read-ahead batch answers', async () => {
     const vfs = new BatchedRAM()
-    const ws = new Workspace({ '/r': vfs })
+    const ws = new Workspace({ '/r': vfs }, { cache: {} })
     const session = new SessionState({
       sessionId: 'agent',
       visibility: { paths: { paths: ['/r/secret'] } },
@@ -2943,7 +2943,7 @@ describe('a hide filters a one-call read', () => {
   it('reads ahead only the files listed small', async () => {
     const vfs = new BatchedRAM(false)
     vfs.store.files.set('/big', new Uint8Array(READ_AHEAD_BYTES + 1))
-    const ws = new Workspace({ '/r': vfs })
+    const ws = new Workspace({ '/r': vfs }, { cache: {} })
     try {
       await ws.mount('/r').index.setDir(
         '/r',
@@ -2968,7 +2968,7 @@ describe('a hide filters a one-call read', () => {
   it('skips cache probes for index-known directories', async () => {
     const vfs = new BatchedRAM()
     vfs.store.dirs.add('/empty')
-    const ws = new Workspace({ '/r': vfs })
+    const ws = new Workspace({ '/r': vfs }, { cache: {} })
     try {
       await ws.mount('/r').index.setDir('/r', [
         ['a', new FileStat({ name: 'a', type: FileType.FILE, size: 2 })],
@@ -2988,7 +2988,7 @@ describe('a hide filters a one-call read', () => {
 
   it('batches metadata lookups for warm read-ahead', async () => {
     const vfs = new BatchedRAM()
-    const ws = new Workspace({ '/r': vfs })
+    const ws = new Workspace({ '/r': vfs }, { cache: {} })
     try {
       await ws.dispatch('read_many', '/r/a', [], { paths: [PathSpec.fromStrPath('/r/b')] })
       const lookup = vi.spyOn(ws.mount('/r').index, 'getMany')
@@ -3230,7 +3230,7 @@ describe('a hide filters a one-call read', () => {
   it('holds no file the read cache answers', async () => {
     const vfs = new HeldRAM(false)
     Object.assign(vfs, { cachesReads: true })
-    const ws = new Workspace({ '/r': vfs })
+    const ws = new Workspace({ '/r': vfs }, { cache: {} })
     try {
       const batch = (await ws.dispatch('read_many', '/r/a', [], {
         paths: [spec('/r/b')],

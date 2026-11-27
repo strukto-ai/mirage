@@ -18,6 +18,7 @@ from contextlib import contextmanager
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.io.stream import yield_bytes
 from mirage.runtime.python.monty import MontyRuntime
 from mirage.types import MountMode, ReadPolicy, ReadSpec
@@ -63,6 +64,7 @@ def _workspace(
             mode=mode,
             read=read,
             machines=[MontyRuntime()],
+            cache=CacheConfig(),
         )
         yield ws, session._client
 

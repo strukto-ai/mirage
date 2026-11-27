@@ -592,6 +592,15 @@ export class MountEntry {
     return pipeBelow(accessor, norm('/' + mountKey(path, rstripSlash(this.prefix))))
   }
 
+  /**
+   * Whether the workspace's file cache keeps this mount's reads: its backend
+   * caches them and the workspace has a cache that keeps anything, which it
+   * has only where its options ask for one.
+   */
+  get cachesReads(): boolean {
+    return this.cacheManager?.cachesReads ?? false
+  }
+
   /** Metadata access bound to this mount's ownership. */
   get index(): IndexCacheStore {
     return this.cacheManager?.scopeIndex() ?? this.indexStore

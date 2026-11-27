@@ -567,6 +567,10 @@ export function buildMountArgs(
     maxBodyBytes: state.max_body_bytes ?? MAX_BODY_BYTES,
     network: state.network ?? true,
     systemTime: state.system_time ?? null,
+    cache:
+      state.cache.limit > 0
+        ? { limit: state.cache.limit, maxDrainBytes: state.cache.max_drain_bytes }
+        : null,
   }
 }
 

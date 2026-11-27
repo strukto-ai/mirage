@@ -18,9 +18,22 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index.config import RedisIndexConfig
 from mirage.utils.clock import ManualClock
 from mirage.workspace.workspace.cache import build_file_cache
+
+
+def test_no_config_builds_a_cache_that_keeps_nothing():
+    cache = build_file_cache(None)
+    assert isinstance(cache, RAMFileCacheStore)
+    assert cache.cache_limit == 0
+
+
+def test_a_config_naming_no_limit_keeps_32mb_in_ram():
+    cache = build_file_cache(CacheConfig())
+    assert isinstance(cache, RAMFileCacheStore)
+    assert cache.cache_limit == 32 * 1024 * 1024
 
 
 @pytest.mark.asyncio

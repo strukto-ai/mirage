@@ -435,7 +435,9 @@ class MountRegistry:
             self._file_cache,
             m.index_store,
             m.prefix,
-            m.vfs.caches_reads,
+            m.vfs.caches_reads
+            and self._file_cache is not None
+            and self._file_cache.cache_limit > 0,
             lambda path: not m.retiring and self.try_mount_for(path) is m,
             read_ttl=m.read.ttl,
             conditional=m.write is WritePolicy.CONDITIONAL,
@@ -1197,8 +1199,7 @@ class MountRegistry:
                 workspace_limits=self.command_limits,
                 calls=m.calls,
                 keeps_listings=m.index_store.ttl > 0,
-                keeps_bodies=self._file_cache is not None
-                and m.vfs.caches_reads
+                keeps_bodies=m.caches_reads
                 and m.read.policy is ReadPolicy.BOUNDED,
             )
             for m in self._mounts

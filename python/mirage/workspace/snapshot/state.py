@@ -22,6 +22,7 @@ from typing import Any, Protocol, cast, get_args
 
 from pydantic import BaseModel
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -678,6 +679,7 @@ def build_mount_args(
                 e[CLIKey.CONFIG],
             )
 
+    saved_cache = state.get(StateKey.CACHE) or {}
     saved_default = state.get(StateKey.WRITE)
     if saved_default is None or saved_default == "":
         raise WritePolicyError(
@@ -710,6 +712,14 @@ def build_mount_args(
         max_body_bytes=state.get(StateKey.MAX_BODY_BYTES, MAX_BODY_BYTES),
         network=state.get(StateKey.NETWORK, True),
         system_time=state.get(StateKey.SYSTEM_TIME),
+        cache=(
+            CacheConfig(
+                limit=saved_cache[CacheKey.LIMIT],
+                max_drain_bytes=saved_cache.get(CacheKey.MAX_DRAIN_BYTES),
+            )
+            if saved_cache.get(CacheKey.LIMIT)
+            else None
+        ),
     )
 
 

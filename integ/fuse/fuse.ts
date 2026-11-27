@@ -79,9 +79,12 @@ async function runSizelessProbe(
   const api = new SizelessRAM()
   api.store.dirs.add('/')
   api.store.files.set('/api.json', enc.encode(API_CONTENT))
-  const ws = new Workspace({
-    '/api': new Mount(api, { mode: MountMode.READ }),
-  })
+  const ws = new Workspace(
+    {
+      '/api': new Mount(api, { mode: MountMode.READ }),
+    },
+    { cache: {} },
+  )
   const handle = await fuseMount(ws)
   const apiFile = join(handle.mountpoint, 'api', 'api.json')
   try {

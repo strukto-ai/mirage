@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -49,7 +50,8 @@ def _ws(vfs) -> Workspace:
                 read=ReadSpec(policy=ReadPolicy.FRESH),
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        cache=CacheConfig(),
     )
 
 

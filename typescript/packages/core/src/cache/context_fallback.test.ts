@@ -664,7 +664,10 @@ async function conditionalReads(
   manager: CacheManager
   dispatcher: Dispatcher
 }> {
-  const ws = new Workspace({ '/data': new ConditionalReadRAM() }, { mode: MountMode.WRITE, write })
+  const ws = new Workspace(
+    { '/data': new ConditionalReadRAM() },
+    { cache: {}, mode: MountMode.WRITE, write },
+  )
   await ws.namespace.ensureLoaded()
   const mount = ws.namespace.mountFor('/data/f')
   await mount.ensureReady()

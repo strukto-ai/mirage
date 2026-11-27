@@ -609,8 +609,11 @@ async function main(): Promise<void> {
     mounts['/redis'] = new RedisVFS({ url: redisUrl, keyPrefix: prefix })
   }
 
+  // The cache checks serve warm bytes, which a workspace keeps only when its
+  // options ask for a cache.
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
+    cache: {},
     profiles: { 'integ-agent': SessionProfile({}) },
     profile: 'integ-agent',
   })

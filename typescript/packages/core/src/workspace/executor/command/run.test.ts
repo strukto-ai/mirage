@@ -33,12 +33,7 @@ function warmWorkspace(): [Workspace, RAMVFS, RAMVFS] {
   // warm; forcing it on RAM reproduces that without a network backend.
   ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
   ;(other as unknown as { cachesReads: boolean }).cachesReads = true
-  const ws = new Workspace(
-    { '/r': ram, '/o': other },
-    {
-      mode: MountMode.WRITE,
-    },
-  )
+  const ws = new Workspace({ '/r': ram, '/o': other }, { cache: {}, mode: MountMode.WRITE })
   return [ws, ram, other]
 }
 

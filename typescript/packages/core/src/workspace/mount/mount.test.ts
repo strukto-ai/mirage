@@ -913,7 +913,7 @@ describe('a user write past the dispatcher', () => {
         ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
         vfs.store.files.set(key, ENC.encode('v1\n'))
       }
-      const ws = new Workspace({ '/one/': one, '/two/': two }, { mode: MountMode.WRITE })
+      const ws = new Workspace({ '/one/': one, '/two/': two }, { cache: {}, mode: MountMode.WRITE })
       try {
         ws.mount('/one/').registerCommands([
           new Command({

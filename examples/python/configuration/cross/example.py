@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.vfs.discord import DiscordConfig, DiscordVFS
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.vfs.gmail import GmailConfig, GmailVFS
@@ -91,6 +92,7 @@ async def main():
             "/discord": discord,
         },
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
     )
 
     # gdrive needs `ls` of the parent folder first so the index has

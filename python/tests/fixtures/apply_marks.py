@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+from mirage.cache.file.config import CacheConfig
 from mirage.observe.record import OpRecord
 from mirage.types import CacheFacts, MountMode
 from mirage.vfs.ram import RAMVFS
@@ -12,7 +13,7 @@ def caching_ram_workspace() -> Workspace:
     """A writable workspace with a read-caching RAM mount at ``/r``."""
     ram = RAMVFS()
     ram.caches_reads = True
-    return Workspace({"/r": ram}, mode=MountMode.WRITE)
+    return Workspace({"/r": ram}, mode=MountMode.WRITE, cache=CacheConfig())
 
 
 def capture_marks(ws: Workspace) -> list[tuple[list[Mark], bool]]:

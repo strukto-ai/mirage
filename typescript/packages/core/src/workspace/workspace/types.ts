@@ -117,11 +117,12 @@ export interface WorkspaceOptions {
   systemTime?: string | null
   /**
    * The workspace's byte cache, described the way `index` is: the
-   * config to build one from. A store core cannot build reaches
-   * `buildFileCache` by registering a factory for its `type`
-   * (`registerFileCacheStore`), the seam node's redis store already
-   * uses — so the workspace always builds this cache, and always
-   * closes it.
+   * config to build one from. Unset, the workspace keeps no file
+   * content and every read asks the backend; `{}` keeps up to 32MB in
+   * memory. A store core cannot build reaches `buildFileCache` by
+   * registering a factory for its `type` (`registerFileCacheStore`),
+   * the seam node's redis store already uses — so the workspace always
+   * builds this cache, and always closes it.
    */
   cache?: CacheConfig | RedisCacheConfig
   index?: IndexConfig | RedisIndexConfig

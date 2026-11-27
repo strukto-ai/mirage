@@ -20,6 +20,7 @@ import uuid
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.execution.job import JobHandle, JobState
 from mirage.shell.console import (
     Channel,
@@ -114,7 +115,11 @@ def test_shallow_copy_error_mentions_alternatives():
 
 
 def test_save_load_preserves_max_drain_bytes(tmp_path):
-    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    src = Workspace(
+        {"/m": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        cache=CacheConfig(),
+    )
     src.max_drain_bytes = 1234
 
     snap = tmp_path / "ws.tar"
@@ -228,7 +233,11 @@ def test_copy_shares_redis_backend():
 
 
 def test_copy_independence_of_cache():
-    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    src = Workspace(
+        {"/m": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        cache=CacheConfig(),
+    )
     asyncio.run(src._cache.set("/m/a.txt", b"src-cached"))
 
     cp = asyncio.run(src.copy())

@@ -19,6 +19,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -2416,6 +2417,7 @@ async def _warm_ws(warm: bool) -> tuple[Workspace, RAMVFS]:
         {"/data/": (ram, MountMode.WRITE)},
         mode=MountMode.WRITE,
         profiles={"limited": WARM_DOC},
+        cache=CacheConfig(),
     )
     ws.create_session("g", profile="limited")
     await ws.shell(

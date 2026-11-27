@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from mirage.accessor.notion import NotionAccessor
+from mirage.cache.file.config import CacheConfig
 from mirage.core.api.errors import PaginationStalledError
 from mirage.core.notion import pages as pages_mod
 from mirage.core.notion.client import NotionAPIError
@@ -233,7 +234,7 @@ async def test_shell_early_reads_do_not_cache_partial_files(
     replies, path, command
 ):
     vfs = NotionVFS(NotionConfig(api_key="key"))
-    ws = Workspace({"/notion": vfs})
+    ws = Workspace({"/notion": vfs}, cache=CacheConfig())
     await index_for(
         path, next(mount for mount in ws.mounts() if mount.vfs is vfs).index
     )

@@ -267,11 +267,24 @@ describe('the write policy at the workspace entry points', () => {
   })
 
   it.each([
-    ['names', {}, s3Vfs, 'conditional', WritePolicy.CONDITIONAL],
+    ['names', { cache: {} }, s3Vfs, 'conditional', WritePolicy.CONDITIONAL],
     ['cannot honour', {}, () => new RAMVFS(), 'conditional', 'ram does not'],
-    ['inherits', { write: WritePolicy.CONDITIONAL }, s3Vfs, undefined, WritePolicy.CONDITIONAL],
-    ['inherits on null', { write: WritePolicy.CONDITIONAL }, s3Vfs, null, WritePolicy.CONDITIONAL],
+    [
+      'inherits',
+      { write: WritePolicy.CONDITIONAL, cache: {} },
+      s3Vfs,
+      undefined,
+      WritePolicy.CONDITIONAL,
+    ],
+    [
+      'inherits on null',
+      { write: WritePolicy.CONDITIONAL, cache: {} },
+      s3Vfs,
+      null,
+      WritePolicy.CONDITIONAL,
+    ],
     ['keeps nothing', { cache: { limit: 0 } }, s3Vfs, 'conditional', 'caches reads'],
+    ['no cache', {}, s3Vfs, 'conditional', 'caches reads'],
   ] as const)(
     'judges an added mount on its write policy: %s',
     (_name, options, vfs, write, expected) => {
@@ -285,7 +298,10 @@ describe('the write policy at the workspace entry points', () => {
 
   it('keeps the host-built mounts unconditional under a conditional default', async () => {
     const ws = track(
-      new Workspace({ '/s3': s3Vfs() }, { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL }),
+      new Workspace(
+        { '/s3': s3Vfs() },
+        { cache: {}, mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
+      ),
     )
     expect(ws.mount('/s3/').write).toBe(WritePolicy.CONDITIONAL)
     for (const prefix of ['/dev/', '/', '/.bash_history/', '/usr/bin/']) {

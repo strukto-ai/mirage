@@ -92,7 +92,7 @@ function underM(records: readonly OpRecord[]): [string, string][] {
 }
 
 async function ops(vfs: BaseVFS, setup: string | null): Promise<[string, string][]> {
-  const ws = new Workspace({ '/m': vfs, '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/m': vfs, '/r': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE })
   try {
     if (setup !== null) expect((await ws.shell(setup)).exitCode).toBe(0)
     const start = ws.records.length

@@ -21,6 +21,7 @@ from dulwich.index import IndexEntry
 from dulwich.objects import Blob
 from dulwich.repo import Repo
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.status import parse_flags
@@ -512,6 +513,7 @@ async def test_an_add_keeps_a_fingerprint_only_where_reads_ask_the_backend(
     with Workspace(
         {"/src/": DiskVFS(root=str(repo_path.parent)), "/w/": vfs()},
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
     ) as ws:
         ws.register_cli("git", GIT)
         cloned = await ws.shell("git clone -q /src/work /w/dst")

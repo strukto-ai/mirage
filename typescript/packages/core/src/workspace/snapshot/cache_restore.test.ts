@@ -31,7 +31,7 @@ describe('a cache entry restored from a snapshot', () => {
   it.each(['', null] as const)(
     'folds a %j token the way the live write entry points fold it',
     async (stored) => {
-      const ws = new Workspace({ '/m/': new RAMVFS() })
+      const ws = new Workspace({ '/m/': new RAMVFS() }, { cache: {} })
       try {
         await ws.cache.set('/m/a.txt', ENC.encode('x'), { fingerprint: 'etag-1' })
         const state = await toStateDict(ws)
@@ -54,7 +54,7 @@ describe('a cache entry restored from a snapshot', () => {
     // The other half of the fold: a token that means something must
     // survive, or the fold would be indistinguishable from dropping
     // every restored token on the floor.
-    const ws = new Workspace({ '/m/': new RAMVFS() })
+    const ws = new Workspace({ '/m/': new RAMVFS() }, { cache: {} })
     try {
       await ws.cache.set('/m/a.txt', ENC.encode('x'), { fingerprint: 'etag-1' })
       const state = await toStateDict(ws)

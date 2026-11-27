@@ -15,6 +15,7 @@
 import asyncio
 from contextlib import ExitStack
 
+from mirage.cache.file.config import CacheConfig
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
@@ -33,6 +34,7 @@ def _make_ws(policy: ReadPolicy) -> Workspace:
         {"/data": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=policy),
+        cache=CacheConfig(),
     )
 
 

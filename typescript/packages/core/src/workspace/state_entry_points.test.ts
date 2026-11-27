@@ -2435,7 +2435,7 @@ describe('a warm walk is refused as the cold walk is', () => {
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
       { '/data': ram },
-      { mode: MountMode.WRITE, profiles: { limited: WARM_DOC } },
+      { cache: {}, mode: MountMode.WRITE, profiles: { limited: WARM_DOC } },
     )
     open.push(ws)
     ws.createSession('g', { profile: 'limited' })

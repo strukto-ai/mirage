@@ -64,7 +64,7 @@ function withFresh(mount: MountEntry): MountEntry {
 }
 
 async function wsWithOverlay(): Promise<Workspace> {
-  const ws = new Workspace({ '/data': new RAMVFS() })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {} })
   await ws.namespace.ensureLoaded()
   await ws.namespace.setAttrs('/data/f.txt', { mode: 0o600 })
   return ws
@@ -84,7 +84,7 @@ describe('Reconciler', () => {
   })
 
   it('onGone for a folder takes its subtree but not links', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {} })
     await ws.namespace.ensureLoaded()
     await ws.namespace.setAttrs('/data/sub', { mode: 0o700 })
     await ws.namespace.setAttrs('/data/sub/x', { mode: 0o600 })
@@ -201,7 +201,7 @@ describe('Reconciler', () => {
   it('mayServeCached drops a bound-less entry under bounded rather than refusing it', async () => {
     const ram = new RAMVFS()
     await ops(ram).write(PathSpec.fromStrPath('/f.txt'), ENC.encode('v1'))
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': ram }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.cache.set('/data/f.txt', ENC.encode('v1'))
       expect(await ws.cache.isUnbounded('/data/f.txt')).toBe(true)
@@ -221,7 +221,7 @@ describe('Reconciler', () => {
   })
 
   it('mayServeCached serves an entry that already carries a bound', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.cache.set('/data/f.txt', ENC.encode('v1'), { ttl: 600 })
       const mount = mountOf(ws, '/data/f.txt')
@@ -259,7 +259,7 @@ describe('Reconciler', () => {
     // threw their verified entries away.
     const ram = new RAMVFS()
     await ops(ram).write(PathSpec.fromStrPath('/f.txt'), new TextEncoder().encode('v1'))
-    const ws = new Workspace({ '/data': ram })
+    const ws = new Workspace({ '/data': ram }, { cache: {} })
     try {
       const mount = withFresh(mountOf(ws, '/data/f.txt'))
       expect(mount.vfs.supportsSnapshot).not.toBe(true)
@@ -378,7 +378,7 @@ describe('unverified freshness probes', () => {
   it.each(['unknown', 'none', 'failed', 'fresh'])(
     '%s cannot silently certify cached bytes',
     async (probe) => {
-      const ws = new Workspace({ '/data': new CachingRAM() })
+      const ws = new Workspace({ '/data': new CachingRAM() }, { cache: {} })
       try {
         const path = '/data/f.txt'
         const mount = withFresh(mountOf(ws, path))
@@ -444,7 +444,7 @@ it.each(['gate', 'shell'])('reconciles GitHub IDs before the %s reread', async (
   const vfs = new RAMVFS()
   Object.defineProperty(vfs, 'supportsSnapshot', { value: true })
   // Model GitHub's snapshot lifetime; RAM's zero TTL expires each listing immediately.
-  const ws = new Workspace({ '/gh': vfs }, { index: { ttl: 86_400 } })
+  const ws = new Workspace({ '/gh': vfs }, { cache: {}, index: { ttl: 86_400 } })
   try {
     const path = '/gh/f.txt'
     const scope = new PathSpec({ virtual: path, vfsPath: 'f.txt', directory: '/gh/' })
@@ -474,7 +474,7 @@ it.each([false, true])(
   async (replacement) => {
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/data/sub/nested': new RAMVFS() },
-      { index: { ttl: 600 } },
+      { cache: {}, index: { ttl: 600 } },
     )
     try {
       await ws.namespace.ensureLoaded()
@@ -510,7 +510,7 @@ it.each([false, true])(
 )
 
 it('batches a thousand vanished children in one cleanup', async () => {
-  const ws = new Workspace({ '/data': new RAMVFS() }, { index: { ttl: 600 } })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {}, index: { ttl: 600 } })
   try {
     await ws.namespace.ensureLoaded()
     const mount = ws.mount('/data')
@@ -544,7 +544,7 @@ it('batches a thousand vanished children in one cleanup', async () => {
 it('batches overlapping folders and protects nested mounts', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/data/tree/nested': new RAMVFS() },
-    { index: { ttl: 600 } },
+    { cache: {}, index: { ttl: 600 } },
   )
   try {
     await ws.namespace.ensureLoaded()
@@ -590,7 +590,7 @@ it('batches overlapping folders and protects nested mounts', async () => {
 it('a write in the command sends the next probe to the backend', async () => {
   const resource = new RAMVFS()
   resource.store.files.set('/f.txt', new TextEncoder().encode('v1'))
-  const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/data': resource }, { cache: {}, mode: MountMode.WRITE })
   try {
     await ws.namespace.ensureLoaded()
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
@@ -668,7 +668,7 @@ describe('the gate reuses what the operand probe got from the backend', () => {
   }> {
     const resource = new CachingRAM()
     resource.store.files.set('/f.txt', new TextEncoder().encode('v1'))
-    const ws = new Workspace({ '/data': resource }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': resource }, { cache: {}, mode: MountMode.WRITE })
     await ws.namespace.ensureLoaded()
     const mount = withFresh(mountOf(ws, '/data/f.txt'))
     await ws.cache.set('/data/f.txt', new TextEncoder().encode('v1'), { fingerprint: 'fp1' })
@@ -1051,7 +1051,7 @@ describe('the listing version gate', () => {
 // row: a backend with no path lookup (box) may address that id once, and
 // must confirm what comes back.
 it('the probe hints the mount index row', async () => {
-  const ws = new Workspace({ '/data': new RAMVFS() })
+  const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {} })
   try {
     await ws.namespace.ensureLoaded()
     const path = '/data/f.txt'

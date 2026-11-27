@@ -22,6 +22,7 @@ import pytest
 
 from mirage.accessor.ram import RAMAccessor
 from mirage.cache.context import read_versioned
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index.config import ListResult
 from mirage.cache.types import (
     ABSENT_WRITE,
@@ -646,7 +647,9 @@ async def test_a_user_write_drops_only_its_own_mounts_caches(write):
     for vfs, key in ((one, "/a.txt"), (two, "/b.txt")):
         vfs.caches_reads = True
         vfs.accessor.store.files[key] = b"v1\n"
-    ws = Workspace({"/one/": one, "/two/": two}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/one/": one, "/two/": two}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         stamp = command("stamp", vfs=None, spec=CommandSpec(), write=write)
         ws.mount("/one/").register_commands([stamp(_stamp)])

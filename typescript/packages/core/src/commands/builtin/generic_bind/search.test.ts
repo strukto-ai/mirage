@@ -307,7 +307,7 @@ async function grepAfterEdit(vfs: RAMVFS): Promise<[string, string[]]> {
   for (const [key, data] of Object.entries({ ...TREE, '/d/c.txt': 'ada cached\n' })) {
     vfs.store.files.set(key, ENC.encode(data))
   }
-  const ws = new Workspace({ '/': vfs })
+  const ws = new Workspace({ '/': vfs }, { cache: {} })
   try {
     await ws.shell('cat /d/c.txt')
     vfs.store.files.set('/d/c.txt', ENC.encode('nothing\n'))

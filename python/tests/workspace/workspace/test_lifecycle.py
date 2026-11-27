@@ -23,6 +23,7 @@ from uuid import uuid4
 import pytest
 
 from mirage.bridge.sync import soon
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index.config import (
     IndexConfig,
     LookupStatus,
@@ -235,7 +236,7 @@ async def test_unmount_waits_for_an_inflight_cache_write(monkeypatch):
 
     old = CachedRAM()
     old.load_state({"files": {"/file": b"old"}})
-    ws = Workspace({"/data": old})
+    ws = Workspace({"/data": old}, cache=CacheConfig())
     entered = asyncio.Event()
     release = asyncio.Event()
     write_cache = ws.cache.set
@@ -343,7 +344,7 @@ async def test_retired_command_cannot_cache_bytes_for_replacement_mount(
     mounts = {prefix: old}
     if change == "reveal":
         mounts["/"] = replacement
-    ws = Workspace(mounts)
+    ws = Workspace(mounts, cache=CacheConfig())
     ws.register_cli(
         "gate",
         CLI(spec=CommandSpec(name="gate"), handlers={"": CLIHandler(fn=gate)}),
@@ -374,7 +375,7 @@ async def test_unmount_keeps_prefix_reserved_until_cache_cleanup(
 ):
     vfs = RAMVFS()
     vfs.load_state({"files": {"/file": b"old"}})
-    ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/data": vfs}, mode=MountMode.WRITE, cache=CacheConfig())
     cache = ws.cache
     entered = asyncio.Event()
     release = asyncio.Event()

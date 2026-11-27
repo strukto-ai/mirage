@@ -43,6 +43,7 @@ from mirage import (  # noqa: E402
     ProcessExecutorMixin,
     Workspace,
 )
+from mirage.cache.file.config import CacheConfig  # noqa: E402
 from mirage.commands.cli.specs import cli_spec_for  # noqa: E402
 from mirage.commands.cli.types import CLI  # noqa: E402
 from mirage.commands.config import Context  # noqa: E402
@@ -979,7 +980,9 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
         )
         for name, content in spec.get("files", {}).items():
             seeds.append((prefix, name, content.encode()))
-    kwargs: dict[str, Any] = {}
+    # A `<backend>+cache` variant serves repeat reads from the file
+    # cache, which a workspace keeps only when its config asks for one.
+    kwargs: dict[str, Any] = {"cache": CacheConfig()}
     if "session_id" in world:
         kwargs["session_id"] = world["session_id"]
     if "machines" in world:

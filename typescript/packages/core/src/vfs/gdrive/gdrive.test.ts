@@ -47,7 +47,7 @@ afterEach(async () => {
 function workspace(mode: MountMode, read?: { policy: ReadPolicy; ttl: number }): Workspace {
   return new Workspace(
     { '/gd': new GoogleDriveVFS(account.config()) },
-    { mode, ...(read === undefined ? {} : { read }) },
+    { cache: {}, mode, ...(read === undefined ? {} : { read }) },
   )
 }
 

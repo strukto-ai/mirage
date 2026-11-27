@@ -16,6 +16,7 @@ import hashlib
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
@@ -40,11 +41,16 @@ def _ws(account: GoogleAccount, policy: ReadPolicy | None) -> Workspace:
     """
     vfs = GoogleDriveVFS(account.config(GoogleDriveConfig))
     if policy is None:
-        return Workspace({"/gd": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+        return Workspace(
+            {"/gd": (vfs, MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            cache=CacheConfig(),
+        )
     return Workspace(
         {"/gd": (vfs, MountMode.WRITE)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=policy),
+        cache=CacheConfig(),
     )
 
 

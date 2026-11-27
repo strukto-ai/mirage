@@ -50,10 +50,13 @@ function vfsOf(fake: FakeHub): Promise<BaseVFS> {
 }
 
 function ws(vfs: BaseVFS, policy: ReadPolicy = ReadPolicy.FRESH): Workspace {
-  return new Workspace({
-    '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: DEFAULT_READ_TTL } }),
-    '/r': [new RAMVFS(), MountMode.WRITE],
-  })
+  return new Workspace(
+    {
+      '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: DEFAULT_READ_TTL } }),
+      '/r': [new RAMVFS(), MountMode.WRITE],
+    },
+    { cache: {} },
+  )
 }
 
 async function out(workspace: Workspace, command: string): Promise<Uint8Array> {

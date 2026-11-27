@@ -54,7 +54,10 @@ const deepConfig: S3Config = { ...config, keyPrefix: 'subdata/subsubdata/' }
 
 const backend = new S3VFS(config)
 const deepBackend = new S3VFS(deepConfig)
-const ws = new Workspace({ '/s3/': backend, '/deep/': deepBackend }, { mode: MountMode.READ })
+const ws = new Workspace(
+  { '/s3/': backend, '/deep/': deepBackend },
+  { mode: MountMode.READ, cache: {} },
+)
 
 function opsSummary(): string {
   return `${String(ws.records.length)} ops, ${String(ws.networkBytes)} net, ${String(ws.cacheBytes)} cache`

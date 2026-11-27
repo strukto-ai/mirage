@@ -298,6 +298,28 @@ it('keeps max_body_bytes when copying an uncapped workspace', async () => {
   }
 })
 
+// Twin of test_a_rebuilt_workspace_keeps_the_cache_it_had: the saved limit
+// rebuilds the cache, through a copy and a load alike. A workspace that had
+// none keeps no file content, and one that had a cache keeps as much as it did.
+it.each([
+  ['none', undefined, 0],
+  ['kept', { limit: '1MB' }, 1048576],
+] as const)('rebuilds the cache a workspace had: %s', async (_name, cache, limit) => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, cache === undefined ? {} : { cache })
+  try {
+    const tar = await ws.snapshot()
+    for (const rebuilt of [await Workspace.load(tar), await ws.copy()]) {
+      try {
+        expect(rebuilt.cache.cacheLimit).toBe(limit)
+      } finally {
+        await rebuilt.close()
+      }
+    }
+  } finally {
+    await ws.close()
+  }
+})
+
 it.each([1024, null])('copies with the requested body ceiling %s', async (maxBodyBytes) => {
   const ws = new Workspace({ '/d': new RAMVFS() }, { maxBodyBytes: '2MB' })
   try {

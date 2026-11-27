@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import NULL_INDEX
 from mirage.types import MountMode
 from mirage.utils.key_prefix import mounted_path
@@ -125,7 +126,11 @@ def _run(
     async def run() -> tuple[bytes, bytes, int]:
         vfs._store.dirs.update({"/d", "/d/sub"})
         vfs._store.files.update(TREE)
-        ws = Workspace({"/": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+        ws = Workspace(
+            {"/": (vfs, MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            cache=CacheConfig(),
+        )
         ws.mount("/").revisions = pins or {}
         try:
             session = None
@@ -363,7 +368,7 @@ async def _grep_after_edit(vfs: RAMVFS) -> tuple[bytes, list[str]]:
     vfs.caches_reads = True
     vfs._store.dirs.update({"/d", "/d/sub"})
     vfs._store.files.update(TREE | {"/d/c.txt": b"ada cached\n"})
-    ws = Workspace({"/": vfs})
+    ws = Workspace({"/": vfs}, cache=CacheConfig())
     try:
         await ws.shell("cat /d/c.txt")
         vfs._store.files["/d/c.txt"] = b"nothing\n"

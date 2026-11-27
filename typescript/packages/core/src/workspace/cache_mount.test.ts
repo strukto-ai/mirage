@@ -71,6 +71,7 @@ describe('warm read serves from the hidden store, command stays on its mount', (
     const ws = new Workspace(
       { '/r': ram },
       {
+        cache: {},
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
       },
@@ -95,10 +96,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
       { '/r': ram },
-      {
-        mode: MountMode.WRITE,
-        read: { policy: ReadPolicy.BOUNDED, ttl: 45 },
-      },
+      { cache: {}, mode: MountMode.WRITE, read: { policy: ReadPolicy.BOUNDED, ttl: 45 } },
     )
     try {
       await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
@@ -137,6 +135,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
         }),
       },
       {
+        cache: {},
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
       },
@@ -161,10 +160,7 @@ describe('the mount bound reaches the cache through a shell read', () => {
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
     const ws = new Workspace(
       { '/r': ram },
-      {
-        mode: MountMode.WRITE,
-        read: { policy: ReadPolicy.BOUNDED, ttl: 45 },
-      },
+      { cache: {}, mode: MountMode.WRITE, read: { policy: ReadPolicy.BOUNDED, ttl: 45 } },
     )
     try {
       await ops(ram).write(PathSpec.fromStrPath('/a.txt'), ENC.encode('v1\n'))
@@ -251,6 +247,7 @@ describe('a guarded cp reads through the dispatcher', () => {
     const ws = new Workspace(
       { '/': ram },
       {
+        cache: {},
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: DEFAULT_READ_TTL },
       },
@@ -293,12 +290,7 @@ describe('a renderer registered beside the VFS', () => {
   ])('still renders after a shell %s fills the cache', async (_name, line) => {
     const ram = new RAMVFS()
     Object.assign(ram, { cachesReads: true })
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.WRITE,
-      },
-    )
+    const ws = new Workspace({ '/data': ram }, { cache: {}, mode: MountMode.WRITE })
     renderTally(ram)
     try {
       await ops(ram).write(PathSpec.fromStrPath('/books.tally'), ENC.encode('STORED\n'))
@@ -355,12 +347,7 @@ describe('a line touching a file twice', () => {
     // test_a_line_touching_a_file_twice_caches_only_a_whole_file.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace(
-      { '/d': ram },
-      {
-        mode: MountMode.WRITE,
-      },
-    )
+    const ws = new Workspace({ '/d': ram }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.shell("printf 'b\\na\\n' > /d/f")
       await ws.shell('cat /d/f')
@@ -421,12 +408,7 @@ describe('mv and the caches', () => {
     // under the old name.
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace(
-      { '/m/': ram },
-      {
-        mode: MountMode.WRITE,
-      },
-    )
+    const ws = new Workspace({ '/m/': ram }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.shell('echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x')
       await ws.shell('cat /m/dir/x')

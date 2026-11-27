@@ -31,12 +31,7 @@ describe('a warm read command reads nothing from the backend', () => {
   ])('%s', async (line) => {
     const ram = new RAMVFS()
     Object.assign(ram, { cachesReads: true })
-    const ws = new Workspace(
-      { '/c': ram },
-      {
-        mode: MountMode.WRITE,
-      },
-    )
+    const ws = new Workspace({ '/c': ram }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.shell("printf 'alpha\\nbeta\\n' > /c/a.txt")
       await ws.shell('cat /c/a.txt')
@@ -68,7 +63,7 @@ it.each([
   const enc = new TextEncoder()
   ram.store.files.set('/a', enc.encode('alpha\nbeta\n'))
   ram.store.files.set('/b', enc.encode('Alpha\nBeta\n'))
-  const ws = new Workspace({ '/c': ram }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/c': ram }, { cache: {}, mode: MountMode.WRITE })
   try {
     await ws.shell('cat /c/a /c/b')
     ram.store.files.set('/a', enc.encode('x'))

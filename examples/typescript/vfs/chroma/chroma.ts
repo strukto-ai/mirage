@@ -82,7 +82,7 @@ async function firstDocumentPath(ws: Workspace): Promise<string | null> {
 
 async function main(): Promise<void> {
   const vfs = buildVfs()
-  const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+  const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ, cache: {} })
   ws.registerCli('search', SEARCH)
   try {
     console.log('=== Chroma Knowledge ===\n')

@@ -17,6 +17,7 @@ from functools import partial
 import pytest
 
 from mirage.accessor.base import NOOPAccessor
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS, Argument, CommandSpec
@@ -354,7 +355,9 @@ async def test_a_cross_mount_sed_in_place_keeps_both_edited_files_cached():
     left.caches_reads = right.caches_reads = True
     left.load_state({"files": {"/f": b"a1\n"}})
     right.load_state({"files": {"/g": b"a2\n"}})
-    ws = Workspace({"/a": left, "/b": right}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/a": left, "/b": right}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         result = await ws.shell("sed -i s/a/b/ /a/f /b/g")
         assert result.exit_code == 0

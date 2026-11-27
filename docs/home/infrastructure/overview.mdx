@@ -36,8 +36,9 @@ next read faster. If a cache is lost, the next read is just slower. The
 | [File Cache](/home/infrastructure/file-cache) | File content Mirage has read | `ram`, `redis` | `cache` |
 | [Index](/home/infrastructure/file-index) | Directory listings and metadata | `ram`, `redis` | `index` |
 
-A mount can also set its own `index`, which replaces the workspace's for
-that mount.
+The file cache is off until the workspace sets `cache`. The index keeps
+listings without being asked. A mount can also set its own `index`, which
+replaces the workspace's for that mount.
 
 ## What each backend gives you
 

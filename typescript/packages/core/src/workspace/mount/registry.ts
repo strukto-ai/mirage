@@ -345,7 +345,7 @@ export class MountRegistry {
       this.cacheStore,
       m.indexStore,
       m.prefix,
-      m.vfs.cachesReads,
+      m.vfs.cachesReads && this.cacheStore !== null && this.cacheStore.cacheLimit > 0,
       (path) => !m.retiring && this.tryMountFor(path) === m,
       m.read.ttl,
       // Read at call time, as the listing gate is; a retiring mount's
@@ -811,8 +811,7 @@ export class MountRegistry {
         commandLimits: mount.commandLimits,
         workspaceLimits: this.commandLimits,
         keepsListings: mount.indexStore.ttl > 0,
-        keepsBodies:
-          this.cacheStore !== null && vfs.cachesReads && mount.read.policy === ReadPolicy.BOUNDED,
+        keepsBodies: mount.cachesReads && mount.read.policy === ReadPolicy.BOUNDED,
       }
     })
     return [...this.rowCache]

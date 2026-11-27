@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
@@ -427,6 +428,7 @@ async def test_one_clock_ages_the_file_cache_and_every_mount_index():
         mode=MountMode.WRITE,
         index=IndexConfig(ttl=60),
         clock=clock,
+        cache=CacheConfig(),
     )
     try:
         ws.add_mount("/b", RAMVFS(), MountMode.WRITE)

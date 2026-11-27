@@ -21,6 +21,7 @@ import pytest_asyncio
 
 import mirage.core.box.read as box_read
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.cache.file.config import CacheConfig
 from mirage.errors.types import StaleWriteError
 from mirage.policy import Deny, Policy
 from mirage.policy.types import VfsResultContext
@@ -165,7 +166,7 @@ async def workspace(drive: Drive) -> AsyncIterator[Callable[..., Workspace]]:
             if read is None
             else Mount(vfs, mode=MountMode.WRITE, write=write, read=read)
         )
-        ws = Workspace({drive.root: mount})
+        ws = Workspace({drive.root: mount}, cache=CacheConfig())
         built.append(ws)
         return ws
 

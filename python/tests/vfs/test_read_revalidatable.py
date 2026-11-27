@@ -49,6 +49,7 @@ import mirage.core.hf_hub.stream as hf_stream
 import mirage.core.msgraph.drive as drive_ops
 import mirage.core.s3.read as s3_read
 import mirage.core.s3.stream as s3_stream
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import IndexCacheStore, RAMIndexCacheStore
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.box.readdir import readdir as box_readdir
@@ -1042,7 +1043,8 @@ def _fresh_workspace(vfs: BaseVFS) -> Workspace:
                 read=ReadSpec(policy=ReadPolicy.FRESH),
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        cache=CacheConfig(),
     )
     _OWN_INDEX[vfs] = ws.mount("/m").index_store
     return ws

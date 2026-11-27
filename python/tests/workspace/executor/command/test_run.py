@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.accessor.base import Accessor
+from mirage.cache.file.config import CacheConfig
 from mirage.runtime.types import RouteDecision
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
@@ -46,7 +47,9 @@ async def _cli_write_case(
     two = DiskVFS(root=str(tmp_path / "two"))
     one.caches_reads = True
     two.caches_reads = True
-    ws = Workspace({"/one/": one, "/two/": two}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/one/": one, "/two/": two}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await (await ws.shell("cat /one/a.txt")).stdout_str()
     await (await ws.shell("cat /two/b.txt")).stdout_str()
     (tmp_path / "one" / "a.txt").write_bytes(b"v2\n")

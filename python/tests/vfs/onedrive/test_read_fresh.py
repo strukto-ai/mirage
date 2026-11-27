@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.context import session_context as caller
 from mirage.core.onedrive.read import read
 from mirage.core.onedrive.stream import read_stream
@@ -53,7 +54,8 @@ def _ws(vfs) -> Workspace:
                 read=ReadSpec(policy=ReadPolicy.FRESH),
             ),
             "/r": (RAMVFS(), MountMode.WRITE),
-        }
+        },
+        cache=CacheConfig(),
     )
 
 
@@ -274,7 +276,8 @@ def _bounded_ws(vfs) -> Workspace:
                 mode=MountMode.WRITE,
                 read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=600),
             ),
-        }
+        },
+        cache=CacheConfig(),
     )
 
 

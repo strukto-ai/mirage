@@ -319,7 +319,7 @@ async function savedState(
   mounts: Record<string, BaseVFS | Mount>,
   write: WritePolicy = WritePolicy.UNCONDITIONAL,
 ): Promise<WorkspaceStateDict> {
-  const ws = new Workspace(mounts, { mode: MountMode.WRITE, write })
+  const ws = new Workspace(mounts, { cache: {}, mode: MountMode.WRITE, write })
   try {
     return await toStateDict(ws)
   } finally {
@@ -344,7 +344,7 @@ describe('the write policy in a snapshot', () => {
           '/s3': s3Vfs(),
           '/d': new Mount(new RAMVFS(), { mode: MountMode.WRITE, write: 'unconditional' }),
         },
-        { mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
+        { cache: {}, mode: MountMode.WRITE, write: WritePolicy.CONDITIONAL },
       ),
     )
     const back = track(
@@ -422,7 +422,7 @@ describe('the write policy in a snapshot', () => {
 
   it('leaves a version kept without bytes out', async () => {
     // It has no bytes to restore; captured, it would come back an empty file.
-    const ws = track(new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE }))
+    const ws = track(new Workspace({ '/d': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE }))
     await ws.cache.set('/d/a', new TextEncoder().encode('bytes'), { fingerprint: 'v1' })
     await ws.cache.keepFingerprints({ '/d/b': 'v2' })
     const state = await toStateDict(ws)

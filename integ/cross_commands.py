@@ -22,6 +22,7 @@ import boto3
 from moto.server import ThreadedMotoServer
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.redis import RedisVFS
@@ -693,9 +694,12 @@ async def main() -> None:
         prefix = f"mirage-integ-cross-{uuid.uuid4().hex[:8]}/"
         mounts["/redis"] = RedisVFS(url=redis_url, key_prefix=prefix)
 
+    # The cache checks serve warm bytes, which a workspace keeps only
+    # when its config asks for a cache.
     ws = Workspace(
         mounts,
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
         profiles={"integ-agent": {}},
         profile="integ-agent",
     )

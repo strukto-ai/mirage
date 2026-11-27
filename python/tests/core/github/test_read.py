@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.accessor.github import GitHubAccessor
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.read import read, read_many, read_stream
@@ -212,7 +213,7 @@ async def test_read_many_asks_nothing_for_a_file_it_leaves_out(repo):
 async def test_cat_reads_ahead_its_operands_in_one_query(repo):
     files = {f"{name}.txt": f"{name}\n".encode() for name in "abcd"}
     await repo.create(files)
-    ws = Workspace({"/gh": GitHubVFS(repo.config())})
+    ws = Workspace({"/gh": GitHubVFS(repo.config())}, cache=CacheConfig())
     try:
         result = await ws.shell("cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt")
         assert await result.stdout_str() == "a\nb\nc\nd\n"

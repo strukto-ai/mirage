@@ -28,8 +28,14 @@ import { GWS } from '../../commands/cli/builtin/gws/index.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 
 describe('buildFileCache', () => {
-  it('defaults to a 32MB RAM store', () => {
+  it('keeps nothing unless a config asks for a cache', () => {
     const cache = buildFileCache(undefined)
+    expect(cache).toBeInstanceOf(RAMFileCacheStore)
+    expect(cache.cacheLimit).toBe(0)
+  })
+
+  it('keeps 32MB in RAM for a config that names no limit', () => {
+    const cache = buildFileCache({})
     expect(cache).toBeInstanceOf(RAMFileCacheStore)
     expect(cache.cacheLimit).toBe(32 * 1024 * 1024)
   })
@@ -117,7 +123,7 @@ describe('the workspace clock', () => {
     const clock = new ManualClock(1000)
     const ws = new Workspace(
       { '/a': new RAMVFS() },
-      { mode: MountMode.WRITE, index: { type: IndexType.RAM, ttl: 60 }, clock },
+      { cache: {}, mode: MountMode.WRITE, index: { type: IndexType.RAM, ttl: 60 }, clock },
     )
     try {
       const late = ws.addMount('/b', new RAMVFS(), MountMode.WRITE)

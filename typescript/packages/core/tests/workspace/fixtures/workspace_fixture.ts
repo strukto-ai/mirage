@@ -27,7 +27,7 @@ const DEC = new TextDecoder()
 export function cachingRamWorkspace(): Workspace {
   const ram = new RAMVFS()
   ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-  return new Workspace({ '/r': ram }, { mode: MountMode.WRITE })
+  return new Workspace({ '/r': ram }, { cache: {}, mode: MountMode.WRITE })
 }
 
 export type Mark = [op: string, path: string]

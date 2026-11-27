@@ -143,7 +143,7 @@ describe('Workspace lifecycle', () => {
     }
     const old = new CachedRAM()
     old.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
-    const ws = new Workspace({ '/data': old })
+    const ws = new Workspace({ '/data': old }, { cache: {} })
     let enter = (): void => undefined
     let resume = (): void => undefined
     const entered = new Promise<void>((resolve) => {
@@ -247,7 +247,7 @@ describe('Workspace lifecycle', () => {
       const prefix = shadow ? '/' : '/data'
       const mounts: Record<string, BaseVFS> = { [prefix]: old }
       if (change === 'reveal') mounts['/'] = replacement
-      const ws = new Workspace(mounts)
+      const ws = new Workspace(mounts, { cache: {} })
       ws.registerCli(
         'gate',
         new CLI({
@@ -642,7 +642,7 @@ describe('Workspace.unmount', () => {
     async (fails, store) => {
       const vfs = new RAMVFS()
       vfs.loadState({ type: 'ram', files: { '/file': new TextEncoder().encode('old') } })
-      const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+      const ws = new Workspace({ '/data': vfs }, { cache: {}, mode: MountMode.WRITE })
       const cache = ws.cache
       const index = ws.mount('/data').indexStore
       let enter = (): void => undefined

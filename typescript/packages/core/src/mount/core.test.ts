@@ -606,7 +606,9 @@ describe('MountCore', () => {
 
   it("takes a released file's size from the workspace cache", async () => {
     const vfs = new UnsizedRAM()
-    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE }).vfs)
+    const core = new MountCore(
+      new Workspace({ '/data/': vfs }, { cache: {}, mode: MountMode.WRITE }).vfs,
+    )
     expect((await core.getattr('/data/u.json')).size).toBe(0)
     let fh = await core.open('/data/u.json')
     expect(await core.read('/data/u.json', fh, 0, 1024)).toEqual(PAYLOAD)
@@ -621,7 +623,7 @@ describe('MountCore', () => {
     // The target was opened and released as u.json, leaving its bytes in
     // the workspace cache; truncating through the link must not leave the
     // old length for the next stat of the target.
-    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data/': new UnsizedRAM() }, { cache: {}, mode: MountMode.WRITE })
     await ws.shell('ln -s u.json /data/lk')
     const core = new MountCore(ws.vfs)
     const fh = await core.open('/data/u.json')

@@ -23,6 +23,7 @@ import uuid
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.types import DriftPolicy, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
@@ -53,6 +54,7 @@ ws = Workspace(
         "/deep/": deep_backend,
     },
     mode=MountMode.READ,
+    cache=CacheConfig(),
 )
 
 
