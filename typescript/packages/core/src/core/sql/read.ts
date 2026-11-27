@@ -18,7 +18,7 @@ import { record, recordStream, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import type { SqlRow } from '../../vfs/sql/types.ts'
-import { entriesNamed, MAX_PARAMS, rowsOf } from './constants.ts'
+import { entriesNamed, MAX_PARAMS, READ_RUN_BYTES, rowsOf } from './constants.ts'
 import { fillBytes, readBytes } from './data.ts'
 import { type Inode, inodeOf, isDir, isFile } from './inode.ts'
 import { found, namesOf, target, walk } from './path.ts'
@@ -47,12 +47,13 @@ export async function read(
 /**
  * Several whole files by virtual path, in a few queries whatever their
  * number: each folder they sit in walked once, its entries the files name in
- * one query, and every row of the files kept in one more. A file is kept only
- * from what its inode says, before its rows are asked for: one that is gone
- * or no file, one longer than `limit`, and one that does not fit in `room`
- * beside the files kept before it is left out for its own read to meet. Each
- * file read is recorded as a whole streamed read records it. Mirrors Python's
- * `read_many`.
+ * one query, and the rows of the files kept in one more for each
+ * `READ_RUN_BYTES` of them (`runs`), so the rows alive beside the files built
+ * never pass a run. A file is kept only from what its inode says, before its
+ * rows are asked for: one that is gone or no file, one longer than `limit`,
+ * and one that does not fit in `room` beside the files kept before it is left
+ * out for its own read to meet. Each file read is recorded as a whole
+ * streamed read records it. Mirrors Python's `read_many`.
  *
  * Args:
  *   accessor: the database.
@@ -101,22 +102,51 @@ export async function readMany(
       kept.push([spec, entry])
     }
   }
-  const rows = await rowsByIno(
-    accessor,
-    kept.filter(([, entry]) => entry.size > 0).map(([, entry]) => entry.ino),
-  )
   const cs = await accessor.chunkSize()
   const read = new Map<string, Uint8Array>()
-  for (const [spec, entry] of kept) {
-    const data = fillBytes(rows.get(entry.ino) ?? [], cs, 0, entry.size)
-    const rec = recordStream('read', spec.virtual, VFSName.SQL)
-    if (rec !== null) {
-      rec.bytes = data.byteLength
-      rec.complete = true
+  const built = new Map<number, Uint8Array>()
+  for (const run of runs(kept)) {
+    const rows = await rowsByIno(
+      accessor,
+      run.filter(([, e]) => e.size > 0 && !built.has(e.ino)).map(([, e]) => e.ino),
+    )
+    for (const [spec, entry] of run) {
+      let data = built.get(entry.ino)
+      if (data === undefined) {
+        data = fillBytes(rows.get(entry.ino) ?? [], cs, 0, entry.size)
+        rows.delete(entry.ino)
+        built.set(entry.ino, data)
+      }
+      const rec = recordStream('read', spec.virtual, VFSName.SQL)
+      if (rec !== null) {
+        rec.bytes = data.byteLength
+        rec.complete = true
+      }
+      read.set(spec.virtual, data)
     }
-    read.set(spec.virtual, data)
   }
   return read
+}
+
+/**
+ * `kept` cut into runs whose rows one query fetches: at most `READ_RUN_BYTES`
+ * of files, a longer file alone, and at most `MAX_PARAMS` files. Mirrors
+ * Python's `_runs`.
+ */
+function runs(kept: readonly [PathSpec, Inode][]): [PathSpec, Inode][][] {
+  const out: [PathSpec, Inode][][] = []
+  let size = 0
+  for (const [spec, entry] of kept) {
+    const last = out[out.length - 1]
+    if (last === undefined || last.length === MAX_PARAMS || size + entry.size > READ_RUN_BYTES) {
+      out.push([[spec, entry]])
+      size = entry.size
+    } else {
+      last.push([spec, entry])
+      size += entry.size
+    }
+  }
+  return out
 }
 
 /**

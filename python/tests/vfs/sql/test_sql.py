@@ -29,6 +29,7 @@ from mirage.core.sql.constants import (
     DEFAULT_CHUNK_SIZE,
     DIR,
     FILE,
+    READ_RUN_BYTES,
     clear_under,
 )
 from mirage.io.stream import materialize
@@ -157,12 +158,13 @@ async def test_a_file_across_chunk_boundaries_reads_whole_and_in_windows(
 @pytest.mark.asyncio
 async def test_a_batch_read_answers_its_files_in_a_few_queries(vfs: SqlVFS):
     # However many files a batch names, each folder is walked once, the
-    # entries it names come in one query and every row of the files kept
-    # in one more, each split where a statement's parameters run out (120
+    # entries it names come in one query and the rows of the files kept in
+    # one more, each split where a statement's parameters run out (120
     # names here: two entry queries in /b, two row queries); the walks of
     # /a, /b and the missing /gone make 3, so 8 in all. A file across rows
-    # reads whole, and a folder, a file gone or one longer than the limit
-    # is left for its own read. Each file kept is recorded once.
+    # reads whole, the same file named twice reads whole both times, and a
+    # folder, a file gone or one longer than the limit is left for its own
+    # read. Each file kept is recorded once.
     data = bytes(i % 251 for i in range(CS * 2 + 5))
     await vfs.mkdir(at("/a"))
     await vfs.mkdir(at("/a/sub"))
@@ -191,6 +193,33 @@ async def test_a_batch_read_answers_its_files_in_a_few_queries(vfs: SqlVFS):
     assert got == {"/a/big": data, **small}
     assert len(queries) <= 8
     assert sorted(r.path for r in scope.records) == sorted(got)
+    twice = await vfs.read_many([at("/a/big"), at("/a/big")], len(data))
+    assert twice == {"/a/big": data}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_fetches_its_rows_a_run_at_a_time(vfs: SqlVFS):
+    # The rows a query answers live beside the files built from them, so a
+    # query asks for the rows of at most READ_RUN_BYTES of files: three
+    # files of 100 KiB come in two row queries, and a file longer than a
+    # run comes alone in its own.
+    files = {f"/r{i}": bytes([i + 1]) * (100 * 1024) for i in range(3)}
+    files["/long"] = b"L" * (READ_RUN_BYTES + 1)
+    for key, body in files.items():
+        await vfs.write(at(key), body)
+    queries: list[str] = []
+    query = vfs.accessor.query
+
+    async def counting(
+        sql: str, params: Sequence[SqlValue] = ()
+    ) -> list[SqlRow]:
+        queries.append(sql)
+        return await query(sql, params)
+
+    vfs.accessor.query = counting  # type: ignore[method-assign]
+    got = await vfs.read_many([at(k) for k in files], 1 << 20)
+    assert got == files
+    assert sum("FROM fs_data" in q for q in queries) == 3
 
 
 @pytest.mark.asyncio

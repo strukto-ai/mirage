@@ -13,7 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import MAX_PARAMS, entries_named, rows_of
+from mirage.core.sql.constants import (
+    MAX_PARAMS,
+    READ_RUN_BYTES,
+    entries_named,
+    rows_of,
+)
 from mirage.core.sql.data import fill_bytes, read_bytes
 from mirage.core.sql.inode import Inode, inode_of, is_dir, is_file
 from mirage.core.sql.path import found, names_of, target, walk
@@ -55,12 +60,13 @@ async def read_many(
 ) -> dict[str, bytes]:
     """Several whole files by virtual path, in a few queries whatever
     their number: each folder they sit in walked once, its entries the
-    files name in one query, and every row of the files kept in one more.
-    A file is kept only from what its inode says, before its rows are
-    asked for: one that is gone or no file, one longer than ``limit``, and
-    one that does not fit in ``room`` beside the files kept before it is
-    left out for its own read to meet. Each file read is recorded as a
-    whole streamed read records it.
+    files name in one query, and the rows of the files kept in one more
+    for each ``READ_RUN_BYTES`` of them (``_runs``), so the rows alive
+    beside the files built never pass a run. A file is kept only from what
+    its inode says, before its rows are asked for: one that is gone or no
+    file, one longer than ``limit``, and one that does not fit in ``room``
+    beside the files kept before it is left out for its own read to meet.
+    Each file read is recorded as a whole streamed read records it.
 
     Args:
         accessor (SqlAccessor): the database.
@@ -95,19 +101,52 @@ async def read_many(
                 continue
             total += entry.size
             kept.append((spec, entry))
-    rows = await _rows_by_ino(
-        accessor, [entry.ino for _, entry in kept if entry.size]
-    )
     cs = await accessor.chunk_size()
     read: dict[str, bytes] = {}
-    for spec, entry in kept:
-        data = fill_bytes(rows.get(entry.ino, []), cs, 0, entry.size)
-        rec = record_stream("read", spec.virtual, VFSName.SQL)
-        if rec is not None:
-            rec.bytes = len(data)
-            rec.complete = True
-        read[spec.virtual] = data
+    built: dict[int, bytes] = {}
+    for run in _runs(kept):
+        rows = await _rows_by_ino(
+            accessor,
+            [e.ino for _, e in run if e.size and e.ino not in built],
+        )
+        for spec, entry in run:
+            data = built.get(entry.ino)
+            if data is None:
+                data = fill_bytes(rows.pop(entry.ino, []), cs, 0, entry.size)
+                built[entry.ino] = data
+            rec = record_stream("read", spec.virtual, VFSName.SQL)
+            if rec is not None:
+                rec.bytes = len(data)
+                rec.complete = True
+            read[spec.virtual] = data
     return read
+
+
+def _runs(
+    kept: list[tuple[PathSpec, Inode]],
+) -> list[list[tuple[PathSpec, Inode]]]:
+    """``kept`` cut into runs whose rows one query fetches: at most
+    ``READ_RUN_BYTES`` of files, a longer file alone, and at most
+    ``MAX_PARAMS`` files.
+
+    Args:
+        kept (list[tuple[PathSpec, Inode]]): the files kept, in order.
+    """
+    runs: list[list[tuple[PathSpec, Inode]]] = []
+    size = 0
+    for spec, entry in kept:
+        last = runs[-1] if runs else None
+        if (
+            last is None
+            or len(last) == MAX_PARAMS
+            or size + entry.size > READ_RUN_BYTES
+        ):
+            runs.append([(spec, entry)])
+            size = entry.size
+        else:
+            last.append((spec, entry))
+            size += entry.size
+    return runs
 
 
 async def _inodes_named(

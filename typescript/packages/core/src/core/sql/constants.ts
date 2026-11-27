@@ -44,6 +44,13 @@ export const READ_BYTES = 64 * 1024
 /** The bytes a streamed write gathers before it lands them. */
 export const FLUSH_BYTES = 1024 * 1024
 
+/**
+ * The most file bytes one query of a batch read asks for the rows of. The
+ * rows a query answers stay alive beside the files built from them until the
+ * driver lets them go, so a batch fetches its rows a run at a time.
+ */
+export const READ_RUN_BYTES = 256 * 1024
+
 /** The columns of `fs_inode` the ops read. */
 export const INODE_COLUMNS = ['ino', 'mode', 'size', 'mtime', 'mtime_nsec'] as const
 

@@ -152,9 +152,12 @@ def _read_checked(
     parent: str, name: str, most: int, opened: set[str]
 ) -> bytes | None:
     """The bytes of the regular file ``name`` in the checked host folder
-    ``parent``, or None when it is no regular file spelled so or is longer
-    than ``most`` bytes. The file is opened before its name is proven, so
-    the proof is of the file that is read; a link refuses the open.
+    ``parent``, or None when it is no regular file spelled so, is longer
+    than ``most`` bytes, or grew past its stat while it was read. The file
+    is opened before its name is proven, so the proof is of the file that
+    is read; a link refuses the open. One read asks for the size its stat
+    gives and one byte more, never ``most``, so no buffer outgrows the
+    file; a short read of a regular file is its end.
 
     Args:
         parent (str): the checked host folder.
@@ -171,14 +174,7 @@ def _read_checked(
             or not exact_name(parent, name, info, opened)
         ):
             return None
-        parts: list[bytes] = []
-        left = most + 1
-        while left > 0:
-            chunk = os.read(fd, left)
-            if not chunk:
-                break
-            parts.append(chunk)
-            left -= len(chunk)
+        data = os.read(fd, info.st_size + 1)
     finally:
         os.close(fd)
-    return b"".join(parts) if left > 0 else None
+    return data if len(data) <= info.st_size else None

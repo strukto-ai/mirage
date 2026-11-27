@@ -16,7 +16,12 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
+import {
+  DEFAULT_CHUNK_SIZE,
+  DIR,
+  FILE,
+  READ_RUN_BYTES,
+} from '@struktoai/mirage-core/core/sql/constants'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
@@ -130,6 +135,22 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect(got).toEqual(new Map([['/a/big', data], ...small]))
     expect(query.mock.calls.length).toBeLessThanOrEqual(8)
     expect(records.map((r) => r.path).sort()).toEqual([...got.keys()].sort())
+    const twice = await vfs.readMany([at('/a/big'), at('/a/big')], data.length)
+    expect(twice).toEqual(new Map([['/a/big', data]]))
+  })
+
+  it('fetches the rows of a batch read a run at a time', async () => {
+    // The rows a query answers live beside the files built from them, so a
+    // query asks for the rows of at most READ_RUN_BYTES of files: three files
+    // of 100 KiB come in two row queries, and a file longer than a run comes
+    // alone in its own.
+    const files = new Map<string, Uint8Array>()
+    for (let i = 0; i < 3; i++) files.set(`/r${String(i)}`, new Uint8Array(100 * 1024).fill(i + 1))
+    files.set('/long', new Uint8Array(READ_RUN_BYTES + 1).fill(76))
+    for (const [key, body] of files) await ops(vfs).write(at(key), body)
+    const query = vi.spyOn(vfs.accessor, 'query')
+    expect(await vfs.readMany([...files.keys()].map(at), 1 << 20)).toEqual(files)
+    expect(query.mock.calls.filter(([sql]) => sql.includes('FROM fs_data')).length).toBe(3)
   })
 
   it('keeps the files of a batch read that fit its room', async () => {

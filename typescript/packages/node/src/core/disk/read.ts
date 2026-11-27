@@ -168,8 +168,9 @@ async function folderInside(
  * or null when it is no regular file spelled so, is longer than `most` bytes,
  * or grew past its stat while it was read. The file is opened before its name
  * is proved, so the proof is of the file that is read; a link refuses the
- * open. A short read of a regular file is its end. Mirrors Python's
- * `_read_checked`.
+ * open. One read asks for the size its stat gives and one byte more, never
+ * `most`, so no buffer outgrows the file; a short read of a regular file is
+ * its end. Mirrors Python's `_read_checked`.
  */
 async function readChecked(
   parent: string,
