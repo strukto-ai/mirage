@@ -25,6 +25,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { read, readMany } from './read.ts'
+import type * as ObserveContext from '@struktoai/mirage-core/observe/context'
 import type * as DiskUtils from './utils.ts'
 
 let root: string
@@ -238,39 +239,93 @@ describe('core/disk/readMany', () => {
     // The batch proves /a once, so a file opened after /a was swapped for a
     // link to a folder outside the mount would come from outside; once each
     // file is open the folder's path must still name the directory proven,
-    // so /a/y is left for its own read, which refuses the link.
+    // so /a/x, read before the swap, comes and /a/y is left for its own read,
+    // which refuses the link. The swap lands as /a/x is recorded.
     await mkdir(join(root, 'a'))
     await writeFile(join(root, 'a', 'x'), 'x\n')
     await writeFile(join(root, 'a', 'y'), 'y\n')
     const elsewhere = mkdtempSync(join(tmpdir(), 'mirage-disk-outside-'))
     writeFileSync(join(elsewhere, 'y'), 'outside\n')
+    const moved = join(root, '..', `${basename(root)}-moved`)
     vi.resetModules()
-    vi.doMock('./utils.ts', async (importOriginal) => {
-      const real = await importOriginal<typeof DiskUtils>()
+    vi.doMock('@struktoai/mirage-core/observe/context', async (importOriginal) => {
+      const real = await importOriginal<typeof ObserveContext>()
       let swapped = false
       return {
         ...real,
-        exactName: async (...args: Parameters<typeof real.exactName>) => {
-          const exact = await real.exactName(...args)
+        recordStream: (...args: Parameters<typeof real.recordStream>) => {
           if (!swapped) {
             swapped = true
-            renameSync(join(root, 'a'), join(root, '..', `${basename(root)}-moved`))
+            renameSync(join(root, 'a'), moved)
             symlinkSync(elsewhere, join(root, 'a'))
           }
-          return exact
+          return real.recordStream(...args)
         },
       }
     })
     try {
       const fresh = await import('./read.ts')
       const got = await fresh.readMany(accessor, ['/a/x', '/a/y'].map(spec), 8)
-      expect(got.has('/a/y')).toBe(false)
-      expect([...got.values()].map((b) => new TextDecoder().decode(b))).not.toContain('outside\n')
+      expect(got).toEqual(new Map([['/a/x', new TextEncoder().encode('x\n')]]))
+    } finally {
+      vi.doUnmock('@struktoai/mirage-core/observe/context')
+      vi.resetModules()
+      rmSync(elsewhere, { recursive: true, force: true })
+      rmSync(moved, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses a folder swapped right after its proof', async () => {
+    // The batch keeps a folder's identity to check each file's folder against;
+    // taken after the proof, it could be of a folder swapped for a link to one
+    // outside the mount in between, and every file would then come from
+    // outside. It is taken before the proof, so a swap right after it is
+    // caught when the file's folder is checked.
+    await mkdir(join(root, 'a'))
+    await writeFile(join(root, 'a', 'x'), 'x\n')
+    const elsewhere = mkdtempSync(join(tmpdir(), 'mirage-disk-outside-'))
+    writeFileSync(join(elsewhere, 'x'), 'outside\n')
+    const moved = join(root, '..', `${basename(root)}-moved`)
+    let swapped = false
+    vi.resetModules()
+    vi.doMock('./utils.ts', async (importOriginal) => {
+      const real = await importOriginal<typeof DiskUtils>()
+      return {
+        ...real,
+        resolveInside: async (...args: Parameters<typeof real.resolveInside>) => {
+          const host = await real.resolveInside(...args)
+          if (!swapped) {
+            swapped = true
+            renameSync(join(root, 'a'), moved)
+            symlinkSync(elsewhere, join(root, 'a'))
+          }
+          return host
+        },
+      }
+    })
+    try {
+      const fresh = await import('./read.ts')
+      const got = await fresh.readMany(accessor, [spec('/a/x')], 8)
+      expect(swapped).toBe(true)
+      expect(got).toEqual(new Map())
     } finally {
       vi.doUnmock('./utils.ts')
       vi.resetModules()
       rmSync(elsewhere, { recursive: true, force: true })
-      rmSync(join(root, '..', `${basename(root)}-moved`), { recursive: true, force: true })
+      rmSync(moved, { recursive: true, force: true })
     }
+  })
+
+  it('leaves out a name the host cannot open', async () => {
+    // A name holding a NUL passes its folder's check but no host call takes
+    // it; that file is left for its own read, and the rest of the batch is
+    // still read and recorded.
+    await mkdir(join(root, 'a'))
+    await writeFile(join(root, 'a', 'x'), 'x\n')
+    const [got, records] = await recordingScope(() =>
+      readMany(accessor, ['/a/n\u0000ul', '/a/x'].map(spec), 8),
+    )
+    expect(got).toEqual(new Map([['/a/x', new TextEncoder().encode('x\n')]]))
+    expect(records.map((r) => r.path)).toEqual(['/a/x'])
   })
 })

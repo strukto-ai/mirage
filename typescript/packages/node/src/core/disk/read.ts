@@ -15,7 +15,7 @@
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { constants, lstat, open, stat } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import type { Stats } from 'node:fs'
+import type { BigIntStats } from 'node:fs'
 import { join } from 'node:path'
 import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -23,7 +23,7 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { norm } from '@struktoai/mirage-core/utils/path'
 import { diskError } from './errors.ts'
-import { exactName, probeName, resolveInside } from './utils.ts'
+import { exactName, insidePath, probeName, resolveInside } from './utils.ts'
 
 const CHUNK = 1 << 20
 
@@ -114,7 +114,7 @@ export async function readMany(
   room: number | null = null,
 ): Promise<Map<string, Uint8Array>> {
   const opened = new Map<string, Promise<void>>()
-  const folders = new Map<string, [string, Stats] | null>()
+  const folders = new Map<string, [string, BigIntStats] | null>()
   const read = new Map<string, Uint8Array>()
   let total = 0
   for (const spec of new Map(paths.map((p) => [p.virtual, p])).values()) {
@@ -152,18 +152,26 @@ export async function readMany(
  * The host directory a batch's `folder` names, checked as a read of a file in
  * it checks it, with the stat it was proven as, or null when it is no
  * directory there. The stat follows a link, as the mount root itself may be
- * one. Mirrors Python's `_folder_inside`.
+ * one, and keeps its ids as bigints: a number loses the low bits of an id
+ * past 2^53 (NTFS file ids), so two folders could compare equal. It is taken
+ * before the folder is proven, never after: a stat taken after the proof could
+ * land on a folder swapped for a link to a directory outside the mount since,
+ * and the batch would keep that directory's identity; one taken before is of
+ * what the proof then finds no link on the way to. Mirrors Python's
+ * `_folder_inside`.
  */
 async function folderInside(
   root: string,
   spec: PathSpec,
   folder: string,
   opened: Map<string, Promise<void>>,
-): Promise<[string, Stats] | null> {
+): Promise<[string, BigIntStats] | null> {
   try {
-    const host = await resolveInside(root, spec, folder, opened)
-    const info = await stat(host)
-    return info.isDirectory() ? [host, info] : null
+    const host = insidePath(root, folder)
+    const info = await stat(host, { bigint: true })
+    if (!info.isDirectory()) return null
+    await resolveInside(root, spec, folder, opened)
+    return [host, info]
   } catch (err) {
     console.debug(`batch read leaves ${folder} to its own read: ${String(err)}`)
     return null
@@ -186,24 +194,27 @@ async function folderInside(
  */
 async function readChecked(
   parent: string,
-  proven: Stats,
+  proven: BigIntStats,
   name: string,
   most: number,
   opened: Map<string, Promise<void>>,
 ): Promise<Uint8Array | null> {
   const host = join(parent, name)
-  const seen = OPEN_REFUSES_LINK ? null : await lstat(host)
+  const seen = OPEN_REFUSES_LINK ? null : await lstat(host, { bigint: true })
   if (seen !== null && !seen.isFile()) return null
   const handle = await open(host, OPEN_CHECKED)
   try {
     const info = await handle.stat()
     if (!info.isFile() || info.size > most) return null
-    if (seen !== null && (seen.dev !== info.dev || seen.ino !== info.ino)) return null
+    if (seen !== null) {
+      const reached = await handle.stat({ bigint: true })
+      if (seen.dev !== reached.dev || seen.ino !== reached.ino) return null
+    }
     const buf = Buffer.allocUnsafe(info.size + 1)
     const [exact, filled, folder] = await Promise.allSettled([
       exactName(probeName(parent, name, opened, info), info),
       readUpto(handle, buf),
-      stat(parent),
+      stat(parent, { bigint: true }),
     ])
     if (exact.status === 'rejected') throw exact.reason
     if (filled.status === 'rejected') throw filled.reason

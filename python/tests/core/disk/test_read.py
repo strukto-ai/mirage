@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -311,3 +312,58 @@ async def test_a_batch_read_refuses_a_folder_swapped_for_a_link_mid_batch(
         DiskAccessor(root), [_on_d("/a/x"), _on_d("/a/y")], 8
     )
     assert got == {"/d/a/x": b"x\n"}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_a_name_the_host_cannot_open(tmp_path):
+    # A name holding a NUL passes its folder's check but no host call takes
+    # it; that file is left for its own read, and the rest of the batch is
+    # still read and recorded.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    scope = RecordingScope()
+    try:
+        got = await read_many(
+            DiskAccessor(tmp_path), [_on_d("/a/n\x00ul"), _on_d("/a/x")], 8
+        )
+    finally:
+        scope.close()
+    assert got == {"/d/a/x": b"x\n"}
+    assert [r.path for r in scope.records] == ["/d/a/x"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_refuses_a_folder_swapped_right_after_its_proof(
+    tmp_path, monkeypatch
+):
+    # The batch keeps a folder's identity to check each file's folder
+    # against; taken after the proof, it could be of a folder swapped for a
+    # link to one outside the mount in between, and every file would then
+    # come from outside. It is taken before the proof, so a swap right
+    # after it is caught when the file's folder is checked.
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "x").write_bytes(b"x\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x").write_bytes(b"outside\n")
+    real = disk_read.resolve_inside_sync
+    swapped: list[bool] = []
+
+    def swapping(
+        root_: Path,
+        spec: PathSpec,
+        path: str | None = None,
+        opened: set[str] | None = None,
+    ) -> Path:
+        host = real(root_, spec, path, opened)
+        if not swapped:
+            swapped.append(True)
+            os.rename(root / "a", tmp_path / "moved")
+            os.symlink(outside, root / "a")
+        return host
+
+    monkeypatch.setattr(disk_read, "resolve_inside_sync", swapping)
+    got = await read_many(DiskAccessor(root), [_on_d("/a/x")], 8)
+    assert swapped
+    assert got == {}

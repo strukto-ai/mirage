@@ -52,7 +52,9 @@ export async function read(
  * never pass a run. A file is kept only from what its inode says, before its
  * rows are asked for: one that is gone or no file, one longer than `limit`,
  * and one that does not fit in `room` beside the files kept before it is left
- * out for its own read to meet. A path named twice is kept once, and so is an
+ * out for its own read to meet, and so is one whose rows come back with
+ * another size than it was kept at, or with none, as when a write lands
+ * between the two queries. A path named twice is kept once, and so is an
  * inode two paths reach (one moved between the folders' lookups): the later
  * path is left for its own read, so no file is answered with the size another
  * path saw. Each file read is recorded as a whole streamed read records it.
@@ -117,8 +119,11 @@ export async function readMany(
       cs,
     )
     for (const [spec, entry] of run) {
-      const data = fillBytes(rows.get(entry.ino) ?? [], cs, 0, entry.size)
+      const found = rows.get(entry.ino) ?? []
       rows.delete(entry.ino)
+      const changed = found.length === 0 || found.some((r) => Number(r.size ?? 0) !== entry.size)
+      if (entry.size > 0 && changed) continue
+      const data = fillBytes(found, cs, 0, entry.size)
       const rec = recordStream('read', spec.virtual, VFSName.SQL)
       if (rec !== null) {
         rec.bytes = data.byteLength
@@ -178,7 +183,8 @@ async function inodesNamed(
 
 /**
  * The `fs_data` rows of `files`, by inode, each file's only as far as the size
- * its inode gave when it was kept (`rowsOf`). Mirrors Python's `_rows_by_ino`.
+ * its inode gave when it was kept, and each with the size the file has as they
+ * are read (`rowsOf`). Mirrors Python's `_rows_by_ino`.
  */
 async function rowsByIno(
   accessor: SqlAccessor,

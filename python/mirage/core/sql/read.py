@@ -65,8 +65,10 @@ async def read_many(
     beside the files built never pass a run. A file is kept only from what
     its inode says, before its rows are asked for: one that is gone or no
     file, one longer than ``limit``, and one that does not fit in ``room``
-    beside the files kept before it is left out for its own read to meet.
-    A path named twice is kept once, and so is an inode two paths reach
+    beside the files kept before it is left out for its own read to meet,
+    and so is one whose rows come back with another size than it was kept
+    at, or with none, as when a write lands between the two queries. A
+    path named twice is kept once, and so is an inode two paths reach
     (one moved between the folders' lookups): the later path is left for
     its own read, so no file is answered with the size another path saw.
     Each file read is recorded as a whole streamed read records it.
@@ -112,7 +114,13 @@ async def read_many(
     for run in _runs(kept):
         rows = await _rows_by_ino(accessor, [e for _, e in run if e.size], cs)
         for spec, entry in run:
-            data = fill_bytes(rows.pop(entry.ino, []), cs, 0, entry.size)
+            found = rows.pop(entry.ino, [])
+            if entry.size and (
+                not found
+                or any(int(r["size"] or 0) != entry.size for r in found)
+            ):
+                continue
+            data = fill_bytes(found, cs, 0, entry.size)
             rec = record_stream("read", spec.virtual, VFSName.SQL)
             if rec is not None:
                 rec.bytes = len(data)
@@ -176,7 +184,8 @@ async def _rows_by_ino(
     accessor: SqlAccessor, files: list[Inode], cs: int
 ) -> dict[int, list[SqlRow]]:
     """The ``fs_data`` rows of ``files``, by inode, each file's only as
-    far as the size its inode gave when it was kept (``rows_of``).
+    far as the size its inode gave when it was kept, and each with the
+    size the file has as they are read (``rows_of``).
 
     Args:
         accessor (SqlAccessor): the database.

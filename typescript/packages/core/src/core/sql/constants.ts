@@ -221,12 +221,14 @@ export function entriesNamed(count: number): string {
  * The `fs_data` rows of a batch of files, in order within each, a file's only
  * up to the chunk its checked size ends in, so a file that grew since is
  * fetched no further: two parameters a file, its inode and that last chunk's
- * index.
+ * index. Each row carries its file's size as the same statement sees it, so
+ * rows a write changed after the size was checked are told apart.
  */
 export function rowsOf(count: number): string {
   const files = Array<string>(count).fill('(ino = ? AND chunk_index <= ?)').join(' OR ')
-  return `SELECT ino, chunk_index, data FROM fs_data
-    WHERE ${files} ORDER BY ino, chunk_index`
+  return `SELECT ino, chunk_index, data,
+    (SELECT i.size FROM fs_inode i WHERE i.ino = fs_data.ino) AS size
+    FROM fs_data WHERE ${files} ORDER BY ino, chunk_index`
 }
 
 /** Direct children of a bounded batch of parents, with their inode rows. */

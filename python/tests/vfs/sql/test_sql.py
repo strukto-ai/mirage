@@ -252,7 +252,8 @@ async def test_a_batch_read_fetches_no_row_past_the_size_it_kept(
     # The rows come in a query after the sizes were checked, so a file
     # that grew between them is fetched only as far as the size the batch
     # kept it at: here its inode answers CS + 1 bytes of a file that is
-    # three rows long now, so only its first two rows come.
+    # three rows long now, so only its first two rows come. Those rows
+    # carry the size it has now, so it is then left for its own read.
     await vfs.write(at("/g"), b"g" * (CS * 3))
     fetched: list[SqlRow] = []
     query = vfs.accessor.query
@@ -267,8 +268,38 @@ async def test_a_batch_read_fetches_no_row_past_the_size_it_kept(
 
     vfs.accessor.query = grown  # type: ignore[method-assign]
     got = await vfs.read_many([at("/g")], CS * 3)
-    assert got == {"/g": b"g" * (CS + 1)}
+    assert got == {}
     assert sorted(int(r["chunk_index"] or 0) for r in fetched) == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_a_file_written_between_its_queries(
+    vfs: SqlVFS,
+):
+    # A truncate or an unlink that lands after the sizes were checked and
+    # before the rows come would leave a file padded with zeros to the
+    # size the batch saw; each row carries the size its file has as it is
+    # read, so a file whose rows carry another size, or that has none, is
+    # left for its own read, and an untouched one still comes.
+    await vfs.write(at("/t"), b"ab")
+    await vfs.write(at("/u"), b"uu")
+    await vfs.write(at("/k"), b"kk")
+    query = vfs.accessor.query
+    landed: list[bool] = []
+
+    async def racing(
+        sql: str, params: Sequence[SqlValue] = ()
+    ) -> list[SqlRow]:
+        if "chunk_index <=" in sql and not landed:
+            landed.append(True)
+            await vfs.truncate(at("/t"), 1)
+            await vfs.unlink(at("/u"))
+        return await query(sql, params)
+
+    vfs.accessor.query = racing  # type: ignore[method-assign]
+    got = await vfs.read_many([at("/t"), at("/u"), at("/k")], 64)
+    assert landed
+    assert got == {"/k": b"kk"}
 
 
 @pytest.mark.asyncio

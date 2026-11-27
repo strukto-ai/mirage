@@ -154,6 +154,21 @@ async function openParent(parent: string): Promise<void> {
 }
 
 /**
+ * The host path a mount-relative key names below `root`, worked out from the
+ * key alone: nothing on the way is looked at, so it is no proof
+ * (`resolveInside` is). A key that leads out of the root throws. Mirrors
+ * Python's `inside_path`.
+ */
+export function insidePath(root: string, virtual: string): string {
+  const base = path.resolve(root)
+  const full = path.resolve(base, lstripSlash(virtual))
+  if (full !== base && !full.startsWith(base.endsWith(path.sep) ? base : base + path.sep)) {
+    throw new Error(`path escapes root: ${virtual}`)
+  }
+  return full
+}
+
+/**
  * The host path for a mount path, refused as absent when a component below
  * the root is a symlink. A VFS never stores a symlink, so a host link is not
  * an entry of the mount: following it would let a path the root admits
@@ -183,11 +198,8 @@ export async function resolveInside(
   opened?: Map<string, Promise<void>>,
 ): Promise<string> {
   const base = path.resolve(root)
-  const full = path.resolve(base, lstripSlash(virtual))
+  const full = insidePath(root, virtual)
   if (full === base) return full
-  if (!full.startsWith(base.endsWith(path.sep) ? base : base + path.sep)) {
-    throw new Error(`path escapes root: ${virtual}`)
-  }
   const parts = path.relative(base, full).split(path.sep)
   const end = parts.includes('') ? parts.indexOf('') : parts.length
   let probe = end > 0 ? probeName(base, parts[0] ?? '', opened) : null

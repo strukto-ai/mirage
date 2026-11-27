@@ -21,7 +21,11 @@ from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import exact_name, resolve_inside_sync
+from mirage.core.disk.utils import (
+    exact_name,
+    inside_path,
+    resolve_inside_sync,
+)
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -109,7 +113,7 @@ async def read_many(
                 continue
             try:
                 data = _read_checked(*proven, name, most, opened)
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 logger.debug(
                     "batch read leaves %s to its own read: %s",
                     spec.virtual,
@@ -137,7 +141,11 @@ def _folder_inside(
     """The host directory a batch's ``folder`` names, checked as a read of
     a file in it checks it, with the stat it was proven as, or None when
     it is no directory there. The stat follows a link, as the mount root
-    itself may be one.
+    itself may be one. It is taken before the folder is proven, never
+    after: a stat taken after the proof could land on a folder swapped for
+    a link to a directory outside the mount since, and the batch would keep
+    that directory's identity; one taken before is of what the proof then
+    finds no link on the way to.
 
     Args:
         root (Path): the mount root on the host.
@@ -146,9 +154,10 @@ def _folder_inside(
         opened (set[str]): the parents the batch has proven readable.
     """
     try:
-        host = resolve_inside_sync(root, spec, folder, opened)
+        host = inside_path(root, spec, folder)
         info = os.stat(host)
         if stat.S_ISDIR(info.st_mode):
+            resolve_inside_sync(root, spec, folder, opened)
             return str(host), info
     except (OSError, ValueError) as exc:
         logger.debug("batch read leaves %s to its own read: %s", folder, exc)

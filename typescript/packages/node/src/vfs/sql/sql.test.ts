@@ -175,7 +175,8 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     // The rows come in a query after the sizes were checked, so a file that
     // grew between them is fetched only as far as the size the batch kept it
     // at: here its inode answers one byte past a row of a file that is three
-    // rows long now, so only its first two rows come.
+    // rows long now, so only its first two rows come. Those rows carry the size
+    // it has now, so it is then left for its own read.
     await ops(vfs).write(at('/g'), new Uint8Array(DEFAULT_CHUNK_SIZE * 3).fill(103))
     const query = vfs.accessor.query.bind(vfs.accessor)
     const fetched: SqlRow[] = []
@@ -187,8 +188,32 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
       return rows
     })
     const got = await vfs.readMany([at('/g')], DEFAULT_CHUNK_SIZE * 3)
-    expect(got).toEqual(new Map([['/g', new Uint8Array(DEFAULT_CHUNK_SIZE + 1).fill(103)]]))
+    expect(got).toEqual(new Map())
     expect(fetched.map((r) => Number(r.chunk_index)).sort()).toEqual([0, 1])
+  })
+
+  it('leaves out a file of a batch read written between its queries', async () => {
+    // A truncate or an unlink that lands after the sizes were checked and
+    // before the rows come would leave a file padded with zeros to the size
+    // the batch saw; each row carries the size its file has as it is read, so
+    // a file whose rows carry another size, or that has none, is left for its
+    // own read, and an untouched one still comes.
+    await ops(vfs).write(at('/t'), enc.encode('ab'))
+    await ops(vfs).write(at('/u'), enc.encode('uu'))
+    await ops(vfs).write(at('/k'), enc.encode('kk'))
+    const query = vfs.accessor.query.bind(vfs.accessor)
+    let landed = false
+    vi.spyOn(vfs.accessor, 'query').mockImplementation(async (sql, params) => {
+      if (sql.includes('chunk_index <=') && !landed) {
+        landed = true
+        await ops(vfs).truncate(at('/t'), 1)
+        await ops(vfs).unlink(at('/u'))
+      }
+      return query(sql, params)
+    })
+    const got = await vfs.readMany([at('/t'), at('/u'), at('/k')], 64)
+    expect(landed).toBe(true)
+    expect(got).toEqual(new Map([['/k', enc.encode('kk')]]))
   })
 
   it('keeps the files of a batch read that fit its room', async () => {

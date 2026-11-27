@@ -159,6 +159,28 @@ def _open_parent(parent: str, opened: set[str] | None = None) -> None:
         opened.add(parent)
 
 
+def inside_path(root: Path, spec: PathSpec, path: str | None = None) -> Path:
+    """The host path a mount-relative key names below ``root``, worked out
+    from the key alone: nothing on the way is looked at, so it is no proof
+    (``resolve_inside_sync`` is).
+
+    Args:
+        root (Path): mount root on the host.
+        spec (PathSpec): operand retained for virtual-path errors.
+        path (str | None): alternate mount-relative key, otherwise spec's.
+
+    Raises:
+        ValueError: the key leads out of the root.
+    """
+    key = spec.mount_path if path is None else path
+    base = os.path.abspath(root)
+    full = os.path.normpath(os.path.join(base, key.lstrip("/")))
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    if full != base and not full.startswith(prefix):
+        raise ValueError(f"path escapes root: {spec.virtual}")
+    return Path(full)
+
+
 def resolve_inside_sync(
     root: Path,
     spec: PathSpec,
@@ -186,12 +208,8 @@ def resolve_inside_sync(
         opened (set[str] | None): the parents a batch of checks has
             proven readable, shared across its calls (``exact_name``).
     """
-    key = spec.mount_path if path is None else path
     base = os.path.abspath(root)
-    full = os.path.normpath(os.path.join(base, key.lstrip("/")))
-    prefix = base if base.endswith(os.sep) else base + os.sep
-    if full != base and not full.startswith(prefix):
-        raise ValueError(f"path escapes root: {spec.virtual}")
+    full = str(inside_path(root, spec, path))
     at = base
     for part in full[len(base) :].split(os.sep):
         if not part:
