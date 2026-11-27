@@ -130,8 +130,9 @@ export interface GmailLabel {
   type: string
 }
 
-// One change to a mailbox, as history.list names it: a message added or
-// deleted, or labels added to or removed from one. `seq` is its history id.
+// One change to a mailbox, the fake's own record of what history.list then
+// names (Gmail has no resource for it): a message added or deleted, or labels
+// added to or removed from one. `seq` is its history id.
 export type GmailChangeKind = 'messagesAdded' | 'messagesDeleted' | 'labelsAdded' | 'labelsRemoved'
 
 export interface GmailChange {
