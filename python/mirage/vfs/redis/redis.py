@@ -27,6 +27,7 @@ from mirage.core.redis.exists import exists as _exists
 from mirage.core.redis.location import server_location
 from mirage.core.redis.mkdir import mkdir as _mkdir
 from mirage.core.redis.read import read as _read
+from mirage.core.redis.read import read_many as _read_many
 from mirage.core.redis.readdir import readdir as _readdir
 from mirage.core.redis.readdir import tree as _tree
 from mirage.core.redis.rename import rename as _rename
@@ -106,6 +107,11 @@ class RedisVFS(BaseVFS):
         if not offset and size is None:
             return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int, room: int | None = None
+    ) -> dict[str, bytes]:
+        return await _read_many(self.accessor, paths, limit, room)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)

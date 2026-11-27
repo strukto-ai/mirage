@@ -42,6 +42,17 @@ export interface RedisStoreLike {
   readonly url: string
   readonly keyPrefix: string
   getFile(path: string): Promise<Uint8Array | null>
+  /**
+   * The bytes of each file `paths` names, in one round trip that sizes each
+   * on the server before reading it (`READ_FILES_SCRIPT`): null for one that
+   * is absent or empty, longer than `limit`, or past what is left of `room`
+   * (null for no bound) once the files before it took theirs.
+   */
+  getFiles(
+    paths: readonly string[],
+    limit: number,
+    room: number | null,
+  ): Promise<(Uint8Array | null)[]>
   /** A byte window, or null when the file is absent; a null `size` reads to the end. */
   getFileRange(path: string, offset: number, size: number | null): Promise<Uint8Array | null>
   setFile(path: string, data: Uint8Array): Promise<void>

@@ -753,7 +753,10 @@ class BaseVFS:
         it, fingerprint included, so the read cache keeps its token. A VFS
         that needs what the listings hold takes ``entries`` (what is at
         each path) or ``parents`` (what is at each path's folder), each in
-        the order of ``paths``.
+        the order of ``paths``. One that takes ``room`` is handed the most
+        bytes the files it answers may come to together, None for no
+        bound, and leaves out a file that would pass it before fetching
+        its bytes.
 
         Args:
             paths (list[PathSpec]): the files, all on this mount.

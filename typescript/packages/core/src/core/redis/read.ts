@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { record, startOp } from '../../observe/context.ts'
+import { record, recordStream, startOp } from '../../observe/context.ts'
 import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
@@ -47,4 +47,45 @@ export async function read(
   }
   record('read', path.virtual, VFSName.REDIS, data.byteLength, timer)
   return data
+}
+
+/**
+ * Several whole files by virtual path, in one round trip whatever their
+ * number (`RedisStoreLike.getFiles`): one that is absent, empty or no file,
+ * one longer than `limit`, and one that does not fit in `room` beside the
+ * files read before it is left out for its own read to meet. A path named
+ * twice is read once. Each file read is recorded as a whole streamed read
+ * records it. Mirrors Python's `read_many`.
+ *
+ * Args:
+ *   accessor: Redis accessor.
+ *   paths: the files, all on this mount.
+ *   limit: the most bytes worth fetching for one file.
+ *   room: the most bytes the files read may come to together, null for no
+ *     bound.
+ */
+export async function readMany(
+  accessor: RedisAccessor,
+  paths: readonly PathSpec[],
+  limit: number,
+  room: number | null = null,
+): Promise<Map<string, Uint8Array>> {
+  const files = [...new Map(paths.map((p) => [p.virtual, p])).values()]
+  const found = await accessor.store.getFiles(
+    files.map((p) => norm(p.mountPath)),
+    limit,
+    room,
+  )
+  const read = new Map<string, Uint8Array>()
+  files.forEach((spec, i) => {
+    const data = found[i] ?? null
+    if (data === null) return
+    const rec = recordStream('read', spec.virtual, VFSName.REDIS)
+    if (rec !== null) {
+      rec.bytes = data.byteLength
+      rec.complete = true
+    }
+    read.set(spec.virtual, data)
+  })
+  return read
 }

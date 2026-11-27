@@ -64,7 +64,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
 import { type Egress, withEgress } from '../../io/gateway.ts'
-import { checkMemory } from '../../io/memory.ts'
+import { checkMemory, memoryRoom } from '../../io/memory.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { closeQuietly, OutputStream, rechunk } from '../../io/stream.ts'
@@ -242,6 +242,34 @@ async function* asStream(
     return
   }
   yield* found
+}
+
+/**
+ * The files of a batch read that fit together, in `scopes`' order, in what
+ * the workspace's `max_memory` has left beside `heldBytes` now; one that does
+ * not fit is left out for its own read to meet, and a smaller one after it
+ * may still fit. Mirrors Python's `_in_room`.
+ *
+ * @param scopes the files the batch asked for, in order
+ * @param read what the batch read, by virtual path
+ * @param heldBytes the bytes the batch already holds
+ */
+function inRoom(
+  scopes: readonly PathSpec[],
+  read: Map<string, Uint8Array>,
+  heldBytes: number,
+): Map<string, Uint8Array> {
+  const room = memoryRoom()
+  if (room === null) return read
+  const kept = new Map<string, Uint8Array>()
+  let left = room - heldBytes
+  for (const scope of scopes) {
+    const data = read.get(scope.virtual)
+    if (data === undefined || kept.has(scope.virtual) || data.byteLength > left) continue
+    kept.set(scope.virtual, data)
+    left -= data.byteLength
+  }
+  return kept
 }
 
 /**
@@ -2445,11 +2473,14 @@ export class MountEntry {
 
   /**
    * The VFS's batch read, handed what is at each path and at its folder as
-   * the stored listings name them, where it declares them; a VFS with no batch
-   * read has each file read as its own whole read reads it (`readEach`), and
-   * one longer than `limit`, one that does not fit in what is left, or one that
-   * fails is left out. Either way the index is observed once. Mirrors Python's
-   * `_read_many`.
+   * the stored listings name them, where it declares them, and the bytes the
+   * files may come to together (`room`: what the workspace's `max_memory` has
+   * left beside `heldBytes`); what it answers is kept only as far as it fits
+   * in what is left once it is done (`inRoom`), since the stores may have
+   * grown while it read. A VFS with no batch read has each file read as its
+   * own whole read reads it (`readEach`), and one longer than `limit`, one
+   * that does not fit in what is left, or one that fails is left out. Either
+   * way the index is observed once. Mirrors Python's `_read_many`.
    */
   private async batchRead(
     scopes: PathSpec[],
@@ -2473,7 +2504,12 @@ export class MountEntry {
       if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
       handed.push(one)
     }
-    const result = await this.vfs.readMany(scopes, limit, handed)
+    const free = memoryRoom()
+    const result = inRoom(
+      scopes,
+      await this.vfs.readMany(scopes, limit, handed, free === null ? null : free - heldBytes),
+      heldBytes,
+    )
     await this.observe(
       index,
       scopes.filter((scope) => result.has(scope.virtual)),

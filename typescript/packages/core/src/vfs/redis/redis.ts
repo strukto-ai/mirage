@@ -23,7 +23,7 @@ import { create as redisCreate } from '../../core/redis/create.ts'
 import { exists as redisExists } from '../../core/redis/exists.ts'
 import { serverLocation } from '../../core/redis/location.ts'
 import { mkdir as redisMkdir } from '../../core/redis/mkdir.ts'
-import { read as redisRead } from '../../core/redis/read.ts'
+import { read as redisRead, readMany as redisReadMany } from '../../core/redis/read.ts'
 import { readdir as redisReaddir, tree as redisTree } from '../../core/redis/readdir.ts'
 import { rename as redisRename } from '../../core/redis/rename.ts'
 import { rmR as redisRmR } from '../../core/redis/rm.ts'
@@ -139,6 +139,15 @@ export class RedisVFS extends BaseVFS {
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return redisStream(this.accessor, path)
     return redisRead(this.accessor, path, size === null ? { offset } : { offset, size })
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    _handed?: readonly Handed[],
+    room: number | null = null,
+  ): Promise<Map<string, Uint8Array>> {
+    return redisReadMany(this.accessor, paths, limit, room)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

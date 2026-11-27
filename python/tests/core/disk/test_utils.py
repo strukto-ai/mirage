@@ -361,3 +361,43 @@ def test_a_proven_parent_is_opened_not_listed(tree, monkeypatch, platform):
         tree / "lib" / "7"
     )
     assert scans == []
+
+
+def test_a_batch_of_proofs_opens_each_parent_once(tree, monkeypatch):
+    # Checks that share ``opened`` prove a parent readable once for all of
+    # them, and one that does not share it opens the parent again; a
+    # parent that cannot be opened still refuses the check that needs it.
+    # Names without letters have no case to probe, so every proof opens.
+    (tree / "1" / "2").mkdir(parents=True)
+    for i in range(3, 6):
+        (tree / "1" / "2" / str(i)).write_text("x")
+    opens = []
+    original = os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if flags & os.O_DIRECTORY:
+            opens.append(str(path))
+        return original(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(disk_utils.os, "open", opening)
+    folders = [str(tree), str(tree / "1"), str(tree / "1" / "2")]
+    opened: set[str] = set()
+    for i in range(3, 6):
+        resolve_inside_sync(
+            tree, PathSpec.from_str_path(f"/1/2/{i}"), opened=opened
+        )
+    assert opens == folders
+    resolve_inside_sync(tree, PathSpec.from_str_path("/1/2/3"))
+    assert opens[3:] == folders
+
+    def denied(path, flags, *args, **kwargs):
+        if str(path) == str(tree / "1" / "2"):
+            raise PermissionError(errno.EACCES, "denied")
+        return original(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(disk_utils.os, "open", denied)
+    with pytest.raises(PermissionError):
+        resolve_inside_sync(
+            tree, PathSpec.from_str_path("/1/2/4"), opened=set()
+        )
