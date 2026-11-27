@@ -61,5 +61,5 @@ async def set_attrs(
         entry["atime"] = atime
     if mtime is not None:
         store.modified[p] = mtime
-        entry["times_set_at"] = stamp_iso(accessor.stamped())
+        entry["retimed"] = stamp_iso(accessor.stamped())
     return {}

@@ -84,8 +84,9 @@ export interface RAMAttrs {
   atime?: string
   /** The stamp the store gave when a caller last set the file's mtime by
    * hand, which its fingerprint carries: a time set back keeps the
-   * fingerprint off every one the file had before. */
-  timesSetAt?: string
+   * fingerprint off every one the file had before. One word, so a
+   * snapshot either host saves names it as the other reads it. */
+  retimed?: string
 }
 
 /**

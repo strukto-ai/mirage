@@ -23,7 +23,7 @@ def token_of(store: RAMStore, p: str) -> str | None:
     (``RAMStore.stamped``), so a rewrite always moves it, a same-size one
     in the same instant included. A time set by hand (``touch -d``,
     ``touch -r``) can be one the file had before, so the stamp the store
-    gave that set (``times_set_at``) goes with it, and a rewrite whose
+    gave that set (``retimed``) goes with it, and a rewrite whose
     time is set back to the old one still moves the fingerprint.
 
     Args:
@@ -33,5 +33,5 @@ def token_of(store: RAMStore, p: str) -> str | None:
     modified = store.modified.get(p)
     if modified is None:
         return None
-    set_at = store.attrs.get(p, {}).get("times_set_at")
-    return modified if set_at is None else f"{modified}~{set_at}"
+    retimed = store.attrs.get(p, {}).get("retimed")
+    return modified if retimed is None else f"{modified}~{retimed}"

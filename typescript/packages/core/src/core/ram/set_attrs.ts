@@ -40,7 +40,7 @@ export function setAttrs(
   store.attrs.set(p, entry)
   if (fields.mtime !== undefined) {
     store.modified.set(p, fields.mtime)
-    entry.timesSetAt = stampIso(accessor.stamped())
+    entry.retimed = stampIso(accessor.stamped())
   }
   return Promise.resolve({})
 }

@@ -59,6 +59,9 @@ describe('tokenOf', () => {
     })
     expect(after.modified).toBe(first.modified)
     expect(after.fingerprint).not.toBe(first.fingerprint)
+    // The key a snapshot saves it under, which the Python store reads back by
+    // the same name.
+    expect(vfs.getState().attrs?.['/f']?.retimed).toBeDefined()
   })
 
   it('moves on the first rewrite of a store loaded from a saved one', async () => {

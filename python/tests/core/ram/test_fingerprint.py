@@ -62,11 +62,15 @@ async def test_a_time_set_back_by_hand_still_moves_it():
     # touch -r can put back the very time the first write gave the file;
     # the fingerprint carries the stamp of that set, so it is not the
     # first write's.
+    vfs = RAMVFS()
     first, after = await run_with_system_clock(
-        ManualClock(1_800_000_000), _set_back(RAMVFS())
+        ManualClock(1_800_000_000), _set_back(vfs)
     )
     assert after.modified == first.modified
     assert after.fingerprint != first.fingerprint
+    # The key a snapshot saves it under, which the TypeScript store reads
+    # back by the same name.
+    assert "retimed" in vfs.get_state()["attrs"]["/f"]
 
 
 async def _reloaded(vfs: RAMVFS) -> tuple[FileStat, FileStat]:
