@@ -711,6 +711,34 @@ describe('E2B health', () => {
     expect((await health(headers)).statusCode).toBe(502)
     expect((await health(routing)).statusCode).toBe(502)
   })
+
+  it('answers the route the listener matched, whatever the host port, encoding or HEAD', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const listener = e2bListener(app)
+    const headers = {
+      'e2b-sandbox-id': sandbox.sandboxID,
+      'e2b-sandbox-port': '49983',
+      'x-access-token': sandbox.envdAccessToken,
+    }
+    const oddHost = await listener.inject({
+      url: HEALTH,
+      headers: { ...headers, host: 'localhost:99999' },
+    })
+    expect(oddHost.statusCode).toBe(204)
+    expect((await listener.inject({ url: '/he%61lth', headers })).statusCode).toBe(204)
+    const stat = await listener.inject({
+      method: 'POST',
+      url: '/filesystem.Filesystem/St%61t',
+      headers: { ...headers, 'content-type': 'application/json' },
+      payload: { path: '.' },
+    })
+    expect(stat.statusCode, stat.body).toBe(200)
+    for (const url of ['/sandboxes', `/sandboxes/${sandbox.sandboxID}`]) {
+      const head = await listener.inject({ method: 'HEAD', url, headers: API_KEY })
+      expect(head.statusCode).toBe(501)
+    }
+  })
 })
 
 describe('E2B commands', () => {
@@ -855,6 +883,28 @@ describe('E2B commands', () => {
       client.destroy()
     }
     const after = await runCommand(app, headers, processBody('test ! -e expired'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
+  it('refuses a command whose upload ends after the server starts draining', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
+    const { client, reply } = streamingPost(address + START, headers)
+    const body = processBody('touch drained')
+    try {
+      client.write(body.subarray(0, 4))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      app.registry.draining = true
+      client.end(body.subarray(4))
+      const response = await reply
+      expect(response.status).toBe(503)
+      expect(response.body.toString()).toContain('server is shutting down')
+    } finally {
+      client.destroy()
+      app.registry.draining = false
+    }
+    const after = await runCommand(app, headers, processBody('test ! -e drained'))
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
 
@@ -1141,6 +1191,55 @@ describe('E2B files', () => {
       const response = await list(invalid)
       expect(response.statusCode).toBe(400)
       expect(response.json()).toMatchObject({ code: 'invalid_argument' })
+    }
+  })
+
+  it('keeps the connection open and frames small answers on a real socket', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 })
+    const send = (method: string, path: string, body?: string) =>
+      new Promise<{ status: number; headers: Record<string, unknown>; reused: boolean }>(
+        (resolve, reject) => {
+          const client = request(
+            address + path,
+            {
+              method,
+              agent,
+              headers: {
+                ...dataHeaders(sandbox),
+                ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+              },
+            },
+            (response) => {
+              response.resume()
+              response.on('end', () => {
+                resolve({
+                  status: response.statusCode ?? 0,
+                  headers: response.headers,
+                  reused: client.reusedSocket,
+                })
+              })
+            },
+          )
+          client.on('error', reject)
+          client.end(body)
+        },
+      )
+    try {
+      const first = await send('GET', HEALTH)
+      const second = await send('GET', HEALTH)
+      expect(first.status).toBe(204)
+      expect(first.headers.connection).toBe('keep-alive')
+      expect(second.reused).toBe(true)
+      const stat = await send('POST', '/filesystem.Filesystem/Stat', JSON.stringify({ path: '.' }))
+      expect(stat.status).toBe(200)
+      expect(stat.headers['content-length']).toBeDefined()
+      expect(stat.headers['transfer-encoding']).toBeUndefined()
+      expect(stat.reused).toBe(true)
+    } finally {
+      agent.destroy()
     }
   })
 

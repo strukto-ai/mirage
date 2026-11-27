@@ -45,6 +45,23 @@ export const BASE_TEMPLATE = 'base'
 export const DEFAULT_TIMEOUT = 300
 export const ENVD_VERSION = '0.5.6'
 
+/** Fastify's default: the largest body a route reads unless it names its own. */
+export const BODY_LIMIT = 1024 * 1024
+export const BODY_METHODS: ReadonlySet<string> = new Set([
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+])
+
+/**
+ * The sandbox owner when the auth mode names no account. An E2B sandbox
+ * always has an owner; without accounts the server's workspaces keep null.
+ */
+export const DEFAULT_OWNER = 'default'
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
+
 export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
 export const TYPES: Partial<Record<FileType, string>> = {
