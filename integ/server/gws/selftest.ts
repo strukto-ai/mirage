@@ -1535,6 +1535,26 @@ async function calendarSyncHttp(at: string): Promise<void> {
     (await api(`${pull}&pageToken=nope`, 't1')).status,
     400,
   )
+  const listing = `${events}?maxResults=1`
+  let rest = obj((await api(listing, 't1')).body)
+  const edited = obj(arr(rest.items)[0])
+  await patch(`${events}/${String(edited.id)}`, { summary: 'Edited mid-listing' })
+  while (rest.nextPageToken !== undefined) {
+    rest = obj((await api(`${listing}&pageToken=${String(rest.nextPageToken)}`, 't1')).body)
+  }
+  eq(
+    'sync: an event edited during a paged full listing reaches the next pull',
+    field(
+      obj((await api(`${events}?syncToken=${String(rest.nextSyncToken)}`, 't1')).body).items,
+      'summary',
+    ),
+    ['Edited mid-listing'],
+  )
+  eq(
+    'sync: a full listing refuses a page token that is not one',
+    (await api(`${listing}&pageToken=nope`, 't1')).status,
+    400,
+  )
 }
 
 async function main(): Promise<void> {

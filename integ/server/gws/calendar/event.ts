@@ -115,8 +115,14 @@ export function listCalendarEvents(
   if (query.get('orderBy') === 'startTime') {
     rows.sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
   }
+  // The first page fixes the sync token the listing ends with, and each page
+  // token carries it beside the next row's index, so an event edited between
+  // pages stays after that token and reaches the next pull.
+  const paging = /^(\d+)\.(\d+)$/.exec(query.get('pageToken') ?? `${syncTokenOf(st)}.0`)
+  if (paging === null) return googleError(400, 'Bad Request', 'INVALID_ARGUMENT')
+  const [, bound = '0', offset = '0'] = paging
   const max = Number(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS))
-  const start = Number(query.get('pageToken') ?? '0')
+  const start = Number(offset)
   const page = rows.slice(start, start + max)
   const out: JsonObj = {
     kind: 'calendar#events',
@@ -129,8 +135,8 @@ export function listCalendarEvents(
     // grouping by local date read the wrong day.
     items: page.map((ev) => fmtEvent(cal, ev, tz)),
   }
-  if (start + max < rows.length) out.nextPageToken = String(start + max)
-  else out.nextSyncToken = syncTokenOf(st)
+  if (start + max < rows.length) out.nextPageToken = `${bound}.${start + max}`
+  else out.nextSyncToken = bound
   return ok(out)
 }
 
