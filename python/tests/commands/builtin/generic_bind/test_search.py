@@ -235,7 +235,10 @@ def test_rg_keeps_a_marked_line_answer_under_no_encoding(lines):
     assert vfs.reads == []
 
 
-EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
+# Every file: where grep and rg read each text file, the read-ahead reads
+# w.bin, which they pass over, with z.txt after it, as it reads a batch on a
+# mount that holds its data locally.
+EVERY = "a.txt b.txt c.txt sub/d.txt w.bin z.txt"
 
 
 @pytest.mark.parametrize(
@@ -324,14 +327,22 @@ def test_what_a_search_reads_and_asks(line, mount, reads, asked):
     [
         (
             ("d/sub",),
-            ["d/a.txt", "d/b.txt", "d/c.txt", "d/sub/d.txt", "d/z.txt"],
+            [
+                "d/a.txt",
+                "d/b.txt",
+                "d/c.txt",
+                "d/sub/d.txt",
+                "d/w.bin",
+                "d/z.txt",
+            ],
         ),
         (("d/*.txt",), ["d/a.txt", "d/sub/d.txt"]),
     ],
 )
 def test_a_file_the_search_does_not_cover_is_always_read(searchable, reads):
     # A glob naming a directory covers what is below it, and `*` stays
-    # within one segment, so d/*.txt leaves d/sub/d.txt uncovered.
+    # within one segment, so d/*.txt leaves d/sub/d.txt uncovered. Where
+    # every text file is read, the read-ahead reads w.bin with them.
     vfs = SearchRAM(lines=None)
     vfs.searchable = searchable
     line = "grep -r ada /d"

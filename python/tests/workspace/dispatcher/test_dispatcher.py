@@ -87,14 +87,18 @@ from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.types import VfsCall
 from mirage.workspace import Workspace
-from mirage.workspace.dispatcher.constants import (
-    POLICY_WRITE_OPS,
-    READ_AHEAD_BYTES,
-)
+from mirage.workspace.dispatcher.constants import POLICY_WRITE_OPS
 from mirage.workspace.dispatcher.dispatcher import Dispatcher, _MountChannel
+from mirage.workspace.dispatcher.read_batch import READ_AHEAD_BYTES
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session import SessionState
-from tests.fixtures.vfs_io import BatchedRAM, dispatched, override, render
+from tests.fixtures.vfs_io import (
+    BatchedRAM,
+    HeldRAM,
+    dispatched,
+    override,
+    render,
+)
 
 
 class DenyLocked(Policy):
@@ -2936,6 +2940,163 @@ async def test_a_read_ahead_fetches_nothing_a_policy_could_refuse():
     with Workspace({"/r/": vfs}, policies=[DenyLocked()]) as ws:
         await ws.dispatch("read_many", _path("/r/a"), paths=[_path("/r/b")])
     assert (vfs.batches, vfs.reads) == ([], [])
+
+
+def _sized(**sizes: int) -> dict[str, FileStat]:
+    """What a command's listing found at each file under ``/r``.
+
+    Args:
+        **sizes (int): each file's size, by name.
+    """
+    return {
+        f"/r/{name}": FileStat(name=name, type=FileType.FILE, size=size)
+        for name, size in sizes.items()
+    }
+
+
+class _ScopingGate:
+    """An EntryGate whose path rule reaches one path."""
+
+    scoped = True
+    granted = ()
+    judged: frozenset[str] = frozenset()
+
+    def __init__(self, scope: str) -> None:
+        self.scope = scope
+
+    def check(self, virtual: str) -> None:
+        return None
+
+    def scopes(self, virtual: str) -> bool:
+        return virtual == self.scope
+
+
+class SeenReads(Policy):
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batched", [True, False])
+async def test_a_read_ahead_on_a_local_mount_holds_each_file_for_one_read(
+    batched,
+):
+    # One batch where the store reads one, each file read in turn where not.
+    vfs = HeldRAM(batched)
+    with Workspace({"/r/": vfs}) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/b")],
+            stats=_sized(a=2, b=2),
+        )
+    assert (batch.kept, batch.holds) == (False, True)
+    assert (vfs.batches, vfs.reads) == (
+        ([["/r/a", "/r/b"]], []) if batched else ([], ["/r/a", "/r/b"])
+    )
+    assert (batch.take("/r/a"), batch.take("/r/a")) == (b"a\n", None)
+    assert batch.take("/r/b") == b"b\n"
+
+
+@pytest.mark.asyncio
+async def test_a_write_since_the_read_ahead_drops_the_held_file():
+    vfs = HeldRAM()
+    with Workspace({"/r/": vfs}, mode=MountMode.WRITE) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/b")],
+            stats=_sized(a=2, b=2),
+        )
+        await ws.dispatch("write", _path("/r/b"), data=b"new\n")
+        data, _ = await ws.dispatch("read", _path("/r/b"))
+    assert (batch.take("/r/a"), batch.take("/r/b")) == (b"a\n", None)
+    assert data == b"new\n"
+
+
+@pytest.mark.asyncio
+async def test_a_copy_since_the_read_ahead_keeps_its_held_source():
+    # A copy changes only what it writes: its source is still the held
+    # bytes, its destination is not.
+    vfs = HeldRAM()
+    with Workspace({"/r/": vfs}, mode=MountMode.WRITE) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/b")],
+            stats=_sized(a=2, b=2),
+        )
+        await ws.dispatch("copy", _path("/r/a"), dst=_path("/r/b"))
+    assert (batch.take("/r/a"), batch.take("/r/b")) == (b"a\n", None)
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_holds_no_hidden_ruled_unsized_or_empty_file():
+    # A hidden or ruled file is left to a read the checks refuse, one no
+    # listing sized to its own read, and an empty one to the read that
+    # asks whether a directory is there.
+    vfs = HeldRAM(batched=False)
+    vfs._store.files.update({"/d": b"d\n", "/e": b""})
+    session = SessionState(
+        session_id="agent",
+        visibility=Visibility(paths=HiddenPaths(paths=("/r/secret",))),
+    )
+    token = set_current_session(session)
+    try:
+        with Workspace({"/r/": vfs}) as ws:
+            batch, _ = await ws.dispatch(
+                "read_many",
+                _path("/r/a"),
+                paths=[
+                    _path(p) for p in ("/r/secret/c", "/r/b", "/r/d", "/r/e")
+                ],
+                stats={
+                    **_sized(a=2, d=2, e=0),
+                    "/r/secret/c": FileStat(
+                        name="c", type=FileType.FILE, size=2
+                    ),
+                },
+                caller=_by_command(_ScopingGate("/r/d")),
+            )
+    finally:
+        reset_caller(token)
+    assert (batch.holds, vfs.reads, sorted(batch.held)) == (
+        True,
+        ["/r/a"],
+        ["/r/a"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_holds_nothing_a_policy_could_judge():
+    # A coded pre_vfs policy keeps the read-ahead from reading at all, and
+    # a post_vfs one from holding what its reads would judge.
+    for policy in (DenyLocked(), SeenReads()):
+        vfs = HeldRAM(batched=False)
+        with Workspace({"/r/": vfs}, policies=[policy]) as ws:
+            batch, _ = await ws.dispatch(
+                "read_many",
+                _path("/r/a"),
+                paths=[_path("/r/b")],
+                stats=_sized(a=2, b=2),
+            )
+        assert (batch.holds, batch.held, vfs.reads) == (False, {}, [])
+
+
+@pytest.mark.asyncio
+async def test_a_read_ahead_holds_no_file_the_read_cache_answers():
+    # A local mount that keeps reads too serves each read from its read
+    # cache, which may hold a copy older than the store.
+    vfs = HeldRAM(batched=False)
+    vfs.caches_reads = True
+    with Workspace({"/r/": vfs}) as ws:
+        batch, _ = await ws.dispatch(
+            "read_many",
+            _path("/r/a"),
+            paths=[_path("/r/b")],
+            stats=_sized(a=2, b=2),
+        )
+    assert (batch.holds, batch.held, vfs.reads) == (False, {}, [])
 
 
 @pytest.mark.asyncio

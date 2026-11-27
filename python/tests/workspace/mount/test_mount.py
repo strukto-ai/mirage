@@ -874,3 +874,27 @@ async def test_a_lookup_finds_a_file_a_listing_landing_beside_it_names(
 
     monkeypatch.setattr(mount.index, "list_dir", racing)
     assert await mount.call("read", "/d/w/a") == b"x"
+
+
+class _FailingRAM(RAMVFS):
+    """A RAM mount whose read of one file fails."""
+
+    async def read(self, path, offset=0, size=None):
+        if path.virtual.endswith("/bad"):
+            raise OSError(errno.EIO, "unreadable", path.virtual)
+        return await super().read(path, offset, size)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_without_one_on_the_vfs_reads_each_file():
+    # The VFS reads no batch, so each file is read as its own read would
+    # read it; one longer than the limit, and one whose read fails, is left
+    # for that read.
+    vfs = _FailingRAM()
+    vfs._store.files.update(
+        {"/a": b"a\n", "/big": b"x" * 9, "/bad": b"b\n", "/e": b""}
+    )
+    mount = MountEntry("/d/", vfs)
+    assert not vfs.supports("read_many")
+    read = await mount.read_many(["/d/a", "/d/big", "/d/bad", "/d/e"], 8)
+    assert read == {"/d/a": b"a\n", "/d/e": b""}

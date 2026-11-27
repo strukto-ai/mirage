@@ -166,7 +166,6 @@ import {
   NATIVE_WALK_OPS,
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
-  READ_AHEAD_BYTES,
   READ_SHORTCUT_OPS,
   READ_STAND_IN_OPS,
   SERIAL_WRITE_OPS,
@@ -175,6 +174,7 @@ import {
   UNLINKING_OPS,
   XATTR_OPS,
 } from './constants.ts'
+import { type HeldFile, READ_AHEAD_BYTES, ReadBatch } from './read_batch.ts'
 import { sees } from './reader.ts'
 import { LentPayload, memoryAnswered, primed, served, withMemory } from './stream.ts'
 
@@ -874,9 +874,11 @@ export class Dispatcher {
     } finally {
       if (POLICY_WRITE_OPS.has(name)) {
         const changes = this.namespace.registry.changes
-        for (const changed of args?.[0] instanceof PathSpec ? [path, args[0]] : [path]) {
-          changes.note(changed.virtual)
-          changes.note(this.spelled(changed))
+        const changed = COPY_OPS.has(name) ? [] : [path]
+        if (args?.[0] instanceof PathSpec) changed.push(args[0])
+        for (const spec of changed) {
+          changes.note(spec.virtual)
+          changes.note(this.spelled(spec))
         }
       }
       const data = args?.[0] ?? kwargs?.data
@@ -1023,12 +1025,19 @@ export class Dispatcher {
       kwargs = own
     if (name === 'stat' && fresh !== undefined) kwargs = own
     if (name === 'read_many') {
-      const { paths, stats } = (kwargs ?? {}) as {
+      const { paths, stats, hold } = (kwargs ?? {}) as {
         paths?: PathSpec[]
         stats?: Map<string, FileStat>
+        hold?: boolean
       }
-      const kept = await this.readMany([path, ...(paths ?? [])], issuer, caller, stats ?? new Map())
-      return [kept, new IOResult()]
+      const batch = await this.readMany(
+        [path, ...(paths ?? [])],
+        issuer,
+        caller,
+        stats ?? new Map(),
+        hold ?? true,
+      )
+      return [batch, new IOResult()]
     }
     const prune = name === 'files_containing' && kwargs?.prune === true
     if (prune) {
@@ -1597,38 +1606,55 @@ export class Dispatcher {
   }
 
   /**
-   * Keep the small files `typed` names in the read cache, for the reads a
-   * command is about to make of them; the answer is whether any of them is on
-   * a mount this keeps reads for, so a caller warms no more of a run that is
-   * not. Each read that
-   * follows still meets every check of its own and is served what this kept,
-   * so nothing is fetched where a check could refuse that read before its
-   * backend is asked: nothing in a dry run or while a coded preVfs policy
-   * speaks for the session (the rule a one-call walk meets in `declines`),
-   * and no path the session hides or a path rule reaches. A file already
-   * kept, one a renderer answers, one pinned to a revision and one on a mount
-   * that keeps no reads or holds its data locally (read as fast when asked)
-   * is passed over. A store that reads a batch
-   * (`readMany`) is asked once for the rest of its files; any other is asked
-   * for each file its listing, or the stat the caller made of it (`stats`, by
-   * path), sizes within READ_AHEAD_BYTES. A failure is logged and dropped:
-   * the read that follows meets it itself. Mirrors Python's
-   * Dispatcher._read_many.
+   * Read ahead the small files `typed` names, for the reads a command is about
+   * to make of them.
+   *
+   * On a mount that keeps reads this keeps them in the read cache, and the
+   * answer's `kept` says it did, so a caller warms no more of a run that keeps
+   * none. Each read that follows still meets every check of its own and is
+   * served what this kept. On a mount that holds its data locally (`local`)
+   * this reads them for the caller instead, as `readHeld` says, and the answer
+   * holds the bytes; unless `hold` is false, where it reads none and only
+   * answers whether it would (`holds`), for a caller that does not know yet
+   * whether its files are on such a mount and reads nothing ahead there until
+   * it does.
+   *
+   * Nothing is fetched where a check could refuse a read before its backend is
+   * asked: nothing in a dry run or while a coded preVfs policy speaks for the
+   * session (the rule a one-call walk meets in `declines`), and no path the
+   * session hides or a path rule reaches. A file already kept, one a renderer
+   * answers and one pinned to a revision is passed over, and so is one on a
+   * mount that holds its data locally and keeps reads too, whose read the read
+   * cache answers. A store that reads a batch (`readMany`) is asked once for
+   * the rest of its files; any other is asked for each file its listing, or the
+   * stat the caller made of it (`stats`, by path), sizes within
+   * READ_AHEAD_BYTES. A failure is logged and dropped: the read that follows
+   * meets it itself. Mirrors Python's Dispatcher._read_many.
    */
   private async readMany(
     typed: readonly PathSpec[],
     issuer: symbol | undefined,
     caller: Caller | undefined,
     stats: ReadonlyMap<string, FileStat>,
-  ): Promise<boolean> {
+    hold: boolean,
+  ): Promise<ReadBatch> {
     if (this.explaining() !== null || (await this.policies.wantsFor('preVfs', this.sessionId()))) {
-      return false
+      return new ReadBatch()
     }
     await this.prepare()
     const gate = this.caller?.ruleGate ?? null
+    const changes = this.namespace.registry.changes
+    const count = changes.count
+    const judged = await this.policies.wantsFor('postVfs', this.sessionId())
+    let holdable = false
+    const redirected = new Set(
+      (caller ?? this.caller ?? currentCaller()).streamed.map(([file]) =>
+        this.followed(file.where.virtual),
+      ),
+    )
     const batches = new Map<string, [MountEntry, CacheManager, PathSpec[]]>()
+    const local = new Map<string, [MountEntry, [PathSpec, Call][]]>()
     for (const path of typed) {
-      if (this.namespace.tryMountFor(path.virtual)?.vfs.local === true) continue
       let call: Call
       try {
         call = await this.walk('read', path, [], {}, null, undefined, issuer, caller)
@@ -1638,22 +1664,51 @@ export class Dispatcher {
         continue
       }
       const mount = this.namespace.tryMountFor(call.path.virtual)
-      const manager = mount === null ? null : this.filler(call, mount, mount.vfs)
       if (
         mount === null ||
-        manager === null ||
         mount.retiring ||
-        mount.vfs.local ||
         mount.revisions.has(call.path.virtual) ||
         (gate !== null && (gate.scopes(path.virtual) || gate.scopes(call.path.virtual)))
       ) {
         continue
       }
+      const manager = this.filler(call, mount, mount.vfs)
+      if (mount.vfs.local) {
+        if (
+          !judged &&
+          manager === null &&
+          !redirected.has(this.spelled(path)) &&
+          !this.tableAnswers('read', call.path.virtual, {}) &&
+          !this.rendersRead(call, mount) &&
+          mount.vfs.supports('read') &&
+          !mount.holdsLivePipe(call.path.virtual, this.access)
+        ) {
+          holdable = true
+          if (hold) {
+            const group = local.get(mount.prefix) ?? [mount, []]
+            group[1].push([path, call])
+            local.set(mount.prefix, group)
+          }
+        }
+        continue
+      }
+      if (manager === null) continue
       const batch = batches.get(mount.prefix) ?? [mount, manager, []]
       batch[2].push(call.path)
       batches.set(mount.prefix, batch)
     }
-    if (batches.size === 0) return false
+    const held = new Map<string, HeldFile>()
+    for (const [mount, pairs] of local.values()) {
+      for (const [name, file] of await this.readHeld(mount, pairs, stats)) held.set(name, file)
+    }
+    const answer = new ReadBatch({
+      kept: batches.size > 0,
+      holds: holdable,
+      held,
+      changes: held.size > 0 ? changes : null,
+      count,
+    })
+    if (batches.size === 0) return answer
     const warm = async (): Promise<void> => {
       for (const [mount, manager, paths] of batches.values()) {
         await mount.ensureReady()
@@ -1711,7 +1766,86 @@ export class Dispatcher {
       if (activeRecords() === undefined) await recordingScope(warm, null, this.namespace.clock)
       else await warm()
     })
-    return true
+    return answer
+  }
+
+  /**
+   * Read files on a mount that holds its data locally for the caller, each
+   * past the checks its own read meets: admitted as that read is, its answer
+   * completed through the same boundary.
+   *
+   * A file the mount's index or the caller's stat does not size as a file of
+   * at most READ_AHEAD_BYTES, an empty one (whose read asks whether a directory
+   * is there), one past the room the batch has left, one the walk declines and
+   * one refused here is left to its own read. The mount reads the rest in one
+   * call (`MountEntry.readMany`), which observes its index once for all of
+   * them. Mirrors Python's Dispatcher._read_held.
+   *
+   * @param mount the mount, which holds its data locally.
+   * @param pairs each file as the caller named it, with its walked and
+   *   followed read.
+   * @param stats the caller's stats of them, by the path it named.
+   */
+  private async readHeld(
+    mount: MountEntry,
+    pairs: readonly [PathSpec, Call][],
+    stats: ReadonlyMap<string, FileStat>,
+  ): Promise<Map<string, HeldFile>> {
+    const held = new Map<string, HeldFile>()
+    await mount.ensureReady()
+    const entries = await mount.index.getMany(pairs.map(([, call]) => call.path.virtual))
+    const mark = declared(mount.vfs.constructor, 'read') ?? CALLS.get('read')
+    if (mark === undefined) throw new Error('missing read call definition')
+    const admitted: [PathSpec, Call, Boundary][] = []
+    let room = READ_AHEAD_BYTES
+    for (const [path, call] of pairs) {
+      const row = entries.get(call.path.virtual) ?? stats.get(path.virtual) ?? null
+      if (row?.type !== FileType.FILE || row.size === null || row.size === 0 || row.size > room) {
+        continue
+      }
+      try {
+        await this.refuseCrossMount(call, mount)
+        if (await this.declines(call)) continue
+        const boundary = this.boundary(mount)
+        await this.admit(call, boundary, mark)
+        room -= row.size
+        admitted.push([path, call, boundary])
+      } catch (err) {
+        console.debug(`read-ahead leaves ${path.virtual} to its read: ${String(err)}`)
+      }
+    }
+    if (admitted.length === 0) return held
+    let read: Map<string, Uint8Array>
+    try {
+      read = await mount.readMany(
+        admitted.map(([, call]) => call.path.virtual),
+        READ_AHEAD_BYTES,
+      )
+    } catch (err) {
+      console.debug(`read-ahead on ${mount.prefix} dropped: ${String(err)}`)
+      return held
+    }
+    for (const [path, call, boundary] of admitted) {
+      const data = read.get(call.path.virtual)
+      if (data === undefined || data.byteLength === 0) continue
+      let answer: unknown
+      try {
+        answer = await boundary.complete(
+          mark,
+          call.path,
+          false,
+          this.filter(call, data),
+          call.issuer,
+        )
+      } catch (err) {
+        console.debug(`read-ahead leaves ${path.virtual} to its read: ${String(err)}`)
+        continue
+      }
+      if (answer instanceof Uint8Array && answer.byteLength > 0) {
+        held.set(path.virtual, { followed: call.path.virtual, data: answer })
+      }
+    }
+    return held
   }
 
   /**

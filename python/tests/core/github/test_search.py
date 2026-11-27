@@ -564,9 +564,9 @@ async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
     got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
-    # The walk reads four. The read-ahead warms the file after them in a
-    # task of its own, and the walk can stop before that request goes out.
-    assert _read(hub) in (sorted(REPO)[:4], sorted(REPO))
+    # The walk reads four and warms none past them: the two it read in a
+    # row in docs set no pace for src.
+    assert _read(hub) == sorted(REPO)[:4]
 
 
 @pytest.mark.asyncio

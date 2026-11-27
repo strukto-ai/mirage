@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextvars import ContextVar
 
 from mirage.utils.clock import Clock
@@ -40,7 +40,9 @@ class RecentChanges:
     """The file changes of the last ``window`` seconds, each with the
     machine whose served mount made it, so a machine whose kernel keeps
     what its mounts answered that long starts a program only once nothing
-    another made there may still be held.
+    another made there may still be held. Each change is numbered as it
+    is noted, so a reader that took ``count`` before reading files asks
+    ``reached_since`` whether one has reached them since.
 
     Args:
         clock (Clock): the workspace's clock.
@@ -50,8 +52,15 @@ class RecentChanges:
     def __init__(self, clock: Clock, window: float) -> None:
         self._clock = clock
         self._window = window
-        self._changes: deque[tuple[float, str | None, str]] = deque()
+        self._changes: deque[tuple[float, str | None, str, int]] = deque()
         self._watchers: set[Callable[[str, str | None], None]] = set()
+        self._count = 0
+        self._forgotten = 0
+
+    @property
+    def count(self) -> int:
+        """How many changes have been noted so far."""
+        return self._count
 
     def note(self, path: str) -> None:
         """Record a change at ``path``, made by ``SERVED_BY``'s machine.
@@ -62,9 +71,33 @@ class RecentChanges:
         now = self._clock.monotonic()
         self._forget(now)
         by = SERVED_BY.get()
-        self._changes.append((now, by, path))
+        self._count += 1
+        self._changes.append((now, by, path, self._count))
         for watcher in list(self._watchers):
             watcher(path, by)
+
+    def reached_since(self, count: int, paths: Iterable[str]) -> bool:
+        """Whether a change noted after the first ``count`` reached one of
+        ``paths``: it is the path, a directory above it or a file below
+        it. Also True once such a change has been forgotten, which leaves
+        nothing to tell that it did not.
+
+        Args:
+            count (int): ``count`` as the reader took it.
+            paths (Iterable[str]): the virtual paths read.
+        """
+        if self._count == count:
+            return False
+        self._forget(self._clock.monotonic())
+        if self._forgotten > count:
+            return True
+        wanted = tuple(paths)
+        for _, _, path, number in reversed(self._changes):
+            if number <= count:
+                return False
+            if any(_overlaps(path, p) for p in wanted):
+                return True
+        return False
 
     def watch(
         self, listener: Callable[[str, str | None], None]
@@ -109,7 +142,7 @@ class RecentChanges:
         last = max(
             (
                 at
-                for at, by, path in self._changes
+                for at, by, path, _ in self._changes
                 if by != machine
                 and any(
                     at >= since and _overlaps(path, prefix)
@@ -123,4 +156,4 @@ class RecentChanges:
 
     def _forget(self, now: float) -> None:
         while self._changes and self._changes[0][0] <= now - self._window:
-            self._changes.popleft()
+            self._forgotten = self._changes.popleft()[3]

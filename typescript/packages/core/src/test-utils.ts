@@ -382,6 +382,16 @@ export class BatchedRAM extends RAMVFS {
 }
 
 /**
+ * A RAM mount that holds its data locally, as RAM does, so a read-ahead reads
+ * its files for the command instead of warming a read cache; it reads a batch
+ * in one call where `batched`, counting both. Twin of Python's `HeldRAM`.
+ */
+export class HeldRAM extends BatchedRAM {
+  override readonly cachesReads: boolean = false
+  override readonly local: boolean = true
+}
+
+/**
  * A `commands` block read and held by the built-in grammars' canonical
  * names, as a session holds it.
  */

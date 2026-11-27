@@ -41,7 +41,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.readers import readers
-from tests.fixtures.vfs_io import BatchedRAM
+from tests.fixtures.vfs_io import BatchedRAM, HeldRAM
 
 
 @dataclass
@@ -311,6 +311,69 @@ async def test_a_walk_warms_ahead_only_while_it_reads_what_it_lists(
         await (await ws.shell(line)).stdout_str()
     assert vfs.reads == [f"/r/d/f{n}" for n in reads]
     assert vfs.batches == [[f"/r/d/f{n}" for n in b] for b in batches]
+
+
+@pytest.mark.asyncio
+async def test_a_glob_read_on_a_local_mount_is_answered_from_held_batches():
+    # The first batch only learns that the mount holds its data, so the
+    # first operand is read on its own; the read after it reads ahead from
+    # itself, every file the batch has room for.
+    vfs = HeldRAM()
+    names = [f"/f{i:02}" for i in range(12)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}) as ws:
+        out = await ws.shell("cat /r/f*")
+        assert await out.stdout_str() == "x\n" * 12
+    assert vfs.reads == ["/r/f00"]
+    assert vfs.batches == [[f"/r{name}" for name in names[1:]]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,reads,batches",
+    [
+        (
+            "grep -rc x /r/d",
+            ["00", "01"],
+            [["02", "03"], ["04", "05", "06", "07"], ["08", "09", "10", "11"]],
+        ),
+        ("grep -rc --include='f0[05]' x /r/d", ["00", "05"], []),
+    ],
+    ids=["reads-all", "filtered"],
+)
+async def test_a_walk_on_a_local_mount_holds_ahead_while_it_reads_what_it_lists(
+    line, reads, batches
+):
+    # The first batch, one file after two read in a row, only learns that
+    # the mount holds its data; the read that lands on it reads ahead from
+    # itself, and the pace doubles on each read a batch answers.
+    held, printed = HeldRAM(), []
+    for vfs in (held, RAMVFS()):
+        vfs._store.dirs.add("/d")
+        vfs._store.files.update({f"/d/f{i:02}": b"x\n" for i in range(12)})
+        with Workspace({"/r/": vfs}) as ws:
+            printed.append(await (await ws.shell(line)).stdout_str())
+    assert printed[0] == printed[1]
+    assert held.reads == [f"/r/d/f{n}" for n in reads]
+    assert held.batches == [[f"/r/d/f{n}" for n in b] for b in batches]
+
+
+@pytest.mark.asyncio
+async def test_a_walk_back_in_a_parent_directory_reads_each_file_once():
+    # b/ sorts between a and c, so the walk reads a, then b/'s files, then
+    # comes back for c and d; the batch d/ sent before the mount was known
+    # to hold its data held nothing, and c and d are read once each.
+    vfs = HeldRAM()
+    vfs._store.dirs.update({"/d", "/d/b"})
+    names = ["a", "a2", "c", "c2", "c3"]
+    vfs._store.files.update({f"/d/{n}": b"x\n" for n in names})
+    vfs._store.files.update({f"/d/b/f{i}": b"x\n" for i in range(6)})
+    with Workspace({"/r/": vfs}) as ws:
+        out = await (await ws.shell("grep -rc x /r/d")).stdout_str()
+    assert out.count(":1\n") == 11
+    read = vfs.reads + [p for batch in vfs.batches for p in batch]
+    assert sorted(read) == sorted(set(read))
+    assert len(read) == 11
 
 
 @pytest.mark.asyncio

@@ -2909,7 +2909,8 @@ class MountEntry:
     async def read_many(
         self, paths: list[str], limit: int
     ) -> dict[str, bytes]:
-        """Read several whole files on this mount in one request.
+        """Read several whole files on this mount, in one request where
+        its VFS reads a batch and one file after another otherwise.
 
         For the dispatcher's read-ahead, once it has walked and followed
         each path; keyed by virtual path, a file left out is read on its
@@ -2944,12 +2945,21 @@ class MountEntry:
         self, scopes: list[PathSpec], limit: int
     ) -> dict[str, bytes]:
         """The VFS's batch read, handed what is at each path and at its
-        folder as the stored listings name them, where it takes them.
+        folder as the stored listings name them, where it takes them; a
+        VFS with no batch read has each file read as its streamed read
+        reads it (``_answer``), and one longer than ``limit`` or one that
+        fails is left out. Either way the index is observed once.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
             limit (int): the most bytes worth fetching for one file.
         """
+        if not self.vfs.supports("read_many"):
+            read = await self._read_each(scopes, limit)
+            await self._observe(
+                self.index, [s for s in scopes if s.virtual in read]
+            )
+            return read
         fn = self.vfs.read_many
         names = _parameters(getattr(fn, "__func__", fn))
         kwargs: dict[str, list[FileStat | None]] = {}
@@ -2966,6 +2976,42 @@ class MountEntry:
             self.index, [s for s in scopes if s.virtual in result]
         )
         return result
+
+    async def _read_each(
+        self, scopes: list[PathSpec], limit: int
+    ) -> dict[str, bytes]:
+        """Each file's whole bytes as its streamed read answers them, by
+        virtual path; one longer than ``limit`` bytes, or one whose read
+        fails, is left out for its own read to meet.
+
+        Args:
+            scopes (list[PathSpec]): the files, keyed below the mount.
+            limit (int): the most bytes worth holding for one file.
+        """
+        read: dict[str, bytes] = {}
+        for scope in scopes:
+            parts: list[bytes] = []
+            size = 0
+            source: AsyncIterator[bytes] | None = None
+            try:
+                source = _as_stream(await self._answer(self.index, scope))
+                async for chunk in source:
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    parts.append(chunk)
+                else:
+                    read[scope.virtual] = b"".join(parts)
+            except Exception as exc:
+                logger.debug(
+                    "batch read leaves %s to its own read: %s",
+                    scope.virtual,
+                    exc,
+                )
+            finally:
+                if source is not None:
+                    await close_quietly(source)
+        return read
 
     def live_pipe(self, path: str) -> DevicePipe | None:
         """The live pipe a read of ``path`` takes bytes from, which another

@@ -96,6 +96,7 @@ import {
   WritePolicy,
 } from '../../types.ts'
 import { Activity } from '../../utils/activity.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { Clock } from '../../utils/clock.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { pathVisible } from '../../utils/hidden.ts'
@@ -2402,10 +2403,11 @@ export class MountEntry {
   }
 
   /**
-   * Read several whole files on this mount in one request. For the
-   * dispatcher's read-ahead, once it has walked and
-   * followed each path; keyed by virtual path, a file left out is read on its
-   * own later. Mirrors Python's `read_many`.
+   * Read several whole files on this mount, in one request where its VFS reads
+   * a batch and one file after another otherwise. For the dispatcher's
+   * read-ahead, once it has walked and followed each path; keyed by virtual
+   * path, a file left out is read on its own later. Mirrors Python's
+   * `read_many`.
    */
   async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
@@ -2433,12 +2435,22 @@ export class MountEntry {
 
   /**
    * The VFS's batch read, handed what is at each path and at its folder as
-   * the stored listings name them, where it declares them. Mirrors Python's
-   * `_read_many`.
+   * the stored listings name them, where it declares them; a VFS with no batch
+   * read has each file read as its streamed read reads it (`answer`), and one
+   * longer than `limit` or one that fails is left out. Either way the index is
+   * observed once. Mirrors Python's `_read_many`.
    */
   private async batchRead(scopes: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {
-    const wants = this.wants('readMany')
     const index = this.index
+    if (!this.vfs.supports('readMany')) {
+      const read = await this.readEach(scopes, limit)
+      await this.observe(
+        index,
+        scopes.filter((scope) => read.has(scope.virtual)),
+      )
+      return read
+    }
+    const wants = this.wants('readMany')
     const handed: Handed[] = []
     for (const scope of scopes) {
       const one: { -readonly [K in keyof Handed]: Handed[K] } = {}
@@ -2452,6 +2464,36 @@ export class MountEntry {
       scopes.filter((scope) => result.has(scope.virtual)),
     )
     return result
+  }
+
+  /**
+   * Each file's whole bytes as its streamed read answers them, by virtual
+   * path; one longer than `limit` bytes, or one whose read fails, is left out
+   * for its own read to meet. Mirrors Python's `_read_each`.
+   */
+  private async readEach(
+    scopes: readonly PathSpec[],
+    limit: number,
+  ): Promise<Map<string, Uint8Array>> {
+    const read = new Map<string, Uint8Array>()
+    for (const scope of scopes) {
+      const parts: Uint8Array[] = []
+      let size = 0
+      const source = asStream(this.answer(this.vfs, this.index, scope))
+      try {
+        for await (const chunk of source) {
+          size += chunk.byteLength
+          if (size > limit) break
+          parts.push(chunk)
+        }
+        if (size <= limit) read.set(scope.virtual, concat(parts))
+      } catch (err) {
+        console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
+      } finally {
+        await closeQuietly(source)
+      }
+    }
+    return read
   }
 
   /**

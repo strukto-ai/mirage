@@ -306,8 +306,9 @@ describe('grep and rg over code search', () => {
     const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true, 4)
     expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`grep: /gh: ${STOPPED_AT_4}`, 2])
-    // The walk reads four; the read-ahead warmed the file after them.
-    expect(await read(hub)).toHaveLength(5)
+    // The walk reads four and warms none past them: the two it read in a row
+    // in docs set no pace for src.
+    expect(await read(hub)).toEqual(Object.keys(REPO).sort().slice(0, 4))
   })
 
   // Twin of test_an_anonymous_mount_scans_instead_of_searching: code search

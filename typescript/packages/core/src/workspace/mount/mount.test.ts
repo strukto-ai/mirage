@@ -1093,3 +1093,35 @@ it.each([false, true])(
     }
   },
 )
+
+// Twin of test_a_batch_read_without_one_on_the_vfs_reads_each_file: the VFS
+// reads no batch, so each file is read as its own read would read it; one
+// longer than the limit, and one whose read fails, is left for that read.
+it('reads each file of a batch read the VFS has none of', async () => {
+  class FailingRAM extends RAMVFS {
+    override read(
+      path: PathSpec,
+      handed?: Handed,
+      offset = 0,
+      size: number | null = null,
+    ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+      if (path.virtual.endsWith('/bad')) return Promise.reject(new Error('unreadable'))
+      return super.read(path, handed, offset, size)
+    }
+  }
+  const vfs = new FailingRAM()
+  const enc = new TextEncoder()
+  vfs.store.files.set('/a', enc.encode('a\n'))
+  vfs.store.files.set('/big', new Uint8Array(9))
+  vfs.store.files.set('/bad', enc.encode('b\n'))
+  vfs.store.files.set('/e', new Uint8Array())
+  const mount = new MountEntry({ prefix: '/d/', vfs })
+  expect(vfs.supports('readMany')).toBe(false)
+  const read = await mount.readMany(['/d/a', '/d/big', '/d/bad', '/d/e'], 8)
+  expect(read).toEqual(
+    new Map([
+      ['/d/a', enc.encode('a\n')],
+      ['/d/e', new Uint8Array()],
+    ]),
+  )
+})
