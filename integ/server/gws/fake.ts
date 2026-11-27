@@ -143,11 +143,10 @@ function tokenRoutes(issued: Set<string>, runTokenPattern: string): KitRoute<C>[
 //
 // Known-absent surface, listed so a 404 here reads as "not built yet" rather
 // than "mirage sent the wrong request":
-//   - Gmail beyond labels.list, messages list/get/insert/send/trash and
+//   - Gmail beyond labels list/get/create/patch/update/delete, the profile,
+//     history.list, messages list/get/insert/send/trash/modify/delete and
 //     drafts list/get/create/update/delete/send: no
-//     messages.modify/untrash/delete/batchModify, no labels CRUD, and no
-//     threads resource at all
-//   - drive changes.list / changes.getStartPageToken (needs a change feed)
+//     messages.untrash/batchModify, and no threads resource at all
 //   - Sheets requests that need a cell format or style model (repeatCell,
 //     copyPaste, conditional formats) and spreadsheets.getByDataFilter;
 //     updateCells is served, but only for userEnteredValue, so a format-only

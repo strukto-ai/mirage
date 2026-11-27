@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeDrive, installDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { MountMode, ReadPolicy } from '../../types.ts'
 import { md5Hex } from '../../utils/hash.ts'
 import { RAMIndexCacheStore } from '../../cache/index/ram.ts'
@@ -27,35 +28,44 @@ import { GoogleDriveVFS, VFS_MD } from './gdrive.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-let fake: FakeDrive
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  installDrive(fake)
+  account = new GoogleAccount(origin)
 })
 
-afterEach(() => {
-  vi.restoreAllMocks()
+afterEach(async () => {
+  await account.run.close()
 })
+
+function workspace(mode: MountMode, read?: { policy: ReadPolicy; ttl: number }): Workspace {
+  return new Workspace(
+    { '/gd': new GoogleDriveVFS(account.config()) },
+    { mode, ...(read === undefined ? {} : { read }) },
+  )
+}
 
 describe('GoogleDriveVFS re-list cleanup', () => {
   // The first read of an expired folder can be a stat of one child; the
   // re-list it warms still has to find the sibling that went away, which it
   // cannot if the old listing is thrown out before warming.
   it('cleans up a sibling a stat-driven re-list drops', async () => {
-    const dir = fake.folder('dir')
-    fake.add('a.txt', dir, undefined, ENC.encode('alpha\n'))
-    const b = fake.add('b.txt', dir, undefined, ENC.encode('bravo\n'))
-    const ws = new Workspace(
-      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-      { mode: MountMode.READ },
-    )
+    const dir = await account.folder('dir')
+    await account.upload('a.txt', 'alpha\n', dir)
+    const b = await account.upload('b.txt', 'bravo\n', dir)
+    const ws = workspace(MountMode.READ)
     try {
       expect(DEC.decode((await ws.shell('ls /gd/dir')).stdout)).toBe('a.txt\nb.txt\n')
       await ws.cache.set('/gd/dir/b.txt', ENC.encode('bravo\n'))
       await ws.namespace.setAttrs('/gd/dir/b.txt', { mode: 0o600 })
       expect(await ws.cache.exists('/gd/dir/b.txt')).toBe(true)
-      fake.items.delete(b)
+      await account.delete(b)
       await ws.registry.mountFor('/gd/dir').index.invalidate()
       expect(DEC.decode((await ws.shell('stat -c %n /gd/dir/a.txt')).stdout)).toBe(
         '/gd/dir/a.txt\n',
@@ -70,21 +80,15 @@ describe('GoogleDriveVFS re-list cleanup', () => {
   // Under fresh the next command re-lists on its own; its first read is a
   // stat of a sibling, and that re-list still has to find b.txt gone.
   it('re-lists under fresh on a stat and cleans up a dropped sibling', async () => {
-    const dir = fake.folder('dir')
-    fake.add('a.txt', dir, undefined, ENC.encode('alpha\n'))
-    const b = fake.add('b.txt', dir, undefined, ENC.encode('bravo\n'))
-    const ws = new Workspace(
-      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-      {
-        mode: MountMode.READ,
-        read: { policy: ReadPolicy.FRESH, ttl: 600 },
-      },
-    )
+    const dir = await account.folder('dir')
+    await account.upload('a.txt', 'alpha\n', dir)
+    const b = await account.upload('b.txt', 'bravo\n', dir)
+    const ws = workspace(MountMode.READ, { policy: ReadPolicy.FRESH, ttl: 600 })
     try {
       expect(DEC.decode((await ws.shell('ls /gd/dir')).stdout)).toBe('a.txt\nb.txt\n')
       await ws.cache.set('/gd/dir/b.txt', ENC.encode('bravo\n'))
       await ws.namespace.setAttrs('/gd/dir/b.txt', { mode: 0o600 })
-      fake.items.delete(b)
+      await account.delete(b)
       expect(DEC.decode((await ws.shell('stat -c %n /gd/dir/a.txt')).stdout)).toBe(
         '/gd/dir/a.txt\n',
       )
@@ -96,25 +100,22 @@ describe('GoogleDriveVFS re-list cleanup', () => {
   })
 })
 
-function freshWs(): Workspace {
-  return new Workspace(
-    { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-    { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } },
-  )
-}
-
-async function warmFile(ws: Workspace, depth: number): Promise<string> {
+/** Make `file.txt` holding `v1`, `depth` folders down, and answer its path. */
+async function fileAt(depth: number): Promise<string> {
   let parent = 'root'
   const parts: string[] = []
   for (const name of ['a', 'b', 'c'].slice(0, depth)) {
-    parent = fake.folder(name, parent)
+    parent = await account.folder(name, parent)
     parts.push(name)
   }
+  await account.upload('file.txt', 'v1', parent)
+  return `/gd/${[...parts, 'file.txt'].join('/')}`
+}
+
+/** Hold `path`'s bytes in the workspace's cache, stamped with their md5. */
+async function warm(ws: Workspace, path: string): Promise<void> {
   const bytes = ENC.encode('v1')
-  fake.add('file.txt', parent, undefined, bytes)
-  const path = `/gd/${[...parts, 'file.txt'].join('/')}`
   await ws.cache.set(path, bytes, { fingerprint: md5Hex(bytes) })
-  return path
 }
 
 describe('GoogleDriveVFS warm read under fresh', () => {
@@ -128,13 +129,14 @@ describe('GoogleDriveVFS warm read under fresh', () => {
     [3, 4],
   ] as const) {
     it(`costs one walk per probe at depth ${String(depth)}`, async () => {
-      const ws = freshWs()
+      const ws = workspace(MountMode.READ, { policy: ReadPolicy.FRESH, ttl: 600 })
       try {
-        const path = await warmFile(ws, depth)
-        fake.listLimits.length = 0
+        const path = await fileAt(depth)
+        await warm(ws, path)
+        await account.run.recordRequests()
         const result = await ws.shell(`cat ${path}`)
         expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'v1'])
-        expect(fake.listLimits).toHaveLength(listings)
+        expect((await account.listings()).filter((l) => !l.level)).toHaveLength(listings)
       } finally {
         await ws.close()
       }
@@ -144,19 +146,15 @@ describe('GoogleDriveVFS warm read under fresh', () => {
   // The command's stat now comes from the freshness probe rather than from
   // the command's own lookup; what it prints must not change with it.
   it('prints the same stat as a bounded mount', async () => {
+    const path = await fileAt(1)
     const outs: string[] = []
     for (const read of [
       { policy: ReadPolicy.FRESH, ttl: 600 },
       { policy: ReadPolicy.BOUNDED, ttl: 600 },
     ]) {
-      fake = new FakeDrive()
-      installDrive(fake)
-      const ws = new Workspace(
-        { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-        { mode: MountMode.READ, read },
-      )
+      const ws = workspace(MountMode.READ, read)
       try {
-        const path = await warmFile(ws, 1)
+        await warm(ws, path)
         outs.push(DEC.decode((await ws.shell(`stat ${path}`)).stdout))
       } finally {
         await ws.close()
@@ -172,17 +170,11 @@ describe('GoogleDriveVFS snapshot capture on a written path', () => {
   // that pin whole with the upload reply's md5, so a replay checks the
   // written bytes rather than pinning the pre-write revision.
   it('pins the write token and replays against it', async () => {
-    const id = fake.add('file.txt', 'root', undefined, ENC.encode('v1'))
-    const ws = new Workspace(
-      { '/gd': new GoogleDriveVFS({ clientId: 'i', clientSecret: 's', refreshToken: 'r' }) },
-      {
-        mode: MountMode.WRITE,
-        read: { policy: ReadPolicy.FRESH, ttl: 600 },
-      },
-    )
+    const id = await account.upload('file.txt', 'v1')
+    const ws = workspace(MountMode.WRITE, { policy: ReadPolicy.FRESH, ttl: 600 })
     try {
       await ws.shell('cat /gd/file.txt; echo x | tee /gd/file.txt')
-      expect(DEC.decode(fake.items.get(id)?.content)).toBe('x\n')
+      expect(await account.content(id)).toBe('x\n')
       const pins = captureFingerprints(ws.records, ws.registry).filter(
         (e) => e.path === '/gd/file.txt',
       )
@@ -193,8 +185,7 @@ describe('GoogleDriveVFS snapshot capture on a written path', () => {
       const statFn = (p: string): Promise<unknown> =>
         ws.dispatch('stat', p, [], { index: new RAMIndexCacheStore() })
       await checkDrift(ws.registry, statFn, '/gd/file.txt', recorded)
-      const item = fake.items.get(id)
-      if (item !== undefined) item.content = ENC.encode('changed')
+      await account.update(id, 'changed')
       await expect(
         checkDrift(ws.registry, statFn, '/gd/file.txt', recorded),
       ).rejects.toBeInstanceOf(ContentDriftError)

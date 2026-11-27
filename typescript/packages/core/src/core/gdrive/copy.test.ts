@@ -12,134 +12,100 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { copy } from './copy.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
+async function copied(src: string, dst: string): Promise<void> {
+  const accessor = account.driveAccessor()
+  await copy(
+    accessor,
+    spec(src),
+    spec(dst),
+    undefined,
+    await handedAt(readdir, accessor, spec(src), spec(dst)),
+  )
+}
+
 describe('gdrive copy', () => {
   it('copies a file', async () => {
-    fake.add('src.txt', 'root', undefined, ENC.encode('data'))
-    await copy(
-      accessor,
-      spec('/src.txt'),
-      spec('/dst.txt'),
-      undefined,
-      await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
-    )
-    expect(DEC.decode(fake.find('dst.txt')?.content)).toBe('data')
-    expect(fake.find('src.txt')).not.toBeNull()
+    await account.upload('src.txt', 'data')
+    await copied('/src.txt', '/dst.txt')
+    const dst = await account.find('dst.txt')
+    expect(await account.content(dst?.id ?? '')).toBe('data')
+    expect(await account.find('src.txt')).not.toBeNull()
   })
 
   it('overwrites an existing file', async () => {
-    fake.add('src.txt', 'root', undefined, ENC.encode('new'))
-    fake.add('dst.txt', 'root', undefined, ENC.encode('old'))
-    await copy(
-      accessor,
-      spec('/src.txt'),
-      spec('/dst.txt'),
-      undefined,
-      await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
-    )
-    expect(DEC.decode(fake.find('dst.txt')?.content)).toBe('new')
-    expect(fake.items.size).toBe(2)
+    await account.upload('src.txt', 'new')
+    await account.upload('dst.txt', 'old')
+    await copied('/src.txt', '/dst.txt')
+    const dst = await account.find('dst.txt')
+    expect(await account.content(dst?.id ?? '')).toBe('new')
+    expect(await account.items()).toHaveLength(2)
   })
 
   it('file onto dir raises EISDIR', async () => {
-    fake.add('src.txt', 'root', undefined, ENC.encode('x'))
-    fake.folder('d')
-    await expect(
-      copy(
-        accessor,
-        spec('/src.txt'),
-        spec('/d'),
-        undefined,
-        await handedAt(readdir, accessor, spec('/src.txt'), spec('/d')),
-      ),
-    ).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
+    await account.upload('src.txt', 'x')
+    await account.folder('d')
+    await expect(copied('/src.txt', '/d')).rejects.toMatchObject({ code: 'EISDIR' })
   })
 
   it('copies a tree into a missing dir', async () => {
-    const src = fake.folder('src')
-    const sub = fake.folder('sub', src)
-    fake.add('f.txt', sub, undefined, ENC.encode('deep'))
-    fake.add('top.txt', src, undefined, ENC.encode('top'))
-    await copy(
-      accessor,
-      spec('/src'),
-      spec('/dst'),
-      undefined,
-      await handedAt(readdir, accessor, spec('/src'), spec('/dst')),
-    )
-    expect(fake.find('dst')).not.toBeNull()
+    const src = await account.folder('src')
+    const sub = await account.folder('sub', src)
+    await account.upload('f.txt', 'deep', sub)
+    await account.upload('top.txt', 'top', src)
+    await copied('/src', '/dst')
+    expect(await account.find('dst')).not.toBeNull()
+    const items = await account.items()
     for (const name of ['sub', 'f.txt', 'top.txt']) {
-      const copies = [...fake.items.values()].filter((i) => i.name === name)
-      expect(copies).toHaveLength(2)
+      expect(items.filter((i) => i.name === name)).toHaveLength(2)
     }
+    const deep = items.filter((i) => i.name === 'f.txt')
+    expect(await Promise.all(deep.map((i) => account.content(i.id)))).toEqual(['deep', 'deep'])
   })
 
   it('merges into an existing dir', async () => {
-    const src = fake.folder('src')
-    fake.add('f.txt', src, undefined, ENC.encode('x'))
-    const dst = fake.folder('dst')
-    fake.add('keep.txt', dst, undefined, ENC.encode('k'))
-    await copy(
-      accessor,
-      spec('/src'),
-      spec('/dst'),
-      undefined,
-      await handedAt(readdir, accessor, spec('/src'), spec('/dst')),
-    )
-    const children = [...fake.items.values()].filter((i) => i.parents.includes(dst))
+    const src = await account.folder('src')
+    await account.upload('f.txt', 'x', src)
+    const dst = await account.folder('dst')
+    await account.upload('keep.txt', 'k', dst)
+    await copied('/src', '/dst')
+    const children = (await account.items()).filter((i) => i.parents.includes(dst))
     expect(new Set(children.map((i) => i.name))).toEqual(new Set(['keep.txt', 'f.txt']))
   })
 
   it('dir onto file raises ENOTDIR', async () => {
-    fake.folder('src')
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(
-      copy(
-        accessor,
-        spec('/src'),
-        spec('/f.txt'),
-        undefined,
-        await handedAt(readdir, accessor, spec('/src'), spec('/f.txt')),
-      ),
-    ).rejects.toMatchObject({
-      code: 'ENOTDIR',
-    })
+    await account.folder('src')
+    await account.upload('f.txt', 'x')
+    await expect(copied('/src', '/f.txt')).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
   it('missing src raises ENOENT', async () => {
-    await expect(
-      copy(
-        accessor,
-        spec('/missing.txt'),
-        spec('/dst.txt'),
-        undefined,
-        await handedAt(readdir, accessor, spec('/missing.txt'), spec('/dst.txt')),
-      ),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
+    await expect(copied('/missing.txt', '/dst.txt')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

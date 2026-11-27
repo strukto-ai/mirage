@@ -12,18 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { ContentType, FileType, MountMode, type PathSpec, type FileStat } from '../../types.ts'
 import { compactJsonBytes } from '../render/json.ts'
-import {
-  API,
-  EVENTS,
-  installCalendar,
-  makeAccessor,
-  spec,
-} from '../../../tests/core/gcal/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import type { GoogleAccount } from '../../../tests/fixtures/google_account.ts'
+import { calendarAccount, makeAccessor, spec } from '../../../tests/fixtures/gcal_seed.ts'
 
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
 const { Workspace: MountWorkspace } = await import('../../workspace/workspace/workspace.ts')
@@ -52,14 +48,24 @@ async function stat(accessor: GCalAccessor, path: PathSpec): Promise<FileStat> {
 
 const WEEK = '/primary/2026-08-10--2026-08-16'
 
-beforeEach(() => {
-  API.reset()
-  installCalendar()
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(async () => {
+  account = await calendarAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 describe('gcal stat', () => {
   it('reports the root as a directory', async () => {
-    expect((await stat(makeAccessor(), spec('/'))).type).toBe(FileType.DIRECTORY)
+    expect((await stat(makeAccessor(account), spec('/'))).type).toBe(FileType.DIRECTORY)
   })
 
   // The range query is positive proof of what is there, so a bucket with no
@@ -71,7 +77,7 @@ describe('gcal stat', () => {
     [1, '/primary/2027-03-04'],
     [7, '/primary/2027-03-01--2027-03-07'],
   ])('reports %i-day %s as a directory', async (size, path) => {
-    const row = await stat(makeAccessor({ bucket_days: size }), spec(path))
+    const row = await stat(makeAccessor(account, { bucket_days: size }), spec(path))
     expect(row.type).toBe(FileType.DIRECTORY)
     expect(row.name).toBe(path.slice(path.lastIndexOf('/') + 1))
   })
@@ -80,15 +86,15 @@ describe('gcal stat', () => {
     [1, '/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'],
     [7, `${WEEK}/aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json`],
   ])('reports a %i-day event as JSON sized as rendered', async (size, path) => {
-    const row = await stat(makeAccessor({ bucket_days: size }), spec(path))
+    const row = await stat(makeAccessor(account, { bucket_days: size }), spec(path))
     expect(row.content).toBe(ContentType.JSON)
     expect(row.extra.event_id).toBe('aaaa1')
     // The rendered payload's byte length, never a source-side number.
-    expect(row.size).toBe(compactJsonBytes(EVENTS[0] ?? {}).length)
+    expect(row.size).toBe(compactJsonBytes(await account.eventItem('aaaa1')).length)
   })
 
   it('reports calendar.json as JSON', async () => {
-    const row = await stat(makeAccessor(), spec('/primary/calendar.json'))
+    const row = await stat(makeAccessor(account), spec('/primary/calendar.json'))
     expect(row.content).toBe(ContentType.JSON)
   })
 
@@ -103,6 +109,6 @@ describe('gcal stat', () => {
     [7, '/primary/2026-08-11'],
     [7, '/primary/2026-08-11--2026-08-17'],
   ])('is ENOENT on a %i-day mount for %s', async (size, path) => {
-    await expect(stat(makeAccessor({ bucket_days: size }), spec(path))).rejects.toThrow()
+    await expect(stat(makeAccessor(account, { bucket_days: size }), spec(path))).rejects.toThrow()
   })
 })

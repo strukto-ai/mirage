@@ -22,17 +22,21 @@ import { asObj, asObjArr, asStr } from '../wire/json.ts'
 import { NOT_FOUND, googleError, isReply, noContent, ok } from '../wire/reply.ts'
 import {
   calendarOr404,
+  eventIdTaken,
   eventsOf,
   fmtEvent,
+  isEventId,
   listCalendarEvents,
   makeEvent,
   readEventTimes,
 } from './event.ts'
-import { eventEndMs, eventStartMs } from './zone.ts'
+import { eventEndMs, eventStartMs, isIanaZone } from './zone.ts'
 
 type GwsCtx = Ctx<GwsState>
 
 const NEED_WRITER = 'You need to have writer access.'
+// Calendar's access roles, the least first.
+const ROLES = ['freeBusyReader', 'reader', 'writer', 'owner']
 
 function writable(cal: CalendarEntry): boolean {
   return cal.accessRole === 'owner' || cal.accessRole === 'writer'
@@ -43,10 +47,22 @@ function createEvent(ctx: GwsCtx): Reply {
   if (cal === null) return NOT_FOUND
   if (!writable(cal)) return googleError(403, NEED_WRITER, 'PERMISSION_DENIED')
   const body = asObj(ctx.json())
+  // A caller may name the event: base32hex (0-9 and a-v), 5 to 1024
+  // characters, as Calendar takes one. Calendar asks it to be unique in the
+  // calendar; here every calendar's events share one table, so it is unique
+  // in the account.
+  const pinned = asStr(body.id)
+  if (pinned !== undefined && !isEventId(pinned)) {
+    return googleError(400, 'Invalid resource id value.', 'INVALID_ARGUMENT')
+  }
+  if (pinned !== undefined && eventIdTaken(ctx.db, pinned)) {
+    return googleError(409, 'The requested identifier already exists.', 'ALREADY_EXISTS')
+  }
   const times = readEventTimes(body, cal.timeZone)
   if (isReply(times)) return times
-  const ev = makeEvent(ctx.db, body, times)
+  const ev = makeEvent(ctx.db, body, times, pinned)
   eventsOf(ctx.db, cal.id).set(ev.id, ev)
+  ctx.db.noteCalendarChange(cal.id, ev.id)
   return ok(fmtEvent(cal, ev))
 }
 
@@ -87,7 +103,32 @@ function patchEvent(ctx: GwsCtx, replace = false): Reply {
   if (location !== undefined) next.location = location
   if (body.attendees !== undefined) next.attendees = body.attendees
   found.bucket.set(found.ev.id, next)
+  ctx.db.noteCalendarChange(found.cal.id, found.ev.id)
   return ok(fmtEvent(found.cal, next))
+}
+
+// calendars.patch: the owner changes a calendar's title or zone. The zone is
+// what each of its events renders in, and so the day an event falls on. A
+// calendar shared with the account is not its to change; the refusal is the
+// generic one, not a probed wording, as is the one for a zone Intl cannot
+// resolve.
+function patchCalendar(ctx: GwsCtx): Reply {
+  const cal = calendarOr404(ctx.db, ctx.params.calendarId ?? '')
+  if (cal === null) return NOT_FOUND
+  if (cal.accessRole !== 'owner') return googleError(403, 'Forbidden', 'PERMISSION_DENIED')
+  const body = asObj(ctx.json())
+  const summary = asStr(body.summary)
+  const timeZone = asStr(body.timeZone)
+  if (timeZone !== undefined && !isIanaZone(timeZone)) {
+    return googleError(400, 'Bad Request', 'INVALID_ARGUMENT')
+  }
+  if (summary !== undefined) cal.summary = summary
+  if (timeZone !== undefined) cal.timeZone = timeZone
+  return ok(calendarResource(cal))
+}
+
+function calendarResource(cal: CalendarEntry): JsonValue {
+  return { kind: 'calendar#calendar', id: cal.id, summary: cal.summary, timeZone: cal.timeZone }
 }
 
 function freeBusy(ctx: GwsCtx): Reply {
@@ -121,7 +162,12 @@ export function calendarRoutes(): KitRoute<C>[] {
   return [
     route('GET', '/calendar/v3/users/me/calendarList', (ctx) => {
       const showHidden = ctx.query.get('showHidden') === 'true'
-      const items = [...ctx.db.calendars.values()].filter((c) => showHidden || c.hidden !== true)
+      // minAccessRole keeps the calendars the account holds at least that
+      // role on.
+      const least = ROLES.indexOf(ctx.query.get('minAccessRole') ?? 'freeBusyReader')
+      const items = [...ctx.db.calendars.values()]
+        .filter((c) => showHidden || c.hidden !== true)
+        .filter((c) => ROLES.indexOf(c.accessRole) >= least)
       return ok({
         kind: 'calendar#calendarList',
         items: items.map((c): JsonValue => ({
@@ -163,6 +209,7 @@ export function calendarRoutes(): KitRoute<C>[] {
         if (isReply(found)) return found
         if (!writable(found.cal)) return googleError(403, NEED_WRITER, 'PERMISSION_DENIED')
         found.bucket.delete(found.ev.id)
+        ctx.db.noteCalendarChange(found.cal.id, found.ev.id)
         return noContent()
       },
       { write: true },
@@ -170,12 +217,8 @@ export function calendarRoutes(): KitRoute<C>[] {
     route('GET', '/calendar/v3/calendars/:calendarId', (ctx) => {
       const cal = calendarOr404(ctx.db, ctx.params.calendarId ?? '')
       if (cal === null) return NOT_FOUND
-      return ok({
-        kind: 'calendar#calendar',
-        id: cal.id,
-        summary: cal.summary,
-        timeZone: cal.timeZone,
-      })
+      return ok(calendarResource(cal))
     }),
+    route('PATCH', '/calendar/v3/calendars/:calendarId', patchCalendar, { write: true }),
   ]
 }

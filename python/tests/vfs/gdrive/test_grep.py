@@ -1,31 +1,25 @@
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
 from mirage.types import FileStat, FileType, MountMode
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
 
+MIMES = {
+    "gdoc": "application/vnd.google-apps.document",
+    "gsheet": "application/vnd.google-apps.spreadsheet",
+    "gslide": "application/vnd.google-apps.presentation",
+}
+
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "kind,module",
-    [("gdoc", "gdocs"), ("gsheet", "gsheets"), ("gslide", "gslides")],
-)
-async def test_grep_i_keeps_rendered_google_json(kind, module):
-    config = GoogleConfig(
-        client_id="test", client_secret="test", refresh_token="test"
-    )
-    vfs = GoogleDriveVFS(
-        config=GoogleDriveConfig(client_id="test", refresh_token="test")
-    )
-    vfs.accessor = GDriveAccessor(
-        config=config, token_manager=TokenManager(config)
-    )
+@pytest.mark.parametrize("kind", ["gdoc", "gsheet", "gslide"])
+async def test_grep_i_keeps_rendered_google_json(google_account, kind):
+    # A title holding a NUL: the rendered JSON escapes it, so the file is
+    # text to grep -I, and the raw byte never reaches the output.
+    made = await google_account.create("needle\0tail", MIMES[kind])
+    vfs = GoogleDriveVFS(config=google_account.config(GoogleDriveConfig))
     ws = Workspace({"/drive/": vfs}, mode=MountMode.READ)
     name = f"Report.{kind}.json"
     try:
@@ -38,7 +32,7 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
                         name=name,
                         type=FileType.FILE,
                         extra={
-                            "file_id": "file1",
+                            "file_id": made,
                             "resource_type": f"gdrive/{kind}",
                         },
                     ),
@@ -46,12 +40,8 @@ async def test_grep_i_keeps_rendered_google_json(kind, module):
             ],
             datetime.now(timezone.utc) + timedelta(hours=1),
         )
-        with patch(
-            f"mirage.core.{module}.api.google_get",
-            new=AsyncMock(return_value={"title": "needle\0tail"}),
-        ):
-            io = await ws.shell(f"grep -I needle /drive/{name}")
-            data = io.stdout
+        io = await ws.shell(f"grep -I needle /drive/{name}")
+        data = io.stdout
         assert io.exit_code == 0
         assert b"needle" in data
         assert b"\0" not in data

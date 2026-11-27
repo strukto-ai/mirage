@@ -12,10 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ObserveModule from '../../observe/context.ts'
-import type { DriveFile } from '../google/drive.ts'
 
 const H = vi.hoisted(() => ({
   order: [] as string[],
@@ -34,141 +32,96 @@ vi.mock('../../observe/context.ts', async (importOriginal) => {
 
 import { recordingScope } from '../../observe/context.ts'
 import { PathSpec } from '../../types.ts'
+import { md5Hex } from '../../utils/hash.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount, UPLOAD, UPLOAD_FILE } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { DOC_MIME, FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { write } from './write.ts'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+const DOC_MIME = 'application/vnd.google-apps.document'
+const HELLO_MD5 = md5Hex(ENC.encode('hello'))
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
   H.order = []
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
+async function written(path: string, data: string): Promise<void> {
+  const accessor = account.driveAccessor()
+  await write(accessor, spec(path), ENC.encode(data), await handedAt(readdir, accessor, spec(path)))
+}
+
 describe('gdrive write', () => {
   it('lands on the file at the path now', async () => {
     // The listing named a.txt; another client then renamed that file to b.txt
     // and made a new a.txt. The write goes to the new a.txt.
-    const moved = fake.add('a.txt', 'root', undefined, ENC.encode('old'))
+    const moved = await account.upload('a.txt', 'old')
+    const accessor = account.driveAccessor()
     const listed = await handedAt(readdir, accessor, spec('/a.txt'))
-    const renamed = fake.items.get(moved)
-    if (renamed !== undefined) renamed.name = 'b.txt'
-    const made = fake.add('a.txt', 'root', undefined, ENC.encode('other'))
+    await account.patch(moved, { name: 'b.txt' })
+    const made = await account.upload('a.txt', 'other')
     await write(accessor, spec('/a.txt'), ENC.encode('new'), listed)
-    expect(DEC.decode(fake.items.get(made)?.content)).toBe('new')
-    expect(DEC.decode(fake.items.get(moved)?.content)).toBe('old')
+    expect(await account.content(made)).toBe('new')
+    expect(await account.content(moved)).toBe('old')
   })
 
   it('creates a file in an existing parent', async () => {
-    fake.folder('a')
-    await write(
-      accessor,
-      spec('/a/new.txt'),
-      ENC.encode('hello'),
-      await handedAt(readdir, accessor, spec('/a/new.txt')),
-    )
-    const item = fake.find('new.txt')
+    await account.folder('a')
+    await written('/a/new.txt', 'hello')
+    const item = await account.find('new.txt')
     expect(item).not.toBeNull()
-    expect(DEC.decode(item?.content)).toBe('hello')
+    expect(await account.content(item?.id ?? '')).toBe('hello')
   })
 
   it('overwrites the same id', async () => {
-    const id = fake.add('f.txt', 'root', undefined, ENC.encode('old'))
-    await write(
-      accessor,
-      spec('/f.txt'),
-      ENC.encode('new'),
-      await handedAt(readdir, accessor, spec('/f.txt')),
-    )
-    expect(DEC.decode(fake.items.get(id)?.content)).toBe('new')
-    expect(fake.items.size).toBe(1)
+    const id = await account.upload('f.txt', 'old')
+    await written('/f.txt', 'new')
+    expect(await account.content(id)).toBe('new')
+    expect(await account.items()).toHaveLength(1)
   })
 
   it('missing parent raises ENOENT', async () => {
-    await expect(
-      write(
-        accessor,
-        spec('/no/f.txt'),
-        ENC.encode('x'),
-        await handedAt(readdir, accessor, spec('/no/f.txt')),
-      ),
-    ).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
+    await expect(written('/no/f.txt', 'x')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('writing a folder raises EISDIR', async () => {
-    fake.folder('d')
-    await expect(
-      write(accessor, spec('/d'), ENC.encode('x'), await handedAt(readdir, accessor, spec('/d'))),
-    ).rejects.toMatchObject({
-      code: 'EISDIR',
-    })
+    await account.folder('d')
+    await expect(written('/d', 'x')).rejects.toMatchObject({ code: 'EISDIR' })
   })
 
   it('writing a google-native file raises EACCES', async () => {
-    fake.add('Report', 'root', DOC_MIME)
-    await expect(
-      write(
-        accessor,
-        spec('/Report.gdoc.json'),
-        ENC.encode('x'),
-        await handedAt(readdir, accessor, spec('/Report.gdoc.json')),
-      ),
-    ).rejects.toMatchObject({ code: 'EACCES' })
+    await account.create('Report', DOC_MIME)
+    await expect(written('/Report.gdoc.json', 'x')).rejects.toMatchObject({ code: 'EACCES' })
   })
 })
 
-const HAPPY: Record<string, unknown> = {
-  size: '5',
-  md5Checksum: 'm5',
-  headRevisionId: 'r5',
-  mimeType: 'text/plain',
-}
-
-// [name, overrides on the fake's public() reply (null removes), expected
-// fingerprint] for 5 written bytes. The literal tokens are ones no local hash
-// produces.
-const REPLY_ROWS: [string, Record<string, unknown>, string | null][] = [
-  ['agrees', {}, 'm5'],
-  ['no md5 takes the head revision', { md5Checksum: null }, 'r5'],
-  ['no mimeType counts as non-native', { mimeType: null }, 'm5'],
+// [name, the fields Drive's answer to the write leaves out, the token it is
+// recorded under] for 5 written bytes.
+const REPLY_ROWS: [string, string[], 'md5' | 'revision'][] = [
+  ['agrees', [], 'md5'],
+  ['no md5 takes the head revision', ['md5Checksum'], 'revision'],
+  ['no mimeType counts as non-native', ['mimeType'], 'md5'],
 ]
 
-function withOverrides(
-  reply: DriveFile,
-  overrides: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...reply }
-  for (const [key, value] of Object.entries({ ...HAPPY, ...overrides })) {
-    if (value === null) Reflect.deleteProperty(out, key)
-    else out[key] = value
-  }
-  return out
-}
-
-function replyWith(build: (reply: DriveFile) => unknown): void {
-  const upload = fake.uploadFile.bind(fake)
-  const update = fake.updateFileContent.bind(fake)
-  vi.spyOn(fake, 'uploadFile').mockImplementation(
-    async (...args: Parameters<FakeDrive['uploadFile']>) => build(await upload(...args)) as never,
-  )
-  vi.spyOn(fake, 'updateFileContent').mockImplementation(
-    async (...args: Parameters<FakeDrive['updateFileContent']>) =>
-      build(await update(...args)) as never,
-  )
-}
-
 async function writeRecorded(): Promise<unknown[][]> {
+  const accessor = account.driveAccessor()
   const handed = await handedAt(readdir, accessor, spec('/f.txt'))
   const [, records] = await recordingScope(() =>
     write(accessor, spec('/f.txt'), ENC.encode('hello'), handed),
@@ -180,13 +133,26 @@ describe.each([
   ['create', false],
   ['update', true],
 ])('gdrive write records the upload reply (%s)', (_kind, existing) => {
-  beforeEach(() => {
-    if (existing) fake.add('f.txt', 'root', undefined, ENC.encode('old'))
-  })
-
-  it.each(REPLY_ROWS)('%s', async (_name, overrides, token) => {
-    replyWith((reply) => withOverrides(reply, overrides))
-    expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, token, null]])
+  it.each(REPLY_ROWS)('%s', async (_name, dropped, token) => {
+    if (existing) await account.upload('f.txt', 'old')
+    // Drive's answer for a file holding these five bytes, kept elsewhere,
+    // answered for the write with the fields the row drops left out.
+    const model = await account.item(
+      await account.upload('f.txt', 'hello', await account.folder('elsewhere')),
+    )
+    if (dropped.length > 0) {
+      const reply = Object.fromEntries(
+        Object.entries(model).filter(([key]) => !dropped.includes(key)),
+      )
+      await account.run.answerNext(
+        existing ? 'PATCH' : 'POST',
+        existing ? UPLOAD_FILE : UPLOAD,
+        200,
+        reply as never,
+      )
+    }
+    const expected = token === 'md5' ? HELLO_MD5 : model.headRevisionId
+    expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, expected, null]])
     // Recorded before the eviction, so the record exists when the cache
     // reacts to the write.
     expect(H.order).toEqual(['record'])
@@ -196,6 +162,6 @@ describe.each([
 it('a gdrive write whose reply is empty still records it', async () => {
   // The upload landed, so the write counts even without a token: an earlier
   // write's claim on the path must not win.
-  replyWith(() => null)
+  await account.run.answerNext('POST', UPLOAD, 200, new Uint8Array(0))
   expect(await writeRecorded()).toEqual([['write', '/f.txt', 5, null, null]])
 })

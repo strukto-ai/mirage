@@ -12,61 +12,65 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { unlink } from './unlink.ts'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
+async function unlinked(path: string): Promise<void> {
+  const accessor = account.driveAccessor()
+  await unlink(accessor, spec(path), await handedAt(readdir, accessor, spec(path)))
+}
+
 describe('gdrive unlink', () => {
   it('removes the file at the path now', async () => {
     // The listing named a.txt; another client then renamed that file to b.txt
     // and made a new a.txt. The unlink removes the new a.txt.
-    const moved = fake.add('a.txt', 'root', undefined, ENC.encode('old'))
+    const moved = await account.upload('a.txt', 'old')
+    const accessor = account.driveAccessor()
     const listed = await handedAt(readdir, accessor, spec('/a.txt'))
-    const renamed = fake.items.get(moved)
-    if (renamed !== undefined) renamed.name = 'b.txt'
-    const made = fake.add('a.txt', 'root', undefined, ENC.encode('other'))
+    await account.patch(moved, { name: 'b.txt' })
+    const made = await account.upload('a.txt', 'other')
     await unlink(accessor, spec('/a.txt'), listed)
-    expect(fake.items.has(made)).toBe(false)
-    expect(fake.items.has(moved)).toBe(true)
+    const ids = (await account.items()).map((item) => item.id)
+    expect(ids).not.toContain(made)
+    expect(ids).toContain(moved)
   })
 
   it('removes a file', async () => {
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await unlink(accessor, spec('/f.txt'), await handedAt(readdir, accessor, spec('/f.txt')))
-    expect(fake.find('f.txt')).toBeNull()
+    await account.upload('f.txt', 'x')
+    await unlinked('/f.txt')
+    expect(await account.find('f.txt')).toBeNull()
   })
 
   it('missing target raises ENOENT', async () => {
-    await expect(
-      unlink(
-        accessor,
-        spec('/missing.txt'),
-        await handedAt(readdir, accessor, spec('/missing.txt')),
-      ),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(unlinked('/missing.txt')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('folder target raises EISDIR', async () => {
-    fake.folder('d')
-    await expect(
-      unlink(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    await account.folder('d')
+    await expect(unlinked('/d')).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

@@ -18,7 +18,7 @@ import yarl
 import mirage.core.gcal.client as client_mod
 from mirage.core.gcal.client import delete_event, list_events
 from mirage.core.google.client import TokenManager
-from tests.fixtures.gcal_api import gcal_config
+from mirage.vfs.gcal.config import GCalConfig
 
 pytestmark = pytest.mark.asyncio
 
@@ -30,7 +30,9 @@ HOLIDAY = "en.usa#holiday@group.v.calendar.google.com"
 
 @pytest.fixture
 def token_manager():
-    return TokenManager(gcal_config())
+    # The calls these tests make stop at the patched request, so the
+    # credentials are never exchanged.
+    return TokenManager(GCalConfig(client_id="cid", refresh_token="rt"))
 
 
 async def test_list_events_encodes_the_calendar_id(monkeypatch, token_manager):

@@ -12,28 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.types import FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
+stat = call_over(GSheetsVFS, "stat")
 
-def _op(name: str):
-    return call_over(GSheetsVFS, name)
-
-
-stat = _op("stat")
+APP = "/gsheets"
+MIME = "application/vnd.google-apps.spreadsheet"
 
 
-def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
+def _scope(path: str, prefix: str = APP) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, prefix),
         virtual=path,
@@ -41,51 +35,31 @@ def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GSheetsAccessor(config=None, token_manager=offline_token_manager())
+def _accessor(google_account) -> GSheetsAccessor:
+    manager = google_account.token_manager()
+    return GSheetsAccessor(config=manager.config, token_manager=manager)
 
 
 @pytest.mark.asyncio
-async def test_stat_root_is_directory(accessor):
-    result = await stat(accessor, _scope("/gsheets"))
+async def test_stat_root_is_directory(google_account):
+    result = await stat(_accessor(google_account), _scope(APP))
     assert result.name == "/"
     assert result.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_sheet(accessor):
-    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
-    with serve(
-        drive=StubDrive(
-            list_all_files=AsyncMock(
-                return_value=(
-                    [
-                        {
-                            "mimeType": "application/vnd.google-apps.spreadsheet",
-                            "id": "sheet1",
-                            "name": "Budget",
-                            "modifiedTime": "2026-04-01T00:00:00Z",
-                            "owners": [{"me": True}],
-                        }
-                    ],
-                    True,
-                )
-            )
-        )
-    ):
-        (target,) = await mounted.readdir(_scope("/gsheets/owned"))
-        result = await mounted.stat(_scope(target))
+async def test_stat_sheet(google_account):
+    made = await google_account.create("Budget", MIME)
+    mounted = Mounted(GSheetsVFS, _accessor(google_account), APP)
+    (target,) = await mounted.readdir(_scope(f"{APP}/owned"))
+    result = await mounted.stat(_scope(target))
     assert result.name == target.rsplit("/", 1)[-1]
-    assert result.extra["doc_id"] == "sheet1"
+    assert result.extra["doc_id"] == made
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor):
-    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
-    with serve(
-        drive=StubDrive(list_all_files=AsyncMock(return_value=([], True)))
-    ):
-        await mounted.readdir(_scope("/gsheets/owned"))
-        with pytest.raises(FileNotFoundError):
-            await mounted.stat(_scope("/gsheets/owned/Nonexistent__x9.json"))
+async def test_stat_not_found(google_account):
+    mounted = Mounted(GSheetsVFS, _accessor(google_account), APP)
+    await mounted.readdir(_scope(f"{APP}/owned"))
+    with pytest.raises(FileNotFoundError):
+        await mounted.stat(_scope(f"{APP}/owned/Nonexistent__x9.json"))

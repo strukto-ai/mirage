@@ -20,17 +20,16 @@ import mirage.core.google.drive as wire
 from mirage.core.gdrive.api import DriveApi, DriveClient
 from mirage.core.google.drive import ITEM_FIELDS
 from mirage.utils.ranges import ByteWindow
-from tests.e2e.gdrive_mock import FakeDriveApi
-from tests.fixtures.gdrive_api import FakeDrive
 from tests.fixtures.google_api import (
     Delegation,
     parameter_drift,
     protocol_calls,
     sends,
 )
+from tests.sim.gdrive import FakeDriveApi
 
 
-@pytest.mark.parametrize("fake", [DriveClient, FakeDrive, FakeDriveApi])
+@pytest.mark.parametrize("fake", [DriveClient, FakeDriveApi])
 def test_each_implementation_takes_the_protocols_parameters(fake):
     assert parameter_drift(DriveApi, fake) == {}
 

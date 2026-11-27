@@ -12,88 +12,72 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from contextlib import ExitStack
-
 import pytest
+import pytest_asyncio
 
 from mirage.types import MountMode
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from tests.e2e.gdrive_mock import FakeGDrive, patch_gdrive
+from tests.fixtures.google_account import GoogleAccount
+
+pytestmark = pytest.mark.asyncio
 
 
-def _vfs() -> GoogleDriveVFS:
-    return GoogleDriveVFS(
-        config=GoogleDriveConfig(
-            client_id="fake",
-            client_secret="fake",
-            refresh_token="fake",
-        )
-    )
-
-
-@pytest.fixture
-def cold():
+@pytest_asyncio.fixture
+async def cold(google_account: GoogleAccount):
     """A gdrive tree the index has never seen.
 
     The cross-mount matrix seeds through the workspace, which primes the
     index on the way in, so it cannot reach the cold path #270 is about.
-    Seeding straight into the fake Drive leaves the index empty, which is
-    the state where the walk used to stop at the top level.
+    Seeding straight into Drive leaves the index empty, which is the state
+    where the walk used to stop at the top level.
     """
-    fake = FakeGDrive()
-    fake.add_file("tree/a.txt", b"aaa\n")
-    fake.add_file("tree/sub/b.txt", b"bbb\n")
-    fake.add_file("tree/sub/deep/c.txt", b"ccc\n")
-    gdrive = _vfs()
-    stack = ExitStack()
-    stack.enter_context(patch_gdrive((gdrive.accessor.token_manager, fake)))
+    await google_account.put("tree/a.txt", b"aaa\n")
+    await google_account.put("tree/sub/b.txt", b"bbb\n")
+    await google_account.put("tree/sub/deep/c.txt", b"ccc\n")
+    gdrive = GoogleDriveVFS(google_account.config(GoogleDriveConfig))
+    ws = Workspace(
+        {
+            "/gdrive/": (gdrive, MountMode.WRITE),
+            "/ram/": (RAMVFS(), MountMode.WRITE),
+        }
+    )
     try:
-        yield Workspace(
-            {
-                "/gdrive/": (gdrive, MountMode.WRITE),
-                "/ram/": (RAMVFS(), MountMode.WRITE),
-            }
-        )
+        yield ws
     finally:
-        stack.close()
+        await ws.close()
 
 
-def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
-    async def _inner():
-        io = await ws.shell(cmd)
-        return await io.stdout_str(), io.exit_code
-
-    return asyncio.run(_inner())
+async def _run(ws: Workspace, cmd: str) -> tuple[str, int]:
+    io = await ws.shell(cmd)
+    return await io.stdout_str(), io.exit_code
 
 
-def test_cold_readdir_descends_into_a_nested_subdirectory(cold):
+async def test_cold_readdir_descends_into_a_nested_subdirectory(cold):
     """A cold listing must not need a prior ls to resolve children."""
-    out, code = _run(cold, "ls /gdrive/tree/sub/deep")
+    out, code = await _run(cold, "ls /gdrive/tree/sub/deep")
     assert code == 0
     assert out == "c.txt\n"
 
 
-def test_cold_cross_mount_cp_r_keeps_nested_entries(cold):
+async def test_cold_cross_mount_cp_r_keeps_nested_entries(cold):
     """#270: the walk copied the top level and dropped everything under it."""
-    _, code = _run(cold, "cp -r /gdrive/tree /ram/copied")
+    _, code = await _run(cold, "cp -r /gdrive/tree /ram/copied")
     assert code == 0
-    assert _run(cold, "cat /ram/copied/a.txt")[0] == "aaa\n"
-    assert _run(cold, "cat /ram/copied/sub/b.txt")[0] == "bbb\n"
-    assert _run(cold, "cat /ram/copied/sub/deep/c.txt")[0] == "ccc\n"
+    assert (await _run(cold, "cat /ram/copied/a.txt"))[0] == "aaa\n"
+    assert (await _run(cold, "cat /ram/copied/sub/b.txt"))[0] == "bbb\n"
+    assert (await _run(cold, "cat /ram/copied/sub/deep/c.txt"))[0] == "ccc\n"
 
 
-def test_cold_cross_mount_move_carries_nested_entries_to_the_destination(cold):
-    """The move's copy phase walks the same tree as cp -r.
-
-    Only the destination side is asserted: the fake Drive patches reads,
-    not writes, so deleting the source would reach the real API. The
-    source-removal half is out of scope here and for #270, which is about
-    entries the walk never visited.
-    """
-    _run(cold, "mv /gdrive/tree /ram/moved")
-    assert _run(cold, "cat /ram/moved/a.txt")[0] == "aaa\n"
-    assert _run(cold, "cat /ram/moved/sub/b.txt")[0] == "bbb\n"
-    assert _run(cold, "cat /ram/moved/sub/deep/c.txt")[0] == "ccc\n"
+async def test_cold_cross_mount_move_carries_nested_entries_to_the_destination(
+    cold,
+):
+    """The move's copy phase walks the same tree as cp -r, and the source
+    goes once the copy has landed."""
+    _, code = await _run(cold, "mv /gdrive/tree /ram/moved")
+    assert code == 0
+    assert (await _run(cold, "cat /ram/moved/a.txt"))[0] == "aaa\n"
+    assert (await _run(cold, "cat /ram/moved/sub/b.txt"))[0] == "bbb\n"
+    assert (await _run(cold, "cat /ram/moved/sub/deep/c.txt"))[0] == "ccc\n"
+    assert (await _run(cold, "ls /gdrive/tree"))[1] != 0

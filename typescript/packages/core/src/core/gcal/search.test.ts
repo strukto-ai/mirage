@@ -12,67 +12,103 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import type { JsonValue } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
+import { MAX_RETRIES } from '../google/constants.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import {
-  API,
-  CALENDAR,
-  event,
-  installCalendar,
-  makeAccessor,
+  EVENTS,
+  GoogleAccount,
   PRIMARY,
-  spec,
-} from '../../../tests/core/gcal/_test_util.ts'
+  UNTIL_CLEARED,
+} from '../../../tests/fixtures/google_account.ts'
+import { makeAccessor, spec } from '../../../tests/fixtures/gcal_seed.ts'
 
 const { filesContaining } = await import('./search.ts')
-const { PAGE_LIMIT } = await import('./client.ts')
 
 const DAY = '2026-08-11'
+const NOTHING = { kind: 'calendar#events', items: [] }
 
-function day(id: string, summary: string, fields: Record<string, JsonValue> = {}) {
-  return { ...event(id, summary, `${DAY}T09:00:00+08:00`, `${DAY}T10:00:00+08:00`), ...fields }
-}
+let origin: string
+let account: GoogleAccount
 
-const EVENTS = [
-  day('aaaa1', 'PhD Defense'),
-  day('bbbb2', 'Weekly sync-up', { description: 'Q&amp;A after' }),
-  day('cccc3', 'Lunch', { location: 'Room 4' }),
-]
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+// The primary calendar holding three events on DAY, its requests recorded
+// from here.
+beforeEach(async () => {
+  account = new GoogleAccount(origin)
+  const [start, end] = [`${DAY}T09:00:00+08:00`, `${DAY}T10:00:00+08:00`]
+  await account.reset()
+  await account.event('PhD Defense', start, end, { eventId: 'aaaa1' })
+  await account.event('Weekly sync-up', start, end, {
+    eventId: 'bbbb2',
+    fields: { description: 'Q&amp;A after' },
+  })
+  await account.event('Lunch', start, end, { eventId: 'cccc3', fields: { location: 'Room 4' } })
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 async function ids(
   text: string,
   under = '/',
-  config: Record<string, unknown> = {},
+  config: Record<string, JsonValue> = {},
+  clock?: ManualClock,
 ): Promise<string[] | null> {
-  const accessor = makeAccessor(config)
+  const accessor = makeAccessor(account, config, () => true, clock)
   const out = await filesContaining(accessor, text, [spec(under)])
   if (out === null) return null
   return out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '').sort()
 }
 
-beforeEach(() => {
-  API.reset()
-  installCalendar()
-  API.calendars = [PRIMARY]
-  API.events = EVENTS
-})
+/** The query string the last search for `word` was sent with. */
+async function searchQuery(word: string): Promise<string> {
+  const asked = (await account.asked('GET', EVENTS))
+    .map((r) => r.query)
+    .filter((query) => new URLSearchParams(query).get('q') === word)
+  const last = asked.at(-1)
+  if (last === undefined) throw new Error(`no search for ${word}`)
+  return last
+}
+
+/** How many requests each answer armed on the fake has served. */
+async function served(): Promise<number[]> {
+  const listed = await account.run.call<{ plans: { served: number }[] }>('GET', '/_kit/faults')
+  return listed.plans.map((plan) => plan.served)
+}
 
 // Twins of python/tests/core/gcal/test_search.py. Calendar's search names
 // the events whose own words hold the text; the rest of an event's file (ids,
 // status, times) is the listing's to check.
 it('names events by search and checks the rest against the listing', async () => {
   expect(await ids('defense')).toEqual(['aaaa1'])
-  expect(API.asked).toContainEqual(['integ@example.com', 'defense'])
+  expect(await account.calendarLog()).toContainEqual(['search', PRIMARY, 'defense'])
   expect(await ids('confirmed')).toEqual(['aaaa1', 'bbbb2', 'cccc3'])
 })
 
 // A word the search may split otherwise (hyphenated, an entity) is kept by the
-// listing, and each word of a phrase is found in either place.
+// listing, and each word of a phrase is found in either place. The fake's
+// search finds both words, so each is searched once as it is, and then with
+// the search finding nothing for it, as Calendar's may.
 it('keeps a word the search may split otherwise in the listing', async () => {
+  expect(await ids('sync')).toEqual(['bbbb2'])
+  expect(await ids('amp')).toEqual(['bbbb2'])
+  for (const word of ['sync', 'amp']) {
+    const query = await searchQuery(word)
+    await account.run.answerNext('GET', EVENTS, 200, NOTHING, UNTIL_CLEARED, undefined, query)
+  }
   expect(await ids('sync')).toEqual(['bbbb2'])
   expect(await ids('amp')).toEqual(['bbbb2'])
   expect(await ids('Weekly sync')).toEqual(['bbbb2'])
   expect(await ids('room')).toEqual(['cccc3'])
+  expect(await served()).toEqual([2, 1])
 })
 
 it('answers for a bucket scope and a multi-day mount', async () => {
@@ -90,33 +126,37 @@ it.each([
 })
 
 it('reads every file when the listing kept no text', async () => {
-  const accessor = makeAccessor({}, () => false)
+  const accessor = makeAccessor(account, {}, () => false)
   const out = await filesContaining(accessor, 'lunch', [spec('/')])
   expect(out).toBeNull()
 })
 
-it.each([new TypeError('fetch failed'), new Error(PAGE_LIMIT)])(
-  'reads every file when a search fails with %s',
-  async (error) => {
-    const listEvents = vi
-      .spyOn(CALENDAR, 'listEvents')
-      .mockImplementation((calendarId, timeMin, timeMax, timeZone, scope, query) =>
-        query === undefined
-          ? Promise.resolve(API.listEvents(calendarId, timeMin, timeMax, timeZone, scope))
-          : Promise.reject(error),
-      )
-    try {
-      expect(await ids('lunch')).toBeNull()
-    } finally {
-      listEvents.mockRestore()
-    }
-  },
-)
+it('reads every file when the search connection drops', async () => {
+  // The connection drops on the search and on each retry of it; the
+  // listings are served.
+  expect(await ids('lunch')).toEqual(['cccc3'])
+  const query = await searchQuery('lunch')
+  await account.run.answerNext('GET', EVENTS, null, undefined, UNTIL_CLEARED, undefined, query)
+  expect(await ids('lunch', '/', {}, new ManualClock())).toBeNull()
+  expect(await served()).toEqual([1 + MAX_RETRIES])
+})
+
+it('reads every file when the search runs past the page cap', async () => {
+  // Each page of the search names a next one, so it runs past the cap.
+  expect(await ids('lunch')).toEqual(['cccc3'])
+  const query = await searchQuery('lunch')
+  const page = { ...NOTHING, nextPageToken: '1' }
+  for (const asked of [query, `${query}&pageToken=1`]) {
+    await account.run.answerNext('GET', EVENTS, 200, page, UNTIL_CLEARED, undefined, asked)
+  }
+  expect(await ids('lunch')).toBeNull()
+  expect(await served()).toEqual([1, 49])
+})
 
 // A read fetches the event as it is now, and so does the search: each bucket
 // is listed again rather than served from the walk's listing.
 it('finds a text changed since the listing', async () => {
-  const accessor = makeAccessor()
+  const accessor = makeAccessor(account)
   const search = async (text: string) => {
     const out = await filesContaining(accessor, text, [spec('/')])
     return out === null
@@ -124,6 +164,6 @@ it('finds a text changed since the listing', async () => {
       : out.map((p) => (p.virtual.split('/').at(-1) ?? '').split('__')[0] ?? '')
   }
   expect(await search('tentative')).toBeNull()
-  API.events = EVENTS.map((item) => (item.id === 'aaaa1' ? { ...item, status: 'tentative' } : item))
+  await account.changeEvent('aaaa1', { status: 'tentative' })
   expect(await search('tentative')).toEqual(['aaaa1'])
 })

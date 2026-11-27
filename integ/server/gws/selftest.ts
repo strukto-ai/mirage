@@ -1270,6 +1270,235 @@ function formulaLimitsDirect(): void {
   check('formula work limits apply per root cell without poisoning later reads', true)
 }
 
+async function gmailHistoryHttp(at: string): Promise<void> {
+  const base = `${at}/_run/history`
+  const gmail = `${base}/gmail/v1/users/me`
+  check('history world seeds', (await reset(base, { tenants: ['t1'], epoch: EPOCH })) === 200)
+  const profileOf = async (): Promise<Obj> => obj((await api(`${gmail}/profile`, 't1')).body)
+  const start = String((await profileOf()).historyId)
+  const since = async (from: string): Promise<Obj[]> =>
+    arr(obj((await api(`${gmail}/history?startHistoryId=${from}`, 't1')).body).history).map(obj)
+  const kinds = (records: Obj[]): string[] =>
+    records.flatMap((r) =>
+      ['messagesAdded', 'messagesDeleted', 'labelsAdded', 'labelsRemoved'].filter((k) => k in r),
+    )
+  const work = obj((await post(`${gmail}/labels`, 't1', { name: 'Work' })).body)
+  eq(
+    'history: labels.create makes a user label',
+    [work.name ?? null, work.type ?? null],
+    ['Work', 'user'],
+  )
+  eq(
+    'history: a second label of that name, in any case, is a 409',
+    (await post(`${gmail}/labels`, 't1', { name: 'work' })).status,
+    409,
+  )
+  const made = obj(
+    (await post(`${gmail}/messages`, 't1', { ...obj(message('Plan')), labelIds: ['INBOX'] })).body,
+  )
+  const id = String(made.id)
+  eq('history: an insert is a message added', kinds(await since(start)), ['messagesAdded'])
+  const after = String((await profileOf()).historyId)
+  check('history: and moves the profile history id', Number(after) > Number(start), after)
+  const modified = obj(
+    (
+      await post(`${gmail}/messages/${id}/modify`, 't1', {
+        addLabelIds: [String(work.id)],
+        removeLabelIds: ['INBOX'],
+      })
+    ).body,
+  )
+  eq('history: messages.modify answers the labels now', modified.labelIds ?? null, [
+    String(work.id),
+  ])
+  const relabelled = await since(after)
+  eq('history: and records the labels added and removed', kinds(relabelled), [
+    'labelsAdded',
+    'labelsRemoved',
+  ])
+  eq(
+    'history: each record names its labels',
+    relabelled.map((r) => arr(obj(arr(r.labelsAdded ?? r.labelsRemoved)[0]).labelIds)),
+    [[String(work.id)], ['INBOX']],
+  )
+  eq(
+    'history: modify refuses a label the mailbox has not',
+    (await post(`${gmail}/messages/${id}/modify`, 't1', { addLabelIds: ['nope'] })).status,
+    400,
+  )
+  const renamed = obj(
+    (
+      await api(`${gmail}/labels/${String(work.id)}`, 't1', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Projects' }),
+      })
+    ).body,
+  )
+  eq('history: labels.patch renames a user label', renamed.name ?? null, 'Projects')
+  eq(
+    'history: a system label is not renamed',
+    (
+      await api(`${gmail}/labels/INBOX`, 't1', {
+        method: 'PATCH',
+        body: JSON.stringify({ name: 'Mail' }),
+      })
+    ).status,
+    400,
+  )
+  const beforeDelete = String((await profileOf()).historyId)
+  eq(
+    'history: messages.delete answers 204',
+    (await api(`${gmail}/messages/${id}`, 't1', { method: 'DELETE' })).status,
+    204,
+  )
+  eq('history: and is a message deleted', kinds(await since(beforeDelete)), ['messagesDeleted'])
+  eq('history: the message is gone', (await api(`${gmail}/messages/${id}`, 't1')).status, 404)
+  eq(
+    'history: labels.delete answers 204',
+    (await api(`${gmail}/labels/${String(work.id)}`, 't1', { method: 'DELETE' })).status,
+    204,
+  )
+  eq(
+    'history: and the label is gone',
+    (await api(`${gmail}/labels/${String(work.id)}`, 't1')).status,
+    404,
+  )
+  eq(
+    'history: a start that is not a history id is a 400',
+    (await api(`${gmail}/history?startHistoryId=nope`, 't1')).status,
+    400,
+  )
+  const page = obj((await api(`${gmail}/history?startHistoryId=${start}&maxResults=1`, 't1')).body)
+  eq(
+    'history: history.list pages on maxResults',
+    [arr(page.history).length, typeof page.nextPageToken],
+    [1, 'string'],
+  )
+}
+
+async function calendarSyncHttp(at: string): Promise<void> {
+  const base = `${at}/_run/sync`
+  const events = `${base}/calendar/v3/calendars/integ@example.com/events`
+  const teamEvent = {
+    id: 'team1',
+    summary: 'Standup',
+    start: { dateTime: '2026-02-03T09:00:00Z' },
+    end: { dateTime: '2026-02-03T09:15:00Z' },
+  }
+  const team = {
+    id: 'team@group.calendar.google.com',
+    summary: 'Team',
+    accessRole: 'reader',
+    events: [teamEvent],
+  }
+  const seed = {
+    tenants: ['t1'],
+    epoch: EPOCH,
+    extras: {
+      calendars: [
+        team,
+        { id: 'busy@group.calendar.google.com', summary: 'Busy', accessRole: 'freeBusyReader' },
+      ],
+    },
+  }
+  const twice = { ...seed, extras: { calendars: [{ ...team, events: [teamEvent, teamEvent] }] } }
+  eq('sync: a seed naming one event id twice is a 400', await reset(base, twice), 400)
+  check('sync world seeds', (await reset(base, seed)) === 200)
+  eq(
+    'sync: a seeded event keeps the id it names',
+    field(
+      obj((await api(`${base}/calendar/v3/calendars/${team.id}/events`, 't1')).body).items,
+      'id',
+    ),
+    ['team1'],
+  )
+  const listed = async (role: string): Promise<string[]> =>
+    field(
+      obj((await api(`${base}/calendar/v3/users/me/calendarList?minAccessRole=${role}`, 't1')).body)
+        .items,
+      'id',
+    )
+  eq('sync: minAccessRole=reader leaves the free/busy calendar out', await listed('reader'), [
+    'integ@example.com',
+    'team@group.calendar.google.com',
+  ])
+  eq('sync: minAccessRole=owner keeps the owned calendar', await listed('owner'), [
+    'integ@example.com',
+  ])
+  const slot = {
+    start: { dateTime: '2026-02-02T09:00:00Z' },
+    end: { dateTime: '2026-02-02T10:00:00Z' },
+  }
+  const pinned = obj((await post(events, 't1', { ...slot, id: 'aaaa1', summary: 'Pinned' })).body)
+  eq('sync: an insert keeps the id the caller names', pinned.id ?? null, 'aaaa1')
+  eq(
+    'sync: and refuses that id again',
+    (await post(events, 't1', { ...slot, id: 'aaaa1' })).status,
+    409,
+  )
+  eq(
+    'sync: and an id outside base32hex',
+    (await post(events, 't1', { ...slot, id: 'ZZZZ1' })).status,
+    400,
+  )
+  const full = obj((await api(events, 't1')).body)
+  const token = String(full.nextSyncToken)
+  check('sync: a listing hands out a sync token', /^\d+$/.test(token), token)
+  const other = obj((await post(events, 't1', { ...slot, summary: 'Other' })).body)
+  await api(`${events}/aaaa1`, 't1', {
+    method: 'PATCH',
+    body: JSON.stringify({ summary: 'Moved' }),
+  })
+  await api(`${events}/${String(other.id)}`, 't1', { method: 'DELETE' })
+  const synced = obj((await api(`${events}?syncToken=${token}`, 't1')).body)
+  eq(
+    'sync: a listing from the token names each event changed since, a deleted one cancelled',
+    arr(synced.items)
+      .map(obj)
+      .map((e) => [e.id ?? null, e.status ?? null, e.summary ?? null]),
+    [
+      ['aaaa1', 'confirmed', 'Moved'],
+      [String(other.id), 'cancelled', null],
+    ],
+  )
+  const next = String(synced.nextSyncToken)
+  eq(
+    'sync: and the token it hands out names nothing yet',
+    arr(obj((await api(`${events}?syncToken=${next}`, 't1')).body).items),
+    [],
+  )
+  eq(
+    'sync: a token that is not one is a 400',
+    (await api(`${events}?syncToken=nope`, 't1')).status,
+    400,
+  )
+  const primary = `${base}/calendar/v3/calendars/integ@example.com`
+  const patch = (url: string, body: Record<string, string>) =>
+    api(url, 't1', { method: 'PATCH', body: JSON.stringify(body) })
+  await patch(primary, { summary: 'Renamed', timeZone: 'America/Los_Angeles' })
+  const renamed = obj((await api(primary, 't1')).body)
+  eq(
+    'calendars.patch: the owner renames its calendar and moves its zone',
+    [renamed.summary ?? null, renamed.timeZone ?? null],
+    ['Renamed', 'America/Los_Angeles'],
+  )
+  eq(
+    'calendars.patch: and its events render in the new zone',
+    obj(obj((await api(`${events}/aaaa1`, 't1')).body).start).dateTime ?? null,
+    '2026-02-02T01:00:00-08:00',
+  )
+  eq(
+    'calendars.patch: a zone that is not one is a 400',
+    (await patch(primary, { timeZone: 'Not/AZone' })).status,
+    400,
+  )
+  eq(
+    'calendars.patch: a calendar shared with the account is a 403',
+    (await patch(`${base}/calendar/v3/calendars/${team.id}`, { summary: 'Mine' })).status,
+    403,
+  )
+}
+
 async function main(): Promise<void> {
   compatibilityDirect()
   sheetsFormatsDirect()
@@ -1283,6 +1512,8 @@ async function main(): Promise<void> {
     await gridRangesHttp(at)
     await driveMoveHttp(at)
     await draftsHttp(at)
+    await gmailHistoryHttp(at)
+    await calendarSyncHttp(at)
     // ---- the base world is fixture rows, not constructor state
     check('a bare /reset seeds', (await reset(at, { tenants: ['t1'], epoch: EPOCH })) === 200)
     const labels = await api(`${at}/gmail/v1/users/me/labels`, 't1')

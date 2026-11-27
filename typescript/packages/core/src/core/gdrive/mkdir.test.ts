@@ -12,30 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { FOLDER_MIME, GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
-import { FOLDER_MIME } from '../google/drive.ts'
 import { mkdir } from './mkdir.ts'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function workspace(): Workspace {
-  const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
-  Object.assign(vfs, { accessor })
-  return new Workspace({ '/d/': vfs }, { mode: MountMode.WRITE })
+  return new Workspace({ '/d/': new GoogleDriveVFS(account.config()) }, { mode: MountMode.WRITE })
 }
 
 function spec(virtual: string): PathSpec {
@@ -44,11 +47,13 @@ function spec(virtual: string): PathSpec {
 
 describe('gdrive mkdir', () => {
   it('creates a folder', async () => {
+    const accessor = account.driveAccessor()
     await mkdir(accessor, spec('/d'), false, await handedAt(readdir, accessor, spec('/d')))
-    expect(fake.find('d')?.mimeType).toBe(FOLDER_MIME)
+    expect((await account.find('d'))?.mimeType).toBe(FOLDER_MIME)
   })
 
   it('missing parent raises ENOENT', async () => {
+    const accessor = account.driveAccessor()
     await expect(
       mkdir(accessor, spec('/no/d'), false, await handedAt(readdir, accessor, spec('/no/d'))),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -60,21 +65,21 @@ describe('gdrive mkdir', () => {
     const ws = workspace()
     try {
       await ws.dispatch('mkdir', '/d/a/b/c', [], { parents: true })
-      const a = fake.find('a')
-      const b = fake.find('b')
-      const c = fake.find('c')
+      const a = await account.find('a')
+      const b = await account.find('b')
+      const c = await account.find('c')
       expect(a && b && c).toBeTruthy()
       expect(b?.parents).toEqual([a?.id])
       expect(c?.parents).toEqual([b?.id])
       await ws.dispatch('mkdir', '/d/a/b/c', [], { parents: true })
-      expect(fake.items.size).toBe(3)
+      expect(await account.items()).toHaveLength(3)
     } finally {
       await ws.close()
     }
   })
 
   it('-p over a file raises EEXIST at the leaf and ENOTDIR mid-path', async () => {
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
+    await account.upload('f.txt', 'x')
     const ws = workspace()
     try {
       await expect(ws.dispatch('mkdir', '/d/f.txt', [], { parents: true })).rejects.toMatchObject({

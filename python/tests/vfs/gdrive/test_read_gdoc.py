@@ -13,17 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
-from tests.fixtures.gdocs_api import StubDocs
-from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.vfs_io import call_over
+
+MIME = "application/vnd.google-apps.document"
 
 
 def _op(name: str):
@@ -41,30 +39,30 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDriveAccessor(config=None, token_manager=offline_token_manager())
-
-
 @pytest.mark.asyncio
-async def test_read_gdoc_renders_doc_json(accessor):
+async def test_read_gdoc_renders_doc_json(google_account):
+    made = await google_account.create("report", MIME)
     row = FileStat(
         name="report.gdoc.json",
         type=FileType.FILE,
         modified="2026-04-01T00:00:00Z",
-        extra={"file_id": "doc123", "resource_type": "gdrive/gdoc"},
+        extra={"file_id": made, "resource_type": "gdrive/gdoc"},
     )
-    doc_json = json.dumps({"documentId": "doc123"}).encode()
-    mock = AsyncMock(return_value=doc_json)
-    with serve(docs=StubDocs(read_doc=mock)):
-        result = await read(
-            accessor, _scope("/docs/report.gdoc.json"), entry=row
-        )
-        mock.assert_called_once_with("doc123")
-        assert json.loads(result)["documentId"] == "doc123"
+    await google_account.run.record_requests()
+    result = await read(
+        google_account.drive_accessor(),
+        _scope("/docs/report.gdoc.json"),
+        entry=row,
+    )
+    assert [path for _, path in await google_account.log()] == [
+        f"/v1/documents/{made}"
+    ]
+    assert json.loads(result)["documentId"] == made
 
 
 @pytest.mark.asyncio
-async def test_read_gdoc_not_found(accessor):
+async def test_read_gdoc_not_found(google_account):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, _scope("/nonexistent.gdoc.json"))
+        await read(
+            google_account.drive_accessor(), _scope("/nonexistent.gdoc.json")
+        )

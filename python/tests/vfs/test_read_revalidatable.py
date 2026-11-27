@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from inspect import isawaitable, signature
 from types import ModuleType
 from typing import Any, TypeVar
-from unittest.mock import AsyncMock
 from weakref import WeakKeyDictionary
 
 import boto3
@@ -58,6 +57,7 @@ from mirage.core.gdrive.readdir import readdir as gdrive_readdir
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.hf_hub.client import etag_value
 from mirage.core.hf_hub.readdir import readdir as hf_readdir
+from mirage.core.render.json import compact_json_bytes
 from mirage.observe.context import OpTimer, recording_active
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -76,8 +76,9 @@ from tests.core.box.conftest import TOKEN, BoxAccount
 from tests.core.dropbox.conftest import DropboxAccount
 from tests.core.github.conftest import TOKEN as GITHUB_TOKEN
 from tests.core.github.conftest import GitHubRepo, blob_sha
-from tests.e2e.gdrive_mock import FakeDriveApi, FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
+from tests.fixtures.google_account import FILES, GoogleAccount
+from tests.fixtures.google_account import TOKEN as GOOGLE_TOKEN
 from tests.fixtures.handed import ListFn, entry_at
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
@@ -164,6 +165,13 @@ GAPPS = {
     ),
 }
 
+# The request each Google app renders its file with.
+RENDERS = {
+    "gdocs": ("GET", "/v1/documents/:id"),
+    "gsheets": ("GET", "/v4/spreadsheets/:id"),
+    "gslides": ("GET", "/v1/presentations/:id"),
+}
+
 # What each family can run, fixed at collection. github and gdrive have no
 # key_prefix. The GAPPS mounts have one flat listing, so only one shape,
 # and their stream is their render handed over whole, one chunk, so a
@@ -187,7 +195,6 @@ S3_CONFIG = {
 }
 S3_EXTRA = {"oci": {"namespace": "ns"}}
 GRIDFS_CONFIG = {"uri": "mongodb://127.0.0.1:27017", "database": "d"}
-GDRIVE_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
 DROPBOX_CONFIG = {
     "client_id": "i",
     "client_secret": "s",
@@ -287,9 +294,23 @@ class Fake:
     # backend reads one (gdrive, box, dropbox, github, the Hub): the direct
     # calls are handed it, as the mount hands it.
     readdir: ListFn | None = None
+    # What a read of the key answers now, where that is not the bytes last
+    # written: a Google app's file reads as its API's rendering of it.
+    rendered: Callable[[], bytes] | None = None
+    # How many Drive listings the mount has asked, for a Google app, whose
+    # listing is a Drive search.
+    searched: Callable[[], int] | None = None
 
     def slot(self) -> str:
         return "stream" if self.stream_mod is not None else "bytes"
+
+    def expected(self, data: bytes) -> bytes:
+        """What a read of the key answers once ``data`` is its content.
+
+        Args:
+            data (bytes): the bytes last written to the key.
+        """
+        return data if self.rendered is None else self.rendered()
 
     async def handed(
         self, fn: Callable[..., Any], path: PathSpec
@@ -572,50 +593,165 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
         )
 
 
+def _google_config(drive: GoogleAccount) -> dict[str, str]:
+    return {"access_token": GOOGLE_TOKEN, "api_base": drive.run.url}
+
+
+async def _downloads(drive: GoogleAccount) -> int:
+    return [name for name, _ in await drive.log()].count("media")
+
+
 @contextmanager
-def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
+def _gdrive_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
+    # The account runs on a loop of its own, as Dropbox's does.
     key = KEYS[shape]
-    drive = FakeGDrive()
-    drive.add_file(key, data)
-    with patch_gdrive(drive):
-        vfs = build_vfs("gdrive", GDRIVE_CONFIG)
-        # No stray reach to refuse: stat has no download to fall into, and
-        # a no-index stat reaching get_file is its legitimate API entry point.
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: drive.calls["download_file"],
-            rewrite=lambda new: drive.add_file(key, new),
-            reach=[],
-            read_mod=gdrive_read,
-            stream_mod=gdrive_read,
-            readdir=gdrive_readdir,
+    thread = LoopThread()
+    try:
+        drive = thread.run(_account(GoogleAccount, origin))
+        try:
+            thread.run(drive.put(key, data))
+            thread.run(drive.run.record_requests())
+            # No stray reach to refuse: stat has no download to fall into,
+            # and a no-index stat reaching get_file is its legitimate API
+            # entry point.
+            yield Fake(
+                vfs=build_vfs("gdrive", _google_config(drive)),
+                key=key,
+                fetches=lambda: thread.run(_downloads(drive)),
+                rewrite=lambda new: thread.run(drive.put(key, new)),
+                reach=[],
+                read_mod=gdrive_read,
+                stream_mod=gdrive_read,
+                readdir=gdrive_readdir,
+            )
+        finally:
+            thread.run(drive.run.close())
+    finally:
+        thread.close()
+
+
+async def _app_write(
+    drive: GoogleAccount, name: str, file_id: str, text: str
+) -> None:
+    """Write ``text`` into a Google app's file as its editor's API does,
+    which moves the file's modifiedTime.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+        file_id (str): the file.
+        text (str): what is written.
+    """
+    if name == "gdocs":
+        edit = {"insertText": {"location": {"index": 1}, "text": text}}
+        await drive.run.call(
+            "POST",
+            f"/v1/documents/{file_id}:batchUpdate",
+            json={"requests": [edit]},
         )
+    elif name == "gsheets":
+        await drive.run.call(
+            "PUT",
+            f"/v4/spreadsheets/{file_id}/values/A1",
+            params={"valueInputOption": "RAW"},
+            json={"values": [[text]]},
+        )
+    else:
+        await drive.run.call(
+            "POST",
+            f"/v1/presentations/{file_id}:batchUpdate",
+            json={
+                "requests": [
+                    {"insertText": {"objectId": "shape", "text": text}}
+                ]
+            },
+        )
+
+
+async def _app_file(drive: GoogleAccount, name: str, text: str) -> str:
+    """A Google app's file named ``a`` holding ``text``, and its id; a
+    presentation's text is in a shape on a slide of its own.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+        text (str): what it holds.
+    """
+    file_id = await drive.create("a", GAPPS[name][0])
+    if name == "gslides":
+        on_slide = {"pageObjectId": "slide"}
+        await drive.run.call(
+            "POST",
+            f"/v1/presentations/{file_id}:batchUpdate",
+            json={
+                "requests": [
+                    {"createSlide": {"objectId": "slide"}},
+                    {
+                        "createShape": {
+                            "objectId": "shape",
+                            "elementProperties": on_slide,
+                        }
+                    },
+                ]
+            },
+        )
+    await _app_write(drive, name, file_id, text)
+    return file_id
+
+
+async def _searches(drive: GoogleAccount) -> int:
+    return len(await drive.asked("GET", FILES))
+
+
+async def _renders(drive: GoogleAccount, name: str) -> int:
+    return len(await drive.asked(*RENDERS[name]))
+
+
+async def _rendered(drive: GoogleAccount, name: str) -> bytes:
+    """The app's answer to the last render request the mount made, asked
+    again, compacted as a read hands it on.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+    """
+    asked = (await drive.asked(*RENDERS[name]))[-1]
+    made = await drive.run.call("GET", f"{asked['path']}?{asked['query']}")
+    return compact_json_bytes(made)
 
 
 @contextmanager
-def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
-    mime, read_mod, filename = GAPPS[name]
-    drive = FakeGDrive()
-    file_id = drive.add_file("a", data, mime)
-    listed = drive.find_entry(file_id)
-    assert listed is not None
-    # The fake names no owner, so the file lists under shared/. A rewrite
-    # moves modifiedTime within the same day, which keeps the name.
-    key = "shared/" + filename("a", file_id, listed["modifiedTime"])
-    with patch_gdrive(drive):
-        vfs = build_vfs(name, GDRIVE_CONFIG)
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: drive.calls["render"],
-            rewrite=lambda new: drive.add_file("a", new, mime),
-            reach=[],
-            read_mod=read_mod,
-            stream_mod=None,
-            index=RAMIndexCacheStore(),
-            stat_indexed=False,
-        )
+def _gapps_fake(name: str, data: bytes, origin: str) -> Iterator[Fake]:
+    _, read_mod, filename = GAPPS[name]
+    thread = LoopThread()
+    try:
+        drive = thread.run(_account(GoogleAccount, origin))
+        try:
+            file_id = thread.run(_app_file(drive, name, data.decode()))
+            item = thread.run(drive.item(file_id))
+            # The account owns the file, so it lists under owned/. A rewrite
+            # moves modifiedTime within the same day, which keeps the name.
+            key = "owned/" + filename("a", file_id, item["modifiedTime"])
+            thread.run(drive.run.record_requests())
+            yield Fake(
+                vfs=build_vfs(name, _google_config(drive)),
+                key=key,
+                fetches=lambda: thread.run(_renders(drive, name)),
+                rewrite=lambda new: thread.run(
+                    _app_write(drive, name, file_id, new.decode())
+                ),
+                reach=[],
+                read_mod=read_mod,
+                stream_mod=None,
+                index=RAMIndexCacheStore(),
+                stat_indexed=False,
+                rendered=lambda: thread.run(_rendered(drive, name)),
+                searched=lambda: thread.run(_searches(drive)),
+            )
+        finally:
+            thread.run(drive.run.close())
+    finally:
+        thread.close()
 
 
 @contextmanager
@@ -842,11 +978,15 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "gdrive":
-        with _gdrive_fake(shape, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("gws_origin")
+        with _gdrive_fake(shape, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] in GAPPS:
-        with _gapps_fake(name, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("gws_origin")
+        with _gapps_fake(name, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "hf_models":
@@ -1091,11 +1231,12 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
             refetched,
             second,
         ) = asyncio.run(run())
+        want = fake.expected(data)
 
     assert cached_before is False
     assert taken == [(fake.slot(), virtual)]
     assert fetched == 1
-    assert first == data
+    assert first == want
     assert stat.fingerprint is not None
     # A whole read of a rendered Google file goes through the dispatcher,
     # where a filetype read op always renders and keeps nothing, so its
@@ -1104,7 +1245,7 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     renders = row == "bytes" and name in GAPPS
     assert fresh is not renders
     assert refetched == (1 if renders else 0)
-    assert second == data
+    assert second == want
     assert fake.reach == []
 
 
@@ -1206,9 +1347,10 @@ def test_an_unrecorded_read_stamps_the_stat_token(
             return unrecorded, data, stat
 
         unrecorded, data, stat = asyncio.run(run())
+        want = fake.expected(SEED)
 
     assert unrecorded
-    assert data == SEED
+    assert data == want
     assert [r.path for r in records] == [virtual]
     # The real record_stream returns None with no recorder bound, so no
     # stream read can stamp a token outside a capture at all. This row can
@@ -1279,14 +1421,15 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch, request):
         (stat, fresh, refetched, second, refreshed, third_fetched, third) = (
             asyncio.run(run())
         )
+        want = fake.expected(CHANGED)
 
     assert stat.fingerprint is not None
     assert not fresh
     assert refetched == 1
-    assert second == CHANGED
+    assert second == want
     assert refreshed
     assert third_fetched == 0
-    assert third == CHANGED
+    assert third == want
     assert fake.reach == []
 
 
@@ -1740,27 +1883,33 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(
 
 @pytest.mark.parametrize("name", ["gdocs", "gsheets", "gslides"])
 def test_partial_search_cannot_evict_live_app_bytes_or_overlay(
-    name, monkeypatch
+    name, monkeypatch, request
 ):
-    with _fake(name, "root", SEED, monkeypatch) as fake:
+    with _fake(name, "root", SEED, monkeypatch, request) as fake:
         virtual = "/m/" + fake.key
+        assert fake.searched is not None
+        searched = fake.searched
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
-                await _line(ws, f"cat {virtual}")
+                first = await _line(ws, f"cat {virtual}")
                 await _line(ws, f"chmod 600 {virtual}")
-                search = AsyncMock(return_value=([], False))
-                monkeypatch.setattr(FakeDriveApi, "list_all_files", search)
                 before = fake.fetches()
-                assert await _line(ws, f"cat {virtual}") == SEED
+                listed = searched()
+                assert await _line(ws, f"cat {virtual}") == first
                 assert await _line(ws, f"stat -c %a {virtual}") == b"600\n"
                 assert fake.fetches() == before
-                search.assert_not_awaited()
+                # Neither the read nor the stat searched Drive.
+                assert searched() == listed
+                return first
             finally:
                 await ws.close()
 
-        asyncio.run(run())
+        first = asyncio.run(run())
+        want = fake.expected(SEED)
+
+    assert first == want
 
 
 DEEP = "a/b/c.txt"

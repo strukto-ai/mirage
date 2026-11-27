@@ -91,6 +91,8 @@ export function listCalendarEvents(
   // per-field wording.)
   if (asked !== null && !isIanaZone(asked)) return invalidFormat()
   const tz = asked ?? cal.timeZone
+  const syncToken = query.get('syncToken')
+  if (syncToken !== null) return syncedEvents(st, cal, query, syncToken, tz)
   const showDeleted = query.get('showDeleted') === 'true'
   const q = query.get('q')
   const timeMin = query.get('timeMin')
@@ -128,6 +130,7 @@ export function listCalendarEvents(
     items: page.map((ev) => fmtEvent(cal, ev, tz)),
   }
   if (start + max < rows.length) out.nextPageToken = String(start + max)
+  else out.nextSyncToken = syncTokenOf(st)
   return ok(out)
 }
 
@@ -223,10 +226,15 @@ export function readEventTimes(
   return { start, end }
 }
 
-export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): CalendarEvent {
+export function makeEvent(
+  st: GwsState,
+  body: JsonObj,
+  times: EventTimes,
+  id?: string,
+): CalendarEvent {
   const now = st.now()
   const ev: CalendarEvent = {
-    id: st.nextEventId(),
+    id: id ?? st.nextEventId(),
     status: 'confirmed',
     start: times.start,
     end: times.end,
@@ -241,4 +249,60 @@ export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): Calen
   if (location !== undefined) ev.location = location
   if (body.attendees !== undefined) ev.attendees = body.attendees
   return ev
+}
+
+// An event id as Calendar takes one from a caller: base32hex, 5 to 1024
+// characters.
+export function isEventId(id: string): boolean {
+  return /^[a-v0-9]{5,1024}$/.test(id)
+}
+
+// Whether any calendar of the account already holds an event of this id.
+export function eventIdTaken(st: GwsState, id: string): boolean {
+  return [...st.events.values()].some((bucket) => bucket.has(id))
+}
+
+// The sync token an events listing hands out: the last event change recorded.
+export function syncTokenOf(st: GwsState): string {
+  return String(st.counters.get('calendarChange') ?? 0)
+}
+
+// An events listing asked with a sync token: each event of the calendar made,
+// changed or deleted since, at its newest state, a deleted one as Calendar
+// names it, `cancelled` with its id alone. Every change is kept, so no token
+// is too old; a test that wants Calendar's 410 for one arms it.
+function syncedEvents(
+  st: GwsState,
+  cal: CalendarEntry,
+  query: URLSearchParams,
+  token: string,
+  tz: string,
+): Reply {
+  if (!/^\d+$/.test(token)) return googleError(400, 'Invalid sync token value.', 'INVALID_ARGUMENT')
+  const after = Number(token)
+  const latest = new Map<string, number>()
+  for (const [seq, calendarId, eventId] of st.calendarChanges) {
+    if (seq <= after || calendarId !== cal.id) continue
+    latest.delete(eventId)
+    latest.set(eventId, seq)
+  }
+  const bucket = eventsOf(st, cal.id)
+  const items: JsonValue[] = [...latest.keys()].map((id) => {
+    const ev = bucket.get(id)
+    return ev === undefined
+      ? { kind: 'calendar#event', id, status: 'cancelled' }
+      : fmtEvent(cal, ev, tz)
+  })
+  const max = Number(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS))
+  const start = Number(query.get('pageToken') ?? '0')
+  const out: JsonObj = {
+    kind: 'calendar#events',
+    summary: cal.summary,
+    timeZone: tz,
+    accessRole: cal.accessRole,
+    items: items.slice(start, start + max),
+  }
+  if (start + max < items.length) out.nextPageToken = String(start + max)
+  else out.nextSyncToken = syncTokenOf(st)
+  return ok(out)
 }

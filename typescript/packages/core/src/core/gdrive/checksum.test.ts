@@ -12,34 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { createHash } from 'node:crypto'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { currentCaller, bindCaller } from '../../context/session_context.ts'
 import { recordingScope } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import {
-  type StubDrive,
-  makeGDriveAccessor,
-  stubDrive,
-} from '../../../tests/core/gdrive/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { FILE, GoogleAccount } from '../../../tests/core/google/account.ts'
 import { checksum } from './checksum.ts'
 
 const SCOPE = new PathSpec({ vfsPath: 'r.pdf', virtual: '/r.pdf', directory: '/' })
-let drive: StubDrive
-let accessor: GDriveAccessor
+const DATA = 'report bytes'
 
-function row(resourceType: string): FileStat {
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
+function row(fileId: string, resourceType: string): FileStat {
   return new FileStat({
     name: 'r.pdf',
     type: FileType.FILE,
-    extra: { file_id: 'f1', resource_type: resourceType },
+    extra: { file_id: fileId, resource_type: resourceType },
   })
 }
-
-beforeEach(() => {
-  drive = stubDrive()
-  accessor = makeGDriveAccessor(drive)
-})
 
 describe('Drive checksum', () => {
   // Mirrors python's test_drive_answers_the_digest_it_keeps.
@@ -48,42 +54,45 @@ describe('Drive checksum', () => {
     ['sha1', 'sha1Checksum'],
     ['sha256', 'sha256Checksum'],
   ])('answers the %s Drive keeps', async (algorithm, field) => {
-    const reply = {
-      id: 'f1',
-      name: 'r.pdf',
-      md5Checksum: 'm5',
-      headRevisionId: 'h1',
-      [field]: 'ABC123',
-    }
-    drive.getFile.mockResolvedValue(reply)
+    const made = await account.upload('r.pdf', DATA)
+    // Drive's digest in capitals, which the answer lowers.
+    const answered = await account.item(made)
+    answered[field] = (answered[field] as string).toUpperCase()
+    await account.run.answerNext('GET', FILE, 200, answered)
+    await account.run.recordRequests()
     const [found, records] = await recordingScope(() =>
-      checksum(accessor, SCOPE, algorithm, row('gdrive/file')),
+      checksum(account.driveAccessor(), SCOPE, algorithm, row(made, 'gdrive/file')),
     )
-    expect(found).toBe('abc123')
-    const [fileId, asked] = drive.getFile.mock.calls[0] ?? []
-    expect(fileId).toBe('f1')
-    const fields = (asked ?? '').split(',')
+    expect(found).toBe(createHash(algorithm).update(DATA).digest('hex'))
+    expect((await account.log()).map(([name]) => name)).toEqual(['get'])
+    const fields = ((await account.run.params('GET', FILE))[0]?.fields ?? '').split(',')
     expect(fields[0]).toBe(field)
     expect(fields).toEqual(expect.arrayContaining(['md5Checksum', 'headRevisionId']))
     expect(records.map((r) => [r.op, r.path, r.fingerprint, r.revision])).toEqual([
-      ['read', '/r.pdf', reply.md5Checksum, 'h1'],
+      ['read', '/r.pdf', answered.md5Checksum, answered.headRevisionId],
     ])
   })
 
   // Mirrors python's test_a_native_file_or_another_algorithm_reads.
   it('reads a native file or another algorithm', async () => {
-    expect(await checksum(accessor, SCOPE, 'md5', row('gdrive/gdoc'))).toBeNull()
-    expect(await checksum(accessor, SCOPE, 'sha512', row('gdrive/file'))).toBeNull()
-    expect(drive.getFile).not.toHaveBeenCalled()
+    const made = await account.upload('r.pdf', DATA)
+    const accessor = account.driveAccessor()
+    await account.run.recordRequests()
+    expect(await checksum(accessor, SCOPE, 'md5', row(made, 'gdrive/gdoc'))).toBeNull()
+    expect(await checksum(accessor, SCOPE, 'sha512', row(made, 'gdrive/file'))).toBeNull()
+    expect(await account.log()).toEqual([])
   })
 
   // Mirrors python's test_a_pinned_revision_reads.
   it('reads a pinned revision', async () => {
+    const made = await account.upload('r.pdf', DATA)
+    const accessor = account.driveAccessor()
+    await account.run.recordRequests()
     const found = await bindCaller(
       { ...currentCaller(), revisions: { map: new Map([[SCOPE.virtual, 'r7']]) } },
-      () => checksum(accessor, SCOPE, 'md5', row('gdrive/file')),
+      () => checksum(accessor, SCOPE, 'md5', row(made, 'gdrive/file')),
     )
     expect(found).toBeNull()
-    expect(drive.getFile).not.toHaveBeenCalled()
+    expect(await account.log()).toEqual([])
   })
 })

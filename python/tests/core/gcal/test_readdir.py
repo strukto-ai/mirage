@@ -23,10 +23,17 @@ from mirage.core.gcal.readdir import (
 from mirage.core.gcal.readdir import readdir as gcal_readdir
 from mirage.types import PathSpec
 from mirage.vfs.gcal import GCalVFS
-from tests.fixtures.gcal_api import HK, make_accessor, names, spec
+from tests.fixtures.gcal_seed import (
+    HK,
+    event_listings,
+    make_accessor,
+    names,
+    spec,
+)
+from tests.fixtures.google_account import PRIMARY
 from tests.fixtures.mounted import mounted
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
+pytestmark = pytest.mark.asyncio
 
 WEEK = "/primary/2026-08-10--2026-08-16"
 
@@ -45,7 +52,7 @@ async def test_root_lists_one_directory_per_calendar(accessor):
 
 async def test_primary_keeps_its_alias_and_others_carry_the_id(accessor):
     calendars = await calendar_index(accessor)
-    assert calendars["primary"]["id"] == "integ@example.com"
+    assert calendars["primary"]["id"] == PRIMARY
     assert (
         calendars["Engineering__team@group.calendar.google.com"]["id"]
         == "team@group.calendar.google.com"
@@ -60,8 +67,10 @@ async def test_primary_keeps_its_alias_and_others_carry_the_id(accessor):
         ({"time_zone": "Europe/Berlin"}, "Europe/Berlin"),
     ],
 )
-async def test_bucket_zone_defaults_to_the_primary_calendar(config, tz):
-    accessor = make_accessor(**config)
+async def test_bucket_zone_defaults_to_the_primary_calendar(
+    calendar, config, tz
+):
+    accessor = make_accessor(calendar, **config)
     assert bucket_zone(accessor, await calendar_index(accessor)) == tz
 
 
@@ -83,18 +92,21 @@ async def test_bucket_zone_defaults_to_the_primary_calendar(config, tz):
     ],
 )
 async def test_calendar_lists_every_bucket_holding_events(
-    size, buckets, index
+    calendar, size, buckets, index
 ):
     # All past events count, so last year's bucket is listed too.
-    out = await readdir(make_accessor(bucket_days=size), spec("/primary"))
+    out = await readdir(
+        make_accessor(calendar, bucket_days=size), spec("/primary")
+    )
     assert names(out) == ["calendar.json", *buckets]
 
 
-async def test_the_window_is_centred_in_the_bucket_zone(gcal_api, accessor):
+async def test_the_window_is_centred_in_the_bucket_zone(calendar, accessor):
     # today is pinned, so this asserts the zone reaches the accessor at all:
     # the bound carries the bucket zone's offset rather than the host's.
     await readdir(accessor, spec("/primary"))
-    assert gcal_api.listed[-1][1:] == (None, "2026-11-09T16:00:00+00:00")
+    listed = await event_listings(calendar)
+    assert listed[-1][1:] == (None, "2026-11-09T16:00:00+00:00")
 
 
 @pytest.mark.parametrize(
@@ -122,24 +134,25 @@ async def test_the_window_is_centred_in_the_bucket_zone(gcal_api, accessor):
     ],
 )
 async def test_a_date_glob_moves_the_window_to_its_buckets(
-    gcal_api, size, glob, listed, window
+    calendar, size, glob, listed, window
 ):
     # The backend's own listing for the glob word: the span it asks for,
     # before a shell matches names against it.
-    accessor = make_accessor(bucket_days=size)
+    accessor = make_accessor(calendar, bucket_days=size)
     out = await gcal_readdir(accessor, spec(f"/primary/{glob}", glob))
     assert out.partial is True
     assert listed in [row.name for row in out.entries]
-    assert gcal_api.listed[-1][1:] == window
+    assert (await event_listings(calendar))[-1][1:] == window
 
 
 async def test_a_day_lists_one_file_per_overlapping_event(accessor):
+    # In the order Calendar lists them, by start.
     out = await readdir(accessor, spec("/primary/2026-08-11"))
     assert names(out) == [
-        "aaaa1__0900-1030_PhD_Defense.gcal.json",
-        "bbbb2__1500-1600_Committee_Meeting.gcal.json",
         "cccc3__0000-2400_Conference.gcal.json",
         "dddd4__0000-2400_Public_Holiday.gcal.json",
+        "aaaa1__0900-1030_PhD_Defense.gcal.json",
+        "bbbb2__1500-1600_Committee_Meeting.gcal.json",
     ]
 
 
@@ -161,29 +174,26 @@ async def test_a_multi_day_event_appears_under_every_day_it_covers(
     assert any("Public_Holiday" in n for n in out) is (day == "2026-08-11")
 
 
-async def test_a_week_lists_its_days_in_one_query(gcal_api):
-    out = await readdir(make_accessor(bucket_days=7), spec(WEEK))
+async def test_a_week_lists_its_days_in_one_query(calendar):
+    out = await readdir(make_accessor(calendar, bucket_days=7), spec(WEEK))
     assert names(out) == [
-        "aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json",
-        "bbbb2__2026-08-11_1500-1600_Committee_Meeting.gcal.json",
         "cccc3__2026-08-10_0900-2400_Conference.gcal.json",
         "cccc3__2026-08-11_0000-2400_Conference.gcal.json",
         "cccc3__2026-08-12_0000-2400_Conference.gcal.json",
         "cccc3__2026-08-13_0000-1700_Conference.gcal.json",
         "dddd4__2026-08-11_0000-2400_Public_Holiday.gcal.json",
+        "aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json",
+        "bbbb2__2026-08-11_1500-1600_Committee_Meeting.gcal.json",
     ]
-    assert gcal_api.listed == [
-        (
-            "integ@example.com",
-            "2026-08-10T00:00:00+08:00",
-            "2026-08-17T00:00:00+08:00",
-        )
+    # The week of 2026-08-10 in Hong Kong, sent in UTC.
+    assert await event_listings(calendar) == [
+        (PRIMARY, "2026-08-09T16:00:00+00:00", "2026-08-16T16:00:00+00:00")
     ]
 
 
-async def test_a_scoped_week_lists_only_its_days_in_scope():
+async def test_a_scoped_week_lists_only_its_days_in_scope(calendar):
     accessor = make_accessor(
-        bucket_days=7, start_time="2026-08-12T00:00:00+08:00"
+        calendar, bucket_days=7, start_time="2026-08-12T00:00:00+08:00"
     )
     assert names(await readdir(accessor, spec(WEEK))) == [
         "cccc3__2026-08-12_0000-2400_Conference.gcal.json",
@@ -195,8 +205,9 @@ async def test_a_scoped_week_lists_only_its_days_in_scope():
     "size, path",
     [(1, "/primary/2027-03-04"), (7, "/primary/2027-03-01--2027-03-07")],
 )
-async def test_a_bucket_with_no_events_lists_empty(size, path):
-    assert await readdir(make_accessor(bucket_days=size), spec(path)) == []
+async def test_a_bucket_with_no_events_lists_empty(calendar, size, path):
+    accessor = make_accessor(calendar, bucket_days=size)
+    assert await readdir(accessor, spec(path)) == []
 
 
 async def test_free_busy_calendar_renders_events_without_titles(accessor):
@@ -206,8 +217,8 @@ async def test_free_busy_calendar_renders_events_without_titles(accessor):
             spec("/Exec__busy@group.calendar.google.com/2026-08-11"),
         )
     )
-    # The real API sends no summary on such a calendar; the fake strips it,
-    # so this asserts the accessRole is what decides the rendering.
+    # Calendar sends no summary on such a calendar, and neither does the
+    # fake, so this asserts the accessRole is what decides the rendering.
     assert out and all(n.endswith("_busy.gcal.json") for n in out)
 
 
@@ -226,13 +237,14 @@ async def test_free_busy_calendar_renders_events_without_titles(accessor):
         ({"bucket_days": 7, "end_time": "2026-08-10T00:00:00+08:00"}, WEEK),
     ],
 )
-async def test_a_path_the_tree_does_not_hold_is_enoent(config, path):
+async def test_a_path_the_tree_does_not_hold_is_enoent(calendar, config, path):
     with pytest.raises(FileNotFoundError):
-        await readdir(make_accessor(**config), spec(path))
+        await readdir(make_accessor(calendar, **config), spec(path))
 
 
-async def test_min_access_role_filters_the_calendar_list():
-    out = await readdir(make_accessor(min_access_role="owner"), spec("/"))
+async def test_min_access_role_filters_the_calendar_list(calendar):
+    accessor = make_accessor(calendar, min_access_role="owner")
+    out = await readdir(accessor, spec("/"))
     assert names(out) == ["primary"]
 
 

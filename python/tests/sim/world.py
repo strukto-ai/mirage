@@ -36,9 +36,9 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.slack import SlackConfig, SlackVFS
 from tests.core.discord.conftest import FakeDiscordApi
 from tests.core.slack.conftest import FakeSlack
-from tests.e2e.gdrive_mock import FakeGDrive
 from tests.e2e.s3_mock import MultiBucketS3Client
 from tests.sim.dropbox import FakeDropbox
+from tests.sim.gdrive import FakeGDrive
 from tests.sim.github import FakeGitHubApi
 from tests.sim.loop import SimClock, SimLoop, run
 from tests.sim.model import stamped

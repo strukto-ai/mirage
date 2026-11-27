@@ -12,71 +12,74 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { GSlidesAccessor } from '../../accessor/gslides.ts'
 import { recordingScope } from '../../observe/context.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { TokenManager } from '../google/client.ts'
-import type { SlidesApi } from './api.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  FILE,
+  FILES,
+  GoogleAccount,
+  type DriveListing,
+} from '../../../tests/core/google/account.ts'
 import { read } from './read.ts'
-import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import { installApi } from '../../../tests/core/google/_test_util.ts'
 
-const ENC = new TextEncoder()
+const APP = '/gslides'
+const MIME = 'application/vnd.google-apps.presentation'
+const SUFFIX = '.gslide.json'
 
-let drive: StubDrive
-let slides: { readPresentation: ReturnType<typeof vi.fn<SlidesApi['readPresentation']>> }
+let origin: string
+let account: GoogleAccount
 
-beforeEach(() => {
-  drive = stubDrive()
-  slides = { readPresentation: vi.fn<SlidesApi['readPresentation']>() }
-  installApi({ drive, slides })
+beforeAll(async () => {
+  origin = await serve('gws')
 })
 
-const STUB_TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
 
-function makeAccessor(): GSlidesAccessor {
-  return new GSlidesAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+afterEach(async () => {
+  await account.run.close()
+})
+
+function accessor(): GSlidesAccessor {
+  return new GSlidesAccessor({ tokenManager: account.tokenManager() })
+}
+
+function spec(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, APP) })
+}
+
+/** Make a file of the app named `name`, stamped `stamp`, and answer its id. */
+async function made(name: string, stamp: string): Promise<string> {
+  const id = await account.create(name, MIME)
+  await account.patch(id, { modifiedTime: stamp })
+  return id
 }
 
 describe('gslides read auto-bootstrap', () => {
   it('resolves a read no listing named by its id', async () => {
-    drive.getFile.mockResolvedValue({
-      mimeType: 'application/vnd.google-apps.presentation',
-      id: 'slide1',
-      name: 'Deck',
-      modifiedTime: '2026-04-01T00:00:00.000Z',
-      owners: [{ me: true }],
-    })
-    slides.readPresentation.mockResolvedValue(
-      ENC.encode(JSON.stringify({ presentationId: 'slide1' })),
-    )
-
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
-      directory: '/gslides/owned/2026-04-01_Deck__slide1.gslide.json',
-      vfsPath: mountKey('/gslides/owned/2026-04-01_Deck__slide1.gslide.json', '/gslides'),
-    })
-    const out = await read(accessor, path)
-    expect(new TextDecoder().decode(out)).toContain('slide1')
+    const id = await made('Notes', '2026-04-01T00:00:00.000Z')
+    await account.run.recordRequests()
+    const out = await read(accessor(), spec(`${APP}/owned/2026-04-01_Notes__${id}${SUFFIX}`))
+    expect(new TextDecoder().decode(out)).toContain(id)
+    expect((await account.log()).map(([name]) => name)).toEqual([
+      'get',
+      'GET /v1/presentations/:id',
+    ])
   })
 
   it('throws ENOENT when file missing by ID', async () => {
-    drive.getFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-    slides.readPresentation.mockRejectedValue(new Error('should not call readPresentation'))
-
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/gslides/owned/Missing__xyz.gslide.json',
-      directory: '/gslides/owned/Missing__xyz.gslide.json',
-      vfsPath: mountKey('/gslides/owned/Missing__xyz.gslide.json', '/gslides'),
-    })
-    await expect(read(accessor, path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await account.run.recordRequests()
+    await expect(
+      read(accessor(), spec(`${APP}/owned/Missing__xyz${SUFFIX}`)),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await account.log()).map(([name]) => name)).toEqual(['get'])
   })
 })
 
@@ -89,31 +92,26 @@ describe('gslides read token', () => {
   ]
   for (const [stamp, token] of cases) {
     it(`records the token stat reports (stamp ${JSON.stringify(stamp)})`, async () => {
-      const item = {
-        mimeType: 'application/vnd.google-apps.presentation',
-        id: 'd1',
-        name: 'My Deck',
-        modifiedTime: stamp,
-        owners: [{ me: true }],
+      const id = await made('My Deck', '2026-04-01T00:00:00.000Z')
+      if (stamp === '') {
+        // A file Drive gives no modified time: its own item without one, on
+        // the listing and on the lookup.
+        const listing = await account.run.call<DriveListing>(
+          'GET',
+          `${FILES}?${new URLSearchParams({ q: `mimeType = '${MIME}'` }).toString()}`,
+        )
+        const files = listing.files.map((row) =>
+          row.id === id ? { ...row, modifiedTime: '' } : row,
+        )
+        await account.run.answerNext('GET', FILES, 200, { ...listing, files })
+        const item = await account.item(id)
+        await account.run.answerNext('GET', FILE, 200, { ...item, modifiedTime: '' }, 2)
       }
-      drive.listAllFiles.mockResolvedValue({ files: [item], complete: true })
-      drive.getFile.mockResolvedValue(item)
-      slides.readPresentation.mockResolvedValue(
-        ENC.encode(JSON.stringify({ presentationId: 'd1' })),
-      )
-      const accessor = makeAccessor()
-      const vfs = Object.assign(
-        new GSlidesVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
-        { accessor },
-      )
-      const ws = new Workspace({ '/gslides/': vfs })
-      const [target = ''] = (await ws.dispatch('readdir', '/gslides/owned')) as string[]
-      const path = new PathSpec({
-        virtual: target,
-        directory: target,
-        vfsPath: mountKey(target, '/gslides'),
-      })
-      const [data, records] = await recordingScope(() => read(accessor, path))
+      const reader = accessor()
+      const vfs = Object.assign(new GSlidesVFS(account.config()), { accessor: reader })
+      const ws = new Workspace({ [`${APP}/`]: vfs })
+      const [target = ''] = (await ws.dispatch('readdir', `${APP}/owned`)) as string[]
+      const [data, records] = await recordingScope(() => read(reader, spec(target)))
       const info = (await ws.dispatch('stat', target)) as FileStat
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
         ['read', target, 'gslides', data.byteLength, token],

@@ -12,36 +12,53 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.core.gdrive.capacity import capacity
 from mirage.types import CapacityResult, CapacityState
-from tests.fixtures.gdrive_api import StubDrive, install_drive
+
+ABOUT = "/drive/v3/about"
 
 
-@pytest.mark.parametrize(
-    ("shared", "quota", "expected"),
-    [
-        (
-            None,
-            {"limit": "1000", "usage": "400"},
-            CapacityResult(
-                state=CapacityState.QUOTA, total=1000, used=400, available=600
-            ),
-        ),
-        (None, {"usage": "400"}, CapacityResult(state=CapacityState.ELASTIC)),
-        ("drive-1", {}, CapacityResult(state=CapacityState.UNKNOWN)),
-    ],
-)
 @pytest.mark.asyncio
-async def test_the_storage_quota_is_the_capacity(
-    scoped_accessor, monkeypatch, shared, quota, expected
-):
-    accessor = scoped_accessor("folder")
-    accessor.root_drive_id = shared
-    install_drive(
-        monkeypatch, StubDrive(storage_quota=AsyncMock(return_value=quota))
+async def test_my_drives_quota_is_the_capacity(google_account):
+    await google_account.upload("a.bin", b"x" * 400)
+    quota = (await google_account.run.call("GET", ABOUT))["storageQuota"]
+    accessor = google_account.drive_accessor(
+        folder_id=await google_account.folder("scope")
     )
-    assert await capacity(accessor) == expected
+    total = int(quota["limit"])
+    assert await capacity(accessor) == CapacityResult(
+        state=CapacityState.QUOTA, total=total, used=400, available=total - 400
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_drive_with_no_limit_is_elastic(google_account):
+    # An account with unlimited storage: Drive answers its usage and no
+    # limit, which the fake's own quota is answered without.
+    about = await google_account.run.call("GET", ABOUT)
+    del about["storageQuota"]["limit"]
+    await google_account.run.answer_next("GET", ABOUT, 200, about)
+    accessor = google_account.drive_accessor(
+        folder_id=await google_account.folder("scope")
+    )
+    assert await capacity(accessor) == CapacityResult(
+        state=CapacityState.ELASTIC
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_shared_drive_has_no_quota_to_ask(google_account):
+    drive = await google_account.shared_drive("Team")
+    accessor = google_account.drive_accessor(
+        folder_id=await google_account.folder("scope", drive)
+    )
+    await google_account.run.record_requests()
+    assert await capacity(accessor) == CapacityResult(
+        state=CapacityState.UNKNOWN
+    )
+    assert accessor.root_drive_id == drive
+    assert all(
+        route != f"GET {ABOUT}" for route, _ in await google_account.log()
+    )

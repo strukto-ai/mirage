@@ -18,10 +18,10 @@ from mirage.accessor.gcal import GCalAccessor
 from mirage.core.render.json import compact_json_bytes
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.gcal import GCalVFS
-from tests.fixtures.gcal_api import EVENTS, make_accessor, spec
+from tests.fixtures.gcal_seed import make_accessor, spec
 from tests.fixtures.mounted import mounted
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
+pytestmark = pytest.mark.asyncio
 
 
 async def stat(accessor: GCalAccessor, path: PathSpec) -> FileStat:
@@ -45,8 +45,8 @@ async def test_root_is_a_directory(accessor):
         (7, "/primary/2027-03-01--2027-03-07"),
     ],
 )
-async def test_calendars_and_buckets_are_directories(size, path):
-    row = await stat(make_accessor(bucket_days=size), spec(path))
+async def test_calendars_and_buckets_are_directories(calendar, size, path):
+    row = await stat(make_accessor(calendar, bucket_days=size), spec(path))
     assert row.type is FileType.DIRECTORY
     assert row.name == path.rsplit("/", 1)[-1]
 
@@ -62,12 +62,13 @@ async def test_calendars_and_buckets_are_directories(size, path):
         ),
     ],
 )
-async def test_an_event_is_json_sized_as_rendered(size, path):
-    row = await stat(make_accessor(bucket_days=size), spec(path))
+async def test_an_event_is_json_sized_as_rendered(calendar, size, path):
+    row = await stat(make_accessor(calendar, bucket_days=size), spec(path))
     assert row.content is ContentType.JSON
     assert row.extra["event_id"] == "aaaa1"
     # The rendered payload's byte length, never a source-side number.
-    assert row.size == len(compact_json_bytes(EVENTS[0]))
+    item = await calendar.event_item("aaaa1")
+    assert row.size == len(compact_json_bytes(item))
 
 
 async def test_calendar_json_reports_json(accessor):
@@ -89,6 +90,6 @@ async def test_calendar_json_reports_json(accessor):
         (7, "/primary/2026-08-11--2026-08-17"),
     ],
 )
-async def test_what_the_tree_does_not_hold_is_enoent(size, path):
+async def test_what_the_tree_does_not_hold_is_enoent(calendar, size, path):
     with pytest.raises(FileNotFoundError):
-        await stat(make_accessor(bucket_days=size), spec(path))
+        await stat(make_accessor(calendar, bucket_days=size), spec(path))

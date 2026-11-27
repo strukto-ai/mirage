@@ -13,27 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
+import pytest_asyncio
 
 from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail.read import read
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gmail import GmailVFS
-from mirage.vfs.gmail.config import GmailConfig
-from tests.fixtures.gmail_api import StubGmail
-from tests.fixtures.google_api import offline_token_manager, serve
+from tests.fixtures.google_account import GoogleAccount
 from tests.fixtures.mounted import Mounted
 
 
+@pytest_asyncio.fixture
+async def mailbox(google_account: GoogleAccount) -> GoogleAccount:
+    """The account with Gmail's system labels and no message yet."""
+    await google_account.reset()
+    return google_account
+
+
 @pytest.fixture
-def accessor():
-    return GmailAccessor(
-        config=GmailConfig(access_token="t"),
-        token_manager=offline_token_manager(),
-    )
+def accessor(mailbox: GoogleAccount) -> GmailAccessor:
+    return mailbox.gmail_accessor()
 
 
 def _row(name: str, **extra: str) -> FileStat:
@@ -41,50 +43,37 @@ def _row(name: str, **extra: str) -> FileStat:
     return FileStat(name=name, type=FileType.FILE, extra=extra)
 
 
+def _spec(path: str) -> PathSpec:
+    """A path under the mount at /gmail.
+
+    Args:
+        path (str): the path, mount prefix included.
+    """
+    return PathSpec(
+        vfs_path=mount_key(path, "/gmail"), virtual=path, directory=path
+    )
+
+
 @pytest.mark.asyncio
-async def test_read_message(accessor):
-    raw_msg = {
-        "id": "msg1",
-        "threadId": "t1",
-        "snippet": "Hello!",
-        "payload": {
-            "headers": [{"name": "Subject", "value": "Test Email"}],
-        },
-    }
-    with serve(
-        gmail=StubGmail(get_message_raw=AsyncMock(return_value=raw_msg))
-    ):
-        result = await read(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(
-                    "/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
-                    "/gmail",
-                ),
-                virtual="/gmail/INBOX/2026-04-12/Test_Email__msg1.gmail.json",
-                directory="/gmail/INBOX/2026-04-12"
-                "/Test_Email__msg1.gmail.json",
-            ),
-            _row("Test_Email__msg1.gmail.json", message_id="msg1"),
-        )
-        parsed = json.loads(result)
-        assert parsed["id"] == "msg1"
-        assert parsed["subject"] == "Test Email"
+async def test_read_message(mailbox, accessor):
+    msg = await mailbox.message(
+        "Test Email", "Hello!", date="Sun, 12 Apr 2026 12:00:00 +0000"
+    )
+    name = f"Test_Email__{msg}.gmail.json"
+    result = await read(
+        accessor,
+        _spec(f"/gmail/INBOX/2026-04-12/{name}"),
+        _row(name, message_id=msg),
+    )
+    parsed = json.loads(result)
+    assert parsed["id"] == msg
+    assert parsed["subject"] == "Test Email"
 
 
 @pytest.mark.asyncio
 async def test_read_not_found(accessor):
     with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(
-                    "/gmail/INBOX/nonexistent.gmail.json", "/gmail"
-                ),
-                virtual="/gmail/INBOX/nonexistent.gmail.json",
-                directory="/gmail/INBOX/nonexistent.gmail.json",
-            ),
-        )
+        await read(accessor, _spec("/gmail/INBOX/nonexistent.gmail.json"))
 
 
 @pytest.mark.asyncio
@@ -93,66 +82,34 @@ async def test_read_is_directory(accessor):
     # existence proof, so the kit answers "No such file" (the same rule
     # gcal, notion and the database mounts pin).
     with pytest.raises(FileNotFoundError):
-        await read(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key("/gmail/INBOX", "/gmail"),
-                virtual="/gmail/INBOX",
-                directory="/gmail/INBOX",
-            ),
-        )
+        await read(accessor, _spec("/gmail/INBOX"))
 
 
 @pytest.mark.asyncio
-async def test_a_cold_read_lists_its_way_to_the_message(accessor):
-    raw_msg = {
-        "id": "msg-1",
-        "threadId": "t-1",
-        "internalDate": str(1777248000000),
-        "sizeEstimate": 1024,
-        "labelIds": ["INBOX"],
-        "snippet": "hello",
-        "payload": {
-            "headers": [{"name": "Subject", "value": "Hello World"}],
-        },
-    }
-    with (
-        serve(
-            gmail=StubGmail(
-                list_labels=AsyncMock(
-                    return_value=[
-                        {"id": "INBOX", "name": "INBOX", "type": "system"}
-                    ]
-                ),
-                list_messages=AsyncMock(
-                    return_value=[{"id": "msg-1", "threadId": "t-1"}]
-                ),
-                get_message_raw=AsyncMock(return_value=raw_msg),
-            )
-        ),
-    ):
-        result = await Mounted(GmailVFS, accessor, "/gmail").read(
-            "/INBOX/2026-04-27/Hello_World__msg-1.gmail.json"
-        )
-        parsed = json.loads(result)
-        assert parsed["subject"] == "Hello World"
+async def test_a_cold_read_lists_its_way_to_the_message(mailbox, accessor):
+    msg = await mailbox.message(
+        "Hello World", "hello", date="Mon, 27 Apr 2026 00:00:00 +0000"
+    )
+    result = await Mounted(GmailVFS, accessor, "/gmail").read(
+        f"/INBOX/2026-04-27/Hello_World__{msg}.gmail.json"
+    )
+    parsed = json.loads(result)
+    assert parsed["subject"] == "Hello World"
 
 
 @pytest.mark.asyncio
-async def test_read_attachment(accessor):
-    with serve(
-        gmail=StubGmail(get_attachment=AsyncMock(return_value=b"pdf-bytes"))
-    ):
-        result = await read(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(
-                    "/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
-                    "/gmail",
-                ),
-                virtual="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
-                directory="/gmail/INBOX/2026-04-12/Meeting__msg1/report.pdf",
-            ),
-            _row("report.pdf", attachment_id="att1"),
-        )
-        assert result == b"pdf-bytes"
+async def test_read_attachment(mailbox, accessor):
+    msg = await mailbox.message(
+        "Meeting",
+        "agenda attached",
+        date="Sun, 12 Apr 2026 12:00:00 +0000",
+        attachments=(("report.pdf", "application/pdf", b"pdf-bytes"),),
+    )
+    part = (await mailbox.mail(msg))["payload"]["parts"][1]
+    path = f"/gmail/INBOX/2026-04-12/Meeting__{msg}/report.pdf"
+    result = await read(
+        accessor,
+        _spec(path),
+        _row("report.pdf", attachment_id=part["body"]["attachmentId"]),
+    )
+    assert result == b"pdf-bytes"

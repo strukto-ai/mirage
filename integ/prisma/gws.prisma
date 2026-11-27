@@ -134,6 +134,32 @@ model DriveChange {
   @@id([tenant, seq])
 }
 
+// Each change a request made to the mailbox, in order, so history.list can
+// name what changed after a history id: a message added or deleted, or labels
+// added to or removed from one (`labelIds` comma-joined). A row per change, as
+// for DriveChange, since a deleted message has no row left.
+model GmailChange {
+  tenant    String
+  seq       Int
+  kind      String
+  messageId String
+  threadId  String
+  labelIds  String @default("")
+
+  @@id([tenant, seq])
+}
+
+// Each event a request made, changed or deleted, in order, so an events
+// listing asked with a sync token can name what changed since it.
+model CalendarChange {
+  tenant     String
+  seq        Int
+  calendarId String
+  eventId    String
+
+  @@id([tenant, seq])
+}
+
 model DriveParent {
   pk       Int    @id @default(autoincrement())
   tenant   String

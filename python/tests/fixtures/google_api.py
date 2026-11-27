@@ -13,85 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import inspect
-from collections.abc import Callable, Iterator
-from contextlib import ExitStack, contextmanager
+from collections.abc import Callable
 from types import ModuleType
 from typing import Any, NamedTuple
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from mirage.accessor.google_api import GoogleApiAccessor
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
-
-ApiCall = Callable[..., Any]
-
-
-def offline_token_manager() -> TokenManager:
-    """A token manager signing with a fixed token, which never refreshes."""
-    return TokenManager(GoogleConfig(access_token="t"))
-
-
-class StubApi:
-    """A Google service client that answers only the calls a test armed;
-    any other call fails the test."""
-
-    service = "Google"
-
-    def __init__(self, **calls: ApiCall) -> None:
-        """Args:
-        **calls (ApiCall): each armed call, by its client method name.
-        """
-        self._calls = calls
-
-    def __getattr__(self, name: str) -> ApiCall:
-        if name.startswith("__"):
-            raise AttributeError(name)
-        if name not in self._calls:
-            raise AssertionError(
-                f"the test reached {self.service}.{name} without arming it"
-            )
-        return self._calls[name]
-
-
-def install_api(monkeypatch: pytest.MonkeyPatch, **apis: Any) -> None:
-    """Serve each client in ``apis`` from every ``GoogleApiAccessor`` for
-    the test.
-
-    Args:
-        monkeypatch (pytest.MonkeyPatch): the test's monkeypatch.
-        **apis (Any): each client, by its accessor property (``drive``,
-            ``gmail``, ...).
-    """
-    for service, api in apis.items():
-        monkeypatch.setattr(GoogleApiAccessor, service, _serving(api))
-
-
-@contextmanager
-def serve(**apis: Any) -> Iterator[None]:
-    """Serve each client in ``apis`` from every ``GoogleApiAccessor`` for
-    the block.
-
-    Args:
-        **apis (Any): each client, by its accessor property (``drive``,
-            ``gmail``, ...).
-    """
-    with ExitStack() as stack:
-        for service, api in apis.items():
-            stack.enter_context(
-                patch.object(GoogleApiAccessor, service, _serving(api))
-            )
-        yield
-
-
-def _serving(api: Any) -> property:
-    """A property answering ``api`` whatever the accessor.
-
-    Args:
-        api (Any): the client served.
-    """
-    return property(lambda _accessor: api)
 
 
 def protocol_calls(protocol: type) -> list[str]:

@@ -12,16 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
-from tests.fixtures.gdrive_api import StubDrive, install_drive
-from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
 
@@ -40,26 +35,16 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDriveAccessor(config=None, token_manager=offline_token_manager())
-
-
 @pytest.mark.asyncio
-async def test_readdir_lists_the_folder_its_row_names(accessor, monkeypatch):
+async def test_readdir_lists_the_folder_its_row_names(google_account):
+    made = await google_account.folder("docs")
+    await google_account.upload("readme.txt", b"r", made)
     folder = FileStat(
-        name="docs", type=FileType.DIRECTORY, extra={"file_id": "folder1"}
+        name="docs", type=FileType.DIRECTORY, extra={"file_id": made}
     )
-    files = [
-        {
-            "id": "file123",
-            "name": "readme.txt",
-            "mimeType": "text/plain",
-            "modifiedTime": "2026-04-01T00:00:00Z",
-        }
-    ]
-    lister = AsyncMock(return_value=files)
-    install_drive(monkeypatch, StubDrive(list_files=lister))
-    result = await readdir(accessor, _scope("/docs"), entry=folder)
+    await google_account.run.record_requests()
+    result = await readdir(
+        google_account.drive_accessor(), _scope("/docs"), entry=folder
+    )
     assert [row.name for row in result] == ["readme.txt"]
-    assert lister.await_args.kwargs["folder_id"] == "folder1"
+    assert await google_account.log() == [("list", made)]

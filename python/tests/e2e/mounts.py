@@ -21,7 +21,8 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.redis import RedisVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.ssh import SSHVFS, SSHConfig
-from tests.e2e.gdrive_mock import FakeGDrive
+from tests.fixtures.google_account import GoogleAccount
+from tests.fixtures.kit_fake import LoopThread
 from tests.fixtures.ssh_run import sftp_only_connection
 from tests.vfs.ssh.test_ssh_commands import MockSFTPClient
 
@@ -37,7 +38,8 @@ class MountState:
         self.idx = idx
         self.disk_root = None
         self.s3_bucket: str | None = None
-        self.gdrive: FakeGDrive | None = None
+        self.gdrive: GoogleAccount | None = None
+        self.thread: LoopThread | None = None
         self.redis_prefix: str | None = None
         self.sftp_files: dict[str, bytes] | None = None
         self.sftp_dirs: set[str] | None = None
@@ -59,13 +61,13 @@ def _make_redis_vfs(prefix: str) -> RedisVFS:
     return RedisVFS(url=REDIS_URL, key_prefix=prefix)
 
 
-def _make_gdrive_vfs() -> GoogleDriveVFS:
-    config = GoogleDriveConfig(
-        client_id="fake-id",
-        client_secret="fake-secret",
-        refresh_token="fake-refresh",
-    )
-    return GoogleDriveVFS(config)
+async def _account(origin: str) -> GoogleAccount:
+    """An account made on the running loop, which its session belongs to.
+
+    Args:
+        origin (str): the Google Workspace fake's origin.
+    """
+    return GoogleAccount(origin)
 
 
 def _make_ssh_vfs(state: MountState) -> SSHVFS:
@@ -77,7 +79,13 @@ def _make_ssh_vfs(state: MountState) -> SSHVFS:
     return vfs
 
 
-def build_mount(ptype: str, mount_path: str, tmp_path, idx: int) -> MountState:
+def build_mount(
+    ptype: str,
+    mount_path: str,
+    tmp_path,
+    idx: int,
+    gws_origin: str | None = None,
+) -> MountState:
     state = MountState(ptype, mount_path, idx)
     if ptype == "ram":
         state.vfs = RAMVFS()
@@ -95,10 +103,25 @@ def build_mount(ptype: str, mount_path: str, tmp_path, idx: int) -> MountState:
         state.s3_bucket = f"test-bucket-{idx}"
         state.vfs = _make_s3_vfs(state.s3_bucket)
     elif ptype == "gdrive":
-        state.gdrive = FakeGDrive()
-        state.vfs = _make_gdrive_vfs()
+        # An account of its own on the fake, run on a loop of its own: the
+        # matrix runs each command under asyncio.run.
+        assert gws_origin is not None
+        state.thread = LoopThread()
+        state.gdrive = state.thread.run(_account(gws_origin))
+        state.vfs = GoogleDriveVFS(state.gdrive.config(GoogleDriveConfig))
     elif ptype == "ssh":
         state.vfs = _make_ssh_vfs(state)
     else:
         raise ValueError(f"unknown VFS: {ptype}")
     return state
+
+
+def close_mount(state: MountState) -> None:
+    """Drop the account a Drive mount's state holds on the fake.
+
+    Args:
+        state (MountState): the mount's state.
+    """
+    if state.gdrive is not None and state.thread is not None:
+        state.thread.run(state.gdrive.run.close())
+        state.thread.close()

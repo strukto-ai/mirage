@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+import json
 
 import pytest
 
@@ -20,11 +20,13 @@ from mirage.accessor.gdocs import GDocsAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
-from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
+APP = "/gdocs"
+MIME = "application/vnd.google-apps.document"
 
-def _scope(path: str, prefix: str = "/gdocs") -> PathSpec:
+
+def _scope(path: str, prefix: str = APP) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, prefix),
         virtual=path,
@@ -32,38 +34,28 @@ def _scope(path: str, prefix: str = "/gdocs") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDocsAccessor(config=None, token_manager=offline_token_manager())
+def _accessor(google_account) -> GDocsAccessor:
+    manager = google_account.token_manager()
+    return GDocsAccessor(config=manager.config, token_manager=manager)
 
 
 @pytest.mark.asyncio
-async def test_read_calls_core(accessor):
+async def test_read_calls_core(google_account):
+    made = await google_account.create("Report", MIME)
+    await google_account.patch(made, modifiedTime="2026-04-01T00:00:00.000Z")
     fn = call_over(GDocsVFS, "read_doc")
-    with patch(
-        "mirage.vfs.gdocs.gdocs._read",
-        new_callable=AsyncMock,
-        return_value=b"doc content",
-    ) as mock:
-        scope = _scope("/gdocs/owned/File__doc1.gdoc.json")
-        result = await fn(accessor, scope)
-        mock.assert_called_once_with(
-            accessor,
-            _scope("/gdocs/owned/File__doc1.gdoc.json", prefix="/gdocs"),
+    result = await fn(
+        _accessor(google_account),
+        _scope(f"{APP}/owned/2026-04-01_Report__{made}.gdoc.json"),
+    )
+    assert json.loads(result)["documentId"] == made
+
+
+@pytest.mark.asyncio
+async def test_read_not_found(google_account):
+    fn = call_over(GDocsVFS, "read_doc")
+    with pytest.raises(FileNotFoundError):
+        await fn(
+            _accessor(google_account),
+            _scope(f"{APP}/owned/Nonexistent__doc9.gdoc.json"),
         )
-        assert result == b"doc content"
-
-
-@pytest.mark.asyncio
-async def test_read_not_found(accessor):
-    fn = call_over(GDocsVFS, "read_doc")
-    with patch(
-        "mirage.vfs.gdocs.gdocs._read",
-        new_callable=AsyncMock,
-        side_effect=FileNotFoundError("not found"),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await fn(
-                accessor,
-                _scope("/gdocs/owned/Nonexistent__doc9.gdoc.json"),
-            )

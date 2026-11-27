@@ -13,165 +13,121 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
+from http import HTTPStatus
 
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.core.gdocs.read import read
-from mirage.core.google.client import TokenManager
+from mirage.core.google.client import GoogleApiError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
-from mirage.vfs.gdocs.config import GDocsConfig
-from tests.fixtures.gdocs_api import StubDocs
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_account import FILE, FILES, UNTIL_CLEARED
 from tests.fixtures.mounted import Mounted
 
-
-@pytest.fixture
-def token_manager():
-    config = GDocsConfig(
-        client_id="test-id",
-        client_secret="test-secret",
-        refresh_token="test-refresh",
-    )
-    mgr = TokenManager(config)
-    mgr._access_token = "fake-token"
-    mgr._expires_at = 9999999999
-    return mgr
+APP = "/gdocs"
+MIME = "application/vnd.google-apps.document"
+SUFFIX = ".gdoc.json"
 
 
-@pytest.fixture
-def accessor(token_manager):
-    return GDocsAccessor(config=None, token_manager=token_manager)
+def _accessor(google_account, clock=None) -> GDocsAccessor:
+    manager = google_account.token_manager(clock)
+    return GDocsAccessor(config=manager.config, token_manager=manager)
 
 
-def _spec(virtual: str) -> PathSpec:
+def _spec(virtual: str, pattern: str | None = None) -> PathSpec:
+    directory = virtual.rsplit("/", 1)[0] if pattern else virtual
     return PathSpec(
-        vfs_path=mount_key(virtual, "/gdocs"),
+        vfs_path=mount_key(virtual, APP),
         virtual=virtual,
-        directory=virtual,
+        directory=directory,
+        pattern=pattern,
     )
 
 
-def _item(stamp: str) -> dict[str, object]:
-    return {
-        "mimeType": "application/vnd.google-apps.document",
-        "id": "doc1",
-        "name": "My Doc",
-        "modifiedTime": stamp,
-        "owners": [{"me": True}],
-    }
+async def _made(google_account, name: str, stamp: str) -> str:
+    """Make a file of the app named ``name``, stamped ``stamp``, and
+    answer its id.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        name (str): its title.
+        stamp (str): its modified time.
+    """
+    made = await google_account.create(name, MIME)
+    await google_account.patch(made, modifiedTime=stamp)
+    return made
 
 
-@pytest.mark.asyncio
-async def test_read_of_a_listed_file(accessor):
-    item = _item("2026-04-01T00:00:00.000Z")
-    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
-    doc_json = {
-        "documentId": "doc1",
-        "title": "My Doc",
-        "body": {"content": []},
-    }
-    with (
-        serve(
-            drive=StubDrive(
-                list_all_files=AsyncMock(return_value=([item], True)),
-                get_file=AsyncMock(return_value=item),
-            ),
-            docs=StubDocs(
-                read_doc=AsyncMock(return_value=json.dumps(doc_json).encode())
-            ),
-        ),
-    ):
-        (target,) = await mounted.readdir(_spec("/gdocs/owned"))
-        parsed = json.loads(await mounted.read(_spec(target)))
-    assert parsed["documentId"] == "doc1"
+async def _answer_listing(google_account, **fields_by_id) -> None:
+    """Answer the next listing with the fake's own listing of the app's
+    files, each file named in ``fields_by_id`` with those fields set: what
+    the fake keeps no model of, as another owner or a native file's size.
 
-
-@pytest.mark.asyncio
-async def test_a_read_no_listing_named_resolves_by_id(accessor):
+    Args:
+        google_account (GoogleAccount): the account.
+        **fields_by_id: file id to the fields its row carries.
+    """
+    listing = await google_account.run.call(
+        "GET", FILES, params={"q": f"mimeType = '{MIME}'"}
+    )
     files = [
-        {
-            "mimeType": "application/vnd.google-apps.document",
-            "id": "doc1",
-            "name": "Notes",
-            "modifiedTime": "2026-04-01T00:00:00.000Z",
-            "owners": [{"me": True}],
-        }
+        {**row, **fields_by_id.get(row["id"], {})} for row in listing["files"]
     ]
-    with (
-        serve(
-            drive=StubDrive(get_file=AsyncMock(return_value=files[0])),
-            docs=StubDocs(
-                read_doc=AsyncMock(return_value=b'{"documentId":"doc1"}')
-            ),
-        ),
-    ):
-        path = PathSpec(
-            vfs_path=mount_key(
-                "/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json", "/gdocs"
-            ),
-            virtual="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
-            directory="/gdocs/owned/2026-04-01_Notes__doc1.gdoc.json",
-        )
-        result = await read(accessor, path)
-        assert b"doc1" in result
+    await google_account.run.answer_next(
+        "GET", FILES, 200, {**listing, "files": files}
+    )
 
 
 @pytest.mark.asyncio
-async def test_read_missing_file_raises_by_id(accessor):
-    with (
-        serve(
-            drive=StubDrive(
-                get_file=AsyncMock(side_effect=FileNotFoundError("missing"))
-            ),
-            docs=StubDocs(
-                read_doc=AsyncMock(
-                    side_effect=AssertionError("should not call read_doc")
-                )
-            ),
-        ),
-    ):
-        path = PathSpec(
-            vfs_path=mount_key(
-                "/gdocs/owned/Missing__xyz.gdoc.json", "/gdocs"
-            ),
-            virtual="/gdocs/owned/Missing__xyz.gdoc.json",
-            directory="/gdocs/owned/Missing__xyz.gdoc.json",
-        )
-        with pytest.raises(FileNotFoundError):
-            await read(accessor, path)
+async def test_read_of_a_listed_file(google_account):
+    made = await _made(google_account, "My Doc", "2026-04-01T00:00:00.000Z")
+    mounted = Mounted(GDocsVFS, _accessor(google_account), APP)
+    (target,) = await mounted.readdir(_spec(f"{APP}/owned"))
+    parsed = json.loads(await mounted.read(_spec(target)))
+    assert parsed["documentId"] == made
 
 
 @pytest.mark.asyncio
-async def test_read_propagates_metadata_failure(accessor):
-    with (
-        serve(
-            drive=StubDrive(
-                get_file=AsyncMock(
-                    side_effect=RuntimeError("google unavailable")
-                )
-            ),
-            docs=StubDocs(
-                read_doc=AsyncMock(
-                    side_effect=AssertionError("should not call read_doc")
-                )
-            ),
-        ),
-    ):
-        path = PathSpec(
-            vfs_path=mount_key(
-                "/gdocs/owned/Missing__xyz.gdoc.json", "/gdocs"
-            ),
-            virtual="/gdocs/owned/Missing__xyz.gdoc.json",
-            directory="/gdocs/owned/Missing__xyz.gdoc.json",
-        )
-        with pytest.raises(RuntimeError, match="google unavailable"):
-            await read(accessor, path)
+async def test_a_read_no_listing_named_resolves_by_id(google_account):
+    made = await _made(google_account, "Notes", "2026-04-01T00:00:00.000Z")
+    path = _spec(f"{APP}/owned/2026-04-01_Notes__{made}{SUFFIX}")
+    await google_account.run.record_requests()
+    result = await read(_accessor(google_account), path)
+    assert made.encode() in result
+    assert [name for name, _ in await google_account.log()] == [
+        "get",
+        "GET /v1/documents/:id",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_missing_file_raises_by_id(google_account):
+    await google_account.run.record_requests()
+    path = _spec(f"{APP}/owned/Missing__xyz{SUFFIX}")
+    with pytest.raises(FileNotFoundError):
+        await read(_accessor(google_account), path)
+    assert [name for name, _ in await google_account.log()] == ["get"]
+
+
+@pytest.mark.asyncio
+async def test_read_propagates_metadata_failure(google_account):
+    await google_account.refuse(
+        "GET",
+        FILE,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        "google unavailable",
+        reason="backendError",
+        times=UNTIL_CLEARED,
+    )
+    await google_account.run.record_requests()
+    path = _spec(f"{APP}/owned/Missing__xyz{SUFFIX}")
+    with pytest.raises(GoogleApiError, match="google unavailable"):
+        await read(_accessor(google_account, ManualClock()), path)
+    assert {name for name, _ in await google_account.log()} == {"get"}
 
 
 @pytest.mark.asyncio
@@ -179,27 +135,27 @@ async def test_read_propagates_metadata_failure(accessor):
     ("stamp", "token"),
     [("2026-04-01T00:00:00.000Z", "2026-04-01T00:00:00.000Z"), ("", None)],
 )
-async def test_read_records_the_token_stat_reports(accessor, stamp, token):
+async def test_read_records_the_token_stat_reports(
+    google_account, stamp, token
+):
     # read: fresh compares this record with stat's fingerprint, so both take
     # the file's modified stamp, and a file without one stamps nothing.
-    item = _item(stamp)
-    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
+    made = await _made(google_account, "My Doc", "2026-04-01T00:00:00.000Z")
+    if not stamp:
+        # A file Drive gives no modified time: its own item without one,
+        # on the listing and on the lookup.
+        await _answer_listing(google_account, **{made: {"modifiedTime": ""}})
+        item = await google_account.item(made)
+        await google_account.run.answer_next(
+            "GET", FILE, 200, {**item, "modifiedTime": ""}, times=2
+        )
+    accessor = _accessor(google_account)
+    mounted = Mounted(GDocsVFS, accessor, APP)
     scope = RecordingScope()
     try:
-        with (
-            serve(
-                drive=StubDrive(
-                    list_all_files=AsyncMock(return_value=([item], True)),
-                    get_file=AsyncMock(return_value=item),
-                ),
-                docs=StubDocs(
-                    read_doc=AsyncMock(return_value=b'{"documentId":"doc1"}')
-                ),
-            ),
-        ):
-            (target,) = await mounted.readdir(_spec("/gdocs/owned"))
-            data = await read(accessor, _spec(target))
-            info = await mounted.stat(_spec(target))
+        (target,) = await mounted.readdir(_spec(f"{APP}/owned"))
+        data = await read(accessor, _spec(target))
+        info = await mounted.stat(_spec(target))
     finally:
         scope.close()
 

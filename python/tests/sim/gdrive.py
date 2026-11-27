@@ -14,15 +14,11 @@
 import hashlib
 from collections import Counter
 from collections.abc import AsyncGenerator
-from contextlib import ExitStack
 from typing import Any
-from unittest.mock import patch
 
-from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.core.google.drive import ITEM_FIELDS
 from mirage.io.spool import ByteSpool
 from mirage.utils.ranges import ByteWindow
-from tests.fixtures.gdrive_api import payload
 
 _FAKE_TOKEN = "fake-gdrive-token"
 _FAKE_EXPIRES_IN = 9999999999
@@ -40,6 +36,17 @@ _NATIVE_MIMES = frozenset(
         "application/vnd.google-apps.presentation",
     }
 )
+
+
+async def payload(data: bytes | ByteSpool) -> bytes:
+    """The bytes an upload carries, spooled or not.
+
+    Args:
+        data (bytes | ByteSpool): the upload body.
+    """
+    if isinstance(data, ByteSpool):
+        return await data.read(0, data.size)
+    return data
 
 
 def _is_native(mime: str) -> bool:
@@ -317,7 +324,7 @@ class FakeDriveApi:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
             raise AttributeError(name)
-        raise AssertionError(f"gdrive_mock does not answer Drive.{name}")
+        raise AssertionError(f"the sim's Drive does not answer Drive.{name}")
 
     async def list_files(
         self,
@@ -414,7 +421,7 @@ class FakeDriveApi:
         remove_parents: str | None = None,
     ) -> dict:
         if set(body) != {"modifiedTime"} or add_parents or remove_parents:
-            raise AssertionError(f"gdrive_mock does not answer {body!r}")
+            raise AssertionError(f"the sim's Drive does not answer {body!r}")
         self._fake.calls["patch_file"] += 1
         entry = self._fake._entry(file_id)
         if entry is None:
@@ -459,7 +466,7 @@ class FakeRenderApi:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
             raise AttributeError(name)
-        raise AssertionError(f"gdrive_mock does not render {name}")
+        raise AssertionError(f"the sim's Drive does not render {name}")
 
     async def read_doc(self, doc_id: str) -> bytes:
         return self._drive.render(doc_id)
@@ -469,59 +476,3 @@ class FakeRenderApi:
 
     async def read_presentation(self, presentation_id: str) -> bytes:
         return self._drive.render(presentation_id)
-
-
-def _resolve_fake(token_manager, registry) -> FakeGDrive:
-    for tm, fake in registry:
-        if tm is None or tm is token_manager:
-            return fake
-    raise AssertionError("no FakeGDrive was registered for this mount")
-
-
-def patch_gdrive(*pairs) -> ExitStack:
-    """Serve gdrive from in-memory fakes, selected by token manager.
-
-    Every Google accessor serves a ``FakeDriveApi`` as its Drive and a
-    ``FakeRenderApi`` as its Docs, Sheets and Slides, so any call a
-    Drive-backed mount makes is answered by the fake or fails the test.
-
-    Args:
-        *pairs: (token_manager, FakeGDrive) tuples, or one FakeGDrive.
-            The right fake is selected by token_manager identity, so
-            several gdrive mounts can coexist with separate trees.
-    """
-    if len(pairs) == 1 and isinstance(pairs[0], FakeGDrive):
-        registry = [(None, pairs[0])]
-    else:
-        registry = list(pairs)
-    if not registry:
-        raise AssertionError("patch_gdrive was given no FakeGDrive")
-
-    def drive_for(token_manager) -> FakeDriveApi:
-        return FakeDriveApi(_resolve_fake(token_manager, registry), registry)
-
-    async def fake_refresh(_config):
-        return _FAKE_TOKEN, _FAKE_EXPIRES_IN
-
-    rendered = property(
-        lambda accessor: FakeRenderApi(drive_for(accessor.token_manager))
-    )
-    with ExitStack() as stack:
-        stack.enter_context(
-            patch.object(
-                GoogleApiAccessor,
-                "drive",
-                property(lambda accessor: drive_for(accessor.token_manager)),
-            )
-        )
-        for service in ("docs", "sheets", "slides"):
-            stack.enter_context(
-                patch.object(GoogleApiAccessor, service, rendered)
-            )
-        stack.enter_context(
-            patch(
-                "mirage.core.google.client.refresh_access_token",
-                new=fake_refresh,
-            )
-        )
-        return stack.pop_all()

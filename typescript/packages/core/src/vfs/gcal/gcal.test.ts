@@ -12,20 +12,36 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { EVENTS, HK, gcalConfig, installCalendar } from '../../../tests/core/gcal/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import type { GoogleAccount } from '../../../tests/fixtures/google_account.ts'
+import { HK, TODAY, calendarAccount, gcalConfig } from '../../../tests/fixtures/gcal_seed.ts'
 import { parseBucket } from '../../core/gcal/day.ts'
 import { compactJsonBytes } from '../../core/render/json.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { parseConfigWithSchema } from '../secrets.ts'
+import { GCalConfig } from './config.ts'
 import { GCalVFS } from './gcal.ts'
 
-installCalendar()
-
 const EVENT = '/cal/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json'
-const WHOLE = compactJsonBytes(EVENTS[0] ?? {})
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(async () => {
+  account = await calendarAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function workspace(): Workspace {
-  return new Workspace({ '/cal': new GCalVFS(gcalConfig()) })
+  return new Workspace({ '/cal': new GCalVFS(gcalConfig(account)) })
 }
 
 describe('gcal VFS', () => {
@@ -33,11 +49,12 @@ describe('gcal VFS', () => {
   // so a read keyed to ".gcal.json" was never picked and a cold read failed
   // until a cat warmed the file cache.
   it.each([
-    ['whole', {}, WHOLE],
-    ['raw', { raw: true }, WHOLE],
-    ['range', { offset: 2, size: 10 }, WHOLE.slice(2, 12)],
-  ])('reads an event cold at the dispatcher (%s)', async (_label, options, data) => {
-    expect(await workspace().vfs.read(EVENT, options)).toEqual(data)
+    ['whole', {}, [0, undefined]],
+    ['raw', { raw: true }, [0, undefined]],
+    ['range', { offset: 2, size: 10 }, [2, 12]],
+  ] as const)('reads an event cold at the dispatcher (%s)', async (_label, options, [lo, hi]) => {
+    const whole = compactJsonBytes(await account.eventItem('aaaa1'))
+    expect(await workspace().vfs.read(EVENT, options)).toEqual(whole.slice(lo, hi))
   })
 
   it('reads calendar.json cold at the dispatcher', async () => {
@@ -46,7 +63,14 @@ describe('gcal VFS', () => {
   })
 
   it.each([1, 7, 30])('shows the mount its own tree (%i)', async (size) => {
-    const vfs = new GCalVFS(gcalConfig({ bucket_days: size }))
+    // The tree is the mount's own shape, drawn without a request.
+    const config = parseConfigWithSchema(GCalConfig, {
+      client_id: 'cid',
+      refresh_token: 'rt',
+      today: TODAY,
+      bucket_days: size,
+    })
+    const vfs = new GCalVFS(config)
     const text = await new Workspace({ '/cal': vfs }).vfsMd()
     const [, bucket = '', name = ''] =
       /primary\/\s+calendar\.json\s+(\S+)\/\s+<eventId>__(\S+)/.exec(text) ?? []

@@ -16,8 +16,6 @@ import pytest
 
 from mirage.core.gmail import history, labels, messages
 from mirage.core.gmail.api import GmailApi, GmailClient
-from tests.core.gmail.test_events import Mailbox
-from tests.fixtures.gmail_api import FakeGmail
 from tests.fixtures.google_api import (
     Delegation,
     parameter_drift,
@@ -44,9 +42,8 @@ DELEGATIONS = [
 ]
 
 
-@pytest.mark.parametrize("fake", [GmailClient, FakeGmail, Mailbox])
-def test_each_implementation_takes_the_protocols_parameters(fake):
-    assert parameter_drift(GmailApi, fake) == {}
+def test_the_client_takes_the_protocols_parameters():
+    assert parameter_drift(GmailApi, GmailClient) == {}
 
 
 def test_every_call_has_a_case():

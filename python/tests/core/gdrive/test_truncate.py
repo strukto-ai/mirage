@@ -25,29 +25,37 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_truncate_shrinks(fake_drive, gdrive_accessor):
-    file_id = fake_drive.add("f.txt", content=b"abcdef")
-    await call(truncate, readdir, gdrive_accessor, spec("/f.txt"), 3)
-    assert fake_drive.items[file_id]["content"] == b"abc"
+async def test_truncate_shrinks(google_account):
+    file_id = await google_account.upload("f.txt", b"abcdef")
+    await call(
+        truncate, readdir, google_account.drive_accessor(), spec("/f.txt"), 3
+    )
+    assert await google_account.content(file_id) == b"abc"
 
 
 @pytest.mark.asyncio
-async def test_truncate_pads(fake_drive, gdrive_accessor):
-    file_id = fake_drive.add("f.txt", content=b"ab")
-    await call(truncate, readdir, gdrive_accessor, spec("/f.txt"), 4)
-    assert fake_drive.items[file_id]["content"] == b"ab\x00\x00"
+async def test_truncate_pads(google_account):
+    file_id = await google_account.upload("f.txt", b"ab")
+    await call(
+        truncate, readdir, google_account.drive_accessor(), spec("/f.txt"), 4
+    )
+    assert await google_account.content(file_id) == b"ab\x00\x00"
 
 
 @pytest.mark.asyncio
-async def test_truncate_creates_missing(fake_drive, gdrive_accessor):
-    await call(truncate, readdir, gdrive_accessor, spec("/new.txt"), 2)
-    item = fake_drive.find("new.txt")
+async def test_truncate_creates_missing(google_account):
+    await call(
+        truncate, readdir, google_account.drive_accessor(), spec("/new.txt"), 2
+    )
+    item = await google_account.find("new.txt")
     assert item is not None
-    assert item["content"] == b"\x00\x00"
+    assert await google_account.content(item["id"]) == b"\x00\x00"
 
 
 @pytest.mark.asyncio
-async def test_truncate_folder_raises(fake_drive, gdrive_accessor):
-    fake_drive.folder("d")
+async def test_truncate_folder_raises(google_account):
+    await google_account.folder("d")
     with pytest.raises(IsADirectoryError):
-        await call(truncate, readdir, gdrive_accessor, spec("/d"), 0)
+        await call(
+            truncate, readdir, google_account.drive_accessor(), spec("/d"), 0
+        )

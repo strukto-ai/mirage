@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,79 +20,97 @@ from mirage.core.gdocs.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs import GDocsVFS
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
+from tests.fixtures.google_account import FILE, FILES
 from tests.fixtures.mounted import Mounted
 
+APP = "/gdocs"
+MIME = "application/vnd.google-apps.document"
+SUFFIX = ".gdoc.json"
 
-@pytest.fixture
-def accessor():
-    return GDocsAccessor(config=None, token_manager=offline_token_manager())
+
+def _accessor(google_account, clock=None) -> GDocsAccessor:
+    manager = google_account.token_manager(clock)
+    return GDocsAccessor(config=manager.config, token_manager=manager)
+
+
+def _spec(virtual: str, pattern: str | None = None) -> PathSpec:
+    directory = virtual.rsplit("/", 1)[0] if pattern else virtual
+    return PathSpec(
+        vfs_path=mount_key(virtual, APP),
+        virtual=virtual,
+        directory=directory,
+        pattern=pattern,
+    )
+
+
+async def _made(google_account, name: str, stamp: str) -> str:
+    """Make a file of the app named ``name``, stamped ``stamp``, and
+    answer its id.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        name (str): its title.
+        stamp (str): its modified time.
+    """
+    made = await google_account.create(name, MIME)
+    await google_account.patch(made, modifiedTime=stamp)
+    return made
+
+
+async def _answer_listing(google_account, **fields_by_id) -> None:
+    """Answer the next listing with the fake's own listing of the app's
+    files, each file named in ``fields_by_id`` with those fields set: what
+    the fake keeps no model of, as another owner or a native file's size.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        **fields_by_id: file id to the fields its row carries.
+    """
+    listing = await google_account.run.call(
+        "GET", FILES, params={"q": f"mimeType = '{MIME}'"}
+    )
+    files = [
+        {**row, **fields_by_id.get(row["id"], {})} for row in listing["files"]
+    ]
+    await google_account.run.answer_next(
+        "GET", FILES, 200, {**listing, "files": files}
+    )
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor):
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gdocs", "/gdocs"),
-            virtual="/gdocs",
-            directory="/gdocs",
-        ),
-    )
+async def test_stat_root(google_account):
+    result = await stat(_accessor(google_account), _spec(APP))
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_owned_dir(accessor):
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gdocs/owned", "/gdocs"),
-            virtual="/gdocs/owned",
-            directory="/gdocs/owned",
-        ),
-    )
+async def test_stat_owned_dir(google_account):
+    result = await stat(_accessor(google_account), _spec(f"{APP}/owned"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "owned"
 
 
 @pytest.mark.asyncio
-async def test_stat_shared_dir(accessor):
-    result = await stat(
-        accessor,
-        PathSpec(
-            vfs_path=mount_key("/gdocs/shared", "/gdocs"),
-            virtual="/gdocs/shared",
-            directory="/gdocs/shared",
-        ),
-    )
+async def test_stat_shared_dir(google_account):
+    result = await stat(_accessor(google_account), _spec(f"{APP}/shared"))
     assert result.type == FileType.DIRECTORY
     assert result.name == "shared"
 
 
 @pytest.mark.asyncio
-async def test_stat_doc(accessor):
-    item = {
-        "mimeType": "application/vnd.google-apps.document",
-        "id": "doc1",
-        "name": "My Doc",
-        "modifiedTime": "2026-04-01T00:00:00.000Z",
-        "owners": [{"me": True}],
-        "size": "1000",
-    }
-    mounted = Mounted(GDocsVFS, accessor, "/gdocs")
-    with serve(
-        drive=StubDrive(list_all_files=AsyncMock(return_value=([item], True)))
-    ):
-        (target,) = await mounted.readdir("/owned")
-        result = await mounted.stat(target.removeprefix("/gdocs"))
-    assert result.name == "2026-04-01_My_Doc__doc1.gdoc.json"
+async def test_stat_doc(google_account):
+    stamp = "2026-04-01T00:00:00.000Z"
+    made = await _made(google_account, "My Doc", stamp)
+    await _answer_listing(google_account, **{made: {"size": "1000"}})
+    mounted = Mounted(GDocsVFS, _accessor(google_account), APP)
+    (target,) = await mounted.readdir("/owned")
+    result = await mounted.stat(target.removeprefix(APP))
+    assert result.name == f"2026-04-01_My_Doc__{made}{SUFFIX}"
     assert result.content == ContentType.JSON
-    assert result.modified == "2026-04-01T00:00:00.000Z"
-    assert result.fingerprint == "2026-04-01T00:00:00.000Z"
-    assert result.extra["doc_id"] == "doc1"
+    assert result.modified == stamp
+    assert result.fingerprint == stamp
+    assert result.extra["doc_id"] == made
     assert result.extra["doc_name"] == "My Doc"
     # rendered JSON length is unknown until read; the Drive source size
     # is surfaced via extra only
@@ -102,55 +119,28 @@ async def test_stat_doc(accessor):
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor):
-    files = [
-        {
-            "mimeType": "application/vnd.google-apps.document",
-            "id": "doc1",
-            "name": "My Doc",
-            "modifiedTime": "2026-04-01T00:00:00.000Z",
-            "owners": [{"me": True}],
-        }
-    ]
-    with serve(drive=StubDrive(get_file=AsyncMock(return_value=files[0]))):
-        with pytest.raises(FileNotFoundError):
-            await stat(
-                accessor,
-                PathSpec(
-                    vfs_path=mount_key(
-                        "/gdocs/owned/nonexistent.gdoc.json", "/gdocs"
-                    ),
-                    virtual="/gdocs/owned/nonexistent.gdoc.json",
-                    directory="/gdocs/owned/nonexistent.gdoc.json",
-                ),
-            )
+async def test_stat_not_found(google_account):
+    await _made(google_account, "My Doc", "2026-04-01T00:00:00.000Z")
+    with pytest.raises(FileNotFoundError):
+        await stat(
+            _accessor(google_account),
+            _spec(f"{APP}/owned/nonexistent{SUFFIX}"),
+        )
 
 
 @pytest.mark.asyncio
-async def test_stat_cache_miss_fetches_metadata_by_id(accessor):
-    files = [
-        {
-            "mimeType": "application/vnd.google-apps.document",
-            "id": "doc1",
-            "name": "My Doc",
-            "modifiedTime": "2026-04-01T00:00:00.000Z",
-            "size": "1234",
-            "owners": [{"me": True}],
-        }
-    ]
-    target = "/gdocs/owned/2026-04-01_My_Doc__doc1.gdoc.json"
-    mock_list = AsyncMock(return_value=files[0])
-    with serve(drive=StubDrive(get_file=mock_list)):
-        result = await stat(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(target, "/gdocs"),
-                virtual=target,
-                directory=target,
-            ),
-        )
+async def test_stat_cache_miss_fetches_metadata_by_id(google_account):
+    made = await _made(google_account, "My Doc", "2026-04-01T00:00:00.000Z")
+    # A native file's source size, which the fake keeps none of.
+    item = await google_account.item(made)
+    await google_account.run.answer_next(
+        "GET", FILE, 200, {**item, "size": "1234"}
+    )
+    target = f"{APP}/owned/2026-04-01_My_Doc__{made}{SUFFIX}"
+    await google_account.run.record_requests()
+    result = await stat(_accessor(google_account), _spec(target))
     assert result.content == ContentType.JSON
-    assert result.extra["doc_id"] == "doc1"
+    assert result.extra["doc_id"] == made
     assert result.size is None
     assert result.extra["source_size"] == 1234
-    assert mock_list.call_count == 1
+    assert await google_account.log() == [("get", made)]

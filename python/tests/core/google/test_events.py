@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
@@ -23,106 +20,86 @@ from mirage.core.google.events import app_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdocs.doc_entry import make_filename
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
 
 ROOT = PathSpec(
     vfs_path=mount_key("/gdocs", "/gdocs"),
     virtual="/gdocs",
     directory="/gdocs",
 )
+CHANGES = "/drive/v3/changes"
+SHEET = "application/vnd.google-apps.spreadsheet"
+FIRST = "2026-10-01T09:00:00.000Z"
+SECOND = "2026-10-02T09:00:00.000Z"
 
 
-def doc(
-    file_id: str,
-    name: str,
-    modified: str,
-    created: str = "2020-01-01T00:00:00.000Z",
-    mime: str = MIME,
-    mine: bool = True,
-    trashed: bool = False,
-) -> dict[str, Any]:
-    return {
-        "fileId": file_id,
-        "file": {
-            "id": file_id,
-            "name": name,
-            "mimeType": mime,
-            "createdTime": created,
-            "modifiedTime": modified,
-            "owners": [{"me": mine}],
-            "trashed": trashed,
-        },
-    }
+async def _page_token(google_account) -> str:
+    made = await google_account.run.call("GET", f"{CHANGES}/startPageToken")
+    return str(made["startPageToken"])
+
+
+async def _shared(google_account, since: str, shared: str) -> None:
+    """Answer the next change read with the fake's own page, the doc
+    ``shared`` in it owned by another: every file the fake holds is the
+    account's own, and Drive names another owner for one shared with it.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        since (str): the page token the read starts from.
+        shared (str): the doc shared with the account.
+    """
+    page = await google_account.run.call(
+        "GET", CHANGES, params={"pageToken": since}
+    )
+    for change in page["changes"]:
+        if change["fileId"] == shared and "file" in change:
+            change["file"]["owners"] = [{"me": False}]
+    await google_account.run.answer_next("GET", CHANGES, 200, page)
 
 
 @pytest.mark.asyncio
-async def test_changes_place_each_doc_where_the_app_lists_it():
+async def test_changes_place_each_doc_where_the_app_lists_it(google_account):
+    old = await google_account.create("Plan", MIME)
+    sheet = await google_account.create("Budget", SHEET)
+    manager = google_account.token_manager()
     hook = app_delta_hook(
-        GDocsAccessor(config=None, token_manager=offline_token_manager()),
+        GDocsAccessor(config=manager.config, token_manager=manager),
         MIME,
         make_filename,
     )
-    with (
-        serve(
-            drive=StubDrive(
-                start_page_token=AsyncMock(return_value="1"),
-                list_changes=AsyncMock(
-                    side_effect=[
-                        (
-                            [
-                                doc("old", "Plan", "2026-10-01T09:00:00.000Z"),
-                                doc(
-                                    "new",
-                                    "Notes",
-                                    "2099-01-01T09:00:00.000Z",
-                                    created="2099-01-01T09:00:00.000Z",
-                                    mine=False,
-                                ),
-                                doc(
-                                    "sheet",
-                                    "Budget",
-                                    "2026-10-01T09:00:00.000Z",
-                                    mime="application/vnd.google-apps.spreadsheet",
-                                ),
-                            ],
-                            "2",
-                        ),
-                        (
-                            [
-                                doc("old", "Plan", "2026-10-02T09:00:00.000Z"),
-                                doc(
-                                    "new",
-                                    "Notes",
-                                    "2099-01-01T09:00:00.000Z",
-                                    trashed=True,
-                                    mine=False,
-                                ),
-                                {"fileId": "gone", "removed": True},
-                            ],
-                            "3",
-                        ),
-                    ]
-                ),
-            )
-        ),
-    ):
-        baseline = await hook.pull(ROOT, None)
-        first = await hook.pull(ROOT, baseline.checkpoint)
-        second = await hook.pull(ROOT, first.checkpoint)
+    baseline = await hook.pull(ROOT, None)
+
+    since = await _page_token(google_account)
+    await google_account.patch(old, modifiedTime=FIRST)
+    new = await google_account.create("Notes", MIME)
+    await google_account.patch(sheet, modifiedTime=FIRST)
+    made = (await google_account.item(new))["modifiedTime"]
+    await _shared(google_account, since, new)
+    first = await hook.pull(ROOT, baseline.checkpoint)
+
+    since = await _page_token(google_account)
+    await google_account.patch(old, modifiedTime=SECOND)
+    await google_account.patch(new, trashed=True, modifiedTime=made)
+    await google_account.delete(await google_account.create("Gone", MIME))
+    await _shared(google_account, since, new)
+    second = await hook.pull(ROOT, first.checkpoint)
+
+    notes = f"/gdocs/shared/{make_filename('Notes', new, made)}"
     assert baseline.changes == ()
     assert [(c.kind, c.path.virtual) for c in first.changes] == [
-        (FileChangeKind.UPDATE, "/gdocs/owned/2026-10-01_Plan__old.gdoc.json"),
         (
-            FileChangeKind.CREATE,
-            "/gdocs/shared/2099-01-01_Notes__new.gdoc.json",
+            FileChangeKind.UPDATE,
+            f"/gdocs/owned/{make_filename('Plan', old, FIRST)}",
         ),
+        (FileChangeKind.CREATE, notes),
     ]
     assert [(c.kind, c.path.virtual) for c in second.changes] == [
-        (FileChangeKind.DELETE, "/gdocs/owned/2026-10-01_Plan__old.gdoc.json"),
-        (FileChangeKind.CREATE, "/gdocs/owned/2026-10-02_Plan__old.gdoc.json"),
         (
             FileChangeKind.DELETE,
-            "/gdocs/shared/2099-01-01_Notes__new.gdoc.json",
+            f"/gdocs/owned/{make_filename('Plan', old, FIRST)}",
         ),
+        (
+            FileChangeKind.CREATE,
+            f"/gdocs/owned/{make_filename('Plan', old, SECOND)}",
+        ),
+        (FileChangeKind.DELETE, notes),
     ]

@@ -17,7 +17,6 @@ import pytest
 from mirage.core.gcal import client
 from mirage.core.gcal.api import CalendarApi, CalendarClient
 from mirage.core.time_range import TimeRange
-from tests.fixtures.gcal_api import FakeCalendarApi
 from tests.fixtures.google_api import (
     Delegation,
     parameter_drift,
@@ -40,9 +39,8 @@ DELEGATIONS = [
 ]
 
 
-@pytest.mark.parametrize("fake", [CalendarClient, FakeCalendarApi])
-def test_each_implementation_takes_the_protocols_parameters(fake):
-    assert parameter_drift(CalendarApi, fake) == {}
+def test_the_client_takes_the_protocols_parameters():
+    assert parameter_drift(CalendarApi, CalendarClient) == {}
 
 
 def test_every_call_has_a_case():
