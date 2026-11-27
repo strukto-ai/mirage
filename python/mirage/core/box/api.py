@@ -195,6 +195,25 @@ def _next_position(data: EventsResponse) -> str | None:
     return None if value is None or value == "" else str(value)
 
 
+async def _events_page(
+    tm: BoxTokenManager, params: dict[str, str | int]
+) -> EventsResponse:
+    """One page of the user's event stream.
+
+    Box spells a stream position as a JSON number near 1.15e18; Python's
+    json reads it as a whole int, where TypeScript keeps the digits it was
+    sent because a JavaScript number would round it.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        params (dict[str, str | int]): the events query.
+    """
+    return cast(
+        EventsResponse,
+        await box_get(tm, f"{tm.api_base}/events", params=params),
+    )
+
+
 async def events_now(tm: BoxTokenManager, stream_type: str) -> str:
     """The current head of the user's event stream.
 
@@ -202,16 +221,8 @@ async def events_now(tm: BoxTokenManager, stream_type: str) -> str:
         tm (BoxTokenManager): token manager.
         stream_type (str): ``all``, ``changes`` or ``sync``.
     """
-    data = cast(
-        EventsResponse,
-        await box_get(
-            tm,
-            f"{tm.api_base}/events",
-            params={
-                "stream_type": stream_type,
-                "stream_position": "now",
-            },
-        ),
+    data = await _events_page(
+        tm, {"stream_type": stream_type, "stream_position": "now"}
     )
     position = _next_position(data)
     if position is None:
@@ -241,17 +252,13 @@ async def events_since(
     out: list[BoxEvent] = []
     position = stream_position
     while True:
-        data = cast(
-            EventsResponse,
-            await box_get(
-                tm,
-                f"{tm.api_base}/events",
-                params={
-                    "stream_type": stream_type,
-                    "stream_position": position,
-                    "limit": limit,
-                },
-            ),
+        data = await _events_page(
+            tm,
+            {
+                "stream_type": stream_type,
+                "stream_position": position,
+                "limit": limit,
+            },
         )
         entries = data.get("entries") or []
         advanced = _next_position(data)

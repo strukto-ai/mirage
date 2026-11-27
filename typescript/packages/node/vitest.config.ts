@@ -23,5 +23,7 @@ export default defineConfig({
     // Vitest's 5s default is sized for pure computation, and the first Redis
     // test in a file was already marginal under the full 200-file run.
     testTimeout: 15_000,
+    // Where a test file finds the run's kit fakes; it starts none itself.
+    globalSetup: ['../core/tests/fixtures/kit_fake_setup.ts'],
   },
 })

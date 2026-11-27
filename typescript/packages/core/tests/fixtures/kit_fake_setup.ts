@@ -17,12 +17,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TestProject } from 'vitest/node'
 
-declare module 'vitest' {
-  export interface ProvidedContext {
-    kitFakeDir: string
-  }
-}
-
 /**
  * The directory the run's kit fakes are found through, and their end. A run
  * that asks for no fake starts none: `serve` (kit_fake.ts) starts one the

@@ -89,8 +89,10 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { checkReadCapability } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { DEFAULT_READ_TTL, ReadPolicy } from '@struktoai/mirage-core/types'
-import { InlineBox } from '../../tests/vfs/fixtures/box.ts'
-import { InlineDropbox } from '../../tests/vfs/fixtures/dropbox.ts'
+import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
+import type { KitRun } from '../../../core/tests/fixtures/kit_fake.ts'
+import { BoxAccount, TOKEN as BOX_TOKEN } from '../../tests/vfs/fixtures/box.ts'
+import { DropboxAccount, TOKEN as DROPBOX_TOKEN } from '../../tests/vfs/fixtures/dropbox.ts'
 import { InlineGitHub, blobSha } from '../../tests/vfs/fixtures/github.ts'
 
 interface GDriveItem {
@@ -591,7 +593,24 @@ const S3_CONFIG = { bucket: 'b', region: 'us-east-1', endpoint_url: 'http://127.
 const S3_EXTRA: Record<string, Record<string, string>> = { oci: { namespace: 'ns' } }
 const GRIDFS_CONFIG = { uri: 'mongodb://127.0.0.1:27017', database: 'd' }
 const GDRIVE_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: 'r' }
-const DROPBOX_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: 'r' }
+const DROPBOX_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: DROPBOX_TOKEN }
+const BOX_DOWNLOAD: [string, string] = ['GET', '/2.0/files/:file_id/content']
+const DROPBOX_DOWNLOAD: [string, string] = ['POST', '/2/files/download']
+const BOX_INFO: [string, string] = ['GET', '/2.0/files/:file_id']
+// More requests than any test here makes: an answer armed this many times
+// stands for the test, the way a stored state would.
+const EVERY = 1000
+const RESTRICTED = {
+  error_summary: 'path/restricted_content/..',
+  error: { '.tag': 'path', path: { '.tag': 'restricted_content' } },
+}
+const FORBIDDEN = {
+  type: 'error',
+  status: 403,
+  code: 'forbidden',
+  message: 'Access denied - insufficient permission',
+}
+const TRASHED = { type: 'error', status: 404, code: 'trashed', message: 'Item is trashed' }
 
 const PREFIX = 'pfx/'
 
@@ -661,8 +680,8 @@ interface Fake {
   vfs: BaseVFS
   accessor: Accessor
   key: string
-  fetches: () => number
-  rewrite: (data: Uint8Array) => void
+  fetches: () => number | Promise<number>
+  rewrite: (data: Uint8Array) => void | Promise<void>
   readBytes: (path: PathSpec) => Promise<Uint8Array>
   readStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   stat: (path: PathSpec) => Promise<FileStat>
@@ -723,6 +742,36 @@ function md5Hex(data: Uint8Array): string {
 let s3: S3Mock
 let hubs: FakeHub[] = []
 let graphs: FakeGraph[] = []
+let runs: KitRun[] = []
+
+async function requestsTo(run: KitRun, [method, route]: [string, string]): Promise<number> {
+  return (await run.params(method, route)).length
+}
+
+// Two same-size edits in one second share server_modified on the real
+// service, so only content_hash may tell them apart. The fake's clock moves on
+// every write, so the stamp is set back; the reload stops the request list,
+// which starts again.
+async function dropboxRewrite(
+  dropbox: DropboxAccount,
+  path: string,
+  data: Uint8Array,
+): Promise<void> {
+  const stamp = (await dropbox.metadata(path)).server_modified
+  await dropbox.put(path, data)
+  await dropbox.run.execute('UPDATE DropboxItem SET modified = ? WHERE path = ?', stamp, path)
+  await dropbox.run.recordRequests()
+}
+
+// As dropboxRewrite: modified_at stays, so only sha1 tells the two versions
+// apart.
+async function boxRewrite(box: BoxAccount, path: string, data: Uint8Array): Promise<void> {
+  const id = await box.idOf(path)
+  const stamp = (await box.fileInfo(id)).modified_at
+  await box.write(path, data)
+  await box.run.execute('UPDATE BoxItem SET modified = ? WHERE id = ?', stamp, id)
+  await box.run.recordRequests()
+}
 
 // What is at `path` on a mount, found by listing each folder from the root
 // down, each handed the row its parent's listing named, as the mount finds
@@ -802,13 +851,15 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     const key = KEYS[shape]
     const root = shape === 'prefixed' ? `/${PREFIX.replace(/\/+$/, '')}` : '/'
     const stored = `${root.replace(/\/+$/, '')}/${key}`
-    const dropbox = new InlineDropbox({ [stored]: data })
-    if (shape === 'prefixed') dropbox.write(`/${key}`, DECOY)
-    vi.stubGlobal('fetch', dropbox.fetch)
+    const dropbox = new DropboxAccount(await serve('dropbox'))
+    runs.push(dropbox.run)
+    await dropbox.put(stored, data)
+    if (shape === 'prefixed') await dropbox.put(`/${key}`, DECOY)
+    await dropbox.run.recordRequests()
     const vfs = await buildVfs('dropbox', {
       ...DROPBOX_CONFIG,
       root_path: root,
-      endpoint: dropbox.url,
+      endpoint: dropbox.run.url,
     })
     const dropboxVfs = vfs as DropboxVFS
     const accessor = dropboxVfs.accessor
@@ -822,10 +873,8 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       vfs,
       accessor,
       key,
-      fetches: () => dropbox.count('download'),
-      rewrite: (next) => {
-        dropbox.write(stored, next)
-      },
+      fetches: () => requestsTo(dropbox.run, DROPBOX_DOWNLOAD),
+      rewrite: (next) => dropboxRewrite(dropbox, stored, next),
       readBytes: async (p) => bytesOf(dropboxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
         yield* chunksOf(dropboxVfs.read(p, await handed(p)))
@@ -839,13 +888,15 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     // instead, with a decoy at the same key outside it.
     const key = KEYS[shape]
     const stored = shape === 'prefixed' ? PREFIX + key : key
-    const box = new InlineBox({ [stored]: data })
-    if (shape === 'prefixed') box.create(key, DECOY)
-    vi.stubGlobal('fetch', box.fetch)
+    const box = new BoxAccount(await serve('box'))
+    runs.push(box.run)
+    await box.write(stored, data)
+    if (shape === 'prefixed') await box.write(key, DECOY)
+    await box.run.recordRequests()
     const vfs = await buildVfs('box', {
-      access_token: 't',
-      endpoint: box.url,
-      ...(shape === 'prefixed' ? { root_folder_id: box.idOf(PREFIX) } : {}),
+      access_token: BOX_TOKEN,
+      endpoint: box.run.url,
+      ...(shape === 'prefixed' ? { root_folder_id: await box.idOf(PREFIX) } : {}),
     })
     const boxVfs = vfs as BoxVFS
     const accessor = boxVfs.accessor
@@ -859,10 +910,8 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       vfs,
       accessor,
       key,
-      fetches: () => box.count('content'),
-      rewrite: (next) => {
-        box.write(stored, next)
-      },
+      fetches: () => requestsTo(box.run, BOX_DOWNLOAD),
+      rewrite: (next) => boxRewrite(box, stored, next),
       readBytes: async (p) => bytesOf(boxVfs.read(p, await handed(p))),
       readStream: async function* (p) {
         yield* chunksOf(boxVfs.read(p, await handed(p)))
@@ -1274,17 +1323,32 @@ function readsOnMount(): [string, string][] {
   return H.slots.filter(([, path]) => path.startsWith('/m/'))
 }
 
-// Decoys at every level, so a folder listing reads differently from a
-// point lookup by id.
-function deepBox(root = ''): InlineBox {
-  const files: Record<string, Uint8Array> = { [`${root}${DEEP}`]: SEED }
-  for (const level of ['', 'a/', 'a/b/'])
-    for (let i = 0; i < 5; i++) files[`${root}${level}d${String(i)}.txt`] = DECOY
-  return new InlineBox(files)
+function info(id: string): string {
+  return `GET /2.0/files/${id}`
 }
 
-function walk(box: InlineBox): string[] {
-  return ['items:0', `items:${box.idOf('a')}`, `items:${box.idOf('a/b')}`]
+function content(id: string): string {
+  return `GET /2.0/files/${id}/content`
+}
+
+function dl(id: string): string {
+  return `GET /dl/${id}`
+}
+
+function items(id: string): string {
+  return `GET /2.0/folders/${id}/items`
+}
+
+// Decoys at every level, so a folder listing reads differently from a
+// point lookup by id.
+async function deepBox(box: BoxAccount, root = ''): Promise<void> {
+  await box.write(`${root}${DEEP}`, SEED)
+  for (const level of ['', 'a/', 'a/b/'])
+    for (let i = 0; i < 5; i++) await box.write(`${root}${level}d${String(i)}.txt`, DECOY)
+}
+
+async function walk(box: BoxAccount): Promise<string[]> {
+  return [items('0'), items(await box.idOf('a')), items(await box.idOf('a/b'))]
 }
 
 async function run(ws: Workspace, command: string): Promise<[number, Uint8Array, string]> {
@@ -1293,16 +1357,18 @@ async function run(ws: Workspace, command: string): Promise<[number, Uint8Array,
 }
 
 async function boxCase<T>(
-  scenario: (ws: Workspace, box: InlineBox) => Promise<T>,
+  scenario: (ws: Workspace, box: BoxAccount) => Promise<T>,
   root = '',
 ): Promise<T> {
-  const box = deepBox(root)
-  vi.stubGlobal('fetch', box.fetch)
+  const box = new BoxAccount(await serve('box'))
+  runs.push(box.run)
+  await deepBox(box, root)
   const vfs = await buildVfs('box', {
-    access_token: 't',
-    endpoint: box.url,
-    ...(root !== '' ? { root_folder_id: box.idOf(root) } : {}),
+    access_token: BOX_TOKEN,
+    endpoint: box.run.url,
+    ...(root !== '' ? { root_folder_id: await box.idOf(root) } : {}),
   })
+  await box.run.recordRequests()
   const ws = freshWorkspace(vfs)
   try {
     return await scenario(ws, box)
@@ -1346,6 +1412,10 @@ describe('the read-token contract', () => {
     hubs = []
     await Promise.all(graphs.map((graph) => graph.close()))
     graphs = []
+    // Detached first, so a close that throws leaves the next test none.
+    const closing = runs
+    runs = []
+    await Promise.all(closing.map((run) => run.close()))
   })
 
   /**
@@ -1446,9 +1516,9 @@ describe('the read-token contract', () => {
       try {
         await line(ws, `echo new | tee ${virtual}`)
         const written = [...H.reach]
-        const before = fake.fetches()
+        const before = await fake.fetches()
         expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
-        expect(fake.fetches() - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
+        expect((await fake.fetches()) - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
         // A new gridfs key's stat miss asks filesColl whether the key names a
         // folder, a dispatcher the read rows refuse; the read itself reaches nothing.
         const statMiss = family === 'gridfs' && target === 'new'
@@ -1497,7 +1567,7 @@ describe('the read-token contract', () => {
         expect(await ws.cache.exists(virtual)).toBe(false)
         const first = await readRow(ws, row, virtual)
         expect(readsOnMount()).toEqual([[slotOf(fake), virtual]])
-        expect(fake.fetches()).toBe(1)
+        expect(await fake.fetches()).toBe(1)
         expect(first).toEqual(data)
 
         // A whole read of a rendered Google file goes through the dispatcher,
@@ -1510,7 +1580,7 @@ describe('the read-token contract', () => {
         expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(!renders)
 
         const second = await readRow(ws, row, virtual)
-        expect(fake.fetches()).toBe(renders ? 2 : 1)
+        expect(await fake.fetches()).toBe(renders ? 2 : 1)
         expect(second).toEqual(data)
         expect(H.reach).toEqual([])
       } finally {
@@ -1527,10 +1597,10 @@ describe('the read-token contract', () => {
       try {
         expect(await readRow(ws, row, virtual)).toEqual(BIG.slice(0, 1))
         expect(readsOnMount()).toEqual([[slotOf(fake), virtual]])
-        expect(fake.fetches()).toBe(1)
+        expect(await fake.fetches()).toBe(1)
         expect(await ws.cache.get(virtual)).toBeNull()
         expect(await line(ws, `cat ${virtual}`)).toEqual(BIG)
-        expect(fake.fetches()).toBe(2)
+        expect(await fake.fetches()).toBe(2)
         expect(H.reach).toEqual([])
       } finally {
         await ws.close()
@@ -1578,21 +1648,21 @@ describe('the read-token contract', () => {
       try {
         if (shape === 'listed') await line(ws, 'ls /m')
         await line(ws, `cat ${virtual}`)
-        fake.rewrite(CHANGED)
+        await fake.rewrite(CHANGED)
         const stat = await reconcileStat(ws, fake, virtual)
         expect(stat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
-        let before = fake.fetches()
+        let before = await fake.fetches()
         expect(await line(ws, `cat ${virtual}`)).toEqual(CHANGED)
-        expect(fake.fetches() - before).toBe(1)
+        expect((await fake.fetches()) - before).toBe(1)
         // The refetch has to stamp the new token, or every later read
         // refetches as well and the backend never serves warm.
         const restat = await reconcileStat(ws, fake, virtual)
         expect(restat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, restat.fingerprint ?? '')).toBe(true)
-        before = fake.fetches()
+        before = await fake.fetches()
         expect(await line(ws, `cat ${virtual}`)).toEqual(CHANGED)
-        expect(fake.fetches() - before).toBe(0)
+        expect((await fake.fetches()) - before).toBe(0)
         expect(H.reach).toEqual([])
       } finally {
         await ws.close()
@@ -1605,15 +1675,18 @@ describe('the read-token contract', () => {
   it('a dropbox fresh probe asks for the file, not its folder', async () => {
     const files: Record<string, Uint8Array> = { '/d/a.txt': SEED }
     for (let i = 0; i < 5; i++) files[`/d/f${String(i)}.txt`] = DECOY
-    const dropbox = new InlineDropbox(files)
-    vi.stubGlobal('fetch', dropbox.fetch)
-    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const dropbox = new DropboxAccount(await serve('dropbox'))
+    runs.push(dropbox.run)
+    for (const [path, data] of Object.entries(files)) await dropbox.put(path, data)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.run.url })
     const ws = freshWorkspace(vfs)
     try {
       await line(ws, 'cat /m/d/a.txt')
-      const before = dropbox.log.length
+      await dropbox.run.recordRequests()
       expect(await line(ws, 'cat /m/d/a.txt')).toEqual(SEED)
-      const routes = dropbox.log.slice(before).filter((r) => r !== 'token')
+      const routes = (await dropbox.run.requests())
+        .map((request) => request.slice(request.lastIndexOf('/') + 1))
+        .filter((r) => r !== 'token')
       expect(routes).not.toContain('list_folder')
       expect(routes).not.toContain('download')
       expect(routes).toContain('get_metadata')
@@ -1629,19 +1702,25 @@ describe('the read-token contract', () => {
     ['restricted', false],
     ['deleted', true],
   ])('a dropbox probe drops an overlay only on a miss (%s)', async (_id, gone) => {
-    const dropbox = new InlineDropbox({ '/d/a.txt': SEED })
-    vi.stubGlobal('fetch', dropbox.fetch)
-    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.url })
+    const dropbox = new DropboxAccount(await serve('dropbox'))
+    runs.push(dropbox.run)
+    await dropbox.put('/d/a.txt', SEED)
+    const vfs = await buildVfs('dropbox', { ...DROPBOX_CONFIG, endpoint: dropbox.run.url })
     const ws = freshWorkspace(vfs)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
       await line(ws, 'cat /m/d/a.txt')
       await line(ws, 'chmod 600 /m/d/a.txt')
-      if (gone) dropbox.files.delete('/d/a.txt')
-      else dropbox.restricted.add('/d/a.txt')
+      if (gone) await dropbox.remove('/d/a.txt')
+      else {
+        // Dropbox refuses content it may not serve this way, on its metadata
+        // and on its download, for as long as the restriction stands.
+        for (const route of ['/2/files/get_metadata', '/2/files/download'])
+          await dropbox.run.answerNext('POST', route, 409, RESTRICTED, EVERY)
+      }
       const result = await ws.shell('cat /m/d/a.txt')
-      dropbox.restricted.clear()
-      dropbox.write('/d/a.txt', SEED)
+      await dropbox.run.clearAnswers()
+      await dropbox.put('/d/a.txt', SEED)
       expect(result.exitCode).toBe(1)
       expect(new TextDecoder().decode(result.stderr).includes('No such file')).toBe(gone)
       expect(new TextDecoder().decode(await line(ws, 'stat -c %a /m/d/a.txt'))).toBe(
@@ -1677,7 +1756,7 @@ describe('the read-token contract', () => {
       expect(stat.fingerprint).not.toBe(md5Hex(SEED) + SUFFIX)
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
       await line(ws, `cat ${virtual}`)
-      expect(fake.fetches()).toBeGreaterThan(1)
+      expect(await fake.fetches()).toBeGreaterThan(1)
     } finally {
       await ws.close()
     }
@@ -1741,9 +1820,9 @@ describe('the read-token contract', () => {
       const stat = await reconcileStat(ws, fake, virtual)
       expect(stat.fingerprint).toBe(xetHash(SEED))
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
-      const before = fake.fetches()
+      const before = await fake.fetches()
       await ws.vfs.read(virtual)
-      expect(fake.fetches() - before).toBe(1)
+      expect((await fake.fetches()) - before).toBe(1)
     } finally {
       await ws.close()
     }
@@ -1788,10 +1867,10 @@ describe('the read-token contract', () => {
         await line(ws, `cat ${virtual}`)
         await line(ws, `chmod 600 ${virtual}`)
         search.mockClear().mockResolvedValue({ files: [], complete: false })
-        const before = fake.fetches()
+        const before = await fake.fetches()
         expect(await line(ws, `cat ${virtual}`)).toEqual(SEED)
         expect(new TextDecoder().decode(await line(ws, `stat -c %a ${virtual}`))).toBe('600\n')
-        expect(fake.fetches()).toBe(before)
+        expect(await fake.fetches()).toBe(before)
         expect(search).not.toHaveBeenCalled()
       } finally {
         await ws.close()
@@ -1809,21 +1888,22 @@ describe('the read-token contract', () => {
       async (root, operand) => {
         await boxCase(async (ws, box) => {
           await line(ws, `ls ${operand}`)
-          box.renameFolder(`${root}a/b`, 'old')
-          box.create(`${root}a/b/new.txt`, new TextEncoder().encode('new listing'))
-          box.create(`${root}${DEEP}`, CHANGED)
-          box.log.length = 0
+          await box.move(`${root}a/b`, `${root}a/old`)
+          await box.write(`${root}a/b/new.txt`, new TextEncoder().encode('new listing'))
+          await box.write(`${root}${DEEP}`, CHANGED)
+          await box.run.recordRequests()
           expect(await line(ws, `ls ${operand}`)).toEqual(
             new TextEncoder().encode('c.txt\nnew.txt\n'),
           )
           expect(await line(ws, `cat /m/${DEEP}`)).toEqual(CHANGED)
-          const fid = box.idOf(`${root}${DEEP}`)
+          const log = await box.run.requests()
+          const fid = await box.idOf(`${root}${DEEP}`)
           const pathWalk = [
-            `items:${root === '' ? '0' : box.idOf(root)}`,
-            `items:${box.idOf(`${root}a`)}`,
-            `items:${box.idOf(`${root}a/b`)}`,
+            items(root === '' ? '0' : await box.idOf(root)),
+            items(await box.idOf(`${root}a`)),
+            items(await box.idOf(`${root}a/b`)),
           ]
-          expect(box.log).toEqual([...pathWalk, ...pathWalk, `content:${fid}`, `dl:${fid}`])
+          expect(log).toEqual([...pathWalk, ...pathWalk, content(fid), dl(fid)])
         }, root)
       },
     )
@@ -1831,38 +1911,39 @@ describe('the read-token contract', () => {
     it('a cold fresh box read lists each level once then downloads', async () => {
       await boxCase(async (ws, box) => {
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        const fid = box.idOf(DEEP)
-        expect(box.log).toEqual([...walk(box), `content:${fid}`, `dl:${fid}`])
+        const log = await box.run.requests()
+        const fid = await box.idOf(DEEP)
+        expect(log).toEqual([...(await walk(box)), content(fid), dl(fid)])
       })
     })
 
     it.each(['', 'r/'])('a warm fresh box read is one request by id (root=%s)', async (root) => {
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
-        const before = box.log.length
+        await box.run.recordRequests()
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(before)).toEqual([`info:${box.idOf(root + DEEP)}`])
+        expect(await box.run.requests()).toEqual([info(await box.idOf(root + DEEP))])
       }, root)
     })
 
     it('a fresh box read after a tee probes once without a download', async () => {
       await boxCase(async (ws, box) => {
         await line(ws, `echo new | tee /m/${DEEP}`)
-        const before = box.log.length
+        await box.run.recordRequests()
         expect(new TextDecoder().decode(await line(ws, `cat /m/${DEEP}`))).toBe('new\n')
-        const log = box.log.slice(before)
+        const log = await box.run.requests()
         // The write keeps the row its reply named, so the probe after it is
         // one info by id rather than a parent walk.
-        expect(log).toEqual([`info:${box.idOf(DEEP)}`])
+        expect(log).toEqual([info(await box.idOf(DEEP))])
       })
     })
 
     it('a direct warm fresh box read is one request by id', async () => {
       await boxCase(async (ws, box) => {
         expect(await ws.vfs.read(`/m/${DEEP}`)).toEqual(SEED)
-        const before = box.log.length
+        await box.run.recordRequests()
         expect(await ws.vfs.read(`/m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(before)).toEqual([`info:${box.idOf(DEEP)}`])
+        expect(await box.run.requests()).toEqual([info(await box.idOf(DEEP))])
       })
     })
 
@@ -1875,28 +1956,32 @@ describe('the read-token contract', () => {
         const logs: string[][] = []
         for (let i = 0; i < 2; i++) {
           await ws.mount('/m').index.clear()
-          const before = box.log.length
+          await box.run.recordRequests()
           expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-          logs.push(box.log.slice(before))
+          logs.push(await box.run.requests())
         }
-        expect(logs).toEqual([walk(box), walk(box)])
+        const w = await walk(box)
+        expect(logs).toEqual([w, w])
       })
     })
 
     it('a same-size box rewrite in the same second is refetched', async () => {
-      // The fake keeps modified_at across writes, as the real service does
-      // within a second: only sha1 tells the two versions apart, and it must
-      // come from Box's live answer, not the cached row.
+      // The rewrite keeps modified_at, as the real service does within a
+      // second: only sha1 tells the two versions apart, and it must come from
+      // Box's live answer, not the cached row.
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
-        box.write(DEEP, CHANGED)
-        const before = box.log.length
+        const fid = await box.idOf(DEEP)
+        const stamp = (await box.fileInfo(fid)).modified_at
+        await box.write(DEEP, CHANGED)
+        // The fake's clock moves on every write, so the stamp is set back.
+        await box.run.execute('UPDATE BoxItem SET modified = ? WHERE id = ?', stamp, fid)
+        await box.run.recordRequests()
         const out = await line(ws, `cat /m/${DEEP}`)
-        const fid = box.idOf(DEEP)
         expect(SEED.byteLength).toBe(CHANGED.byteLength)
         expect(out).toEqual(CHANGED)
         // The read is handed the probe's live row, so it downloads by id.
-        expect(box.log.slice(before)).toEqual([`info:${fid}`, `content:${fid}`, `dl:${fid}`])
+        expect(await box.run.requests()).toEqual([info(fid), content(fid), dl(fid)])
       })
     })
 
@@ -1904,11 +1989,11 @@ describe('the read-token contract', () => {
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
         await line(ws, `chmod 600 /m/${DEEP}`)
-        const fid = box.idOf(DEEP)
-        box.move(DEEP, 'a/x/c.txt')
-        const before = box.log.length
+        const fid = await box.idOf(DEEP)
+        await box.move(DEEP, 'a/x/c.txt')
+        await box.run.recordRequests()
         const [code, , err] = await run(ws, `cat /m/${DEEP}`)
-        const log = box.log.slice(before)
+        const log = await box.run.requests()
         const meta = ws.namespace.metaFor(`/m/${DEEP}`)
         const moved = await line(ws, 'cat /m/a/x/c.txt')
         expect(code).toBe(1)
@@ -1918,8 +2003,8 @@ describe('the read-token contract', () => {
         // The probe: one info by the hinted id, which places the file
         // elsewhere; its walk lists the old parent chain and misses. GONE
         // clears the mount index, so cat's own stat walks once more.
-        const w = walk(box)
-        expect(log).toEqual([`info:${fid}`, ...w, ...w])
+        const w = await walk(box)
+        expect(log).toEqual([info(fid), ...w, ...w])
       })
     })
 
@@ -1929,17 +2014,21 @@ describe('the read-token contract', () => {
         await boxCase(async (ws, box) => {
           await line(ws, `cat /m/${DEEP}`)
           await line(ws, `chmod 600 /m/${DEEP}`)
-          const old = box.idOf(DEEP)
-          box.delete(DEEP, mode)
-          const fresh = box.create(DEEP, CHANGED)
-          const before = box.log.length
+          const old = await box.idOf(DEEP)
+          await box.remove(DEEP)
+          // A trashed file keeps its id, which Box answers as trashed rather
+          // than not found.
+          if (mode === 'trash')
+            await box.run.answerNext(...BOX_INFO, 404, TRASHED, EVERY, `/2.0/files/${old}`)
+          const fresh = await box.write(DEEP, CHANGED)
+          await box.run.recordRequests()
           const out = await line(ws, `cat /m/${DEEP}`)
-          const log = box.log.slice(before)
+          const log = await box.run.requests()
           const modeBits = await line(ws, `stat -c %a /m/${DEEP}`)
           expect(out).toEqual(CHANGED)
           // The probe's walk finds the new id, and the read is handed that
           // live row: no second walk.
-          expect(log).toEqual([`info:${old}`, ...walk(box), `content:${fresh}`, `dl:${fresh}`])
+          expect(log).toEqual([info(old), ...(await walk(box)), content(fresh), dl(fresh)])
           // STALE keeps the overlay; reading the purged id's 404 as gone would
           // have dropped it while the walk still printed the new bytes.
           expect(new TextDecoder().decode(modeBits)).toBe('600\n')
@@ -1950,14 +2039,14 @@ describe('the read-token contract', () => {
     it('a box file recreated with the same bytes is served warm', async () => {
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
-        const old = box.idOf(DEEP)
-        box.delete(DEEP, 'purge')
-        const fresh = box.create(DEEP, SEED)
+        const old = await box.idOf(DEEP)
+        await box.remove(DEEP)
+        const fresh = await box.write(DEEP, SEED)
         for (let i = 0; i < 2; i++) {
-          const before = box.log.length
+          await box.run.recordRequests()
           expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-          expect(box.log.slice(before)).toEqual(
-            i === 0 ? [`info:${old}`, ...walk(box)] : [`info:${fresh}`],
+          expect(await box.run.requests()).toEqual(
+            i === 0 ? [info(old), ...(await walk(box))] : [info(fresh)],
           )
         }
       })
@@ -1966,39 +2055,37 @@ describe('the read-token contract', () => {
     it('a box file under a renamed parent is gone', async () => {
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
-        const fid = box.idOf(DEEP)
-        const toA = walk(box).slice(0, 2)
-        box.renameFolder('a/b', 'b2')
-        const before = box.log.length
+        const fid = await box.idOf(DEEP)
+        const toA = (await walk(box)).slice(0, 2)
+        await box.move('a/b', 'a/b2')
+        await box.run.recordRequests()
         const [code, , err] = await run(ws, `cat /m/${DEEP}`)
-        const log = box.log.slice(before)
+        const log = await box.run.requests()
         expect(code).toBe(1)
         expect(err).toContain('No such file or directory')
         expect(await line(ws, 'cat /m/a/b2/c.txt')).toEqual(SEED)
         // Each walk stops at a, which no longer holds b: the probe's, then
         // cat's own stat over the cleared index.
-        expect(log).toEqual([`info:${fid}`, ...toA, ...toA])
+        expect(log).toEqual([info(fid), ...toA, ...toA])
       })
     })
 
     it('a box file under a trashed mount root is gone', async () => {
-      // Trashing the root makes metadata for its descendant return not_found.
+      // Trashing the root makes metadata for its descendant return not_found,
+      // as deleting it does, which stands for it here.
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
-        const root = box.idOf('r')
-        const fid = box.idOf(`r/${DEEP}`)
-        box.delete('r', 'trash_ancestor')
-        const before = box.log.length
+        const root = await box.idOf('r')
+        const fid = await box.idOf(`r/${DEEP}`)
+        await box.remove('r')
+        await box.run.recordRequests()
         const [code, out, err] = await run(ws, `cat /m/${DEEP}`)
         expect(code).toBe(1)
         expect(out).toEqual(new Uint8Array(0))
         expect(err).toContain('No such file or directory')
         // The root's listing 404s each time: the probe's walk, cat's own
         // stat, then the parent listing cat's missing-operand path asks for.
-        expect(box.log.slice(before)).toEqual([
-          `info:${fid}`,
-          ...Array<string>(3).fill(`items:${root}`),
-        ])
+        expect(await box.run.requests()).toEqual([info(fid), ...Array<string>(3).fill(items(root))])
       }, 'r/')
     })
 
@@ -2006,16 +2093,16 @@ describe('the read-token contract', () => {
       await boxCase(async (ws, box) => {
         await line(ws, `cat /m/${DEEP}`)
         await line(ws, `chmod 600 /m/${DEEP}`)
-        const fid = box.idOf(DEEP)
-        box.forbidden.add(fid)
-        const before = box.log.length
+        const fid = await box.idOf(DEEP)
+        await box.run.answerNext(...BOX_INFO, 403, FORBIDDEN, EVERY, `/2.0/files/${fid}`)
+        await box.run.recordRequests()
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(before)).toEqual([`info:${fid}`, ...walk(box)])
+        expect(await box.run.requests()).toEqual([info(fid), ...(await walk(box))])
         expect(new TextDecoder().decode(await line(ws, `stat -c %a /m/${DEEP}`))).toBe('600\n')
         // Each check pays the refused GET and the walk again: an accepted cost.
-        const again = box.log.length
+        await box.run.recordRequests()
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(again)).toEqual([`info:${fid}`, ...walk(box)])
+        expect(await box.run.requests()).toEqual([info(fid), ...(await walk(box))])
       })
     })
 
@@ -2024,12 +2111,12 @@ describe('the read-token contract', () => {
       // each fresh read is UNKNOWN -- a cold download and a cleared mount
       // index. That cost is the documented price of an unverifiable file.
       await boxCase(async (ws, box) => {
-        const fid = box.idOf(DEEP)
-        box.unhashed.add(fid)
+        const fid = await box.idOf(DEEP)
+        await box.unhash(fid)
         await line(ws, `cat /m/${DEEP}`)
-        const before = box.log.length
+        await box.run.recordRequests()
         expect(await line(ws, `cat /m/${DEEP}`)).toEqual(SEED)
-        expect(box.log.slice(before)).toEqual([`info:${fid}`, `content:${fid}`, `dl:${fid}`])
+        expect(await box.run.requests()).toEqual([info(fid), content(fid), dl(fid)])
       })
     })
 
@@ -2039,10 +2126,10 @@ describe('the read-token contract', () => {
       await boxCase(async (ws, box) => {
         const cold = await line(ws, `ls -l /m/${DEEP}`)
         await line(ws, `cat /m/${DEEP}`)
-        const before = box.log.length
+        await box.run.recordRequests()
         const warm = await line(ws, `ls -l /m/${DEEP}`)
         expect(warm).toEqual(cold)
-        expect(box.log.slice(before)).toEqual([`info:${box.idOf(DEEP)}`])
+        expect(await box.run.requests()).toEqual([info(await box.idOf(DEEP))])
       })
     })
   })

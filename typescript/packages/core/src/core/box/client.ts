@@ -217,16 +217,19 @@ async function boxAuthHeaders(tm: BoxTokenManager): Promise<Record<string, strin
   return { Authorization: `Bearer ${token}` }
 }
 
+/** A GET's answer parsed as JSON, or as the text Box sent with `read: 'text'`. */
 export async function boxGet(
   tm: BoxTokenManager,
   url: string,
   params?: Record<string, string | number>,
+  read: 'json' | 'text' = 'json',
 ): Promise<unknown> {
   return apiRequest('GET', url, {
     timeout: tm.timeout,
     errorOf: errorOf('GET', url),
     headers: await boxAuthHeaders(tm),
     params,
+    read,
   })
 }
 

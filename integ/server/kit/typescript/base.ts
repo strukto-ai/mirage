@@ -15,6 +15,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { Clock } from './clock.ts'
 import { Faults } from './fault.ts'
+import { Holds } from './hold.ts'
 import { Requests } from './request.ts'
 import { Minter } from './mint.ts'
 import { ClientPool } from './db.ts'
@@ -92,12 +93,13 @@ export interface Fake<C extends MinimalClient> {
 // from, so that host's next id repeated one it had already handed out, and
 // `clock.setEpoch()` rebased its timestamps backwards mid-run. A tenant is one
 // caller's whole world, so its clock and its minter are its own. Its armed
-// fault plans and the requests it is keeping are too, and a reset forgets
-// them with the rest.
+// fault plans, its holds and the requests it is keeping are too, and a reset
+// forgets them with the rest.
 export interface TenantState {
   clock: Clock
   minter: Minter
   faults: Faults
+  holds: Holds
   requests: Requests
 }
 
@@ -126,10 +128,17 @@ export class RunState {
       clock: new Clock(),
       minter: new Minter(this.sharing, this.format),
       faults: new Faults(),
+      holds: new Holds(),
       requests: new Requests(),
     }
     this.tenants.set(tenant, made)
     return made
+  }
+
+  // Every hold of every tenant gone, as when the run ends: a request one was
+  // holding is let go unanswered rather than left open forever.
+  clearHolds(): void {
+    for (const st of this.tenants.values()) st.holds.clear()
   }
 
   // Starting a reset UNMARKS the tenant, and only markSeeded re-marks it. The
@@ -142,6 +151,7 @@ export class RunState {
     st.clock.setEpoch(epoch)
     st.minter.reset()
     st.faults.clear()
+    st.holds.clear()
     st.requests.stop()
     this.seeded.delete(tenant)
   }

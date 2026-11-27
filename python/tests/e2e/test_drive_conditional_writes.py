@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 
 import pytest
@@ -26,59 +26,129 @@ from mirage.policy import Deny, Policy
 from mirage.policy.types import VfsResultContext
 from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.registry import build_vfs
-from tests.fixtures.box_api import FakeBox
-from tests.fixtures.box_api import serve as serve_box
-from tests.fixtures.dropbox_api import FakeDropbox
-from tests.fixtures.dropbox_api import serve as serve_dropbox
+from tests.core.box.conftest import TOKEN, BoxAccount
+from tests.core.dropbox.conftest import DropboxAccount
 
 STALE = "changed since it was read; read it again before writing"
 SEED = {"f": b"one\n", "g": b"gee\n", "d/a": b"a\n", "d/b": b"b\n"}
-DROPBOX_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
 BOX = pytest.mark.parametrize("drive", ["box"], indirect=True)
 DROPBOX = pytest.mark.parametrize("drive", ["dropbox"], indirect=True)
+# The routes each kind of request reaches, as each fake declares them.
+ROUTES = {
+    "box": {
+        "content": [("GET", "/2.0/files/:file_id/content")],
+        "upload": [
+            ("POST", "/2.0/files/content"),
+            ("POST", "/2.0/files/:file_id/content"),
+        ],
+        "delete": [
+            ("DELETE", "/2.0/files/:file_id"),
+            ("DELETE", "/2.0/folders/:folder_id"),
+            ("DELETE", "/2.0/web_links/:web_link_id"),
+        ],
+        "update": [
+            ("PUT", "/2.0/files/:file_id"),
+            ("PUT", "/2.0/folders/:folder_id"),
+        ],
+        "copy": [
+            ("POST", "/2.0/files/:file_id/copy"),
+            ("POST", "/2.0/folders/:folder_id/copy"),
+        ],
+    },
+    "dropbox": {
+        "download": [("POST", "/2/files/download")],
+        "upload": [("POST", "/2/files/upload")],
+        "delete": [("POST", "/2/files/delete_v2")],
+        "move": [("POST", "/2/files/move_v2")],
+        "copy": [("POST", "/2/files/copy_v2")],
+    },
+}
 
 
 @dataclass
 class Drive:
-    fake: FakeBox | FakeDropbox
+    account: BoxAccount | DropboxAccount
+    kind: str
     root: str
     config: dict[str, str]
     move: str
     download: str
 
     @property
-    def box(self) -> FakeBox:
-        assert isinstance(self.fake, FakeBox)
-        return self.fake
+    def box(self) -> BoxAccount:
+        assert isinstance(self.account, BoxAccount)
+        return self.account
 
     @property
-    def dropbox(self) -> FakeDropbox:
-        assert isinstance(self.fake, FakeDropbox)
-        return self.fake
+    def dropbox(self) -> DropboxAccount:
+        assert isinstance(self.account, DropboxAccount)
+        return self.account
 
-    def put(self, key: str, data: bytes) -> None:
-        if isinstance(self.fake, FakeBox) and self.fake.read(key) is None:
-            self.fake.create(key, data)
+    async def put(self, key: str, data: bytes) -> None:
+        if isinstance(self.account, BoxAccount):
+            await self.account.write(key, data)
         else:
-            self.fake.write(key, data)
+            await self.account.put(f"/{key}", data)
 
-    def drop(self, key: str) -> None:
-        if isinstance(self.fake, FakeBox):
-            self.fake.delete(key, "purge")
+    async def drop(self, key: str) -> None:
+        if isinstance(self.account, BoxAccount):
+            await self.account.remove(key)
         else:
-            self.fake.delete(key)
+            await self.account.remove(f"/{key}")
+
+    async def read(self, key: str) -> bytes | None:
+        if isinstance(self.account, BoxAccount):
+            return await self.account.content(key)
+        return await self.account.content(f"/{key}")
+
+    async def count(self, kind: str) -> int:
+        """How many requests of ``kind`` Mirage has made."""
+        listed = await self.account.run.call("GET", "/_kit/requests")
+        routes = set(ROUTES[self.kind][kind])
+        return sum(
+            (r["method"], r["route"]) in routes for r in listed["requests"]
+        )
+
+    async def before(
+        self,
+        kind: str,
+        change: Callable[[], Awaitable[None] | None],
+        status: int | None = None,
+    ) -> None:
+        """Run ``change`` when Mirage's next request of ``kind`` arrives,
+        before it acts: another writer landing between Mirage's lookup and
+        its request. With ``status`` the request is answered with it."""
+        await self.account.run.before_next(
+            ROUTES[self.kind][kind], change, status
+        )
+
+    async def fail_next(self, kind: str) -> None:
+        """Answer Mirage's next request of ``kind`` with a server error."""
+        ((method, route),) = ROUTES[self.kind][kind]
+        await self.account.run.answer_next(method, route, 500)
 
 
-@pytest.fixture(params=["box", "dropbox"])
-def drive(request: pytest.FixtureRequest) -> Iterator[Drive]:
+@pytest_asyncio.fixture(params=["box", "dropbox"])
+async def drive(request: pytest.FixtureRequest) -> AsyncIterator[Drive]:
+    made: Drive
     if request.param == "box":
-        with serve_box(FakeBox(files=dict(SEED))) as box:
-            config = {"access_token": "t", "endpoint": box.url}
-            yield Drive(box, "/box", config, "update", "content")
+        box = BoxAccount(request.getfixturevalue("box_origin"))
+        config = {"access_token": TOKEN, "endpoint": box.run.url}
+        made = Drive(box, "box", "/box", config, "update", "content")
     else:
-        with serve_dropbox(FakeDropbox(files=dict(SEED))) as dbx:
-            config = {**DROPBOX_CONFIG, "endpoint": dbx.url}
-            yield Drive(dbx, "/dbx", config, "move", "download")
+        dbx = DropboxAccount(request.getfixturevalue("dropbox_origin"))
+        config = {
+            "client_id": "i",
+            "client_secret": "s",
+            "refresh_token": TOKEN,
+            "endpoint": dbx.run.url,
+        }
+        made = Drive(dbx, "dropbox", "/dbx", config, "move", "download")
+    for key, data in SEED.items():
+        await made.put(key, data)
+    await made.account.run.record_requests()
+    yield made
+    await made.account.run.close()
 
 
 @pytest_asyncio.fixture
@@ -89,8 +159,7 @@ async def workspace(drive: Drive) -> AsyncIterator[Callable[..., Workspace]]:
         write: WritePolicy = WritePolicy.CONDITIONAL,
         read: ReadSpec | None = None,
     ) -> Workspace:
-        name = "box" if isinstance(drive.fake, FakeBox) else "dropbox"
-        vfs = build_vfs(name, drive.config)
+        vfs = build_vfs(drive.kind, drive.config)
         mount = (
             Mount(vfs, mode=MountMode.WRITE, write=write)
             if read is None
@@ -124,30 +193,26 @@ async def _refused_until_read(ws: Workspace, path: str) -> None:
     assert await _run(ws, f"echo y > {path}") == (0, "", "")
 
 
-def _fail() -> None:
-    raise RuntimeError("injected server error")
-
-
 @pytest.mark.asyncio
 async def test_a_changed_file_is_refused_before_any_upload(drive, workspace):
     ws = workspace()
     await _run(ws, f"cat {drive.root}/f")
-    drive.put("f", b"theirs\n")
-    uploads = drive.fake.count("upload")
+    await drive.put("f", b"theirs\n")
+    uploads = await drive.count("upload")
     code, _, err = await _run(ws, f"echo mine > {drive.root}/f")
     assert (code, err) == (1, f"bash: line 1: {drive.root}/f: {STALE}\n")
-    assert drive.fake.count("upload") == uploads
-    assert drive.fake.read("f") == b"theirs\n"
+    assert await drive.count("upload") == uploads
+    assert await drive.read("f") == b"theirs\n"
 
 
 @pytest.mark.asyncio
 async def test_a_write_landing_after_the_lookup_is_refused(drive, workspace):
     ws = workspace()
     await _run(ws, f"cat {drive.root}/f")
-    drive.fake.hooks["upload"] = lambda: drive.put("f", b"theirs\n")
+    await drive.before("upload", lambda: drive.put("f", b"theirs\n"))
     code, _, err = await _run(ws, f"echo mine > {drive.root}/f")
     assert (code, err) == (1, f"bash: line 1: {drive.root}/f: {STALE}\n")
-    assert drive.fake.read("f") == b"theirs\n"
+    assert await drive.read("f") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -158,10 +223,10 @@ async def test_a_write_landing_after_the_lookup_is_refused(drive, workspace):
 )
 async def test_a_rewrite_carries_its_own_reads_version(drive, workspace, line):
     ws = workspace()
-    drive.fake.hooks["upload"] = lambda: drive.put("f", b"theirs\n")
+    await drive.before("upload", lambda: drive.put("f", b"theirs\n"))
     code, _, err = await _run(ws, line.format(r=drive.root))
     assert code == 1 and STALE in err
-    assert drive.fake.read("f") == b"theirs\n"
+    assert await drive.read("f") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -173,8 +238,8 @@ async def test_a_rewrite_carries_its_own_reads_version(drive, workspace, line):
 async def test_an_empty_resize_reads_nothing(drive, workspace, policy):
     ws = workspace(policy)
     assert await _run(ws, f"truncate -s 0 {drive.root}/f") == (0, "", "")
-    assert drive.fake.count(drive.download) == 0
-    assert drive.fake.read("f") == b""
+    assert await drive.count(drive.download) == 0
+    assert await drive.read("f") == b""
 
 
 @pytest.mark.asyncio
@@ -183,27 +248,27 @@ async def test_a_streamed_ops_read_through_an_outdated_listing_holds_its_bytes(
 ):
     ws = workspace()
     await ws.vfs.readdir(drive.root)
-    drive.put("f", b"B\n")
+    await drive.put("f", b"B\n")
     stream = await ws.vfs.read(f"{drive.root}/f", stream=True)
     assert b"".join([chunk async for chunk in stream]) == b"B\n"
-    drive.put("f", b"C\n")
+    await drive.put("f", b"C\n")
     with pytest.raises(StaleWriteError):
         await ws.vfs.write(f"{drive.root}/f", b"mine\n")
-    assert drive.fake.read("f") == b"C\n"
+    assert await drive.read("f") == b"C\n"
 
 
 @pytest.mark.asyncio
 async def test_rm_of_an_unread_file_is_pinned_to_its_lookup(drive, workspace):
     ws = workspace()
-    drive.fake.hooks["delete"] = lambda: drive.put("f", b"theirs\n")
+    await drive.before("delete", lambda: drive.put("f", b"theirs\n"))
     code, _, err = await _run(ws, f"rm {drive.root}/f")
     assert (code, err) == (1, f"rm: cannot remove '{drive.root}/f': {STALE}\n")
-    assert drive.fake.read("f") == b"theirs\n"
+    assert await drive.read("f") == b"theirs\n"
 
 
 @pytest.mark.asyncio
 async def test_rm_r_of_an_unchanged_folder_removes_it(drive, workspace):
-    drive.put("d/s/x", b"x\n")
+    await drive.put("d/s/x", b"x\n")
     ws = workspace()
     r = drive.root
     assert await _run(ws, f"rm -r {r}/d; ls {r}") == (0, "f\ng\n", "")
@@ -213,22 +278,22 @@ async def test_rm_r_of_an_unchanged_folder_removes_it(drive, workspace):
 async def test_rm_r_lets_the_lines_next_write_through(drive, workspace):
     ws = workspace()
     r = drive.root
-    mkdir = f" mkdir {r}/d;" if isinstance(drive.fake, FakeBox) else ""
+    mkdir = f" mkdir {r}/d;" if drive.kind == "box" else ""
     line = f"cat {r}/d/a > /dev/null; rm -r {r}/d;{mkdir} echo x > {r}/d/a"
     assert await _run(ws, line) == (0, "", "")
-    assert drive.fake.read("d/a") == b"x\n"
+    assert await drive.read("d/a") == b"x\n"
 
 
 @pytest.mark.asyncio
 async def test_rm_r_keeps_a_file_changed_during_the_walk(drive, workspace):
     ws = workspace()
-    drive.fake.hooks["delete"] = lambda: drive.put("d/b", b"theirs\n")
+    await drive.before("delete", lambda: drive.put("d/b", b"theirs\n"))
     code, _, err = await _run(ws, f"rm -r {drive.root}/d")
     assert (code, err) == (
         1,
         f"rm: cannot remove '{drive.root}/d/b': {STALE}\n",
     )
-    assert (drive.fake.read("d/a"), drive.fake.read("d/b")) == (
+    assert (await drive.read("d/a"), await drive.read("d/b")) == (
         None,
         b"theirs\n",
     )
@@ -241,8 +306,8 @@ async def test_rm_r_names_the_first_changed_file_and_keeps_both(
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/d/a {r}/d/b")
-    drive.put("d/a", b"theirs\n")
-    drive.put("d/b", b"theirs\n")
+    await drive.put("d/a", b"theirs\n")
+    await drive.put("d/b", b"theirs\n")
     code, _, err = await _run(ws, f"rm -r {r}/d")
     assert (code, err) == (1, f"rm: cannot remove '{r}/d/a': {STALE}\n")
     code, _, err = await _run(ws, f"echo x > {r}/d/b")
@@ -254,19 +319,19 @@ async def test_rm_r_stopped_partway_keeps_the_changed_files_version(
     drive, workspace
 ):
     for key in ("d/a", "d/b"):
-        drive.drop(key)
-    drive.put("d/s/x", b"x\n")
-    drive.put("d/t/y", b"y\n")
+        await drive.drop(key)
+    await drive.put("d/s/x", b"x\n")
+    await drive.put("d/t/y", b"y\n")
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/d/s/x")
-    drive.put("d/s/x", b"theirs\n")
-    drive.fake.hooks["delete"] = lambda: drive.put("d/t/late", b"late\n")
+    await drive.put("d/s/x", b"theirs\n")
+    await drive.before("delete", lambda: drive.put("d/t/late", b"late\n"))
     code, _, err = await _run(ws, f"rm -r {r}/d")
     assert code == 1 and "Directory not empty" in err
     code, _, err = await _run(ws, f"echo z > {r}/d/s/x")
     assert (code, err) == (1, f"bash: line 1: {r}/d/s/x: {STALE}\n")
-    assert drive.fake.read("d/s/x") == b"theirs\n"
+    assert await drive.read("d/s/x") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -277,13 +342,13 @@ async def test_a_destination_changed_during_its_clear_is_refused(
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-    drive.fake.hooks["delete"] = lambda: drive.put("g", b"theirs\n")
+    await drive.before("delete", lambda: drive.put("g", b"theirs\n"))
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (
         1,
         "",
         _refusal(drive, verb),
     )
-    assert (drive.fake.read("f"), drive.fake.read("g")) == (
+    assert (await drive.read("f"), await drive.read("g")) == (
         b"one\n",
         b"theirs\n",
     )
@@ -299,18 +364,18 @@ async def test_a_destination_recreated_after_its_clear_stays_refused(
     await _run(ws, f"cat {r}/g")
     route = "copy" if verb == "cp" else drive.move
 
-    def take_name_after_the_clear() -> None:
-        drive.fake.hooks[route] = lambda: drive.put("g", b"new\n")
+    async def take_name_after_the_clear() -> None:
+        await drive.before(route, lambda: drive.put("g", b"new\n"))
 
-    drive.fake.hooks["delete"] = take_name_after_the_clear
+    await drive.before("delete", take_name_after_the_clear)
     for _ in range(2):
         assert await _run(ws, f"{verb} {r}/f {r}/g") == (
             1,
             "",
             _refusal(drive, verb),
         )
-        assert drive.fake.count("delete") == 1
-    assert drive.fake.read("g") == b"new\n"
+        assert await drive.count("delete") == 1
+    assert await drive.read("g") == b"new\n"
     assert await _run(ws, f"echo x > {r}/f") == (0, "", "")
 
 
@@ -324,16 +389,16 @@ async def test_a_destination_a_folder_retook_after_its_clear_keeps_its_version(
     await _run(ws, f"cat {r}/g")
     route = "copy" if verb == "cp" else drive.move
 
-    def fold_after_the_clear() -> None:
-        drive.fake.hooks[route] = lambda: drive.put("g/x", b"x\n")
+    async def fold_after_the_clear() -> None:
+        await drive.before(route, lambda: drive.put("g/x", b"x\n"))
 
-    drive.fake.hooks["delete"] = fold_after_the_clear
+    await drive.before("delete", fold_after_the_clear)
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (
         1,
         "",
         _refusal(drive, verb),
     )
-    drive.drop("g")
+    await drive.drop("g")
     await _refused_until_read(ws, f"{r}/g")
 
 
@@ -347,19 +412,19 @@ async def test_a_destination_gone_since_its_read_lands_once_seen_gone(
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-    drive.drop("g")
-    if isinstance(drive.fake, FakeBox):
+    await drive.drop("g")
+    if drive.kind == "box":
         assert await _run(ws, f"{verb} {r}/f {r}/g") == (
             1,
             "",
             _refusal(drive, verb),
         )
-        assert (drive.fake.read("f"), drive.fake.read("g")) == (
+        assert (await drive.read("f"), await drive.read("g")) == (
             b"one\n",
             None,
         )
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (0, "", "")
-    assert drive.fake.read("g") == b"one\n"
+    assert await drive.read("g") == b"one\n"
 
 
 @pytest.mark.asyncio
@@ -371,16 +436,16 @@ async def test_a_copy_onto_a_read_file_lets_the_lines_next_write_through(
     r = drive.root
     line = f"cat {r}/g > /dev/null; {verb} {r}/f {r}/g; echo x > {r}/g"
     assert await _run(ws, line) == (0, "", "")
-    assert drive.fake.read("g") == b"x\n"
+    assert await drive.read("g") == b"x\n"
 
 
 @pytest.mark.asyncio
 async def test_a_copy_onto_a_refused_file_lifts_its_refusal(drive, workspace):
-    def theirs() -> None:
-        drive.put("g", b"theirs\n")
-        drive.fake.hooks["upload"] = lambda: drive.put("g", b"gee\n")
+    async def theirs() -> None:
+        await drive.put("g", b"theirs\n")
+        await drive.before("upload", lambda: drive.put("g", b"gee\n"))
 
-    drive.fake.hooks["upload"] = theirs
+    await drive.before("upload", theirs)
     ws = workspace()
     r = drive.root
     line = (
@@ -388,7 +453,7 @@ async def test_a_copy_onto_a_refused_file_lifts_its_refusal(drive, workspace):
         f"cp {r}/f {r}/g && echo mine > {r}/g"
     )
     assert await _run(ws, line) == (0, "", f"bash: line 1: {r}/g: {STALE}\n")
-    assert drive.fake.read("g") == b"mine\n"
+    assert await drive.read("g") == b"mine\n"
 
 
 @pytest.mark.asyncio
@@ -399,17 +464,17 @@ async def test_a_move_lifts_a_kept_version(drive, workspace, ancestor):
     key, move = "g", f"mv {r}/g {r}/h"
     if ancestor:
         key, move = "d/a", f"mv {r}/d {r}/e"
-        if isinstance(drive.fake, FakeBox):
+        if drive.kind == "box":
             move += f"; mkdir {r}/d"
     await _run(ws, f"cat {r}/{key}")
-    drive.put(key, b"theirs\n")
+    await drive.put(key, b"theirs\n")
     line = f"echo x > {r}/{key}; {move}; echo new > {r}/{key}"
     assert await _run(ws, line) == (
         0,
         "",
         f"bash: line 1: {r}/{key}: {STALE}\n",
     )
-    assert drive.fake.read(key) == b"new\n"
+    assert await drive.read(key) == b"new\n"
 
 
 @pytest.mark.asyncio
@@ -422,16 +487,16 @@ async def test_a_box_conditional_write_asks_by_id_before_each_upload(
     # changed file is refused before its body goes out. The redirect's
     # write is its open: one upload.
     logs = []
-    fid = drive.box.id_of("f")
+    fid = await drive.box.id_of("f")
     for policy in (WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL):
         ws = workspace(policy)
         await _run(ws, "cat /box/f")
-        before = len(drive.box.log)
+        before = len(await drive.box.run.requests())
         await _run(ws, "echo mine > /box/f")
-        logs.append(drive.box.log[before:])
-        drive.put("f", SEED["f"])
-    upload = f"upload:{fid}"
-    assert logs == [[f"info:{fid}", upload]] * 2
+        logs.append((await drive.box.run.requests())[before:])
+        await drive.put("f", SEED["f"])
+    upload = f"POST /2.0/files/{fid}/content"
+    assert logs == [[f"GET /2.0/files/{fid}", upload]] * 2
 
 
 @pytest.mark.asyncio
@@ -439,14 +504,14 @@ async def test_a_box_conditional_write_asks_by_id_before_each_upload(
 async def test_a_box_folder_merge_lets_the_next_write_through(
     drive, workspace
 ):
-    drive.put("e/d/a", b"old\n")
+    await drive.put("e/d/a", b"old\n")
     ws = workspace()
     line = (
         "cat /box/e/d/a >/dev/null; cp -r /box/d /box/e; echo y > /box/e/d/a"
     )
     assert await _run(ws, line) == (0, "", "")
     assert await _run(ws, "echo z > /box/e/d/a") == (0, "", "")
-    assert drive.fake.read("e/d/a") == b"z\n"
+    assert await drive.read("e/d/a") == b"z\n"
 
 
 @pytest.mark.asyncio
@@ -454,14 +519,14 @@ async def test_a_box_folder_merge_lets_the_next_write_through(
 async def test_a_box_folder_merge_keeps_the_versions_of_files_it_left(
     drive, workspace
 ):
-    drive.put("e/d/a", b"new\n")
+    await drive.put("e/d/a", b"new\n")
     ws = workspace()
     await _run(ws, "cat /box/d/b")
     assert await _run(ws, "cp -r /box/e/d /box") == (0, "", "")
-    drive.put("d/b", b"theirs\n")
+    await drive.put("d/b", b"theirs\n")
     code, _, err = await _run(ws, "echo mine > /box/d/b")
     assert (code, err) == (1, f"bash: line 1: /box/d/b: {STALE}\n")
-    assert drive.fake.read("d/b") == b"theirs\n"
+    assert await drive.read("d/b") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -469,13 +534,13 @@ async def test_a_box_folder_merge_keeps_the_versions_of_files_it_left(
 async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
     drive, workspace
 ):
-    drive.put("s/a", b"new\n")
+    await drive.put("s/a", b"new\n")
 
-    def theirs() -> None:
-        drive.put("d/a", b"theirs\n")
-        drive.box.hooks["upload"] = lambda: drive.drop("d")
+    async def theirs() -> None:
+        await drive.put("d/a", b"theirs\n")
+        await drive.before("upload", lambda: drive.drop("d"))
 
-    drive.box.hooks["upload"] = theirs
+    await drive.before("upload", theirs)
     # Only a fresh mount lists again to see d gone: a write keeps its own
     # row in its folder's listing rather than dropping the listing.
     ws = workspace(read=ReadSpec(policy=ReadPolicy.FRESH))
@@ -488,7 +553,7 @@ async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
         "",
         f"bash: line 1: /box/d/a: {STALE}\n",
     )
-    assert drive.fake.read("d/a") == b"mine\n"
+    assert await drive.read("d/a") == b"mine\n"
 
 
 @pytest.mark.asyncio
@@ -496,14 +561,11 @@ async def test_a_box_folder_copied_whole_lifts_the_lost_marks_beneath_it(
 async def test_a_box_folder_copy_that_failed_keeps_the_versions_beneath_it(
     drive, workspace
 ):
-    drive.put("s/a", b"new\n")
-    drive.box.hooks["upload"] = lambda: drive.drop("d")
-
-    def theirs_then_fail() -> None:
-        drive.put("d/a", b"theirs\n")
-        _fail()
-
-    drive.box.hooks["copy"] = theirs_then_fail
+    await drive.put("s/a", b"new\n")
+    await drive.before("upload", lambda: drive.drop("d"))
+    await drive.before(
+        "copy", lambda: drive.put("d/a", b"theirs\n"), status=500
+    )
     ws = workspace()
     line = (
         "cat /box/d/a > /dev/null; echo z > /box/z; "
@@ -512,16 +574,16 @@ async def test_a_box_folder_copy_that_failed_keeps_the_versions_beneath_it(
     code, out, err = await _run(ws, line)
     assert (code, out) == (1, "a\n")
     assert err.endswith(f"/box/d/a: {STALE}\n")
-    assert drive.fake.read("d/a") == b"theirs\n"
+    assert await drive.read("d/a") == b"theirs\n"
 
 
 @pytest.mark.asyncio
 @BOX
 @pytest.mark.parametrize("gone", [True, False], ids=["link gone", "link kept"])
 async def test_box_rm_r_deletes_a_web_link_plainly(drive, workspace, gone):
-    drive.box.create_link("d/bookmark")
+    await drive.box.web_link("bookmark", await drive.box.id_of("d"))
     if gone:
-        drive.fake.hooks["delete"] = lambda: drive.drop("d/bookmark")
+        await drive.before("delete", lambda: drive.drop("d/bookmark"))
     ws = workspace()
     assert await _run(ws, "rm -r /box/d; ls /box") == (0, "f\ng\n", "")
 
@@ -529,11 +591,17 @@ async def test_box_rm_r_deletes_a_web_link_plainly(drive, workspace, gone):
 @pytest.mark.asyncio
 @BOX
 async def test_box_rm_r_reports_a_web_link_it_may_not_delete(drive, workspace):
-    link = drive.box.create_link("d/bookmark")
-    drive.box.forbidden.add(link)
+    link = await drive.box.web_link("bookmark", await drive.box.id_of("d"))
+    await drive.box.run.answer_next(
+        "DELETE",
+        "/2.0/web_links/:web_link_id",
+        403,
+        {"code": "forbidden"},
+        path=f"/2.0/web_links/{link}",
+    )
     ws = workspace()
-    url = f"{drive.box.url}/2.0/web_links/{link}"
-    denied = f"rm: Box DELETE {url} -> 403 " + '{"code": "forbidden"}\n'
+    url = f"{drive.box.run.url}/2.0/web_links/{link}"
+    denied = f"rm: Box DELETE {url} -> 403 " + '{"code":"forbidden"}\n'
     assert await _run(ws, "rm -r /box/d") == (1, "", denied)
     assert await _run(ws, "ls /box") == (0, "d\nf\ng\n", "")
 
@@ -548,16 +616,16 @@ async def test_a_box_destination_a_web_link_retook_keeps_its_version(
     await _run(ws, "cat /box/g")
     route = "copy" if verb == "cp" else "update"
 
-    def link_after_the_clear() -> None:
-        drive.fake.hooks[route] = lambda: drive.box.create_link("g")
+    async def link_after_the_clear() -> None:
+        await drive.before(route, lambda: drive.box.web_link("g"))
 
-    drive.fake.hooks["delete"] = link_after_the_clear
+    await drive.before("delete", link_after_the_clear)
     assert await _run(ws, f"{verb} /box/f /box/g") == (
         1,
         "",
         _refusal(drive, verb),
     )
-    drive.drop("g")
+    await drive.drop("g")
     await _refused_until_read(ws, "/box/g")
 
 
@@ -566,9 +634,9 @@ async def test_a_box_destination_a_web_link_retook_keeps_its_version(
 async def test_a_box_resize_holds_the_bytes_it_downloaded(drive, workspace):
     ws = workspace()
     await _run(ws, "cat /box/f")
-    drive.fake.hooks["content"] = lambda: drive.put("f", b"theirs\n")
+    await drive.before("content", lambda: drive.put("f", b"theirs\n"))
     assert await _run(ws, "truncate -s 3 /box/f") == (0, "", "")
-    assert drive.fake.read("f") == b"the"
+    assert await drive.read("f") == b"the"
 
 
 @pytest.mark.asyncio
@@ -580,8 +648,8 @@ async def test_a_box_rewrite_uses_its_completed_tokenless_read(
     ws = workspace()
     a = await ws.session("a")
     await a.vfs.read("/box/f")
-    drive.put("f", b"peer\n")
-    drive.box.unhashed.add(drive.box.id_of("f"))
+    await drive.put("f", b"peer\n")
+    await drive.box.unhash(await drive.box.id_of("f"))
     await ws.cache.clear()
     line = (
         "echo extra >> /box/f"
@@ -591,7 +659,7 @@ async def test_a_box_rewrite_uses_its_completed_tokenless_read(
     result = await a.shell(line)
     assert result.exit_code == 0, await result.stderr_str()
     want = b"peer\nextra\n" if operation == "append" else b"pe"
-    assert drive.fake.read("f") == want
+    assert await drive.read("f") == want
 
 
 @pytest.mark.asyncio
@@ -599,10 +667,10 @@ async def test_a_box_rewrite_uses_its_completed_tokenless_read(
 async def test_a_box_resize_of_a_file_with_no_sha1_goes_out_plain(
     drive, workspace
 ):
-    drive.box.unhashed.add(drive.box.id_of("f"))
+    await drive.box.unhash(await drive.box.id_of("f"))
     ws = workspace()
     assert await _run(ws, "truncate -s 2 /box/f") == (0, "", "")
-    assert drive.fake.read("f") == b"on"
+    assert await drive.read("f") == b"on"
 
 
 @pytest.mark.asyncio
@@ -612,12 +680,9 @@ async def test_a_box_cp_that_changed_nothing_keeps_the_held_version(
     drive, workspace, same_line
 ):
     ws = workspace()
-
-    def theirs_then_fail() -> None:
-        drive.put("g", b"theirs\n")
-        _fail()
-
-    drive.fake.hooks["delete"] = theirs_then_fail
+    await drive.before(
+        "delete", lambda: drive.put("g", b"theirs\n"), status=500
+    )
     if same_line:
         code, _, err = await _run(
             ws, "cat /box/g >/dev/null; cp /box/f /box/g; echo mine > /box/g"
@@ -627,7 +692,7 @@ async def test_a_box_cp_that_changed_nothing_keeps_the_held_version(
         await _run(ws, "cp /box/f /box/g")
         code, _, err = await _run(ws, "echo mine > /box/g")
     assert code == 1 and err.endswith(f"/box/g: {STALE}\n")
-    assert drive.fake.read("g") == b"theirs\n"
+    assert await drive.read("g") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -637,12 +702,7 @@ async def test_a_box_cp_whose_delete_landed_but_failed_serves_no_stale_bytes(
 ):
     ws = workspace()
     await _run(ws, "cat /box/g")
-
-    def gone_then_fail() -> None:
-        drive.drop("g")
-        _fail()
-
-    drive.fake.hooks["delete"] = gone_then_fail
+    await drive.before("delete", lambda: drive.drop("g"), status=500)
     code, _, _ = await _run(ws, "cp /box/f /box/g")
     assert code == 1
     code, out, _ = await _run(ws, "cat /box/g")
@@ -656,11 +716,12 @@ async def test_a_dropbox_held_write_costs_one_lookup_more(drive, workspace):
     for policy in (WritePolicy.UNCONDITIONAL, WritePolicy.CONDITIONAL):
         ws = workspace(policy)
         await _run(ws, "cat /dbx/f")
-        before = len(drive.dropbox.log)
+        before = len(await drive.dropbox.run.requests())
         await _run(ws, "echo mine > /dbx/f")
-        log = drive.dropbox.log[before:]
-        counts.append([name for name, _ in log if name != "token"])
-        drive.put("f", SEED["f"])
+        log = (await drive.dropbox.run.requests())[before:]
+        names = [request.rsplit("/", 1)[-1] for request in log]
+        counts.append([name for name in names if name != "token"])
+        await drive.put("f", SEED["f"])
     assert counts == [
         ["get_metadata", "upload"],
         ["get_metadata", "get_metadata", "upload"],
@@ -675,12 +736,12 @@ async def test_a_vanished_source_costs_a_dropbox_destination_nothing(
 ):
     ws = workspace()
     await _run(ws, "ls /dbx; cat /dbx/g")
-    drive.drop("f")
+    await drive.drop("f")
     code, _, err = await _run(ws, f"{verb} /dbx/f /dbx/g")
     assert code == 1 and "No such file or directory" in err
-    assert drive.fake.count(route) == 1
-    assert drive.fake.count("delete") == 0
-    assert drive.fake.read("g") == b"gee\n"
+    assert await drive.count(route) == 1
+    assert await drive.count("delete") == 0
+    assert await drive.read("g") == b"gee\n"
 
 
 @pytest.mark.asyncio
@@ -692,22 +753,22 @@ async def test_a_dropbox_destination_a_folder_took_is_refused_with_no_delete(
     ws = workspace()
     await _run(ws, "cat /dbx/g")
 
-    def fold() -> None:
-        drive.drop("g")
-        drive.put("g/x", b"x\n")
+    async def fold() -> None:
+        await drive.drop("g")
+        await drive.put("g/x", b"x\n")
 
-    drive.fake.hooks[route] = fold
+    await drive.before(route, fold)
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (
         1,
         "",
         _refusal(drive, verb),
     )
-    assert drive.fake.count("delete") == 0
-    assert (drive.fake.read("f"), drive.fake.read("g/x")) == (
+    assert await drive.count("delete") == 0
+    assert (await drive.read("f"), await drive.read("g/x")) == (
         b"one\n",
         b"x\n",
     )
-    drive.drop("g")
+    await drive.drop("g")
     await _refused_until_read(ws, "/dbx/g")
 
 
@@ -719,7 +780,7 @@ async def test_a_dropbox_source_gone_before_the_retry_is_named(
 ):
     ws = workspace()
     await _run(ws, "cat /dbx/g")
-    drive.fake.hooks["delete"] = lambda: drive.drop("f")
+    await drive.before("delete", lambda: drive.drop("f"))
     missing = {
         "cp": "cp: cannot open '/dbx/f' for reading",
         "mv": "mv: cannot move '/dbx/f' to '/dbx/g'",
@@ -729,7 +790,7 @@ async def test_a_dropbox_source_gone_before_the_retry_is_named(
         "",
         f"{missing}: No such file or directory\n",
     )
-    assert drive.fake.count("delete") == 1
+    assert await drive.count("delete") == 1
 
 
 @pytest.mark.asyncio
@@ -740,18 +801,18 @@ async def test_an_unread_dropbox_destination_retaken_is_refused_once(
 ):
     ws = workspace()
 
-    def take_name_after_the_clear() -> None:
-        drive.fake.hooks[route] = lambda: drive.put("g", b"new\n")
+    async def take_name_after_the_clear() -> None:
+        await drive.before(route, lambda: drive.put("g", b"new\n"))
 
-    drive.fake.hooks["delete"] = take_name_after_the_clear
+    await drive.before("delete", take_name_after_the_clear)
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (
         1,
         "",
         _refusal(drive, verb),
     )
-    assert drive.fake.read("g") == b"new\n"
+    assert await drive.read("g") == b"new\n"
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (0, "", "")
-    assert drive.fake.read("g") == b"one\n"
+    assert await drive.read("g") == b"one\n"
 
 
 @pytest.mark.asyncio
@@ -761,12 +822,12 @@ async def test_a_read_past_an_outdated_listing_keeps_the_version(
 ):
     ws = workspace()
     await _run(ws, "ls /dbx")
-    drive.put("n", b"v1\n")
+    await drive.put("n", b"v1\n")
     assert await _run(ws, "cat /dbx/n") == (0, "v1\n", "")
-    drive.put("n", b"theirs\n")
+    await drive.put("n", b"theirs\n")
     code, _, err = await _run(ws, "echo mine > /dbx/n")
     assert (code, err) == (1, f"bash: line 1: /dbx/n: {STALE}\n")
-    assert drive.fake.read("n") == b"theirs\n"
+    assert await drive.read("n") == b"theirs\n"
 
 
 @pytest.mark.asyncio
@@ -775,10 +836,10 @@ async def test_an_append_keeps_a_file_created_after_the_listing(
 ):
     ws = workspace(WritePolicy.UNCONDITIONAL)
     await _run(ws, f"ls {drive.root}")
-    drive.put("n", b"v1\n")
+    await drive.put("n", b"v1\n")
     code, _, err = await _run(ws, f"echo x >> {drive.root}/n")
     assert (code, err) == (0, "")
-    assert drive.fake.read("n") == b"v1\nx\n"
+    assert await drive.read("n") == b"v1\nx\n"
 
 
 @pytest.mark.asyncio
@@ -795,18 +856,18 @@ async def test_failed_stream_rereads_keep_the_refused_session_version(
         await a.vfs.write(path, b"mine\n")
     for _ in range(2):
         await ws.cache.clear()
-        drive.fake.hooks[drive.download] = _fail
-        with pytest.raises(Exception, match="500|injected server error"):
+        await drive.fail_next(drive.download)
+        with pytest.raises(Exception, match="500"):
             stream = await a.vfs.read(path, stream=True)
             async for chunk in stream:
                 pytest.fail(f"failed download returned bytes: {chunk!r}")
         with pytest.raises(StaleWriteError):
             await a.vfs.write(path, b"mine\n")
-        assert drive.fake.read("f") == peer
+        assert await drive.read("f") == peer
     stream = await a.vfs.read(path, stream=True)
     assert b"".join([chunk async for chunk in stream]) == peer
     await a.vfs.write(path, b"mine\n")
-    assert drive.fake.read("f") == b"mine\n"
+    assert await drive.read("f") == b"mine\n"
 
 
 @pytest.mark.asyncio
@@ -821,8 +882,8 @@ async def test_completed_empty_box_reread_without_sha1_releases_old_version(
     a = await ws.session("a")
     path = "/box/f"
     await a.vfs.read(path)
-    drive.put("f", b"")
-    drive.box.unhashed.add(drive.box.id_of("f"))
+    await drive.put("f", b"")
+    await drive.box.unhash(await drive.box.id_of("f"))
     with pytest.raises(StaleWriteError):
         await a.vfs.write(path, b"mine\n")
     if buffered:
@@ -837,7 +898,7 @@ async def test_completed_empty_box_reread_without_sha1_releases_old_version(
         content = await a.vfs.read(path)
     assert content == b""
     await a.vfs.write(path, b"mine\n")
-    assert drive.fake.read("f") == b"mine\n"
+    assert await drive.read("f") == b"mine\n"
 
 
 @pytest.mark.asyncio
@@ -872,7 +933,7 @@ async def test_a_pending_parallel_read_cannot_hide_a_completed_observation(
         await b.vfs.write("/box/f", b"peer\n")
         with pytest.raises(StaleWriteError):
             await a.vfs.write("/box/f", b"mine\n")
-        assert drive.fake.read("f") == b"peer\n"
+        assert await drive.read("f") == b"peer\n"
     finally:
         for event in release:
             event.set()
@@ -912,7 +973,7 @@ async def test_a_denied_reread_cannot_advance_the_session_version(
         await a.vfs.read(path, stream=streamed)
     with pytest.raises(StaleWriteError):
         await a.vfs.write(path, b"mine\n")
-    assert drive.fake.read("f") == b"peer\n"
+    assert await drive.read("f") == b"peer\n"
     policy.enabled = False
     assert await a.vfs.read(path) == b"peer\n"
     await a.vfs.write(path, b"mine\n")
@@ -930,10 +991,10 @@ async def test_a_completed_write_keeps_its_version_when_its_result_is_denied(
     ws.policies.add(policy)
     with pytest.raises(PermissionError):
         await a.vfs.write(path, b"first\n")
-    assert drive.fake.read("f") == b"first\n"
+    assert await drive.read("f") == b"first\n"
     policy.enabled = False
     await a.vfs.write(path, b"second\n")
-    assert drive.fake.read("f") == b"second\n"
+    assert await drive.read("f") == b"second\n"
 
 
 @pytest.mark.asyncio
@@ -958,9 +1019,9 @@ async def test_a_partial_box_stream_keeps_its_previous_basis(
             yield chunk[7:]
 
     monkeypatch.setattr(box_read, "download_file_stream", split)
-    before = drive.fake.count(drive.download)
+    before = await drive.count(drive.download)
     source = await a.vfs.read(path, stream=True)
-    assert drive.fake.count(drive.download) - before == (0 if warm else 1)
+    assert await drive.count(drive.download) - before == (0 if warm else 1)
     try:
         if finish == "drained" or (warm and finish == "closed"):
             if finish == "drained":
@@ -969,14 +1030,14 @@ async def test_a_partial_box_stream_keeps_its_previous_basis(
                 assert await anext(source) == peer
                 await source.aclose()
             await a.vfs.write(path, b"mine\n")
-            assert drive.fake.read("f") == b"mine\n"
+            assert await drive.read("f") == b"mine\n"
         else:
             if finish == "closed":
                 assert await anext(source) == b"prefix\n"
             await source.aclose()
             with pytest.raises(StaleWriteError):
                 await a.vfs.write(path, b"mine\n")
-            assert drive.fake.read("f") == peer
+            assert await drive.read("f") == peer
     finally:
         await source.aclose()
 
@@ -1004,14 +1065,15 @@ async def test_a_box_range_needs_delivered_bytes_and_a_token_to_change_basis(
     path, peer = "/box/f", b"prefix\nunread peer tail\n"
     await a.vfs.read(path)
     if not known:
-        drive.box.unhashed.add(drive.box.id_of("f"))
+        await drive.box.unhash(await drive.box.id_of("f"))
+        await drive.box.run.record_requests()
     await b.vfs.write(path, peer)
     if not warm:
         await ws.cache.clear()
-    before = drive.fake.count(drive.download)
+    before = await drive.count(drive.download)
     got = await a.vfs.read(path, offset=offset, size=size)
     assert got == peer[offset : None if size is None else offset + size]
-    assert drive.fake.count(drive.download) - before == (
+    assert await drive.count(drive.download) - before == (
         0 if warm or size == 0 else 1
     )
     if warm and known and got:
@@ -1020,14 +1082,14 @@ async def test_a_box_range_needs_delivered_bytes_and_a_token_to_change_basis(
         await b.vfs.write(path, b"new peer\n")
         with pytest.raises(StaleWriteError):
             await a.vfs.write(path, b"again\n")
-        assert drive.fake.read("f") == b"new peer\n"
+        assert await drive.read("f") == b"new peer\n"
     else:
         with pytest.raises(StaleWriteError):
             await a.vfs.write(path, b"mine\n")
-        assert drive.fake.read("f") == peer
+        assert await drive.read("f") == peer
         assert await a.vfs.read(path) == peer
         await a.vfs.write(path, b"mine\n")
-        assert drive.fake.read("f") == b"mine\n"
+        assert await drive.read("f") == b"mine\n"
 
 
 @pytest.mark.asyncio
@@ -1047,10 +1109,10 @@ async def test_a_dropbox_stream_observes_its_token_only_after_delivery(
     try:
         with pytest.raises(StaleWriteError):
             await a.vfs.write(path, b"not seen\n")
-        assert drive.fake.read("f") == peer
+        assert await drive.read("f") == peer
         assert await anext(source) == peer
         await source.aclose()
         await a.vfs.write(path, b"mine\n")
-        assert drive.fake.read("f") == b"mine\n"
+        assert await drive.read("f") == b"mine\n"
     finally:
         await source.aclose()

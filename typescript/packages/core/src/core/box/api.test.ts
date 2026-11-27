@@ -55,6 +55,11 @@ import {
 const ITEMS_ROUTE = '/2.0/folders/:folder_id/items'
 const SEARCH_ROUTE = '/2.0/search'
 const EVENTS_ROUTE = '/2.0/events'
+// Box spells a stream position as a JSON number near 1.15e18, past the 2**53
+// a JavaScript number holds exactly; the kit parses a plan in JavaScript, so
+// an answer carrying one is sent as written.
+const POSITION = '1152922976252290886'
+const ENC = new TextEncoder()
 
 let origin: string
 let account: BoxAccount
@@ -176,14 +181,23 @@ describe('box events api', () => {
     await account.run.recordRequests()
     expect(await eventsNow(tm(), 'changes')).toBe('1')
     expect((await account.run.params('GET', EVENTS_ROUTE))[0]?.stream_position).toBe('now')
-    // Box spells a position as a JSON number. The kit parses JSON in
-    // JavaScript, so the largest it carries exactly is 2**53 - 1.
-    await account.run.answerNext('GET', EVENTS_ROUTE, 200, {
-      chunk_size: 0,
-      next_stream_position: 9007199254740991,
-      entries: [],
-    })
-    expect(await eventsNow(tm(), 'changes')).toBe('9007199254740991')
+    const head = `{"chunk_size": 0, "next_stream_position": ${POSITION}, "entries": []}`
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, ENC.encode(head))
+    expect(await eventsNow(tm(), 'changes')).toBe(POSITION)
+  })
+
+  // Twin of test_events_since_sends_back_a_position_as_box_wrote_it: a
+  // position read into a number comes back as a neighbour, and the next read
+  // from it repeats or skips events.
+  it('sends back a position as Box wrote it', async () => {
+    const page = `{"chunk_size": 1, "next_stream_position": ${POSITION}, "entries": [{"event_id": "a"}]}`
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, ENC.encode(page))
+    await account.run.answerNext('GET', EVENTS_ROUTE, 200, { chunk_size: 0, entries: [] })
+    await account.run.recordRequests()
+    const found = await eventsSince(tm(), '10', 'changes')
+    expect([found.entries.map((e) => e.event_id), found.position]).toEqual([['a'], POSITION])
+    const sent = await account.run.params('GET', EVENTS_ROUTE)
+    expect(sent.map((p) => p.stream_position)).toEqual(['10', POSITION])
   })
 
   it('asks OPTIONS /events for the long-poll server', async () => {
