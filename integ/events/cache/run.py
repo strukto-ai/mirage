@@ -8,6 +8,7 @@ from pathlib import Path
 import aioboto3
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import IndexConfig
 from mirage.events import EventHub, RAMEventQueue
 from mirage.types import FileChangeKind, FileEvent, PathSpec
@@ -59,9 +60,12 @@ async def run_case(mount: str, case: dict) -> None:
         path_style=True,
         key_prefix=prefix,
     )
+    # The cases check that an event drops what the caches kept, so the
+    # workspace keeps file content as well as listings.
     ws = Workspace(
         {mount: S3VFS(config)},
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
         index=IndexConfig(ttl=600),
     )
     queue = ArmedQueue(PathSpec.from_str_path(root))

@@ -95,7 +95,9 @@ async function runCase(mount: string, test: Case): Promise<void> {
         keyPrefix: prefix,
       }),
     },
-    { mode: MountMode.WRITE, index: { type: 'ram', ttl: 600 } },
+    // The cases check that an event drops what the caches kept, so the
+    // workspace keeps file content as well as listings.
+    { mode: MountMode.WRITE, cache: {}, index: { type: 'ram', ttl: 600 } },
   )
   const queue = new ArmedQueue(PathSpec.fromStrPath(root))
   ws.attachEventRuntime(new EventHub(ws.registry, () => queue))

@@ -2287,6 +2287,9 @@
               }
             }
           }
+        },
+        "cache": {
+          "type": "ram"
         }
       },
       "steps": [
@@ -2431,6 +2434,9 @@
               }
             }
           }
+        },
+        "cache": {
+          "type": "ram"
         }
       },
       "steps": [
@@ -4752,7 +4758,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {
@@ -5877,7 +5886,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {
@@ -6084,7 +6096,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {

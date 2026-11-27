@@ -90,6 +90,9 @@ interface Case {
     processes?: WorkspaceOptions['processes']
     machines?: Record<string, Record<string, unknown>>
     clis?: Record<string, { cli: string; config?: Record<string, unknown> }>
+    // The workspace's file cache, as `cache:` in a config; a case whose steps
+    // read what a cache kept names one, as a workspace keeps none unasked.
+    cache?: { type: 'ram'; limit?: string | number }
   }
   steps: Step[]
 }
@@ -895,6 +898,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
       ? { processes: testCase.settings.processes }
       : {}),
     ...(testCase.settings.machines !== undefined ? { machines: testCase.settings.machines } : {}),
+    ...(testCase.settings.cache !== undefined ? { cache: testCase.settings.cache } : {}),
   })
   for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {
     const config = block.config === undefined ? null : normalizeFields(block.config)

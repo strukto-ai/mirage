@@ -902,6 +902,9 @@ async function main(): Promise<void> {
       if (target.max_memory !== undefined) config.max_memory = target.max_memory
       // The corpus's python3 cases run on Monty, named since no machine runs it by default.
       config.machines = { py: { provider: 'in_process', runtime: 'monty' } }
+      // The corpus pins what a cache serves, and a workspace keeps no file
+      // content unless its config asks, so every target asks, as the runners'.
+      config.cache = { type: 'ram' }
       const id = `integ-${target.id}-${runId()}`
       const ws = cloudflareWorkspace(base, id)
       const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
