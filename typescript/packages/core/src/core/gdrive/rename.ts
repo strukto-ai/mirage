@@ -34,9 +34,10 @@ export const rename = eaccesOnDenied(async function (
   const entry = await liveRow(accessor, src, handed.entry)
   if (entry === null) throw enoent(src)
   const dstEntry = await liveRow(accessor, dst, handed.dstEntry)
+  let dstToDeleteId: string | null = null
   if (dstEntry !== null) {
     // GNU mv overwrites the destination: drop a conflicting file (or empty
-    // folder) before the move. A non-empty folder conflict is mv's
+    // folder) after the move succeeds. A non-empty folder conflict is mv's
     // "Directory not empty", mirroring the msgraph rename_replace.
     if (dstEntry.type === FileType.DIRECTORY) {
       const driveId = dstEntry.extra.drive_id
@@ -47,7 +48,10 @@ export const rename = eaccesOnDenied(async function (
       })
       if (children.length > 0) throw enotempty(dst)
     }
-    await drive.deleteFile(dstEntry.extra.file_id as string)
+    const dstFileId = dstEntry.extra.file_id as string
+    if (dstFileId !== (entry.extra.file_id as string)) {
+      dstToDeleteId = dstFileId
+    }
   }
   const [srcParentId] = await parentFolder(accessor, src, handed.parent)
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
@@ -66,6 +70,9 @@ export const rename = eaccesOnDenied(async function (
     body: modified ? { name, modifiedTime: modified } : { name },
     ...(move ? { addParents: dstParentId, removeParents: srcParentId } : {}),
   })
+  if (dstToDeleteId !== null) {
+    await drive.deleteFile(dstToDeleteId)
+  }
   const moved: unknown = item
   return typeof moved === 'object' && moved !== null ? statFromItem(item) : null
 })

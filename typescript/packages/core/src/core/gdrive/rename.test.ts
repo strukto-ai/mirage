@@ -113,4 +113,38 @@ describe('gdrive rename', () => {
     await renamed('/Report.gdoc.json', '/Plan.gdoc.json')
     expect((await account.item(id)).name).toBe('Plan')
   })
+
+  it('failure preserves destination file', async () => {
+    const src = fake.add('src.txt', 'root', undefined, ENC.encode('src'))
+    const dst = fake.add('dst.txt', 'root', undefined, ENC.encode('dst'))
+    fake.patchFile = async () => {
+      throw new Error('patch failed')
+    }
+    await expect(
+      rename(
+        accessor,
+        spec('/src.txt'),
+        spec('/dst.txt'),
+        await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
+      ),
+    ).rejects.toThrow('patch failed')
+    expect(fake.items.get(dst)?.content).toEqual(ENC.encode('dst'))
+    expect(fake.items.get(src)?.content).toEqual(ENC.encode('src'))
+  })
+
+  it('same drive id does not delete file', async () => {
+    const folderA = fake.folder('a')
+    const folderB = fake.folder('b')
+    const fileId = fake.add('f.txt', folderA, undefined, ENC.encode('data'))
+    fake.items.get(fileId)?.parents.push(folderB)
+
+    await rename(
+      accessor,
+      spec('/a/f.txt'),
+      spec('/b/f.txt'),
+      await handedAt(readdir, accessor, spec('/a/f.txt'), spec('/b/f.txt')),
+    )
+    expect(fake.items.has(fileId)).toBe(true)
+    expect(fake.items.get(fileId)?.content).toEqual(ENC.encode('data'))
+  })
 })

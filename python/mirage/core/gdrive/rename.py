@@ -51,9 +51,10 @@ async def rename(
     if entry is None:
         raise enoent(src.virtual)
     dst_entry = await live_row(accessor, dst, dst_entry)
+    dst_to_delete_id: str | None = None
     if dst_entry is not None:
         # GNU mv overwrites the destination: drop a conflicting file (or
-        # empty folder) before the move. A non-empty folder conflict is mv's
+        # empty folder) after the move succeeds. A non-empty folder conflict is mv's
         # "Directory not empty", mirroring the msgraph rename_replace.
         if dst_entry.type is FileType.DIRECTORY:
             children = await drive.list_files(
@@ -63,7 +64,8 @@ async def rename(
             )
             if children:
                 raise enotempty(dst)
-        await drive.delete_file(dst_entry.extra["file_id"])
+        if dst_entry.extra.get("file_id") != entry.extra.get("file_id"):
+            dst_to_delete_id = dst_entry.extra["file_id"]
     src_parent_id, _ = await parent_folder(accessor, src, parent)
     dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
     name = drive_target_name(
@@ -84,4 +86,6 @@ async def rename(
         add_parents=add_parents,
         remove_parents=remove_parents,
     )
+    if dst_to_delete_id is not None:
+        await drive.delete_file(dst_to_delete_id)
     return stat_from_item(item) if isinstance(item, dict) else None

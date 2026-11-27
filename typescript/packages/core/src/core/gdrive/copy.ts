@@ -72,13 +72,22 @@ export const copy = eaccesOnDenied(async function (
     return made
   }
   if (dstEntry !== null && dstEntry.type === FileType.DIRECTORY) throw eisdir(dst)
-  if (dstEntry !== null) await drive.deleteFile(dstEntry.extra.file_id as string)
+  let dstToDeleteId: string | null = null
+  if (dstEntry !== null) {
+    const dstFileId = dstEntry.extra.file_id as string
+    if (dstFileId !== srcNode.id) {
+      dstToDeleteId = dstFileId
+    }
+  }
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
   const item = await drive.copyFile(
     srcNode.id,
     driveTargetName(basename, srcNode.mimeType),
     dstParentId,
   )
+  if (dstToDeleteId !== null) {
+    await drive.deleteFile(dstToDeleteId)
+  }
   const copied: unknown = item
   return typeof copied === 'object' && copied !== null ? statFromItem(item) : null
 })

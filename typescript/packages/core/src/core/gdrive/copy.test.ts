@@ -108,4 +108,23 @@ describe('gdrive copy', () => {
   it('missing src raises ENOENT', async () => {
     await expect(copied('/missing.txt', '/dst.txt')).rejects.toMatchObject({ code: 'ENOENT' })
   })
+
+  it('failure preserves destination file', async () => {
+    const src = fake.add('src.txt', 'root', undefined, ENC.encode('src'))
+    const dst = fake.add('dst.txt', 'root', undefined, ENC.encode('dst'))
+    fake.copyFile = async () => {
+      throw new Error('copy failed')
+    }
+    await expect(
+      copy(
+        accessor,
+        spec('/src.txt'),
+        spec('/dst.txt'),
+        undefined,
+        await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
+      ),
+    ).rejects.toThrow('copy failed')
+    expect(fake.items.get(dst)?.content).toEqual(ENC.encode('dst'))
+    expect(fake.items.get(src)?.content).toEqual(ENC.encode('src'))
+  })
 })
