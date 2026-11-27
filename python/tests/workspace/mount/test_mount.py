@@ -874,3 +874,67 @@ async def test_a_lookup_finds_a_file_a_listing_landing_beside_it_names(
 
     monkeypatch.setattr(mount.index, "list_dir", racing)
     assert await mount.call("read", "/d/w/a") == b"x"
+
+
+class _FailingRAM(RAMVFS):
+    """A RAM mount whose read of one file fails."""
+
+    async def read(self, path, offset=0, size=None):
+        if path.virtual.endswith("/bad"):
+            raise OSError(errno.EIO, "unreadable", path.virtual)
+        return await super().read(path, offset, size)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_without_one_on_the_vfs_reads_each_file():
+    # The VFS reads no batch, so each file is read as its own read would
+    # read it; one longer than the limit, and one whose read fails, is left
+    # for that read.
+    vfs = _FailingRAM()
+    vfs._store.files.update(
+        {"/a": b"a\n", "/big": b"x" * 9, "/bad": b"b\n", "/e": b""}
+    )
+    mount = MountEntry("/d/", vfs)
+    assert not vfs.supports("read_many")
+    read = await mount.read_many(["/d/a", "/d/big", "/d/bad", "/d/e"], 8)
+    assert read == {"/d/a": b"a\n", "/d/e": b""}
+
+
+class _Streamed(BaseVFS):
+    """Answers a whole read as a stream, 16 bytes in four chunks."""
+
+    name = "streamed"
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        for _ in range(4):
+            yield b"x" * 4
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
+    # The files a batch reads must fit together, beside what the batch
+    # already holds, in what the workspace has left, as one file must for
+    # its own read, so a read of one left out meets the refusal; what a RAM
+    # store holds is already counted.
+    ram = RAMVFS()
+    ram._store.files.update({"/f": b"x" * 16, "/g": b"x" * 16})
+    one = MemoryBudget(8, lambda: 0)
+    both = MemoryBudget(24, lambda: 0)
+    built = MountEntry("/b/", _Built())
+    streamed = MountEntry("/s/", _Streamed())
+    stored = MountEntry("/r/", ram)
+    assert await run_with_memory(one, built.read_many(["/b/f"], 64)) == {}
+    assert await run_with_memory(one, streamed.read_many(["/s/f"], 64)) == {}
+    assert await run_with_memory(
+        both, built.read_many(["/b/f", "/b/g"], 64)
+    ) == {"/b/f": b"x" * 16}
+    assert await run_with_memory(both, built.read_many(["/b/f"], 64, 16)) == {}
+    assert await run_with_memory(
+        both, streamed.read_many(["/s/f", "/s/g"], 64)
+    ) == {"/s/f": b"x" * 16}
+    assert await run_with_memory(
+        one, stored.read_many(["/r/f", "/r/g"], 64)
+    ) == {"/r/f": b"x" * 16, "/r/g": b"x" * 16}
+    assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}

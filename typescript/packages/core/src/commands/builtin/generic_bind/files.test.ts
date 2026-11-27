@@ -17,12 +17,15 @@ import { currentCaller, bindCaller, setMountGate } from '../../../context/sessio
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
 import { yieldBytes } from '../../../io/stream.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, OpReport } from '../../../io/types.ts'
+import { RecentChanges } from '../../../mount/changes.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { BatchedRAM, readers } from '../../../test-utils.ts'
+import { BatchedRAM, HeldRAM, readers } from '../../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { ManualClock } from '../../../utils/clock.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { type HeldFile, ReadBatch } from '../../../workspace/dispatcher/read_batch.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { MountRow } from '../../../workspace/types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -33,6 +36,7 @@ import {
   dirAwareStat,
   dirAwareStream,
   fileSize,
+  ReadAhead,
   resolveOrEmpty,
   withReading,
 } from './files.ts'
@@ -314,6 +318,22 @@ it('warms the operands after a glob read', async () => {
   expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8)])
 })
 
+// Twin of test_a_glob_read_on_a_local_mount_is_answered_from_held_batches: the
+// first batch only learns that the mount holds its data, so the first operand
+// is read on its own; the read after it reads ahead from itself, every file the
+// batch has room for.
+it('answers a glob read on a local mount from held batches', async () => {
+  const vfs = new HeldRAM()
+  const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
+  for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs })
+  open.push(ws)
+  const out = await ws.shell('cat /r/f*')
+  expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
+  expect(vfs.reads).toEqual(['/r/f00'])
+  expect(vfs.batches).toEqual([names.slice(1).map((name) => `/r${name}`)])
+})
+
 it.each([
   [
     'grep -rc x /r/d',
@@ -332,6 +352,102 @@ it.each([
   await ws.shell(line)
   expect(vfs.reads).toEqual(reads.map((n) => `/r/d/f${n}`))
   expect(vfs.batches).toEqual(batches.map((b) => b.map((n) => `/r/d/f${n}`)))
+})
+
+// Twin of test_a_walk_on_a_local_mount_holds_ahead_while_it_reads_what_it_lists:
+// the first batch, one file after two read in a row, only learns that the
+// mount holds its data; the read that lands on it reads ahead from itself, and
+// the pace doubles on each read a batch answers.
+it.each([
+  [
+    'grep -rc x /r/d',
+    ['00', '01'],
+    [
+      ['02', '03'],
+      ['04', '05', '06', '07'],
+      ['08', '09', '10', '11'],
+    ],
+  ],
+  ["grep -rc --include='f0[05]' x /r/d", ['00', '05'], []],
+])(
+  'holds ahead of a walk on a local mount only while it reads what it lists: %s',
+  async (line, reads, batches) => {
+    const held = new HeldRAM()
+    const printed: string[] = []
+    for (const vfs of [held, new RAMVFS()]) {
+      vfs.store.dirs.add('/d')
+      for (let i = 0; i < 12; i++) {
+        vfs.store.files.set(`/d/f${String(i).padStart(2, '0')}`, ENC.encode('x\n'))
+      }
+      const ws = new Workspace({ '/r': vfs })
+      open.push(ws)
+      printed.push(DEC.decode((await ws.shell(line)).stdout))
+    }
+    expect(printed[0]).toBe(printed[1])
+    expect(held.reads).toEqual(reads.map((n) => `/r/d/f${n}`))
+    expect(held.batches).toEqual(batches.map((b) => b.map((n) => `/r/d/f${n}`)))
+  },
+)
+
+// Twin of test_a_walk_back_in_a_parent_directory_reads_each_file_once: b/
+// sorts between a and c, so the walk reads a, then b/'s files, then comes
+// back for c and its neighbours; the batch sent before the mount was known to
+// hold its data held nothing, and each file is read once.
+it('reads each file once on a walk back in a parent directory', async () => {
+  const vfs = new HeldRAM()
+  vfs.store.dirs.add('/d')
+  vfs.store.dirs.add('/d/b')
+  for (const name of ['a', 'a2', 'c', 'c2', 'c3'])
+    vfs.store.files.set(`/d/${name}`, ENC.encode('x\n'))
+  for (let i = 0; i < 6; i++) vfs.store.files.set(`/d/b/f${String(i)}`, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs })
+  open.push(ws)
+  const out = DEC.decode((await ws.shell('grep -rc x /r/d')).stdout)
+  expect(out.split(':1\n').length - 1).toBe(11)
+  const read = [...vfs.reads, ...vfs.batches.flat()]
+  expect(new Set(read).size).toBe(read.length)
+  expect(read).toHaveLength(11)
+})
+
+// Twin of test_a_read_passing_a_report_is_left_to_the_dispatcher: the read of
+// b lands on a batch that holds it, but it passes a report, which only the
+// dispatcher stamps, so the dispatcher reads b; c, read without one, is
+// answered from the batch.
+it('leaves a read passing a report to the dispatcher', async () => {
+  const changes = new RecentChanges(new ManualClock(), 1)
+  const reads: [string, OpReport | undefined][] = []
+  const inner: DispatchFn = (name, p, _args, kwargs = {}, report) => {
+    if (name === 'read_many') {
+      const held = new Map<string, HeldFile>()
+      if (kwargs.hold === true) {
+        for (const spec of [p, ...(kwargs.paths as PathSpec[])]) {
+          held.set(spec.virtual, { followed: spec.virtual, data: ENC.encode('held') })
+        }
+      }
+      const batch = new ReadBatch({ holds: true, held, changes, count: changes.count })
+      return Promise.resolve([batch, new IOResult()])
+    }
+    report?.served()
+    reads.push([p.virtual, report])
+    return Promise.resolve([ENC.encode('read'), new IOResult()])
+  }
+  const [a, b, c] = ['a', 'b', 'c'].map((name) => at(`/r/${name}`)) as [
+    PathSpec,
+    PathSpec,
+    PathSpec,
+  ]
+  const ahead = new ReadAhead(inner, [a, b, c])
+  const report = new OpReport()
+  const text = async (answer: Promise<[unknown, IOResult]>): Promise<string> =>
+    DEC.decode((await answer)[0] as Uint8Array)
+  expect(await text(ahead.dispatch('read', a))).toBe('read')
+  expect(await text(ahead.dispatch('read', b, [], {}, report))).toBe('read')
+  expect(await text(ahead.dispatch('read', c))).toBe('held')
+  expect(reads).toEqual([
+    ['/r/a', undefined],
+    ['/r/b', report],
+  ])
+  expect(report.completed).toBe(true)
 })
 
 // A RAM mount noting each folder its tree read is asked for. Twin of

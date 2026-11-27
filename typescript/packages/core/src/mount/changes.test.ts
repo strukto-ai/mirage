@@ -91,4 +91,53 @@ describe('RecentChanges', () => {
     await changes.waitOut(SERVED, 'box')
     expect(clock.monotonic()).toBeCloseTo(10.99)
   })
+
+  // Twin of test_a_change_since_the_count_reaches_the_file_it_overlaps.
+  it.each([
+    ['/data/f', true],
+    ['/data', true],
+    ['/', true],
+    ['/data/f/x', true],
+    ['/data/g', false],
+    ['/data/f2', false],
+  ])('counts a change at %s since the count as reaching /data/f: %s', (path, reached) => {
+    const changes = new RecentChanges(new ManualClock(), 1)
+    changes.note('/elsewhere')
+    const count = changes.count
+    changes.note(path)
+    expect(changes.reachedSince(count, ['/data/f'])).toBe(reached)
+  })
+
+  // Twin of test_a_change_before_the_count_reaches_nothing_read_after_it.
+  it('counts no change before the count as reaching what was read after it', () => {
+    const changes = new RecentChanges(new ManualClock(), 1)
+    changes.note('/data/f')
+    const count = changes.count
+    expect(changes.reachedSince(count, ['/data/f'])).toBe(false)
+    changes.note('/data/g')
+    expect(changes.reachedSince(count, ['/data/f'])).toBe(false)
+  })
+
+  // Twin of test_either_spelling_of_a_read_file_is_reached: a file read
+  // through a link is reached by a change to the name typed and to the one the
+  // link leads to.
+  it('reaches either spelling of a file read', () => {
+    const changes = new RecentChanges(new ManualClock(), 1)
+    const count = changes.count
+    changes.note('/data/real')
+    expect(changes.reachedSince(count, ['/data/link', '/data/real'])).toBe(true)
+  })
+
+  // Twin of test_a_forgotten_change_counts_as_reaching_every_file: past the
+  // window nothing is left to tell where a change landed.
+  it('counts a forgotten change as reaching every file', () => {
+    const clock = new ManualClock()
+    const changes = new RecentChanges(clock, 1)
+    const count = changes.count
+    changes.note('/data/g')
+    clock.advance(1)
+    changes.note('/data/h')
+    expect(changes.reachedSince(count, ['/data/f'])).toBe(true)
+    expect(changes.reachedSince(changes.count, ['/data/f'])).toBe(false)
+  })
 })

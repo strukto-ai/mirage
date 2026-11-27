@@ -87,3 +87,52 @@ async def test_a_change_made_before_its_mount_began_is_not_waited_out():
     clock.advance(0.25)
     await changes.wait_out({"/data": changes.now()}, "box")
     assert clock.monotonic() == 0.25
+
+
+@pytest.mark.parametrize(
+    ("path", "reached"),
+    [
+        ("/data/f", True),
+        ("/data", True),
+        ("/", True),
+        ("/data/f/x", True),
+        ("/data/g", False),
+        ("/data/f2", False),
+    ],
+)
+def test_a_change_since_the_count_reaches_the_file_it_overlaps(path, reached):
+    changes = RecentChanges(ManualClock(), 1)
+    changes.note("/elsewhere")
+    count = changes.count
+    changes.note(path)
+    assert changes.reached_since(count, ["/data/f"]) is reached
+
+
+def test_a_change_before_the_count_reaches_nothing_read_after_it():
+    changes = RecentChanges(ManualClock(), 1)
+    changes.note("/data/f")
+    count = changes.count
+    assert changes.reached_since(count, ["/data/f"]) is False
+    changes.note("/data/g")
+    assert changes.reached_since(count, ["/data/f"]) is False
+
+
+def test_either_spelling_of_a_read_file_is_reached():
+    # A file read through a link is reached by a change to the name typed
+    # and to the one the link leads to.
+    changes = RecentChanges(ManualClock(), 1)
+    count = changes.count
+    changes.note("/data/real")
+    assert changes.reached_since(count, ["/data/link", "/data/real"])
+
+
+def test_a_forgotten_change_counts_as_reaching_every_file():
+    # Past the window nothing is left to tell where a change landed.
+    clock = ManualClock()
+    changes = RecentChanges(clock, 1)
+    count = changes.count
+    changes.note("/data/g")
+    clock.advance(1)
+    changes.note("/data/h")
+    assert changes.reached_since(count, ["/data/f"]) is True
+    assert changes.reached_since(changes.count, ["/data/f"]) is False

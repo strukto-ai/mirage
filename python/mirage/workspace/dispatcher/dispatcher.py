@@ -162,7 +162,6 @@ from mirage.workspace.dispatcher.constants import (
     NATIVE_WALK_OPS,
     NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
-    READ_AHEAD_BYTES,
     READ_SHORTCUT_OPS,
     READ_STAND_IN_OPS,
     SERIAL_WRITE_OPS,
@@ -170,6 +169,11 @@ from mirage.workspace.dispatcher.constants import (
     STAMP_WRITE_OPS,
     UNLINKING_OPS,
     XATTR_OPS,
+)
+from mirage.workspace.dispatcher.read_batch import (
+    READ_AHEAD_BYTES,
+    HeldFile,
+    ReadBatch,
 )
 from mirage.workspace.dispatcher.reader import sees
 from mirage.workspace.dispatcher.stream import (
@@ -1069,11 +1073,12 @@ class Dispatcher:
             if name in POLICY_WRITE_OPS:
                 changes = self._namespace.registry.changes
                 dst = kwargs.get("dst")
-                for changed in (
-                    (path, dst) if isinstance(dst, PathSpec) else (path,)
-                ):
-                    changes.note(changed.virtual)
-                    changes.note(self._spelled(changed))
+                changed = [] if name in COPY_OPS else [path]
+                if isinstance(dst, PathSpec):
+                    changed.append(dst)
+                for spec in changed:
+                    changes.note(spec.virtual)
+                    changes.note(self._spelled(spec))
             if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
 
@@ -1407,12 +1412,13 @@ class Dispatcher:
             else caller.rule_gate
         )
         if name == "read_many":
-            kept = await self._read_many(
+            batch = await self._read_many(
                 [path, *kwargs.pop("paths", ())],
                 caller,
                 kwargs.pop("stats", {}),
+                kwargs.pop("hold", True),
             )
-            return kept, IOResult()
+            return batch, IOResult()
         scopes = kwargs.pop("scopes", ()) if name == "search" else ()
         if scopes:
             hits = await self._search_together(
@@ -1808,49 +1814,64 @@ class Dispatcher:
         typed: list[PathSpec],
         caller: Caller,
         stats: Mapping[str, FileStat],
-    ) -> bool:
-        """Keep the small files ``typed`` names in the read cache, for the
-        reads a command is about to make of them; the answer is whether
-        any of them is on a mount this keeps reads for, so a caller warms
-        no more of a run that is not.
+        hold: bool,
+    ) -> ReadBatch:
+        """Read ahead the small files ``typed`` names, for the reads a
+        command is about to make of them.
 
-        Each read that follows still meets every check of its own and is
-        served what this kept, so nothing is fetched where a check could
-        refuse that read before its backend is asked: nothing in a dry
-        run or while a coded pre_vfs policy speaks for the session (the
-        rule a one-call walk meets in ``_declines``), and no path the
-        session hides or a path rule reaches. A file already kept, one a
-        renderer answers, one pinned to a revision and one on a mount
-        that keeps no reads or holds its data locally (read as fast when
-        asked) is passed over. A store that reads a batch
-        (``read_many``) is asked once for the rest of its files; any
-        other is asked for each file its listing, or the stat the caller
-        made of it, sizes within ``READ_AHEAD_BYTES``. A failure is logged
-        and dropped: the read that follows meets it itself.
+        On a mount that keeps reads this keeps them in the read cache, and
+        the answer's ``kept`` says it did, so a caller warms no more of a
+        run that keeps none. Each read that follows still meets every
+        check of its own and is served what this kept. On a mount that
+        holds its data locally (``local``) this reads them for the caller
+        instead, as ``_read_held`` says, and the answer holds the bytes;
+        unless ``hold`` is False, where it reads none and only answers
+        whether it would (``holds``), for a caller that does not know yet
+        whether its files are on such a mount and reads nothing ahead there
+        until it does.
+
+        Nothing is fetched where a check could refuse a read before its
+        backend is asked: nothing in a dry run or while a coded pre_vfs
+        policy speaks for the session (the rule a one-call walk meets in
+        ``_declines``), and no path the session hides or a path rule
+        reaches. A file already kept, one a renderer answers and one
+        pinned to a revision is passed over, and so is one on a mount that
+        holds its data locally and keeps reads too, whose read the read
+        cache answers. A store that reads a batch
+        (``read_many``) is asked once for the rest of its files; any other
+        is asked for each file its listing, or the stat the caller made of
+        it, sizes within ``READ_AHEAD_BYTES``. A failure is logged and
+        dropped: the read that follows meets it itself.
 
         Args:
             typed (list[PathSpec]): the files, as the caller named them.
             caller (Caller): who makes the reads.
             stats (Mapping[str, FileStat]): the caller's stats of them, by
                 path.
+            hold (bool): whether to read the files on a mount that holds
+                its data locally.
         """
-        if (
-            caller.explaining is not None
-            or await self._namespace.registry.policies.wants_for(
-                "pre_vfs",
-                _session_id(caller),
-            )
+        policies = self._namespace.registry.policies
+        if caller.explaining is not None or await policies.wants_for(
+            "pre_vfs",
+            _session_id(caller),
         ):
-            return False
+            return ReadBatch()
         await self._prepare(caller)
         gate = caller.rule_gate
+        changes = self._namespace.registry.changes
+        count = changes.count
+        links = self._namespace.symlink_targets()
+        judged = await policies.wants_for("post_vfs", _session_id(caller))
+        holdable = False
+        redirected = {
+            self._followed(file.where.virtual) for file, _ in caller.streamed
+        }
         batches: dict[
             str, tuple[MountEntry, CacheManager, list[PathSpec]]
         ] = {}
+        local: dict[str, tuple[MountEntry, list[tuple[PathSpec, _Call]]]] = {}
         for path in typed:
-            here = self._namespace.try_mount_for(path.virtual)
-            if here is not None and here.vfs.local:
-                continue
             try:
                 call = await self._walk("read", path, {}, None, None, caller)
                 self._follow(call)
@@ -1858,12 +1879,9 @@ class Dispatcher:
                 logger.debug("read-ahead passes over %s: %s", path, exc)
                 continue
             mount = self._namespace.try_mount_for(call.path.virtual)
-            manager = None if mount is None else self._filler(call, mount)
             if (
                 mount is None
-                or manager is None
                 or mount.retiring
-                or mount.vfs.local
                 or call.path.virtual in mount.revisions
                 or (
                     gate is not None
@@ -1874,11 +1892,43 @@ class Dispatcher:
                 )
             ):
                 continue
+            manager = self._filler(call, mount)
+            if mount.vfs.local:
+                if (
+                    not judged
+                    and manager is None
+                    and self._spelled(path) not in redirected
+                    and not self._table_answers("read", call.path.virtual, {})
+                    and not call.renders_read(mount)
+                    and mount.vfs.supports("read")
+                    and not mount.holds_live_pipe(call.path.virtual)
+                ):
+                    holdable = True
+                    if hold:
+                        local.setdefault(mount.prefix, (mount, []))[1].append(
+                            (path, call)
+                        )
+                continue
+            if manager is None:
+                continue
             batches.setdefault(mount.prefix, (mount, manager, []))[2].append(
                 call.path
             )
+        held: dict[str, HeldFile] = {}
+        for mount, pairs in local.values():
+            held_bytes = sum(len(file.data) for file in held.values())
+            held.update(await self._read_held(mount, pairs, stats, held_bytes))
+        batch = ReadBatch(
+            kept=bool(batches),
+            holds=holdable,
+            held=held,
+            changes=changes if held else None,
+            count=count,
+            links=links if held else None,
+            current_links=self._namespace.symlink_targets if held else None,
+        )
         if not batches:
-            return False
+            return batch
         scope = RecordingScope(
             active=not recording_active(),
             clock=self._namespace.registry.clock,
@@ -1944,7 +1994,88 @@ class Dispatcher:
         finally:
             reset_caller(token)
             scope.close()
-        return True
+        return batch
+
+    async def _read_held(
+        self,
+        mount: MountEntry,
+        pairs: list[tuple[PathSpec, _Call]],
+        stats: Mapping[str, FileStat],
+        held_bytes: int,
+    ) -> dict[str, HeldFile]:
+        """Read files on a mount that holds its data locally for the
+        caller, each past the checks its own read meets: admitted as that
+        read is, its answer completed through the same boundary.
+
+        A file the mount's index or the caller's stat does not size as a
+        file of at most ``READ_AHEAD_BYTES``, an empty one (whose read asks
+        whether a directory is there), one past the room the batch has
+        left, one the walk declines and one refused here is left to its
+        own read. The mount reads the rest in one call
+        (``MountEntry.read_many``), which observes its index once for all
+        of them.
+
+        Args:
+            mount (MountEntry): the mount, which holds its data locally.
+            pairs (list[tuple[PathSpec, _Call]]): each file as the caller
+                named it, with its walked and followed read.
+            stats (Mapping[str, FileStat]): the caller's stats of them, by
+                the path it named.
+            held_bytes (int): the bytes the batch already holds from the
+                mounts read before this one.
+        """
+        await mount.ensure_ready()
+        entries = await mount.index.get_many(
+            [call.path.virtual for _, call in pairs]
+        )
+        mark = declared(type(mount.vfs), "read") or CALLS["read"]
+        admitted: list[tuple[PathSpec, _Call, Boundary]] = []
+        room = READ_AHEAD_BYTES - held_bytes
+        for path, call in pairs:
+            row = entries.get(call.path.virtual) or stats.get(path.virtual)
+            if (
+                row is None
+                or row.type is not FileType.FILE
+                or not row.size
+                or row.size > room
+            ):
+                continue
+            try:
+                await self._refuse_cross_mount(call, mount)
+                if await self._declines(call):
+                    continue
+                boundary = await self._admit(call, mount, mark)
+            except Exception as exc:
+                logger.debug("read-ahead leaves %s to its read: %s", path, exc)
+                continue
+            room -= row.size
+            admitted.append((path, call, boundary))
+        if not admitted:
+            return {}
+        try:
+            read = await mount.read_many(
+                [call.path.virtual for _, call, _ in admitted],
+                READ_AHEAD_BYTES,
+                held_bytes,
+            )
+        except Exception as exc:
+            logger.debug("read-ahead on %s dropped: %s", mount.prefix, exc)
+            return {}
+        held: dict[str, HeldFile] = {}
+        for path, call, boundary in admitted:
+            data = read.get(call.path.virtual)
+            if not data:
+                continue
+            try:
+                answer = await boundary.complete(
+                    mark, call.path, False, self._filter(call, data)
+                )
+            except Exception as exc:
+                logger.debug("read-ahead leaves %s to its read: %s", path, exc)
+                continue
+            if isinstance(answer, bytes) and answer:
+                held[path.virtual] = HeldFile(call.path.virtual, answer)
+        return held
 
     async def _prepare(self, caller: Caller) -> None:
         """Load the namespace and run what a snapshot restore left owed.
@@ -2984,7 +3115,10 @@ class Dispatcher:
         changes beside the store (caches, the node table's links and
         attributes) changes under the same hold: a chain of renames
         finishing out of order would move one name's attributes onto
-        another. A pwrite that fails stamps the caller's report with the
+        another. A streamed write drops what the read cache keeps of its
+        file and notes the file changed as it starts, not only once it
+        ends, so nothing read before it is served while its bytes land.
+        A pwrite that fails stamps the caller's report with the
         bytes its store's own pwrites landed, from their records: what a
         store that pwrites lands window by window, and nothing for one
         that rewrites the file.
@@ -3022,6 +3156,7 @@ class Dispatcher:
                 else None
             )
             if payload is not None:
+                self._namespace.registry.changes.note(call.path.virtual)
                 await self._invalidate_stream(mount, call.path)
                 kwargs = {**kwargs, "data": payload.chunks()}
             scope = RecordingScope(

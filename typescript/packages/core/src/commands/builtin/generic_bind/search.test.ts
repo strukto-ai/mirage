@@ -228,7 +228,10 @@ it.each(['bytes', 'stream'] as const)(
   },
 )
 
-const EVERY = 'a.txt b.txt c.txt sub/d.txt z.txt'
+// Every file: where grep and rg read each text file, the read-ahead reads
+// w.bin, which they pass over, with z.txt after it, as it reads a batch on a
+// mount that holds its data locally.
+const EVERY = 'a.txt b.txt c.txt sub/d.txt w.bin z.txt'
 
 // Twin of test_what_a_search_reads_and_asks.
 it.each<[string, string, string | null, string]>([
@@ -275,8 +278,9 @@ it.each<[string, string, string | null, string]>([
 
 // Twin of test_a_file_the_search_does_not_cover_is_always_read: a glob naming
 // a directory covers what is below it, and `*` stays within one segment.
+// Where every text file is read, the read-ahead reads w.bin with them.
 it.each([
-  [['d/sub'], ['d/a.txt', 'd/b.txt', 'd/c.txt', 'd/sub/d.txt', 'd/z.txt']],
+  [['d/sub'], ['d/a.txt', 'd/b.txt', 'd/c.txt', 'd/sub/d.txt', 'd/w.bin', 'd/z.txt']],
   [['d/*.txt'], ['d/a.txt', 'd/sub/d.txt']],
 ])('always reads a file outside searchable %j', async (searchable, reads) => {
   const vfs = new SearchRAM({ lines: null })

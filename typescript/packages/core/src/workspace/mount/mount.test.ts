@@ -1093,3 +1093,79 @@ it.each([false, true])(
     }
   },
 )
+
+// Twin of test_a_batch_read_without_one_on_the_vfs_reads_each_file: the VFS
+// reads no batch, so each file is read as its own read would read it; one
+// longer than the limit, and one whose read fails, is left for that read.
+it('reads each file of a batch read the VFS has none of', async () => {
+  class FailingRAM extends RAMVFS {
+    override read(
+      path: PathSpec,
+      handed?: Handed,
+      offset = 0,
+      size: number | null = null,
+    ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+      if (path.virtual.endsWith('/bad')) return Promise.reject(new Error('unreadable'))
+      return super.read(path, handed, offset, size)
+    }
+  }
+  const vfs = new FailingRAM()
+  const enc = new TextEncoder()
+  vfs.store.files.set('/a', enc.encode('a\n'))
+  vfs.store.files.set('/big', new Uint8Array(9))
+  vfs.store.files.set('/bad', enc.encode('b\n'))
+  vfs.store.files.set('/e', new Uint8Array())
+  const mount = new MountEntry({ prefix: '/d/', vfs })
+  expect(vfs.supports('readMany')).toBe(false)
+  const read = await mount.readMany(['/d/a', '/d/big', '/d/bad', '/d/e'], 8)
+  expect(read).toEqual(
+    new Map([
+      ['/d/a', enc.encode('a\n')],
+      ['/d/e', new Uint8Array()],
+    ]),
+  )
+})
+
+// Twin of test_a_batch_read_leaves_out_what_its_own_read_could_not_fit: the
+// files a batch reads must fit together, beside what the batch already holds,
+// in what the workspace has left, as one file must for its own read, so a read
+// of one left out meets the refusal; what a RAM store holds is already counted.
+it('leaves out of a batch read what its own read could not fit', async () => {
+  class Built extends StubVFS {
+    override read(): Promise<Uint8Array> {
+      return Promise.resolve(new Uint8Array(16))
+    }
+  }
+  class Streamed extends StubVFS {
+    override async *read(): AsyncIterable<Uint8Array> {
+      for (let i = 0; i < 4; i++) {
+        await Promise.resolve()
+        yield new Uint8Array(4)
+      }
+    }
+  }
+  const ram = new RAMVFS()
+  ram.store.files.set('/f', new Uint8Array(16))
+  ram.store.files.set('/g', new Uint8Array(16))
+  const one = new MemoryBudget(8, () => 0)
+  const both = new MemoryBudget(24, () => 0)
+  const built = new MountEntry({ prefix: '/b/', vfs: new Built() })
+  const streamed = new MountEntry({ prefix: '/s/', vfs: new Streamed() })
+  const stored = new MountEntry({ prefix: '/r/', vfs: ram })
+  expect(await runWithMemory(one, () => built.readMany(['/b/f'], 64))).toEqual(new Map())
+  expect(await runWithMemory(one, () => streamed.readMany(['/s/f'], 64))).toEqual(new Map())
+  expect(await runWithMemory(both, () => built.readMany(['/b/f', '/b/g'], 64))).toEqual(
+    new Map([['/b/f', new Uint8Array(16)]]),
+  )
+  expect(await runWithMemory(both, () => built.readMany(['/b/f'], 64, 16))).toEqual(new Map())
+  expect(await runWithMemory(both, () => streamed.readMany(['/s/f', '/s/g'], 64))).toEqual(
+    new Map([['/s/f', new Uint8Array(16)]]),
+  )
+  expect(await runWithMemory(one, () => stored.readMany(['/r/f', '/r/g'], 64))).toEqual(
+    new Map([
+      ['/r/f', new Uint8Array(16)],
+      ['/r/g', new Uint8Array(16)],
+    ]),
+  )
+  expect(await streamed.readMany(['/s/f'], 64)).toEqual(new Map([['/s/f', new Uint8Array(16)]]))
+})
