@@ -25,36 +25,45 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_unlink_removes_file(fake_drive, gdrive_accessor):
-    fake_drive.add("f.txt", content=b"x")
-    await call(unlink, readdir, gdrive_accessor, spec("/f.txt"))
-    assert fake_drive.find("f.txt") is None
+async def test_unlink_removes_file(google_account):
+    await google_account.upload("f.txt", b"x")
+    await call(
+        unlink, readdir, google_account.drive_accessor(), spec("/f.txt")
+    )
+    assert await google_account.find("f.txt") is None
 
 
 @pytest.mark.asyncio
-async def test_unlink_missing_raises(fake_drive, gdrive_accessor):
+async def test_unlink_missing_raises(google_account):
     with pytest.raises(FileNotFoundError):
-        await call(unlink, readdir, gdrive_accessor, spec("/missing.txt"))
+        await call(
+            unlink,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/missing.txt"),
+        )
 
 
 @pytest.mark.asyncio
-async def test_unlink_folder_raises(fake_drive, gdrive_accessor):
-    fake_drive.folder("d")
+async def test_unlink_folder_raises(google_account):
+    await google_account.folder("d")
     with pytest.raises(IsADirectoryError):
-        await call(unlink, readdir, gdrive_accessor, spec("/d"))
+        await call(
+            unlink, readdir, google_account.drive_accessor(), spec("/d")
+        )
 
 
 @pytest.mark.asyncio
-async def test_an_unlink_removes_the_file_at_the_path_now(
-    fake_drive, gdrive_accessor
-):
+async def test_an_unlink_removes_the_file_at_the_path_now(google_account):
     # The listing named a.txt; another client then renamed that file to
     # b.txt and made a new a.txt. The unlink removes the new a.txt.
-    moved = fake_drive.add("a.txt", content=b"old")
+    moved = await google_account.upload("a.txt", b"old")
+    accessor = google_account.drive_accessor()
     path = PathSpec.from_str_path("/a.txt")
-    listed = await entry_at(readdir, gdrive_accessor, path)
-    fake_drive.items[moved]["name"] = "b.txt"
-    made = fake_drive.add("a.txt", content=b"other")
-    await unlink(gdrive_accessor, path, listed)
-    assert made not in fake_drive.items
-    assert moved in fake_drive.items
+    listed = await entry_at(readdir, accessor, path)
+    await google_account.patch(moved, name="b.txt")
+    made = await google_account.upload("a.txt", b"other")
+    await unlink(accessor, path, listed)
+    ids = {item["id"] for item in await google_account.items()}
+    assert made not in ids
+    assert moved in ids

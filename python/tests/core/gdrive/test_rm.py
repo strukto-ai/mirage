@@ -25,15 +25,17 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_rm_r_removes_tree(fake_drive, gdrive_accessor):
-    folder = fake_drive.folder("d")
-    sub = fake_drive.folder("s", parent=folder)
-    fake_drive.add("f.txt", parent=sub, content=b"x")
-    await call(rm_r, readdir, gdrive_accessor, spec("/d"))
-    assert fake_drive.items == {}
+async def test_rm_r_removes_tree(google_account):
+    folder = await google_account.folder("d")
+    sub = await google_account.folder("s", folder)
+    await google_account.upload("f.txt", b"x", sub)
+    await call(rm_r, readdir, google_account.drive_accessor(), spec("/d"))
+    assert await google_account.items() == []
 
 
 @pytest.mark.asyncio
-async def test_rm_r_missing_raises(fake_drive, gdrive_accessor):
+async def test_rm_r_missing_raises(google_account):
     with pytest.raises(FileNotFoundError):
-        await call(rm_r, readdir, gdrive_accessor, spec("/missing"))
+        await call(
+            rm_r, readdir, google_account.drive_accessor(), spec("/missing")
+        )

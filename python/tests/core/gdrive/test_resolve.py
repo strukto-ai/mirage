@@ -24,8 +24,6 @@ from mirage.core.gdrive.resolve import (
 from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
 
-FOLDER_MIME = "application/vnd.google-apps.folder"
-
 DOC_MIME = "application/vnd.google-apps.document"
 
 
@@ -36,46 +34,38 @@ def test_drive_target_name():
 
 
 @pytest.mark.asyncio
-async def test_a_scoped_mount_lists_its_folder(fake_drive, scoped_accessor):
-    scope = fake_drive.folder("scope")
-    inner = fake_drive.add("f.txt", parent=scope, content=b"in")
-    fake_drive.add("f.txt", content=b"out")
-    accessor = scoped_accessor(scope)
+async def test_a_scoped_mount_lists_its_folder(google_account):
+    scope = await google_account.folder("scope")
+    inner = await google_account.upload("f.txt", b"in", scope)
+    await google_account.upload("f.txt", b"out")
+    accessor = google_account.drive_accessor(folder_id=scope)
     assert await root_context(accessor) == (scope, None)
     rows = await readdir(accessor, PathSpec.from_str_path("/"))
     assert [row.extra["file_id"] for row in rows] == [inner]
 
 
 @pytest.mark.asyncio
-async def test_root_context_shared_drive_scope(fake_drive, scoped_accessor):
-    scope = fake_drive.add("team", mime=FOLDER_MIME, drive_id="d1")
-    inner = fake_drive.add("f.txt", parent=scope, drive_id="d1")
-    accessor = scoped_accessor(scope)
-    assert await root_context(accessor) == (scope, "d1")
+async def test_root_context_shared_drive_scope(google_account):
+    drive = await google_account.shared_drive("Team")
+    scope = await google_account.folder("team", drive)
+    inner = await google_account.upload("f.txt", b"in", scope)
+    accessor = google_account.drive_accessor(folder_id=scope)
+    assert await root_context(accessor) == (scope, drive)
     rows = await readdir(accessor, PathSpec.from_str_path("/"))
     assert [(row.extra["file_id"], row.extra["drive_id"]) for row in rows] == [
-        (inner, "d1")
+        (inner, drive)
     ]
 
 
 @pytest.mark.asyncio
-async def test_root_context_memoizes_drive_lookup(
-    fake_drive, scoped_accessor, monkeypatch
-):
-    scope = fake_drive.add("team", mime=FOLDER_MIME, drive_id="d1")
-    accessor = scoped_accessor(scope)
-    calls = 0
-    get_file = fake_drive.get_file
-
-    async def counting_get_file(file_id):
-        nonlocal calls
-        calls += 1
-        return await get_file(file_id)
-
-    monkeypatch.setattr(fake_drive, "get_file", counting_get_file)
-    assert await root_context(accessor) == (scope, "d1")
-    assert await root_context(accessor) == (scope, "d1")
-    assert calls == 1
+async def test_root_context_memoizes_drive_lookup(google_account):
+    drive = await google_account.shared_drive("Team")
+    scope = await google_account.folder("team", drive)
+    accessor = google_account.drive_accessor(folder_id=scope)
+    await google_account.run.record_requests()
+    assert await root_context(accessor) == (scope, drive)
+    assert await root_context(accessor) == (scope, drive)
+    assert await google_account.log() == [("get", scope)]
 
 
 @eacces_on_denied
@@ -98,38 +88,44 @@ async def test_eacces_on_denied_maps_403():
 
 
 @pytest.mark.asyncio
-async def test_a_create_at_the_root_lands_in_the_root_folder(
-    fake_drive, gdrive_accessor
-):
+async def test_a_create_at_the_root_lands_in_the_root_folder(google_account):
     path = PathSpec.from_str_path("/drive/new.txt", vfs_path="new.txt")
-    assert await parent_folder(gdrive_accessor, path, None) == ("root", None)
+    assert await parent_folder(
+        google_account.drive_accessor(), path, None
+    ) == ("root", None)
 
 
 @pytest.mark.asyncio
-async def test_a_create_lands_in_the_folder_its_parent_names(
-    fake_drive, gdrive_accessor
-):
+async def test_a_create_lands_in_the_folder_its_parent_names(google_account):
+    drive = await google_account.shared_drive("Team")
+    made = await google_account.folder("a", drive)
     folder = FileStat(
         name="a",
         type=FileType.DIRECTORY,
-        extra={"file_id": "f1", "drive_id": "d1"},
+        extra={"file_id": made, "drive_id": drive},
     )
     path = PathSpec.from_str_path("/drive/a/new.txt", vfs_path="a/new.txt")
-    assert await parent_folder(gdrive_accessor, path, folder) == ("f1", "d1")
+    assert await parent_folder(
+        google_account.drive_accessor(), path, folder
+    ) == (made, drive)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["missing", "file"])
 async def test_a_parent_that_is_no_folder_names_the_operand(
-    fake_drive, gdrive_accessor, kind
+    google_account, kind
 ):
     parent = (
         None
         if kind == "missing"
-        else FileStat(name="a", type=FileType.FILE, extra={"file_id": "f1"})
+        else FileStat(
+            name="a",
+            type=FileType.FILE,
+            extra={"file_id": await google_account.upload("a", b"a")},
+        )
     )
     path = PathSpec.from_str_path("/drive/a/child", vfs_path="a/child")
     error = FileNotFoundError if kind == "missing" else NotADirectoryError
     with pytest.raises(error) as raised:
-        await parent_folder(gdrive_accessor, path, parent)
+        await parent_folder(google_account.drive_accessor(), path, parent)
     assert raised.value.filename == path.virtual

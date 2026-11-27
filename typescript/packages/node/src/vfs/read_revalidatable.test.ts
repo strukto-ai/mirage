@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
-import { ByteSpool } from '@struktoai/mirage-core/io/spool'
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -22,12 +21,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type * as ContextModule from '@struktoai/mirage-core/observe/context'
 import type { OpRecord } from '@struktoai/mirage-core/observe/record'
 import type * as ClientModule from '../core/gridfs/client.ts'
-import type * as DriveModule from '@struktoai/mirage-core/core/google/drive'
-import { GoogleApiAccessor } from '@struktoai/mirage-core/accessor/google_api'
-import type { DriveApi } from '@struktoai/mirage-core/core/gdrive/api'
-import type { DocsApi } from '@struktoai/mirage-core/core/gdocs/api'
-import type { SheetsApi } from '@struktoai/mirage-core/core/gsheets/api'
-import type { SlidesApi } from '@struktoai/mirage-core/core/gslides/api'
 import type { Accessor } from '@struktoai/mirage-core/accessor/base'
 import type { S3Accessor } from '@struktoai/mirage-core/accessor/s3'
 import { ListingCheckStore, RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
@@ -89,7 +82,9 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import type { IndexCacheStore } from '@struktoai/mirage-core/cache/index/store'
 import { checkReadCapability } from '@struktoai/mirage-core/workspace/mount/read_policy'
 import { DEFAULT_READ_TTL, ReadPolicy } from '@struktoai/mirage-core/types'
+import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
 import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
+import { FILES, GoogleAccount } from '../../../core/tests/fixtures/google_account.ts'
 import type { KitRun } from '../../../core/tests/fixtures/kit_fake.ts'
 import { BoxAccount, TOKEN as BOX_TOKEN } from '../../tests/vfs/fixtures/box.ts'
 import { DropboxAccount, TOKEN as DROPBOX_TOKEN } from '../../tests/vfs/fixtures/dropbox.ts'
@@ -98,15 +93,6 @@ import {
   TOKEN as GITHUB_TOKEN,
   blobSha,
 } from '../../../core/tests/fixtures/github_repo.ts'
-
-interface GDriveItem {
-  id: string
-  name: string
-  mimeType: string
-  parents: string[]
-  modifiedTime: string
-  content: Uint8Array
-}
 
 interface GridFSDoc {
   _id: { toString(): string }
@@ -163,12 +149,6 @@ const H = vi.hoisted(() => ({
   gridfs: new Map<string, GridFSDoc>(),
   opened: 0,
   uploads: 0,
-  // A Drive folder tree keyed by id, served through the mocked Drive calls
-  // below; the counters are what the rows assert a warm read avoids.
-  gdrive: new Map<string, GDriveItem>(),
-  gdriveDownloads: 0,
-  gdriveRenders: 0,
-  gdriveUploads: 0,
   reach: [] as string[],
   // Replaces the token a read records, to stage a backend stamping a token of
   // another kind than its stat's.
@@ -294,128 +274,6 @@ vi.mock('../core/gridfs/client.ts', async () => {
     filesColl: refuse('filesColl'),
   }
 })
-
-const GDRIVE_FOLDER = 'application/vnd.google-apps.folder'
-const GDRIVE_NATIVE = new Set([
-  'application/vnd.google-apps.document',
-  'application/vnd.google-apps.spreadsheet',
-  'application/vnd.google-apps.presentation',
-])
-
-// Drive serves md5Checksum and headRevisionId only for a file with binary
-// content, and computes them from what is stored now.
-async function gdriveResource(item: GDriveItem): Promise<DriveModule.DriveFile> {
-  const { createHash: hash } = await import('node:crypto')
-  const out: DriveModule.DriveFile = {
-    id: item.id,
-    name: item.name,
-    mimeType: item.mimeType,
-    parents: item.parents,
-    modifiedTime: item.modifiedTime,
-    size: String(item.content.byteLength),
-  }
-  if (item.mimeType !== GDRIVE_FOLDER && !GDRIVE_NATIVE.has(item.mimeType)) {
-    out.md5Checksum = hash('md5').update(item.content).digest('hex')
-    out.headRevisionId = `${item.id}-r1`
-  }
-  return out
-}
-
-function gdriveItem(id: string): GDriveItem {
-  const found = H.gdrive.get(id)
-  if (found === undefined) throw new Error(`no drive item ${id}`)
-  return found
-}
-
-function gdriveUnserved(call: string): () => never {
-  return () => {
-    throw new Error(`the test Drive does not serve ${call}`)
-  }
-}
-
-const GDRIVE_API: DriveApi = {
-  listFiles: (opts) =>
-    Promise.all(
-      [...H.gdrive.values()].filter((i) => i.parents.includes(opts.folderId)).map(gdriveResource),
-    ),
-  listChildren: gdriveUnserved('listChildren'),
-  listSharedDrives: () => Promise.resolve([]),
-  // Each of gdocs, gsheets and gslides lists only its own kind.
-  listAllFiles: async (opts = {}) => ({
-    files: await Promise.all(
-      [...H.gdrive.values()]
-        .filter(
-          (i) =>
-            i.mimeType !== GDRIVE_FOLDER &&
-            (opts.mimeType === undefined || opts.mimeType === null || i.mimeType === opts.mimeType),
-        )
-        .map(gdriveResource),
-    ),
-    complete: true,
-  }),
-  searchFiles: gdriveUnserved('searchFiles'),
-  getFile: (id) => gdriveResource(gdriveItem(id)),
-  storageQuota: gdriveUnserved('storageQuota'),
-  deleteFile: gdriveUnserved('deleteFile'),
-  downloadFile: (id) => {
-    H.gdriveDownloads += 1
-    return Promise.resolve(gdriveItem(id).content)
-  },
-  downloadFileStream: async function* (id) {
-    H.gdriveDownloads += 1
-    yield* Readable.from(chunked(gdriveItem(id).content)) as AsyncIterable<Uint8Array>
-  },
-  createFolder: gdriveUnserved('createFolder'),
-  // A write's reply is the uploaded file resource, rendered through
-  // gdriveResource like a listing entry, so the token a write records and
-  // the token a later probe lists cannot disagree.
-  uploadFile: async (name, parentId, source) => {
-    const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
-    H.gdriveUploads += 1
-    const created: GDriveItem = {
-      id: `u${String(H.gdriveUploads)}`,
-      name,
-      mimeType: 'application/octet-stream',
-      parents: [parentId],
-      modifiedTime: `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`,
-      content: data,
-    }
-    H.gdrive.set(created.id, created)
-    return gdriveResource(created)
-  },
-  updateFileContent: async (id, source) => {
-    const data = source instanceof ByteSpool ? await source.read(0, source.size) : source
-    H.gdriveUploads += 1
-    const found = gdriveItem(id)
-    found.content = data
-    found.modifiedTime = `2026-04-17T00:00:${String(H.gdriveUploads).padStart(2, '0')}Z`
-    return gdriveResource(found)
-  },
-  patchFile: gdriveUnserved('patchFile'),
-  copyFile: gdriveUnserved('copyFile'),
-  startPageToken: gdriveUnserved('startPageToken'),
-  listChanges: gdriveUnserved('listChanges'),
-  captureFileMetadata: async (id) => {
-    const r = await gdriveResource(gdriveItem(id))
-    return [r.md5Checksum ?? null, r.headRevisionId ?? null]
-  },
-  downloadRevision: gdriveUnserved('downloadRevision'),
-  downloadRevisionStream: gdriveUnserved('downloadRevisionStream'),
-}
-
-// A native file's rendering: its stored bytes, counted as the cost a warm
-// native read avoids.
-function gdriveRender(id: string): Promise<Uint8Array> {
-  H.gdriveRenders += 1
-  return Promise.resolve(gdriveItem(id).content)
-}
-
-const GDOCS_API: DocsApi = { readDoc: gdriveRender }
-const GSHEETS_API: SheetsApi = {
-  readSpreadsheet: gdriveRender,
-  readValues: () => gdriveUnserved('readValues')(),
-}
-const GSLIDES_API: SlidesApi = { readPresentation: gdriveRender }
 
 // Python declares read_revalidatable as a class attribute, so its twin asserts
 // it straight off each alias class. A TypeScript class field is per-instance,
@@ -596,7 +454,6 @@ const DEEP = 'a/b/c.txt'
 const S3_CONFIG = { bucket: 'b', region: 'us-east-1', endpoint_url: 'http://127.0.0.1:9000' }
 const S3_EXTRA: Record<string, Record<string, string>> = { oci: { namespace: 'ns' } }
 const GRIDFS_CONFIG = { uri: 'mongodb://127.0.0.1:27017', database: 'd' }
-const GDRIVE_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: 'r' }
 const DROPBOX_CONFIG = { client_id: 'i', client_secret: 's', refresh_token: DROPBOX_TOKEN }
 const BOX_DOWNLOAD: [string, string] = ['GET', '/2.0/files/:file_id/content']
 const DROPBOX_DOWNLOAD: [string, string] = ['POST', '/2/files/download']
@@ -692,6 +549,82 @@ interface Fake {
   // The slot a whole read records in: the Google apps answer one with their
   // rendering, which records through `record`.
   streamSlot: 'stream' | 'bytes'
+  // What a read of the key answers now, where that is not the bytes last
+  // written: a Google app's file reads as its API's rendering of it.
+  rendered?: () => Promise<Uint8Array>
+  // How many Drive listings the mount has asked, for a Google app, whose
+  // listing is a Drive search.
+  searched?: () => Promise<number>
+}
+
+// What a read of the fake's key answers once `data` is its content.
+async function expectedOf(fake: Fake, data: Uint8Array): Promise<Uint8Array> {
+  return fake.rendered === undefined ? data : fake.rendered()
+}
+
+// The request each Google app renders its file with.
+const RENDERS: Record<string, [string, string]> = {
+  gdocs: ['GET', '/v1/documents/:id'],
+  gsheets: ['GET', '/v4/spreadsheets/:id'],
+  gslides: ['GET', '/v1/presentations/:id'],
+}
+// Where a Google app run's clock starts: midday, far from a day's edge.
+const NOON = '2026-02-01T12:00:00Z'
+
+// Write `text` into a Google app's file as its editor's API does, which moves
+// the file's modifiedTime.
+async function appWrite(
+  drive: GoogleAccount,
+  name: string,
+  fileId: string,
+  text: string,
+): Promise<void> {
+  if (name === 'gdocs') {
+    const edit = { insertText: { location: { index: 1 }, text } }
+    await drive.run.call('POST', `/v1/documents/${fileId}:batchUpdate`, {
+      json: { requests: [edit] },
+    })
+  } else if (name === 'gsheets') {
+    await drive.run.call('PUT', `/v4/spreadsheets/${fileId}/values/A1?valueInputOption=RAW`, {
+      json: { values: [[text]] },
+    })
+  } else {
+    await drive.run.call('POST', `/v1/presentations/${fileId}:batchUpdate`, {
+      json: { requests: [{ insertText: { objectId: 'shape', text } }] },
+    })
+  }
+}
+
+// A Google app's file named `a` holding `text`, and its id; a presentation's
+// text is in a shape on a slide of its own.
+async function appFile(drive: GoogleAccount, name: string, text: string): Promise<string> {
+  const fileId = await drive.create('a', GAPPS[name]?.[0] ?? '')
+  if (name === 'gslides') {
+    await drive.run.call('POST', `/v1/presentations/${fileId}:batchUpdate`, {
+      json: {
+        requests: [
+          { createSlide: { objectId: 'slide' } },
+          { createShape: { objectId: 'shape', elementProperties: { pageObjectId: 'slide' } } },
+        ],
+      },
+    })
+  }
+  await appWrite(drive, name, fileId, text)
+  return fileId
+}
+
+// The app's answer to the last render request the mount made, asked again,
+// compacted as a read hands it on.
+async function rendered(drive: GoogleAccount, name: string): Promise<Uint8Array> {
+  const [method = 'GET', route = ''] = RENDERS[name] ?? []
+  const asked = (await drive.asked(method, route)).at(-1)
+  if (asked === undefined) throw new Error(`${name} rendered nothing yet`)
+  return compactJsonBytes(await drive.run.call(method, `${asked.path}?${asked.query}`))
+}
+
+// How many of a file's bytes Drive has served the mount.
+async function downloads(drive: GoogleAccount): Promise<number> {
+  return (await drive.log()).filter(([name]) => name === 'media').length
 }
 
 // The store each driver's mount runs under, filled when a fresh workspace
@@ -804,48 +737,6 @@ async function entryAt<A>(
     if (found === null) return null
   }
   return found
-}
-
-let gdriveIds = 0
-
-function gdriveAdd(
-  path: string,
-  content: Uint8Array,
-  mimeType = 'application/octet-stream',
-): GDriveItem {
-  const parts = path.split('/').filter((p) => p !== '')
-  let parent = 'root'
-  for (const dir of parts.slice(0, -1)) {
-    const existing = [...H.gdrive.values()].find(
-      (i) => i.name === dir && i.parents.includes(parent) && i.mimeType === GDRIVE_FOLDER,
-    )
-    if (existing !== undefined) {
-      parent = existing.id
-      continue
-    }
-    gdriveIds += 1
-    const id = `d${String(gdriveIds)}`
-    H.gdrive.set(id, {
-      id,
-      name: dir,
-      mimeType: GDRIVE_FOLDER,
-      parents: [parent],
-      modifiedTime: '2026-04-16T00:00:00Z',
-      content: new Uint8Array(0),
-    })
-    parent = id
-  }
-  gdriveIds += 1
-  const item: GDriveItem = {
-    id: `f${String(gdriveIds)}`,
-    name: parts[parts.length - 1] ?? '',
-    mimeType,
-    parents: [parent],
-    modifiedTime: '2026-04-16T00:00:00Z',
-    content,
-  }
-  H.gdrive.set(item.id, item)
-  return item
 }
 
 async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<Fake> {
@@ -1017,8 +908,11 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     }
   }
   if (HARNESSES[name] === 'gdrive') {
-    const item = gdriveAdd(key, data)
-    const vfs = (await buildVfs('gdrive', GDRIVE_CONFIG)) as GoogleDriveVFS
+    const drive = new GoogleAccount(await serve('gws'))
+    runs.push(drive.run)
+    await drive.put(key, data)
+    await drive.run.recordRequests()
+    const vfs = (await buildVfs('gdrive', drive.fields())) as GoogleDriveVFS
     const accessor = vfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
     // An id-addressed backend reads the row its parent's listing names, so
@@ -1026,14 +920,13 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     const handed = async (p: PathSpec): Promise<Handed> => ({
       entry: await entryAt(gdriveReaddir, accessor, p),
     })
-    const before = H.gdriveDownloads
     return {
       vfs,
       accessor,
       key,
-      fetches: () => H.gdriveDownloads - before,
-      rewrite: (next) => {
-        item.content = next
+      fetches: () => downloads(drive),
+      rewrite: async (next) => {
+        await drive.put(key, next)
       },
       readBytes: async (p) => bytesOf(vfs.read(p, await handed(p))),
       readStream: async function* (p) {
@@ -1045,31 +938,35 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
   }
   const gapp = GAPPS[name]
   if (gapp !== undefined) {
-    const [mime, filename] = gapp
-    const item = gdriveAdd('a', data, mime)
-    const vfs = await buildVfs(name, GDRIVE_CONFIG)
+    const [, filename] = gapp
+    const drive = new GoogleAccount(await serve('gws'))
+    runs.push(drive.run)
+    // The name carries modifiedTime's day. The run's clock starts at noon,
+    // so the rewrites, a second each, stay on that day and keep the name; on
+    // the wall clock a run near midnight would not.
+    await drive.reset({}, NOON)
+    const fileId = await appFile(drive, name, new TextDecoder().decode(data))
+    const item = await drive.item(fileId)
+    await drive.run.recordRequests()
+    const vfs = await buildVfs(name, drive.fields())
     const accessor = vfs.accessor
     const io = ownReads(vfs)
     expect(vfs.readRevalidatable).toBe(true)
-    // The fake names no owner, so the file lists under shared/. A rewrite
-    // moves modifiedTime within the same day, which keeps the name.
-    const fileKey = `shared/${filename('a', item.id, item.modifiedTime)}`
-    const before = H.gdriveRenders
-    let edits = 0
+    // The account owns the file, so it lists under owned/.
+    const fileKey = `owned/${filename('a', fileId, item.modifiedTime)}`
+    const [method = 'GET', route = ''] = RENDERS[name] ?? []
     return {
       vfs,
       accessor,
       key: fileKey,
-      fetches: () => H.gdriveRenders - before,
-      rewrite: (next) => {
-        edits += 1
-        item.content = next
-        item.modifiedTime = `2026-04-16T00:00:${String(edits).padStart(2, '0')}Z`
-      },
+      fetches: async () => (await drive.asked(method, route)).length,
+      rewrite: (next) => appWrite(drive, name, fileId, new TextDecoder().decode(next)),
       readBytes: (p) => io.readBytes(p),
       readStream: (p) => io.readStream(p),
       stat: (p) => io.stat(p),
       streamSlot: 'bytes',
+      rendered: () => rendered(drive, name),
+      searched: async () => (await drive.asked('GET', FILES)).length,
     }
   }
   if (HARNESSES[name] === 'hf_buckets') {
@@ -1388,19 +1285,11 @@ describe('the read-token contract', () => {
   })
 
   beforeEach(() => {
-    vi.spyOn(GoogleApiAccessor.prototype, 'drive', 'get').mockReturnValue(GDRIVE_API)
-    vi.spyOn(GoogleApiAccessor.prototype, 'docs', 'get').mockReturnValue(GDOCS_API)
-    vi.spyOn(GoogleApiAccessor.prototype, 'sheets', 'get').mockReturnValue(GSHEETS_API)
-    vi.spyOn(GoogleApiAccessor.prototype, 'slides', 'get').mockReturnValue(GSLIDES_API)
     for (const b of s3.store.allBuckets()) s3.store.objects(b).clear()
     H.unrecorded = false
     H.slots.length = 0
     H.captured.length = 0
     H.gridfs.clear()
-    H.gdrive.clear()
-    H.gdriveDownloads = 0
-    H.gdriveRenders = 0
-    H.gdriveUploads = 0
     H.uploads = 0
     H.reach.length = 0
     H.stampOverride = null
@@ -1535,23 +1424,30 @@ describe('the read-token contract', () => {
     // A native file has no md5 and no head revision; its token is the
     // listing's modifiedTime, and it reaches the cache only through the
     // native read's own record. Twin of the python e2e row.
-    const doc = gdriveAdd('doc', ENC.encode('{"v": 1}'), 'application/vnd.google-apps.document')
-    const vfs = await buildVfs('gdrive', GDRIVE_CONFIG)
+    const drive = new GoogleAccount(await serve('gws'))
+    runs.push(drive.run)
+    const doc = await drive.create('doc', 'application/vnd.google-apps.document')
+    await appWrite(drive, 'gdocs', doc, 'v1')
+    await drive.run.recordRequests()
+    const renders = async (): Promise<number> =>
+      (await drive.asked('GET', '/v1/documents/:id')).length
+    const vfs = await buildVfs('gdrive', drive.fields())
     const ws = freshWorkspace(vfs)
     try {
-      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(ENC.encode('{"v": 1}'))
+      const first = await line(ws, 'cat /m/doc.gdoc.json')
       // The positive control: without it the warm assertion below would also
       // pass if `cat` stopped reaching the counted renderer entirely.
-      expect(H.gdriveRenders).toBe(1)
-      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(ENC.encode('{"v": 1}'))
-      expect(H.gdriveRenders).toBe(1)
-      doc.content = ENC.encode('{"v": 2}')
-      doc.modifiedTime = '2026-05-01T00:00:00Z'
-      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(ENC.encode('{"v": 2}'))
-      expect(H.gdriveRenders).toBe(2)
+      expect(await renders()).toBe(1)
+      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(first)
+      expect(await renders()).toBe(1)
+      await appWrite(drive, 'gdocs', doc, 'v2 ')
+      const third = await line(ws, 'cat /m/doc.gdoc.json')
+      expect(new TextDecoder().decode(third)).toContain('v2 v1')
+      expect(new TextDecoder().decode(first)).not.toContain('v2 v1')
+      expect(await renders()).toBe(2)
       // The refetch has to stamp the new token, or every later read renders.
-      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(ENC.encode('{"v": 2}'))
-      expect(H.gdriveRenders).toBe(2)
+      expect(await line(ws, 'cat /m/doc.gdoc.json')).toEqual(third)
+      expect(await renders()).toBe(2)
     } finally {
       await ws.close()
     }
@@ -1569,7 +1465,7 @@ describe('the read-token contract', () => {
         const first = await readRow(ws, row, virtual)
         expect(readsOnMount()).toEqual([[slotOf(fake), virtual]])
         expect(await fake.fetches()).toBe(1)
-        expect(first).toEqual(data)
+        expect(first).toEqual(await expectedOf(fake, data))
 
         // A whole read of a rendered Google file goes through the dispatcher,
         // where a filetype read op always renders and keeps nothing, so its
@@ -1582,7 +1478,7 @@ describe('the read-token contract', () => {
 
         const second = await readRow(ws, row, virtual)
         expect(await fake.fetches()).toBe(renders ? 2 : 1)
-        expect(second).toEqual(data)
+        expect(second).toEqual(await expectedOf(fake, data))
         expect(H.reach).toEqual([])
       } finally {
         await ws.close()
@@ -1625,7 +1521,7 @@ describe('the read-token contract', () => {
         data = Buffer.concat(parts)
       }
       const stat = await fake.stat(spec)
-      expect(new Uint8Array(data)).toEqual(SEED)
+      expect(new Uint8Array(data)).toEqual(await expectedOf(fake, SEED))
       expect(H.captured.map((r) => r.path)).toEqual([virtual])
       // The real recordStream returns null with no recorder bound, so no
       // stream read can stamp a token outside a capture at all. This row can
@@ -1654,7 +1550,7 @@ describe('the read-token contract', () => {
         expect(stat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
         let before = await fake.fetches()
-        expect(await line(ws, `cat ${virtual}`)).toEqual(CHANGED)
+        expect(await line(ws, `cat ${virtual}`)).toEqual(await expectedOf(fake, CHANGED))
         expect((await fake.fetches()) - before).toBe(1)
         // The refetch has to stamp the new token, or every later read
         // refetches as well and the backend never serves warm.
@@ -1662,7 +1558,7 @@ describe('the read-token contract', () => {
         expect(restat.fingerprint).not.toBeNull()
         expect(await ws.cache.isFresh(virtual, restat.fingerprint ?? '')).toBe(true)
         before = await fake.fetches()
-        expect(await line(ws, `cat ${virtual}`)).toEqual(CHANGED)
+        expect(await line(ws, `cat ${virtual}`)).toEqual(await expectedOf(fake, CHANGED))
         expect((await fake.fetches()) - before).toBe(0)
         expect(H.reach).toEqual([])
       } finally {
@@ -1836,7 +1732,7 @@ describe('the read-token contract', () => {
     const chunks: Uint8Array[] = []
     for await (const chunk of fake.readStream(specFor(`/m/${fake.key}`, fake.key)))
       chunks.push(chunk)
-    expect(chunks).toEqual([SEED])
+    expect(chunks).toEqual([await expectedOf(fake, SEED)])
   })
 
   it('the contract goes red on github stamping another kind', async () => {
@@ -1863,16 +1759,19 @@ describe('the read-token contract', () => {
       const fake = await makeFake(name, 'root', SEED)
       const virtual = `/m/${fake.key}`
       const ws = freshWorkspace(fake.vfs)
-      const search = vi.spyOn(GDRIVE_API, 'listAllFiles')
+      const searched = fake.searched
+      if (searched === undefined) throw new Error(`${name} counts no searches`)
       try {
-        await line(ws, `cat ${virtual}`)
+        const first = await line(ws, `cat ${virtual}`)
+        expect(first).toEqual(await expectedOf(fake, SEED))
         await line(ws, `chmod 600 ${virtual}`)
-        search.mockClear().mockResolvedValue({ files: [], complete: false })
         const before = await fake.fetches()
-        expect(await line(ws, `cat ${virtual}`)).toEqual(SEED)
+        const listed = await searched()
+        expect(await line(ws, `cat ${virtual}`)).toEqual(first)
         expect(new TextDecoder().decode(await line(ws, `stat -c %a ${virtual}`))).toBe('600\n')
         expect(await fake.fetches()).toBe(before)
-        expect(search).not.toHaveBeenCalled()
+        // Neither the read nor the stat searched Drive.
+        expect(await searched()).toBe(listed)
       } finally {
         await ws.close()
       }

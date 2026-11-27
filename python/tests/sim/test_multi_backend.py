@@ -27,7 +27,7 @@ from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.github.github import GitHubVFS
 from tests.core.discord.conftest import DAY, FakeDiscordApi
 from tests.core.slack.conftest import FakeSlack
-from tests.e2e.gdrive_mock import FakeGDrive
+from tests.sim.gdrive import FakeGDrive
 from tests.sim.github import FakeGitHubApi
 from tests.sim.seam import Exponential, Leg, Match
 from tests.sim.trace import StepRef

@@ -13,17 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
-from tests.fixtures.google_api import offline_token_manager, serve
-from tests.fixtures.gsheets_api import StubSheets
 from tests.fixtures.vfs_io import call_over
+
+MIME = "application/vnd.google-apps.spreadsheet"
 
 
 def _op(name: str):
@@ -41,30 +39,30 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDriveAccessor(config=None, token_manager=offline_token_manager())
-
-
 @pytest.mark.asyncio
-async def test_read_gsheet_renders_spreadsheet_json(accessor):
+async def test_read_gsheet_renders_spreadsheet_json(google_account):
+    made = await google_account.create("budget", MIME)
     row = FileStat(
         name="budget.gsheet.json",
         type=FileType.FILE,
         modified="2026-04-01T00:00:00Z",
-        extra={"file_id": "sheet123", "resource_type": "gdrive/gsheet"},
+        extra={"file_id": made, "resource_type": "gdrive/gsheet"},
     )
-    sheet_json = json.dumps({"spreadsheetId": "sheet123"}).encode()
-    mock = AsyncMock(return_value=sheet_json)
-    with serve(sheets=StubSheets(read_spreadsheet=mock)):
-        result = await read(
-            accessor, _scope("/sheets/budget.gsheet.json"), entry=row
-        )
-        mock.assert_called_once_with("sheet123")
-        assert json.loads(result)["spreadsheetId"] == "sheet123"
+    await google_account.run.record_requests()
+    result = await read(
+        google_account.drive_accessor(),
+        _scope("/sheets/budget.gsheet.json"),
+        entry=row,
+    )
+    assert [path for _, path in await google_account.log()] == [
+        f"/v4/spreadsheets/{made}"
+    ]
+    assert json.loads(result)["spreadsheetId"] == made
 
 
 @pytest.mark.asyncio
-async def test_read_gsheet_not_found(accessor):
+async def test_read_gsheet_not_found(google_account):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, _scope("/nonexistent.gsheet.json"))
+        await read(
+            google_account.drive_accessor(), _scope("/nonexistent.gsheet.json")
+        )

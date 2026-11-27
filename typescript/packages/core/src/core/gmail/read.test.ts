@@ -12,36 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import type * as MessagesModule from './messages.ts'
-import type * as LabelsModule from './labels.ts'
-
-vi.mock('./messages.ts', async () => {
-  const actual = await vi.importActual<typeof MessagesModule>('./messages.ts')
-  return {
-    ...actual,
-    listMessages: vi.fn(),
-    getMessageRaw: vi.fn(),
-    getMessageProcessed: vi.fn(),
-  }
-})
-
-vi.mock('./labels.ts', async () => {
-  const actual = await vi.importActual<typeof LabelsModule>('./labels.ts')
-  return { ...actual, listLabels: vi.fn() }
-})
-
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { MountMode } from '../../types.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import * as labelsMod from './labels.ts'
-import * as messagesMod from './messages.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+// The account with Gmail's system labels and no message yet.
+beforeEach(async () => {
+  account = new GoogleAccount(origin)
+  await account.reset()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 async function readAt(path: string): Promise<Uint8Array> {
-  const ws = new Workspace(
-    { '/gmail/': new GmailVFS({ accessToken: 't' }) },
-    { mode: MountMode.READ },
-  )
+  const ws = new Workspace({ '/gmail/': new GmailVFS(account.config()) }, { mode: MountMode.READ })
   try {
     return (await ws.dispatch('read', path)) as Uint8Array
   } finally {
@@ -51,48 +47,21 @@ async function readAt(path: string): Promise<Uint8Array> {
 
 describe('gmail read through a mount', () => {
   it('lists its way to a message on a cold read', async () => {
-    vi.mocked(labelsMod.listLabels).mockResolvedValue([
-      { id: 'INBOX', name: 'INBOX', type: 'system' },
-    ])
-    vi.mocked(messagesMod.listMessages).mockResolvedValue([{ id: 'msg-1', threadId: 't-1' }])
-    vi.mocked(messagesMod.getMessageRaw).mockResolvedValue({
-      id: 'msg-1',
-      threadId: 't-1',
-      internalDate: String(Date.UTC(2026, 3, 27)),
-      sizeEstimate: 1024,
-      labelIds: ['INBOX'],
-      snippet: 'hello',
-      payload: { headers: [{ name: 'Subject', value: 'Hello World' }] },
+    const msg = await account.message('Hello World', 'hi', {
+      sender: 'Alice <alice@example.com>',
+      date: 'Mon, 27 Apr 2026 00:00:00 +0000',
     })
-    vi.mocked(messagesMod.getMessageProcessed).mockResolvedValue({
-      id: 'msg-1',
-      thread_id: 't-1',
-      from: { name: 'Alice', email: 'alice@example.com' },
-      to: [],
-      cc: [],
-      subject: 'Hello World',
-      date: '',
-      body_text: 'hi',
-      snippet: 'hello',
-      labels: ['INBOX'],
-      attachments: [],
-    })
-
-    const out = await readAt('/gmail/INBOX/2026-04-27/Hello_World__msg-1.gmail.json')
+    const out = await readAt(`/gmail/INBOX/2026-04-27/Hello_World__${msg}.gmail.json`)
     const parsed = JSON.parse(new TextDecoder().decode(out)) as { subject: string }
     expect(parsed.subject).toBe('Hello World')
   })
 
   it('throws ENOENT when the day does not list the message', async () => {
-    vi.mocked(labelsMod.listLabels).mockResolvedValue([
-      { id: 'INBOX', name: 'INBOX', type: 'system' },
-    ])
-    vi.mocked(messagesMod.listMessages).mockResolvedValue([])
-    vi.mocked(messagesMod.getMessageRaw).mockRejectedValue(new Error('should not be called'))
-    vi.mocked(messagesMod.getMessageProcessed).mockRejectedValue(new Error('should not be called'))
-
+    await account.run.recordRequests()
     await expect(readAt('/gmail/INBOX/2026-04-27/Missing__msg-x.gmail.json')).rejects.toMatchObject(
       { code: 'ENOENT' },
     )
+    // The day's listing names no such message, so none is fetched.
+    expect(await account.asked('GET', '/gmail/v1/users/me/messages/:id')).toEqual([])
   })
 })

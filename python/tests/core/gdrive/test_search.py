@@ -12,14 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.search import files_containing
 from mirage.core.gdrive.tree import PARENTS_PER_QUERY
 from mirage.types import PathSpec
+from mirage.utils.clock import ManualClock
+from tests.fixtures.google_account import FILES, UNTIL_CLEARED
 from tests.fixtures.handed import entry_at
+
+TIMEOUT = 0.2
 
 
 def scope(vfs_path: str = "") -> PathSpec:
@@ -27,58 +30,62 @@ def scope(vfs_path: str = "") -> PathSpec:
     return PathSpec(vfs_path=vfs_path, virtual=virtual, directory=virtual)
 
 
+async def _searched(google_account) -> list[list[str]]:
+    """The folders each full-text search since recording started asked
+    in."""
+    return [
+        listing.folders
+        for listing in await google_account.listings()
+        if listing.text is not None
+    ]
+
+
 @pytest.mark.asyncio
-async def test_hits_are_the_walked_files_drive_names(
-    fake_drive, gdrive_accessor
-):
-    sub = fake_drive.folder("sub")
-    fake_drive.add("a.txt", content=b"the wombat")
-    fake_drive.add("b.txt", parent=sub, content=b"wombat here")
-    fake_drive.add("c.txt", content=b"nothing")
-    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
+async def test_hits_are_the_walked_files_drive_names(google_account):
+    sub = await google_account.folder("sub")
+    await google_account.upload("a.txt", b"the wombat")
+    await google_account.upload("b.txt", b"wombat here", sub)
+    await google_account.upload("c.txt", b"nothing")
+    await google_account.run.record_requests()
+    out = await files_containing(
+        google_account.drive_accessor(), "wombat", scope(), None
+    )
     assert out is not None
     assert sorted(p.virtual for p in out) == ["/gd/a.txt", "/gd/sub/b.txt"]
-    assert fake_drive.searches == [["root", sub]]
+    assert await _searched(google_account) == [["root", sub]]
 
 
 @pytest.mark.asyncio
-async def test_a_subfolder_scope_searches_from_its_folder(
-    fake_drive, gdrive_accessor
-):
-    sub = fake_drive.folder("sub")
-    fake_drive.add("a.txt", content=b"wombat")
-    fake_drive.add("b.txt", parent=sub, content=b"wombat")
+async def test_a_subfolder_scope_searches_from_its_folder(google_account):
+    sub = await google_account.folder("sub")
+    await google_account.upload("a.txt", b"wombat")
+    await google_account.upload("b.txt", b"wombat", sub)
+    accessor = google_account.drive_accessor()
     under = scope("sub")
-    out = await files_containing(
-        gdrive_accessor,
-        "wombat",
-        under,
-        await entry_at(readdir, gdrive_accessor, under),
-    )
+    entry = await entry_at(readdir, accessor, under)
+    await google_account.run.record_requests()
+    out = await files_containing(accessor, "wombat", under, entry)
     assert out is not None
     assert [(p.virtual, p.vfs_path) for p in out] == [
         ("/gd/sub/b.txt", "sub/b.txt")
     ]
-    assert fake_drive.searches == [[sub]]
+    assert await _searched(google_account) == [[sub]]
 
 
 @pytest.mark.asyncio
-async def test_many_folders_are_searched_in_batches(
-    fake_drive, gdrive_accessor
-):
+async def test_many_folders_are_searched_in_batches(google_account):
     for i in range(PARENTS_PER_QUERY + 5):
-        fake_drive.folder(f"d{i:02d}")
-    fake_drive.add("a.txt", content=b"wombat")
-    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
+        await google_account.folder(f"d{i:02d}")
+    await google_account.upload("a.txt", b"wombat")
+    await google_account.run.record_requests()
+    out = await files_containing(
+        google_account.drive_accessor(), "wombat", scope(), None
+    )
     assert out is not None
-    assert [len(s) for s in fake_drive.searches] == [PARENTS_PER_QUERY, 6]
-
-
-def _raise(exc: BaseException):
-    async def fail(*args, **kwargs):
-        raise exc
-
-    return fail
+    assert [len(s) for s in await _searched(google_account)] == [
+        PARENTS_PER_QUERY,
+        6,
+    ]
 
 
 @pytest.mark.asyncio
@@ -86,21 +93,41 @@ def _raise(exc: BaseException):
     "case",
     ["no hit", "incomplete", "search fails", "timeout", "listing fails"],
 )
-async def test_a_search_that_cannot_answer_answers_none(
-    case, fake_drive, gdrive_accessor, monkeypatch
-):
-    fake_drive.add(
-        "a.txt", content=b"nothing" if case == "no hit" else b"wombat"
+async def test_a_search_that_cannot_answer_answers_none(case, google_account):
+    await google_account.upload(
+        "a.txt", b"nothing" if case == "no hit" else b"wombat"
     )
-    fake_drive.incomplete = case == "incomplete"
-    if case == "search fails":
-        error = aiohttp.ClientConnectionError("down")
-        monkeypatch.setattr(fake_drive, "search_files", _raise(error))
-    if case == "timeout":
-        monkeypatch.setattr(fake_drive, "search_files", _raise(TimeoutError()))
-    if case == "listing fails":
-        monkeypatch.setattr(
-            fake_drive, "list_children", _raise(TimeoutError())
+    if case != "no hit":
+        # A run that answers learns the query each request is asked with,
+        # so the one refused is that request and no other.
+        await google_account.run.record_requests()
+        assert await files_containing(
+            google_account.drive_accessor(), "wombat", scope(), None
         )
-    out = await files_containing(gdrive_accessor, "wombat", scope(), None)
+        listings = await google_account.listings()
+        search = next(one for one in listings if one.text is not None)
+        level = next(one for one in listings if one.level and one.text is None)
+        if case == "incomplete":
+            # Drive gave up on a corpus: its own answer, marked so.
+            asked = await google_account.run.call(
+                "GET", f"{FILES}?{search.query}"
+            )
+            await google_account.run.answer_next(
+                "GET",
+                FILES,
+                200,
+                {**asked, "incompleteSearch": True},
+                query=search.query,
+            )
+        else:
+            await google_account.run.answer_next(
+                "GET",
+                FILES,
+                None if case == "search fails" else 200,
+                times=UNTIL_CLEARED,
+                query=(level if case == "listing fails" else search).query,
+                delay_ms=0 if case == "search fails" else int(TIMEOUT * 5000),
+            )
+    accessor = google_account.drive_accessor(ManualClock(), timeout=TIMEOUT)
+    out = await files_containing(accessor, "wombat", scope(), None)
     assert out is None

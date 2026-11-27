@@ -130,6 +130,19 @@ export interface GmailLabel {
   type: string
 }
 
+// One change to a mailbox, the fake's own record of what history.list then
+// names (Gmail has no resource for it): a message added or deleted, or labels
+// added to or removed from one. `seq` is its history id.
+export type GmailChangeKind = 'messagesAdded' | 'messagesDeleted' | 'labelsAdded' | 'labelsRemoved'
+
+export interface GmailChange {
+  seq: number
+  kind: GmailChangeKind
+  messageId: string
+  threadId: string
+  labelIds: string[]
+}
+
 // A timed event carries dateTime (RFC3339, offset mandatory) and may name its
 // own IANA zone; an all-day event carries a floating `date` and no zone at all.
 export interface EventTime {

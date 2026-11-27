@@ -31,15 +31,15 @@ from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.utils.dates import to_iso_z
 from tests.core.discord.conftest import FakeDiscordApi
 from tests.core.slack.conftest import USERS, FakeSlack
-from tests.e2e.gdrive_mock import (
+from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
+from tests.sim.dropbox import FakeDropbox
+from tests.sim.gdrive import (
     _FAKE_EXPIRES_IN,
     _FAKE_TOKEN,
     FakeDriveApi,
     FakeGDrive,
     FakeRenderApi,
 )
-from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
-from tests.sim.dropbox import FakeDropbox
 from tests.sim.github import (
     MOCK_BLOBS,
     MOCK_DEFAULT_BRANCH,

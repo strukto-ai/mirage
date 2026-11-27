@@ -12,79 +12,117 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import pytest
+from typing import Any
+from urllib.parse import parse_qs
 
-from mirage.core.gcal.client import PAGE_LIMIT
+import pytest
+import pytest_asyncio
+
 from mirage.core.gcal.search import files_containing
-from tests.fixtures.gcal_api import (
+from mirage.core.google.constants import MAX_RETRIES
+from mirage.utils.clock import ManualClock
+from tests.fixtures.gcal_seed import make_accessor, spec
+from tests.fixtures.google_account import (
+    EVENTS,
     PRIMARY,
-    FakeCalendarApi,
-    event,
-    make_accessor,
-    spec,
+    UNTIL_CLEARED,
+    GoogleAccount,
 )
-from tests.fixtures.google_api import install_api
 
 pytestmark = pytest.mark.asyncio
 
 DAY = "2026-08-11"
+NOTHING = {"kind": "calendar#events", "items": []}
 
 
-def _api(monkeypatch: pytest.MonkeyPatch, events: list) -> FakeCalendarApi:
-    fake = FakeCalendarApi([PRIMARY], events)
-    install_api(monkeypatch, calendar=fake)
-    return fake
-
-
-def _day(event_id: str, summary: str, **fields: str) -> dict:
-    found = event(
-        event_id, summary, f"{DAY}T09:00:00+08:00", f"{DAY}T10:00:00+08:00"
+@pytest_asyncio.fixture
+async def calendar(google_account: GoogleAccount) -> GoogleAccount:
+    """The primary calendar holding three events on ``DAY``, its requests
+    recorded from here."""
+    start, end = f"{DAY}T09:00:00+08:00", f"{DAY}T10:00:00+08:00"
+    await google_account.reset()
+    await google_account.event("PhD Defense", start, end, event_id="aaaa1")
+    await google_account.event(
+        "Weekly sync-up",
+        start,
+        end,
+        event_id="bbbb2",
+        description="Q&amp;A after",
     )
-    return found | fields
+    await google_account.event(
+        "Lunch", start, end, event_id="cccc3", location="Room 4"
+    )
+    await google_account.run.record_requests()
+    return google_account
 
 
-async def _ids(text: str, under: str = "/", **config: str | int) -> list:
-    accessor = make_accessor(**config)
+async def _ids(
+    account: GoogleAccount, text: str, under: str = "/", **config: Any
+) -> list | None:
+    accessor = make_accessor(account, **config)
     out = await files_containing(accessor, text, [spec(under)])
     if out is None:
         return None
     return sorted(p.virtual.rsplit("/", 1)[-1].split("__")[0] for p in out)
 
 
-EVENTS = [
-    _day("aaaa1", "PhD Defense"),
-    _day("bbbb2", "Weekly sync-up", description="Q&amp;A after"),
-    _day("cccc3", "Lunch", location="Room 4"),
-]
+async def search_query(account: GoogleAccount, word: str) -> str:
+    """The query string the last search for ``word`` was sent with.
+
+    Args:
+        account (GoogleAccount): the account searched.
+        word (str): the word searched for.
+    """
+    asked = [
+        r["query"]
+        for r in await account.asked("GET", EVENTS)
+        if parse_qs(r["query"]).get("q") == [word]
+    ]
+    return asked[-1]
+
+
+async def served(account: GoogleAccount) -> list[int]:
+    """How many requests each answer armed on the fake has served."""
+    listed = await account.run.call("GET", "/_kit/faults")
+    return [plan["served"] for plan in listed["plans"]]
 
 
 # Calendar's search names the events whose own words hold the text; the
 # rest of an event's file (ids, status, times) is the listing's to check.
 async def test_search_names_events_and_the_listing_checks_the_rest(
-    monkeypatch,
+    calendar,
 ):
-    fake = _api(monkeypatch, EVENTS)
-    assert await _ids("defense") == ["aaaa1"]
-    assert ("integ@example.com", "defense") in fake.asked
-    assert await _ids("confirmed") == ["aaaa1", "bbbb2", "cccc3"]
+    assert await _ids(calendar, "defense") == ["aaaa1"]
+    assert ("search", PRIMARY, "defense") in await calendar.calendar_log()
+    assert await _ids(calendar, "confirmed") == ["aaaa1", "bbbb2", "cccc3"]
 
 
 # A word the search may split otherwise (hyphenated, an entity) is kept by
-# the listing, and each word of a phrase is found in either place.
-async def test_a_word_the_search_may_split_is_kept_by_the_listing(
-    monkeypatch,
-):
-    _api(monkeypatch, EVENTS)
-    assert await _ids("sync") == ["bbbb2"]
-    assert await _ids("amp") == ["bbbb2"]
-    assert await _ids("Weekly sync") == ["bbbb2"]
-    assert await _ids("room") == ["cccc3"]
+# the listing, and each word of a phrase is found in either place. The
+# fake's search finds both words, so each is searched once as it is, and
+# then with the search finding nothing for it, as Calendar's may.
+async def test_a_word_the_search_may_split_is_kept_by_the_listing(calendar):
+    assert await _ids(calendar, "sync") == ["bbbb2"]
+    assert await _ids(calendar, "amp") == ["bbbb2"]
+    for word in ("sync", "amp"):
+        await calendar.run.answer_next(
+            "GET",
+            EVENTS,
+            200,
+            NOTHING,
+            times=UNTIL_CLEARED,
+            query=await search_query(calendar, word),
+        )
+    assert await _ids(calendar, "sync") == ["bbbb2"]
+    assert await _ids(calendar, "amp") == ["bbbb2"]
+    assert await _ids(calendar, "Weekly sync") == ["bbbb2"]
+    assert await _ids(calendar, "room") == ["cccc3"]
+    assert await served(calendar) == [2, 1]
 
 
-async def test_a_bucket_scope_and_a_multi_day_mount(monkeypatch):
-    _api(monkeypatch, EVENTS)
-    assert await _ids("lunch", f"/primary/{DAY}") == ["cccc3"]
-    assert await _ids("lunch", bucket_days=7) == ["cccc3"]
+async def test_a_bucket_scope_and_a_multi_day_mount(calendar):
+    assert await _ids(calendar, "lunch", f"/primary/{DAY}") == ["cccc3"]
+    assert await _ids(calendar, "lunch", bucket_days=7) == ["cccc3"]
 
 
 @pytest.mark.parametrize(
@@ -96,40 +134,48 @@ async def test_a_bucket_scope_and_a_multi_day_mount(monkeypatch):
         ("lunch", f"/primary/{DAY}/cccc3.gcal.json"),
     ],
 )
-async def test_reads_every_file_when_it_cannot_say(monkeypatch, text, under):
-    _api(monkeypatch, EVENTS)
-    assert await _ids(text, under) is None
+async def test_reads_every_file_when_it_cannot_say(calendar, text, under):
+    assert await _ids(calendar, text, under) is None
 
 
-async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
-    _api(monkeypatch, EVENTS)
-    accessor = make_accessor(capped=lambda: False)
+async def test_a_listing_without_kept_text_reads_every_file(calendar):
+    accessor = make_accessor(calendar, capped=lambda: False)
     out = await files_containing(accessor, "lunch", [spec("/")])
     assert out is None
 
 
-@pytest.mark.parametrize(
-    "error", [OSError("connection reset"), RuntimeError(PAGE_LIMIT)]
-)
-async def test_a_failed_search_reads_every_file(monkeypatch, error):
-    fake = _api(monkeypatch, EVENTS)
-    listing = fake.list_events
+async def test_a_dropped_search_reads_every_file(calendar):
+    # The connection drops on the search and on each retry of it; the
+    # listings are served.
+    assert await _ids(calendar, "lunch") == ["cccc3"]
+    await calendar.run.answer_next(
+        "GET",
+        EVENTS,
+        None,
+        times=UNTIL_CLEARED,
+        query=await search_query(calendar, "lunch"),
+    )
+    assert await _ids(calendar, "lunch", clock=ManualClock()) is None
+    assert await served(calendar) == [1 + MAX_RETRIES]
 
-    async def refused(*args, query=None, **kwargs):
-        if query is not None:
-            raise error
-        return await listing(*args, **kwargs)
 
-    monkeypatch.setattr(fake, "list_events", refused)
-    assert await _ids("lunch") is None
+async def test_a_search_past_the_page_cap_reads_every_file(calendar):
+    # Each page of the search names a next one, so it runs past the cap.
+    assert await _ids(calendar, "lunch") == ["cccc3"]
+    query = await search_query(calendar, "lunch")
+    page = {**NOTHING, "nextPageToken": "1"}
+    for asked in (query, f"{query}&pageToken=1"):
+        await calendar.run.answer_next(
+            "GET", EVENTS, 200, page, times=UNTIL_CLEARED, query=asked
+        )
+    assert await _ids(calendar, "lunch") is None
+    assert await served(calendar) == [1, 49]
 
 
 # A read fetches the event as it is now, and so does the search: each
 # bucket is listed again rather than served from the walk's listing.
-async def test_a_text_changed_since_the_listing_is_found(monkeypatch):
-    events = list(EVENTS)
-    _api(monkeypatch, events)
-    accessor = make_accessor()
+async def test_a_text_changed_since_the_listing_is_found(calendar):
+    accessor = make_accessor(calendar)
 
     async def ids(text: str) -> list | None:
         out = await files_containing(accessor, text, [spec("/")])
@@ -138,5 +184,5 @@ async def test_a_text_changed_since_the_listing_is_found(monkeypatch):
         return sorted(p.virtual.rsplit("/", 1)[-1].split("__")[0] for p in out)
 
     assert await ids("tentative") is None
-    events[0] = _day("aaaa1", "PhD Defense", status="tentative")
+    await calendar.change_event("aaaa1", status="tentative")
     assert await ids("tentative") == ["aaaa1"]

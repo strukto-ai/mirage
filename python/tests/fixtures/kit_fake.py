@@ -16,7 +16,7 @@ import asyncio
 import base64
 import inspect
 import json
-import select
+import selectors
 import sqlite3
 import subprocess
 import tempfile
@@ -61,7 +61,12 @@ def serve(service: str) -> Iterator[str]:
     )
     assert process.stdout is not None
     try:
-        ready, _, _ = select.select([process.stdout], [], [], START_SECONDS)
+        # A selector, not select(): the root conftest lets a worker hold
+        # 8192 descriptors, and select() refuses one numbered 1024 or more,
+        # so a fake started late in a busy worker failed to start.
+        with selectors.DefaultSelector() as waiting:
+            waiting.register(process.stdout, selectors.EVENT_READ)
+            ready = waiting.select(START_SECONDS)
         line = process.stdout.readline() if ready else ""
         name, _, origin = line.strip().partition("=")
         if name != f"{service.upper().replace('-', '_')}_URL" or not origin:
@@ -233,18 +238,20 @@ class KitRun:
         self,
         method: str,
         route: str,
-        status: int,
+        status: int | None,
         body: Any = None,
         times: int = 1,
         path: str | None = None,
         query: str | None = None,
+        delay_ms: int = 0,
     ) -> None:
         """Answer the next ``times`` requests to ``route`` with ``status``.
 
         Args:
             method (str): the HTTP method.
             route (str): the route as the fake declares it.
-            status (int): the status to answer.
+            status (int | None): the status to answer; None closes the
+                connection instead, after ``delay_ms``.
             body (Any): the JSON body to answer, bytes to send as written;
                 the kit's own if None.
             times (int): how many requests it answers.
@@ -252,13 +259,17 @@ class KitRun:
                 route serves if None.
             query (str | None): the one query string it answers, ``""``
                 for none; any if None.
+            delay_ms (int): how long each request waits before it is
+                answered.
         """
         plan: dict[str, Any] = {
             "method": method,
             "route": route,
-            "status": status,
             "times": times,
+            "delay_ms": delay_ms,
         }
+        if status is not None:
+            plan["status"] = status
         if path is not None:
             plan["path"] = path
         if query is not None:

@@ -27,46 +27,46 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_rmdir_removes_dir(fake_drive, gdrive_accessor):
-    fake_drive.folder("d")
-    await call(rmdir, readdir, gdrive_accessor, spec("/d"))
-    assert fake_drive.find("d") is None
+async def test_rmdir_removes_dir(google_account):
+    await google_account.folder("d")
+    await call(rmdir, readdir, google_account.drive_accessor(), spec("/d"))
+    assert await google_account.find("d") is None
 
 
 @pytest.mark.asyncio
-async def test_rmdir_missing_raises(fake_drive, gdrive_accessor):
+async def test_rmdir_missing_raises(google_account):
     with pytest.raises(FileNotFoundError):
-        await call(rmdir, readdir, gdrive_accessor, spec("/missing"))
+        await call(
+            rmdir, readdir, google_account.drive_accessor(), spec("/missing")
+        )
 
 
 @pytest.mark.asyncio
-async def test_rmdir_file_raises(fake_drive, gdrive_accessor):
-    fake_drive.add("f.txt", content=b"x")
+async def test_rmdir_file_raises(google_account):
+    await google_account.upload("f.txt", b"x")
     with pytest.raises(NotADirectoryError):
-        await call(rmdir, readdir, gdrive_accessor, spec("/f.txt"))
+        await call(
+            rmdir, readdir, google_account.drive_accessor(), spec("/f.txt")
+        )
 
 
 @pytest.mark.asyncio
-async def test_rmdir_refuses_a_folder_holding_a_file(
-    fake_drive, gdrive_accessor
-):
-    folder = fake_drive.folder("d")
-    fake_drive.add("a.txt", parent=folder, content=b"a")
+async def test_rmdir_refuses_a_folder_holding_a_file(google_account):
+    folder = await google_account.folder("d")
+    await google_account.upload("a.txt", b"a", folder)
     with pytest.raises(OSError) as excinfo:
-        await call(rmdir, readdir, gdrive_accessor, spec("/d"))
+        await call(rmdir, readdir, google_account.drive_accessor(), spec("/d"))
     assert excinfo.value.errno == errno.ENOTEMPTY
-    assert fake_drive.find("d") is not None
-    assert fake_drive.find("a.txt") is not None
+    assert await google_account.find("d") is not None
+    assert await google_account.find("a.txt") is not None
 
 
 @pytest.mark.asyncio
-async def test_rmdir_refuses_a_folder_holding_a_subfolder(
-    fake_drive, gdrive_accessor
-):
-    folder = fake_drive.folder("d")
-    fake_drive.folder("sub", parent=folder)
+async def test_rmdir_refuses_a_folder_holding_a_subfolder(google_account):
+    folder = await google_account.folder("d")
+    await google_account.folder("sub", folder)
     with pytest.raises(OSError) as excinfo:
-        await call(rmdir, readdir, gdrive_accessor, spec("/d"))
+        await call(rmdir, readdir, google_account.drive_accessor(), spec("/d"))
     assert excinfo.value.errno == errno.ENOTEMPTY
-    assert fake_drive.find("d") is not None
-    assert fake_drive.find("sub") is not None
+    assert await google_account.find("d") is not None
+    assert await google_account.find("sub") is not None

@@ -14,15 +14,15 @@
 
 from typing import Any
 
-import pytest
+import pytest_asyncio
 
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import FileStat, Limit, MountMode, PathSpec
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.gmail import GmailVFS
 from mirage.workspace import Workspace
-from tests.fixtures.gmail_api import FakeGmail
-from tests.fixtures.google_api import install_api
+from tests.fixtures.gmail_seed import seed
+from tests.fixtures.google_account import MESSAGES, GoogleAccount
 
 
 class CountingGmail(GmailVFS):
@@ -42,26 +42,22 @@ class CountingGmail(GmailVFS):
         return await super().read(path, entry)
 
 
-@pytest.fixture
-def gmail(monkeypatch):
-    """Run a line over a Gmail mount served by a ``FakeGmail``.
+@pytest_asyncio.fixture
+async def gmail(google_account: GoogleAccount):
+    """Run a line over a Gmail mount on the fake, its mailbox the seeded
+    ``MAILBOX``.
 
     Returns:
-        an async ``run(line, fake=None, walk_limit=None, **config)`` giving
-        the output, the exit code, the message ids read and the queries
-        searched; ``walk_limit`` is the mount's ``"*"`` command limit.
+        an async ``run(line, walk_limit=None, **config)`` giving the
+        output, the exit code, the keys of the messages read and the
+        queries searched; ``walk_limit`` is the mount's ``"*"`` command
+        limit.
     """
+    keys = await seed(google_account)
 
-    async def run(
-        line: str,
-        fake: FakeGmail | None = None,
-        walk_limit: int | None = None,
-        **config: Any,
-    ):
-        fake = fake or FakeGmail()
-        install_api(monkeypatch, gmail=fake)
-        settings = {"access_token": "t"} | config
-        vfs = CountingGmail(GmailConfig(**settings))
+    async def run(line: str, walk_limit: int | None = None, **config: Any):
+        await google_account.run.record_requests()
+        vfs = CountingGmail(google_account.config(GmailConfig, **config))
         limits = (
             {}
             if walk_limit is None
@@ -75,6 +71,13 @@ def gmail(monkeypatch):
             out = await result.stdout_str()
         finally:
             await ws.close()
-        return out, result.exit_code, sorted(vfs.reads), fake.searches
+        # A date window is asked as after:, so a search is any other query.
+        searches = [
+            asked["q"]
+            for asked in await google_account.run.params("GET", MESSAGES)
+            if "q" in asked and not asked["q"].startswith("after:")
+        ]
+        read = sorted(keys[message_id] for message_id in vfs.reads)
+        return out, result.exit_code, read, searches
 
     return run

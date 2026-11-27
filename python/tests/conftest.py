@@ -108,6 +108,14 @@ def github_origin() -> Iterator[str]:
         yield origin
 
 
+@pytest.fixture(scope="session")
+def gws_origin() -> Iterator[str]:
+    """The integ Google Workspace fake's origin, one fake for every test
+    that asks."""
+    with serve("gws") as origin:
+        yield origin
+
+
 @pytest.fixture
 def redis_prefix() -> str:
     """A Redis key prefix that belongs to this one test.

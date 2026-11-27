@@ -12,38 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
+import hashlib
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.context import session_context as caller
 from mirage.core.gdrive.checksum import checksum
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType, PathSpec
-from tests.fixtures.gdrive_api import StubDrive, install_drive
+from tests.fixtures.google_account import FILE
 
 SCOPE = PathSpec(vfs_path="r.pdf", virtual="/r.pdf", directory="/")
+DATA = b"report bytes"
 
 
-@pytest.fixture
-def accessor():
-    config = GoogleConfig(
-        client_id="id", client_secret="secret", refresh_token="refresh"
-    )
-    manager = TokenManager(config)
-    manager._access_token = "fake-token"
-    manager._expires_at = 9999999999
-    return GDriveAccessor(config=config, token_manager=manager)
-
-
-def _row(resource_type: str) -> FileStat:
+def _row(file_id: str, resource_type: str) -> FileStat:
     return FileStat(
         name="r.pdf",
         type=FileType.FILE,
-        extra={"file_id": "f1", "resource_type": resource_type},
+        extra={"file_id": file_id, "resource_type": resource_type},
     )
 
 
@@ -57,48 +44,65 @@ def _row(resource_type: str) -> FileStat:
     ],
 )
 async def test_drive_answers_the_digest_it_keeps(
-    accessor, monkeypatch, algorithm, field
+    google_account, algorithm, field
 ):
-    reply = {"md5Checksum": "m5", "headRevisionId": "h1", field: "ABC123"}
-    get = AsyncMock(return_value=reply)
-    install_drive(monkeypatch, StubDrive(get_file=get))
+    made = await google_account.upload("r.pdf", DATA)
+    # Drive's digest in capitals, which the answer lowers.
+    answered = await google_account.item(made)
+    answered[field] = answered[field].upper()
+    await google_account.run.answer_next("GET", FILE, 200, answered)
+    await google_account.run.record_requests()
     scope = RecordingScope()
     try:
-        got = await checksum(accessor, SCOPE, algorithm, _row("gdrive/file"))
+        got = await checksum(
+            google_account.drive_accessor(),
+            SCOPE,
+            algorithm,
+            _row(made, "gdrive/file"),
+        )
     finally:
         scope.close()
-    assert got == "abc123"
-    file_id, asked = get.await_args.args
-    assert file_id == "f1"
+    assert got == hashlib.new(algorithm, DATA).hexdigest()
+    assert [name for name, _ in await google_account.log()] == ["get"]
+    asked = (await google_account.run.params("GET", FILE))[0]["fields"]
     fields = asked.split(",")
     assert fields[0] == field
     assert {"md5Checksum", "headRevisionId"} <= set(fields)
     assert [
         (r.op, r.path, r.fingerprint, r.revision) for r in scope.records
-    ] == [("read", "/r.pdf", reply["md5Checksum"], "h1")]
+    ] == [
+        (
+            "read",
+            "/r.pdf",
+            answered["md5Checksum"],
+            answered["headRevisionId"],
+        )
+    ]
 
 
 @pytest.mark.asyncio
-async def test_a_native_file_or_another_algorithm_reads(accessor, monkeypatch):
-    get = AsyncMock()
-    install_drive(monkeypatch, StubDrive(get_file=get))
-    doc = _row("gdrive/gdoc")
+async def test_a_native_file_or_another_algorithm_reads(google_account):
+    made = await google_account.upload("r.pdf", DATA)
+    accessor = google_account.drive_accessor()
+    await google_account.run.record_requests()
+    doc = _row(made, "gdrive/gdoc")
     assert await checksum(accessor, SCOPE, "md5", doc) is None
-    binary = _row("gdrive/file")
+    binary = _row(made, "gdrive/file")
     assert await checksum(accessor, SCOPE, "sha512", binary) is None
-    get.assert_not_awaited()
+    assert await google_account.log() == []
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_revision_reads(accessor, monkeypatch):
-    get = AsyncMock()
-    install_drive(monkeypatch, StubDrive(get_file=get))
+async def test_a_pinned_revision_reads(google_account):
+    made = await google_account.upload("r.pdf", DATA)
+    accessor = google_account.drive_accessor()
+    await google_account.run.record_requests()
     token = caller.bind_caller(
         caller.current_caller().changed({"revisions": {SCOPE.virtual: "r7"}})
     )
     try:
-        row = _row("gdrive/file")
+        row = _row(made, "gdrive/file")
         assert await checksum(accessor, SCOPE, "md5", row) is None
     finally:
         caller.reset_caller(token)
-    get.assert_not_awaited()
+    assert await google_account.log() == []

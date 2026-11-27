@@ -26,6 +26,7 @@ import type {
   DriveItem,
   EventTime,
   FormItem,
+  GmailChangeKind,
   GmailMessage,
   Permission,
   Presentation,
@@ -129,6 +130,8 @@ export async function loadState(db: Db, tenant: string, epochMs?: number): Promi
   const meta = rowsOf<Model.Meta>(db, 'Meta', tenant, false)[0] ?? null
   const counters = rowsOf<Model.Counter>(db, 'Counter', tenant, false)
   const changes = rowsOf<Model.DriveChange>(db, 'DriveChange', tenant, true)
+  const gmailChanges = rowsOf<Model.GmailChange>(db, 'GmailChange', tenant, true)
+  const calendarChanges = rowsOf<Model.CalendarChange>(db, 'CalendarChange', tenant, true)
   const drives = rowsOf<Model.Drive>(db, 'Drive', tenant, true)
   const files = rowsOf<Model.DriveFile>(db, 'DriveFile', tenant, true)
   const parents = rowsOf<Model.DriveParent>(db, 'DriveParent', tenant, true)
@@ -163,6 +166,18 @@ export async function loadState(db: Db, tenant: string, epochMs?: number): Promi
   )
   for (const row of counters) st.counters.set(row.kind, row.n)
   for (const row of changes) st.changes.push([row.seq, row.fileId])
+  for (const row of gmailChanges) {
+    st.gmailChanges.push({
+      seq: row.seq,
+      kind: row.kind as GmailChangeKind,
+      messageId: row.messageId,
+      threadId: row.threadId,
+      labelIds: row.labelIds === '' ? [] : row.labelIds.split(','),
+    })
+  }
+  for (const row of calendarChanges) {
+    st.calendarChanges.push([row.seq, row.calendarId, row.eventId])
+  }
 
   for (const row of drives) st.drives.set(row.id, { id: row.id, name: row.name })
 

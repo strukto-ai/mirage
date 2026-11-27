@@ -12,64 +12,67 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { rmdir } from './rmdir.ts'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
+async function removed(path: string): Promise<void> {
+  const accessor = account.driveAccessor()
+  await rmdir(accessor, spec(path), await handedAt(readdir, accessor, spec(path)))
+}
+
 describe('gdrive rmdir', () => {
   it('removes a dir', async () => {
-    fake.folder('d')
-    await rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d')))
-    expect(fake.find('d')).toBeNull()
+    await account.folder('d')
+    await removed('/d')
+    expect(await account.find('d')).toBeNull()
   })
 
   it('missing target raises ENOENT', async () => {
-    await expect(
-      rmdir(accessor, spec('/missing'), await handedAt(readdir, accessor, spec('/missing'))),
-    ).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(removed('/missing')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('file target raises ENOTDIR', async () => {
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    await expect(
-      rmdir(accessor, spec('/f.txt'), await handedAt(readdir, accessor, spec('/f.txt'))),
-    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+    await account.upload('f.txt', 'x')
+    await expect(removed('/f.txt')).rejects.toMatchObject({ code: 'ENOTDIR' })
   })
 
   it('refuses a folder holding a file and keeps both', async () => {
-    const folder = fake.folder('d')
-    fake.add('a.txt', folder, undefined, ENC.encode('a'))
-    await expect(
-      rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
-    ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
-    expect(fake.find('d')).not.toBeNull()
-    expect(fake.find('a.txt')).not.toBeNull()
+    const folder = await account.folder('d')
+    await account.upload('a.txt', 'a', folder)
+    await expect(removed('/d')).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(await account.find('d')).not.toBeNull()
+    expect(await account.find('a.txt')).not.toBeNull()
   })
 
   it('refuses a folder holding a subfolder', async () => {
-    const folder = fake.folder('d')
-    fake.folder('sub', folder)
-    await expect(
-      rmdir(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d'))),
-    ).rejects.toMatchObject({ code: 'ENOTEMPTY' })
-    expect(fake.find('d')).not.toBeNull()
-    expect(fake.find('sub')).not.toBeNull()
+    const folder = await account.folder('d')
+    await account.folder('sub', folder)
+    await expect(removed('/d')).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(await account.find('d')).not.toBeNull()
+    expect(await account.find('sub')).not.toBeNull()
   })
 })

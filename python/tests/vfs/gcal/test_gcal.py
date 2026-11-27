@@ -20,38 +20,37 @@ import pytest
 from mirage import Workspace
 from mirage.core.gcal.day import parse_bucket
 from mirage.core.render.json import compact_json_bytes
+from mirage.vfs.gcal.config import GCalConfig
 from mirage.vfs.gcal.gcal import GCalVFS
-from tests.fixtures.gcal_api import EVENTS, gcal_api, gcal_config
+from tests.fixtures.gcal_seed import TODAY, calendar, gcal_config
 
-__all__ = ["gcal_api"]
+__all__ = ["calendar"]
 
 EVENT = "/cal/primary/2026-08-11/aaaa1__0900-1030_PhD_Defense.gcal.json"
-WHOLE = compact_json_bytes(EVENTS[0])
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("gcal_api")
 @pytest.mark.parametrize(
-    "kwargs, data",
+    "kwargs, part",
     [
-        ({}, WHOLE),
-        ({"raw": True}, WHOLE),
-        ({"offset": 2, "size": 10}, WHOLE[2:12]),
+        ({}, slice(None)),
+        ({"raw": True}, slice(None)),
+        ({"offset": 2, "size": 10}, slice(2, 12)),
     ],
     ids=["whole", "raw", "range"],
 )
-async def test_the_dispatcher_reads_an_event_cold(kwargs, data):
+async def test_the_dispatcher_reads_an_event_cold(calendar, kwargs, part):
     # gcal's read is the by-VFS op: an event resolves as ".json" at the
     # dispatcher, so a read keyed to ".gcal.json" was never picked and a cold
     # read raised ENOTSUP until a cat warmed the file cache.
-    ws = Workspace({"/cal": GCalVFS(gcal_config())})
-    assert await ws.vfs.read(EVENT, **kwargs) == data
+    whole = compact_json_bytes(await calendar.event_item("aaaa1"))
+    ws = Workspace({"/cal": GCalVFS(gcal_config(calendar))})
+    assert await ws.vfs.read(EVENT, **kwargs) == whole[part]
 
 
 @pytest.mark.asyncio
-@pytest.mark.usefixtures("gcal_api")
-async def test_the_dispatcher_reads_calendar_json_cold():
-    ws = Workspace({"/cal": GCalVFS(gcal_config())})
+async def test_the_dispatcher_reads_calendar_json_cold(calendar):
+    ws = Workspace({"/cal": GCalVFS(gcal_config(calendar))})
     body = json.loads(await ws.vfs.read("/cal/primary/calendar.json"))
     assert body["bucketTimeZone"] == "Asia/Hong_Kong"
 
@@ -59,7 +58,11 @@ async def test_the_dispatcher_reads_calendar_json_cold():
 @pytest.mark.parametrize("size", [1, 7, 30])
 @pytest.mark.asyncio
 async def test_vfs_md_shows_the_mount_s_own_tree(size):
-    vfs = GCalVFS(gcal_config(bucket_days=size))
+    # The tree is the mount's own shape, drawn without a request.
+    config = GCalConfig(
+        client_id="cid", refresh_token="rt", today=TODAY, bucket_days=size
+    )
+    vfs = GCalVFS(config)
     text = await Workspace({"/cal": vfs}).vfs_md()
     example = re.search(
         r"primary/\s+calendar\.json\s+(\S+)/\s+<eventId>__(\S+)", text

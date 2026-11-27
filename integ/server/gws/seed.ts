@@ -15,7 +15,7 @@
 import { ResetBodyError } from '../kit/typescript/index.ts'
 import type { JsonValue } from '../kit/typescript/index.ts'
 import { createDriveItem } from './drive/item.ts'
-import { eventsOf, makeEvent, readEventTimes } from './calendar/event.ts'
+import { eventIdTaken, eventsOf, isEventId, makeEvent, readEventTimes } from './calendar/event.ts'
 import { DEFAULT_CALENDAR_TZ } from './store/state.ts'
 import { isIanaZone } from './calendar/zone.ts'
 import type { GwsState } from './store/state.ts'
@@ -62,8 +62,14 @@ export function seedCalendars(st: GwsState, entries: JsonObj[]): void {
       if (isReply(times)) {
         throw new Error(`seed event ${JSON.stringify(raw)} refused: ${JSON.stringify(times.body)}`)
       }
-      const ev = makeEvent(st, raw, times)
+      // A seeded event may name its id, as a caller of events.insert may.
+      const pinned = asStr(raw.id)
+      if (pinned !== undefined && (!isEventId(pinned) || eventIdTaken(st, pinned))) {
+        throw new ResetBodyError(`seed event id is no free event id: ${pinned}`)
+      }
+      const ev = makeEvent(st, raw, times, pinned)
       bucket.set(ev.id, ev)
+      st.noteCalendarChange(id, ev.id)
     }
   }
 }

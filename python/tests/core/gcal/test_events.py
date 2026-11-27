@@ -15,70 +15,63 @@
 import pytest
 
 from mirage.core.gcal.events import build_delta_hook, event_paths
-from mirage.core.google.client import GoogleApiError
-from mirage.types import FileChangeKind
-from tests.fixtures.gcal_api import (
-    EVENTS,
-    HK,
-    PRIMARY,
-    event,
-    make_accessor,
-    spec,
-)
+from mirage.types import FileChangeKind, JsonValue
+from tests.fixtures.gcal_seed import HK, make_accessor, spec
+from tests.fixtures.google_account import EVENTS
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
+pytestmark = pytest.mark.asyncio
 
 DAY = "/primary/2026-08-11"
-MOVED = {
-    **event(
-        "aaaa1",
-        "PhD Defense",
-        "2026-08-11T10:00:00+08:00",
-        "2026-08-11T11:30:00+08:00",
-    ),
-    "updated": "2026-08-02T00:00:00.000Z",
-}
-NEW = event(
-    "ffff6", "Retro", "2026-08-12T09:00:00+08:00", "2026-08-12T10:00:00+08:00"
-)
+RETRO = "/primary/2026-08-12/ffff6__0900-1000_Retro.gcal.json"
 
 
-class Syncs:
-    """Calendar's incremental sync, scripted by the token it is asked from."""
+def event(
+    event_id: str, summary: str, start: str, end: str
+) -> dict[str, JsonValue]:
+    """An events.list item.
 
-    def __init__(self, answers):
-        self.answers = answers
-        self.asked: list[str | None] = []
-
-    async def __call__(self, calendar_id, token, time_zone=None):
-        assert calendar_id == PRIMARY["id"]
-        self.asked.append(token)
-        answer = self.answers[token]
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-
-def _gone() -> GoogleApiError:
-    return GoogleApiError("gone", 410)
+    Args:
+        event_id (str): the event id.
+        summary (str): the title.
+        start (str): RFC3339 start.
+        end (str): RFC3339 end.
+    """
+    return {
+        "id": event_id,
+        "status": "confirmed",
+        "summary": summary,
+        "start": {"dateTime": start},
+        "end": {"dateTime": end},
+    }
 
 
-async def test_events_follow_each_event_s_files(gcal_api):
-    syncs = Syncs(
-        {
-            None: ([EVENTS[0], EVENTS[1]], "t1"),
-            "t1": (
-                [MOVED, {"id": "bbbb2", "status": "cancelled"}, NEW],
-                "t2",
-            ),
-            "t2": _gone(),
-        }
-    )
-    gcal_api.syncs = syncs
-    hook = build_delta_hook(make_accessor())
+async def sync_tokens(account) -> list[str | None]:
+    """The sync token each events request was asked from, None for a
+    whole listing."""
+    return [
+        p.get("syncToken") for p in await account.run.params("GET", EVENTS)
+    ]
+
+
+async def test_events_follow_each_event_s_files(calendar):
+    hook = build_delta_hook(make_accessor(calendar))
     root = spec("/primary")
+    first = await calendar.sync_token()
     baseline = await hook.pull(root, None)
     assert baseline.changes == ()
+    await calendar.change_event(
+        "aaaa1",
+        start={"dateTime": "2026-08-11T10:00:00+08:00"},
+        end={"dateTime": "2026-08-11T11:30:00+08:00"},
+    )
+    await calendar.delete_event("bbbb2")
+    await calendar.event(
+        "Retro",
+        "2026-08-12T09:00:00+08:00",
+        "2026-08-12T10:00:00+08:00",
+        event_id="ffff6",
+    )
+    second = await calendar.sync_token()
     moved = await hook.pull(root, baseline.checkpoint)
     assert [(c.kind, c.path.virtual) for c in moved.changes] == [
         (
@@ -93,32 +86,37 @@ async def test_events_follow_each_event_s_files(gcal_api):
             FileChangeKind.DELETE,
             f"{DAY}/bbbb2__1500-1600_Committee_Meeting.gcal.json",
         ),
-        (
-            FileChangeKind.CREATE,
-            "/primary/2026-08-12/ffff6__0900-1000_Retro.gcal.json",
-        ),
+        (FileChangeKind.CREATE, RETRO),
     ]
     # A token Calendar dropped is answered by the whole calendar, where
     # only an event whose stamp moved since is reported.
-    syncs.answers[None] = (
-        [MOVED, {**NEW, "updated": "2026-08-03T00:00:00.000Z"}],
-        "t3",
+    await calendar.change_event("ffff6", description="Bring notes")
+    await calendar.refuse(
+        "GET",
+        EVENTS,
+        410,
+        "Sync token is no longer valid, a full sync is required.",
+        reason="fullSyncRequired",
     )
     expired = await hook.pull(root, moved.checkpoint)
     assert [(c.kind, c.path.virtual) for c in expired.changes] == [
-        (
-            FileChangeKind.UPDATE,
-            "/primary/2026-08-12/ffff6__0900-1000_Retro.gcal.json",
-        ),
+        (FileChangeKind.UPDATE, RETRO),
     ]
-    assert syncs.asked == [None, "t1", "t2", None]
+    assert await sync_tokens(calendar) == [None, first, second, None]
 
 
-async def test_an_event_outside_the_time_range_is_no_file():
+async def test_an_event_outside_the_time_range_is_no_file(google_account):
     # The listing of its day leaves it out, so its changes name nothing.
     accessor = make_accessor(
+        google_account,
         start_time="2026-08-12T12:00:00+08:00",
         end_time="2026-08-12T18:00:00+08:00",
+    )
+    outside = event(
+        "ffff6",
+        "Retro",
+        "2026-08-12T09:00:00+08:00",
+        "2026-08-12T10:00:00+08:00",
     )
     inside = event(
         "eeee5",
@@ -126,36 +124,35 @@ async def test_an_event_outside_the_time_range_is_no_file():
         "2026-08-12T13:00:00+08:00",
         "2026-08-12T14:00:00+08:00",
     )
-    assert event_paths(accessor, "/primary", NEW, HK, False) == []
+    assert event_paths(accessor, "/primary", outside, HK, False) == []
     assert event_paths(accessor, "/primary", inside, HK, False) == [
         "/primary/2026-08-12/eeee5__1300-1400_Lunch.gcal.json"
     ]
 
 
-def _primary(**changed: str) -> list[dict]:
-    return [{**PRIMARY, **changed}]
-
-
-async def test_events_follow_a_calendar_s_details_and_zone(gcal_api):
-    syncs = Syncs({None: ([EVENTS[0]], "t1"), "t1": ([], "t2")})
-    gcal_api.syncs = syncs
-    gcal_api.calendars = _primary()
-    hook = build_delta_hook(make_accessor())
+async def test_events_follow_a_calendar_s_details_and_zone(google_account):
+    # The primary calendar alone, holding one event.
+    await google_account.reset()
+    await google_account.event(
+        "PhD Defense",
+        "2026-08-11T09:00:00+08:00",
+        "2026-08-11T10:30:00+08:00",
+        event_id="aaaa1",
+    )
+    await google_account.run.record_requests()
+    hook = build_delta_hook(make_accessor(google_account))
     root = spec("/primary")
     baseline = await hook.pull(root, None)
     # Its own details are its calendar.json, which no event names.
-    gcal_api.calendars = _primary(summary="Renamed")
+    await google_account.change_calendar(summary="Renamed")
     renamed = await hook.pull(root, baseline.checkpoint)
     assert [(c.kind, c.path.virtual) for c in renamed.changes] == [
         (FileChangeKind.UPDATE, "/primary/calendar.json")
     ]
     # A new zone moves the day an event falls on: it is synced whole.
-    gcal_api.calendars = _primary(
-        summary="Renamed", timeZone="America/Los_Angeles"
-    )
-    syncs.answers[None] = ([EVENTS[0]], "t3")
+    await google_account.change_calendar(timeZone="America/Los_Angeles")
     moved = await hook.pull(root, renamed.checkpoint)
-    assert syncs.asked[-1] is None
+    assert (await sync_tokens(google_account))[-1] is None
     assert [(c.kind, c.path.virtual) for c in moved.changes] == [
         (FileChangeKind.UPDATE, "/primary/calendar.json"),
         (

@@ -12,30 +12,66 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { CapacityState, type CapacityResult } from '../../types.ts'
-import { makeScopedGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { CapacityState } from '../../types.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { capacity } from './capacity.ts'
 
+const ABOUT = '/drive/v3/about'
+
+interface About {
+  [key: string]: unknown
+  storageQuota: { limit?: string; usage: string }
+}
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
 describe('gdrive capacity', () => {
-  it.each<[string | null, Record<string, string>, CapacityResult]>([
-    [
-      null,
-      { limit: '1000', usage: '400' },
-      { state: CapacityState.QUOTA, total: 1000, used: 400, available: 600 },
-    ],
-    [null, { usage: '400' }, { state: CapacityState.ELASTIC }],
-    ['drive-1', {}, { state: CapacityState.UNKNOWN }],
-  ])('takes the storage quota as the capacity (%s)', async (shared, quota, expected) => {
-    const drive = stubDrive()
-    drive.getFile.mockResolvedValueOnce({
-      id: 'folder',
-      name: 'folder',
-      ...(shared === null ? {} : { driveId: shared }),
+  it("takes My Drive's quota as the capacity", async () => {
+    await account.upload('a.bin', 'x'.repeat(400))
+    const quota = (await account.run.call<About>('GET', ABOUT)).storageQuota
+    const accessor = account.driveAccessor(undefined, { folderId: await account.folder('scope') })
+    const total = Number(quota.limit)
+    expect(await capacity(accessor)).toEqual({
+      state: CapacityState.QUOTA,
+      total,
+      used: 400,
+      available: total - 400,
     })
-    drive.storageQuota.mockResolvedValueOnce(quota)
-    expect(await capacity(makeScopedGDriveAccessor('folder', drive))).toEqual(expected)
-    expect(drive.getFile).toHaveBeenCalledWith('folder')
-    expect(drive.storageQuota).toHaveBeenCalledTimes(shared === null ? 1 : 0)
+  })
+
+  it('is elastic for a drive with no limit', async () => {
+    // An account with unlimited storage: Drive answers its usage and no
+    // limit, which the fake's own quota is answered without.
+    const about = await account.run.call<About>('GET', ABOUT)
+    delete about.storageQuota.limit
+    await account.run.answerNext('GET', ABOUT, 200, about as never)
+    const accessor = account.driveAccessor(undefined, { folderId: await account.folder('scope') })
+    expect(await capacity(accessor)).toEqual({ state: CapacityState.ELASTIC })
+  })
+
+  it('asks no quota for a shared drive', async () => {
+    const drive = await account.sharedDrive('Team')
+    const accessor = account.driveAccessor(undefined, {
+      folderId: await account.folder('scope', drive),
+    })
+    await account.run.recordRequests()
+    expect(await capacity(accessor)).toEqual({ state: CapacityState.UNKNOWN })
+    expect(accessor.rootDriveId).toBe(drive)
+    expect((await account.log()).filter(([name]) => name === `GET ${ABOUT}`)).toEqual([])
   })
 })

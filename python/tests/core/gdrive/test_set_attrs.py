@@ -12,44 +12,54 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.core.gdrive.set_attrs import set_attrs
 from mirage.core.google.client import GoogleApiError
 from mirage.types import FileStat, FileType, PathSpec
-from tests.fixtures.gdrive_api import StubDrive, install_drive
+from tests.fixtures.google_account import FILE
 
 MTIME = "2020-01-01T00:00:00+00:00"
-ROW = FileStat(name="a.txt", type=FileType.FILE, extra={"file_id": "f1"})
 
 
-@pytest.mark.parametrize(
-    ("path", "sent", "residual"),
-    [
-        ("/a.txt", [{"modifiedTime": "2020-01-01T00:00:00Z"}], {"uid": 7}),
-        ("/", [], {"uid": 7, "mtime": MTIME}),
-    ],
-)
+def _row(file_id: str) -> FileStat:
+    return FileStat(
+        name="a.txt", type=FileType.FILE, extra={"file_id": file_id}
+    )
+
+
 @pytest.mark.asyncio
-async def test_an_mtime_becomes_the_modified_time(
-    gdrive_accessor, path, sent, residual, monkeypatch
-):
-    patched = AsyncMock()
-    install_drive(monkeypatch, StubDrive(patch_file=patched))
+async def test_an_mtime_becomes_the_files_modified_time(google_account):
+    made = await google_account.upload("a.txt", b"a")
+    await google_account.run.record_requests()
     got = await set_attrs(
-        gdrive_accessor,
-        PathSpec.from_str_path(path),
-        None if path == "/" else ROW,
+        google_account.drive_accessor(),
+        PathSpec.from_str_path("/a.txt"),
+        _row(made),
         uid=7,
         mtime=MTIME,
     )
-    assert [call.args[0] for call in patched.await_args_list] == (
-        ["f1"] if sent else []
+    assert await google_account.run.bodies("PATCH", FILE) == [
+        {"modifiedTime": "2020-01-01T00:00:00Z"}
+    ]
+    assert (await google_account.item(made))[
+        "modifiedTime"
+    ] == "2020-01-01T00:00:00.000Z"
+    assert got == {"uid": 7}
+
+
+@pytest.mark.asyncio
+async def test_the_mount_root_keeps_its_attributes(google_account):
+    await google_account.run.record_requests()
+    got = await set_attrs(
+        google_account.drive_accessor(),
+        PathSpec.from_str_path("/"),
+        None,
+        uid=7,
+        mtime=MTIME,
     )
-    assert [call.args[1] for call in patched.await_args_list] == sent
-    assert got == residual
+    assert await google_account.log() == []
+    assert got == {"uid": 7, "mtime": MTIME}
 
 
 @pytest.mark.parametrize(
@@ -58,13 +68,16 @@ async def test_an_mtime_becomes_the_modified_time(
 )
 @pytest.mark.asyncio
 async def test_a_failed_patch_answers_by_its_status(
-    gdrive_accessor, status, raised, monkeypatch
+    google_account, status, raised
 ):
-    patched = AsyncMock(
-        side_effect=GoogleApiError("File not found: f1.", status)
+    made = await google_account.upload("a.txt", b"a")
+    await google_account.refuse(
+        "PATCH", FILE, status, f"File not found: {made}."
     )
-    install_drive(monkeypatch, StubDrive(patch_file=patched))
     with pytest.raises(raised):
         await set_attrs(
-            gdrive_accessor, PathSpec.from_str_path("/a.txt"), ROW, mtime=MTIME
+            google_account.drive_accessor(),
+            PathSpec.from_str_path("/a.txt"),
+            _row(made),
+            mtime=MTIME,
         )

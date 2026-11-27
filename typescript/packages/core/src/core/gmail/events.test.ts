@@ -12,69 +12,35 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { expect, it } from 'vitest'
-
-const LABELS = [
-  { id: 'INBOX', name: 'INBOX', type: 'system' },
-  { id: 'TRASH', name: 'TRASH', type: 'system' },
-  { id: 'Label_1', name: 'Work', type: 'user' },
-]
-
-const box = {
-  history: new Map<string, unknown>(),
-  now: '100',
-  messages: new Map<string, unknown>(),
-  LABELS,
-  labels: LABELS,
-}
-
-/** Gmail's history and messages, scripted per pull. Mirrors Python's `Mailbox`. */
-const MAILBOX: GmailApi = {
-  currentHistoryId: () => Promise.resolve(box.now),
-  listHistory: (start: string) => {
-    const answer = box.history.get(start)
-    return answer instanceof Error
-      ? Promise.reject(answer)
-      : Promise.resolve(answer as [Record<string, unknown>[], string])
-  },
-  listMessages: () => Promise.reject(new Error('the test Mailbox lists no messages')),
-  getAttachment: () => Promise.reject(new Error('the test Mailbox holds no attachments')),
-  listLabels: () => Promise.resolve(box.labels),
-  getMessageRaw: (id: string) => Promise.resolve(box.messages.get(id) as GmailMessageRaw),
-}
-
-import type { GmailAccessor } from '../../accessor/gmail.ts'
-import type { GmailApi } from './api.ts'
-import type { GmailMessageRaw } from './messages.ts'
+import { afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import { FileChangeKind, PathSpec } from '../../types.ts'
 import type { Delta } from '../../types.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount, HISTORY } from '../../../tests/core/google/account.ts'
 import { buildDeltaHook } from './events.ts'
 
 const ROOT = PathSpec.fromStrPath('/gmail', '')
+const JAN_5 = 'Mon, 5 Jan 2026 09:00:00 +0000'
+const JAN_6 = 'Tue, 6 Jan 2026 09:00:00 +0000'
+const JAN_7 = 'Wed, 7 Jan 2026 09:00:00 +0000'
+const JAN_8 = 'Thu, 8 Jan 2026 09:00:00 +0000'
 
-function message(
-  mid: string,
-  labelIds: string[],
-  day: string,
-  subject: string,
-  attachment = '',
-): Record<string, unknown> {
-  const parts: Record<string, unknown>[] = [{ mimeType: 'text/plain', body: { data: '' } }]
-  if (attachment !== '') {
-    parts.push({
-      filename: attachment,
-      mimeType: 'text/plain',
-      body: { attachmentId: `A${mid}`, size: 5 },
-    })
-  }
-  return {
-    id: mid,
-    threadId: mid,
-    labelIds,
-    internalDate: String(Date.parse(`${day}T09:00:00Z`)),
-    payload: { mimeType: 'multipart/mixed', headers: [{ name: 'Subject', value: subject }], parts },
-  }
-}
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+// The account with Gmail's system labels and no message yet.
+beforeEach(async () => {
+  account = new GoogleAccount(origin)
+  await account.reset()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function pairs(delta: Delta): [string, string][] {
   return delta.changes.map((c) => [c.kind, c.path.virtual])
@@ -82,69 +48,68 @@ function pairs(delta: Delta): [string, string][] {
 
 // Twin of test_events_follow_each_message_s_labels.
 it("follows each message's labels", async () => {
-  box.messages.set('a1', message('a1', ['TRASH'], '2026-01-05', 'Budget review', 'plan.txt'))
-  box.messages.set('n3', message('n3', ['INBOX'], '2026-01-07', 'Hi'))
-  const hook = buildDeltaHook({ gmail: MAILBOX } as unknown as GmailAccessor)
+  const a1 = await account.message('Budget review', 'numbers for travel', {
+    sender: 'Ana Lima <ana@example.com>',
+    date: JAN_5,
+    attachments: [['plan.txt', 'text/plain', 'plan\n']],
+  })
+  // A message no pull names before it goes.
+  const z9 = await account.message('Gone', 'soon', { date: JAN_6 })
+  const hook = buildDeltaHook(account.gmailAccessor())
   const baseline = await hook.pull(ROOT, null)
   expect(baseline.changes).toEqual([])
-  box.history.set('100', [
-    [
-      { labelsAdded: [{ message: { id: 'a1' }, labelIds: ['TRASH'] }] },
-      { labelsRemoved: [{ message: { id: 'a1' }, labelIds: ['INBOX'] }] },
-      { messagesAdded: [{ message: { id: 'n3' } }] },
-      { messagesDeleted: [{ message: { id: 'z9' } }] },
-    ],
-    '120',
-  ])
+  await account.trash(a1)
+  const n3 = await account.message('Hi', 'hey', { sender: 'Cy <cy@example.com>', date: JAN_7 })
+  await account.deleteMessage(z9)
   const moved = await hook.pull(ROOT, baseline.checkpoint)
   const old = '/gmail/INBOX/2026-01-05'
   const now = '/gmail/TRASH/2026-01-05'
   expect(pairs(moved)).toEqual([
-    [FileChangeKind.DELETE, `${old}/Budget_review__a1.gmail.json`],
-    [FileChangeKind.DELETE, `${old}/Budget_review__a1`],
-    [FileChangeKind.CREATE, `${now}/Budget_review__a1.gmail.json`],
-    [FileChangeKind.CREATE, `${now}/Budget_review__a1`],
-    [FileChangeKind.CREATE, '/gmail/INBOX/2026-01-07/Hi__n3.gmail.json'],
+    [FileChangeKind.DELETE, `${old}/Budget_review__${a1}.gmail.json`],
+    [FileChangeKind.DELETE, `${old}/Budget_review__${a1}`],
+    [FileChangeKind.CREATE, `${now}/Budget_review__${a1}.gmail.json`],
+    [FileChangeKind.CREATE, `${now}/Budget_review__${a1}`],
+    [FileChangeKind.CREATE, `/gmail/INBOX/2026-01-07/Hi__${n3}.gmail.json`],
     [FileChangeKind.UNKNOWN, '/gmail'],
   ])
   // A message a pull has seen leaves the paths it was when it goes.
-  box.history.set('120', [[{ messagesDeleted: [{ message: { id: 'a1' } }] }], '130'])
+  await account.deleteMessage(a1)
   const deleted = await hook.pull(ROOT, moved.checkpoint)
   expect(pairs(deleted)).toEqual([
-    [FileChangeKind.DELETE, `${now}/Budget_review__a1.gmail.json`],
-    [FileChangeKind.DELETE, `${now}/Budget_review__a1`],
+    [FileChangeKind.DELETE, `${now}/Budget_review__${a1}.gmail.json`],
+    [FileChangeKind.DELETE, `${now}/Budget_review__${a1}`],
   ])
-  // A history id Gmail no longer keeps reinventories the root.
-  box.history.set('130', Object.assign(new Error('gone'), { status: 404 }))
-  box.now = '200'
+  // A history id Gmail no longer keeps reinventories the root, from the one
+  // the mailbox is at now.
+  await account.message('Later', 'after', { date: JAN_8 })
+  await account.refuse('GET', HISTORY, 404, 'Requested entity was not found.', {
+    reason: 'notFound',
+  })
   const lost = await hook.pull(ROOT, deleted.checkpoint)
   expect(pairs(lost)).toEqual([[FileChangeKind.UNKNOWN, '/gmail']])
-  expect(lost.checkpoint).toContain('"history":"200"')
+  const at = await account.historyId()
+  expect(lost.checkpoint).toContain(`"history":"${at}"`)
+  expect(deleted.checkpoint).not.toContain(`"history":"${at}"`)
 })
 
 // Twin of test_events_follow_the_label_folders: history records no label
 // created, renamed or deleted, so each pull compares the folders, and a message
 // below a renamed one moves with it.
 it('follows the label folders', async () => {
-  box.labels = box.LABELS
-  const work = message('w1', ['Label_1'], '2026-01-08', 'Plan')
-  box.messages.set('w1', work)
-  const hook = buildDeltaHook({ gmail: MAILBOX } as unknown as GmailAccessor)
+  const work = await account.label('Work')
+  const hook = buildDeltaHook(account.gmailAccessor())
   const baseline = await hook.pull(ROOT, null)
-  box.history.set(box.now, [[{ messagesAdded: [{ message: { id: 'w1' } }] }], '110'])
+  const w1 = await account.message('Plan', 'go', {
+    labels: ['Work'],
+    sender: 'Di <di@example.com>',
+    date: JAN_8,
+  })
   const seen = await hook.pull(ROOT, baseline.checkpoint)
-  const plan = '2026-01-08/Plan__w1.gmail.json'
+  const plan = `2026-01-08/Plan__${w1}.gmail.json`
   expect(pairs(seen)).toEqual([[FileChangeKind.CREATE, `/gmail/Work/${plan}`]])
-  box.labels = [
-    ...box.LABELS.slice(0, 2),
-    { id: 'Label_1', name: 'Projects', type: 'user' },
-    { id: 'Label_2', name: 'Empty', type: 'user' },
-  ]
-  box.messages.set('w1', { ...work, labelIds: ['Label_1', 'INBOX'] })
-  box.history.set('110', [
-    [{ labelsAdded: [{ message: { id: 'w1' }, labelIds: ['INBOX'] }] }],
-    '120',
-  ])
+  await account.renameLabel(work, 'Projects')
+  const empty = await account.label('Empty')
+  await account.modify(w1, ['INBOX'])
   const renamed = await hook.pull(ROOT, seen.checkpoint)
   expect(pairs(renamed)).toEqual([
     [FileChangeKind.DELETE, '/gmail/Work'],
@@ -154,12 +119,9 @@ it('follows the label folders', async () => {
     [FileChangeKind.UPDATE, `/gmail/Projects/${plan}`],
   ])
   // One label takes the name another gives up: each path moves once.
-  box.labels = [
-    ...box.LABELS.slice(0, 2),
-    { id: 'Label_1', name: 'Empty', type: 'user' },
-    { id: 'Label_2', name: 'Archive', type: 'user' },
-  ]
-  box.history.set('120', [[{ messagesDeleted: [{ message: { id: 'w1' } }] }], '130'])
+  await account.renameLabel(empty, 'Archive')
+  await account.renameLabel(work, 'Empty')
+  await account.deleteMessage(w1)
   const swapped = await hook.pull(ROOT, renamed.checkpoint)
   expect(pairs(swapped)).toEqual([
     [FileChangeKind.DELETE, '/gmail/Projects'],
@@ -169,8 +131,8 @@ it('follows the label folders', async () => {
     [FileChangeKind.DELETE, `/gmail/Empty/${plan}`],
     [FileChangeKind.DELETE, `/gmail/INBOX/${plan}`],
   ])
-  box.labels = box.LABELS.slice(0, 2)
-  box.history.set('130', [[], '140'])
+  await account.deleteLabel(work)
+  await account.deleteLabel(empty)
   const removed = await hook.pull(ROOT, swapped.checkpoint)
   expect(pairs(removed)).toEqual([
     [FileChangeKind.DELETE, '/gmail/Empty'],

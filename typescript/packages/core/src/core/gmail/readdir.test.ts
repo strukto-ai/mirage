@@ -12,29 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as MessagesModule from './messages.ts'
-import type * as LabelsModule from './labels.ts'
-
-vi.mock('./messages.ts', async () => {
-  const actual = await vi.importActual<typeof MessagesModule>('./messages.ts')
-  return { ...actual, listMessages: vi.fn(), getMessageRaw: vi.fn() }
-})
-
-vi.mock('./labels.ts', async () => {
-  const actual = await vi.importActual<typeof LabelsModule>('./labels.ts')
-  return { ...actual, listLabels: vi.fn() }
-})
-
-import { GmailAccessor } from '../../accessor/gmail.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import type { TokenManager } from '../google/client.ts'
-import * as labelsMod from './labels.ts'
-import * as messagesMod from './messages.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
 
-const ACCESSOR = new GmailAccessor({ tokenManager: {} as TokenManager, config: {} })
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+// The account with Gmail's system labels and no message yet.
+beforeEach(async () => {
+  account = new GoogleAccount(origin)
+  await account.reset()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/gmail') })
@@ -45,20 +45,16 @@ function row(name: string): FileStat {
 }
 
 describe('gmail readdir windows', () => {
-  beforeEach(() => {
-    vi.mocked(labelsMod.listLabels).mockResolvedValue([{ id: 'INBOX', type: 'system' }])
-    vi.mocked(messagesMod.listMessages).mockResolvedValue([{ id: 'x1' }])
-    vi.mocked(messagesMod.getMessageRaw).mockResolvedValue({
-      id: 'x1',
-      internalDate: String(Date.UTC(2026, 3, 27)),
-      payload: { headers: [{ name: 'Subject', value: 'Hi 27' }] },
-    })
+  let x1: string
+
+  beforeEach(async () => {
+    x1 = await account.message('Hi 27', 'hello', { date: 'Mon, 27 Apr 2026 00:00:00 +0000' })
   })
 
   it('lists a label as a window that seeds its days', async () => {
     // Both fetches stop at MAX_MESSAGES, so what they name is a window: a
     // message outside it has not gone anywhere.
-    const listing = await readdir(ACCESSOR, spec('/gmail/INBOX'), row('INBOX'))
+    const listing = await readdir(account.gmailAccessor(), spec('/gmail/INBOX'), row('INBOX'))
     expect(listing).toBeInstanceOf(DirListing)
     expect((listing as DirListing).window).toBe(true)
     expect([...(listing as DirListing).seeds.keys()]).toEqual(['2026-04-27'])
@@ -67,9 +63,15 @@ describe('gmail readdir windows', () => {
   it('lists a day on its own as a window', async () => {
     // The label listing seeds its days, so a day read after it never reaches
     // the day lister; listing the day first is what exercises that lister.
-    const listing = await readdir(ACCESSOR, spec('/gmail/INBOX/2026-04-27'), row('2026-04-27'))
+    const listing = await readdir(
+      account.gmailAccessor(),
+      spec('/gmail/INBOX/2026-04-27'),
+      row('2026-04-27'),
+    )
     expect(listing).toBeInstanceOf(DirListing)
     expect((listing as DirListing).window).toBe(true)
-    expect((listing as DirListing).entries.map((one) => one.name)).toEqual(['Hi_27__x1.gmail.json'])
+    expect((listing as DirListing).entries.map((one) => one.name)).toEqual([
+      `Hi_27__${x1}.gmail.json`,
+    ])
   })
 })

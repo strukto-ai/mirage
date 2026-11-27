@@ -12,21 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { exists } from './exists.ts'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
@@ -35,23 +41,16 @@ function spec(virtual: string): PathSpec {
 
 describe('gdrive exists', () => {
   it('root, present and missing paths', async () => {
-    fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    expect(
-      await exists(accessor, spec('/'), (await handedAt(readdir, accessor, spec('/'))).entry),
-    ).toBe(true)
-    expect(
-      await exists(
-        accessor,
-        spec('/f.txt'),
-        (await handedAt(readdir, accessor, spec('/f.txt'))).entry,
-      ),
-    ).toBe(true)
-    expect(
-      await exists(
-        accessor,
-        spec('/missing.txt'),
-        (await handedAt(readdir, accessor, spec('/missing.txt'))).entry,
-      ),
-    ).toBe(false)
+    await account.upload('f.txt', 'x')
+    const accessor = account.driveAccessor()
+    for (const [path, found] of [
+      ['/', true],
+      ['/f.txt', true],
+      ['/missing.txt', false],
+    ] as const) {
+      expect(
+        await exists(accessor, spec(path), (await handedAt(readdir, accessor, spec(path))).entry),
+      ).toBe(found)
+    }
   })
 })

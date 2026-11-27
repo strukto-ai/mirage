@@ -13,34 +13,49 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { commandScope } from '../../cache/index/scope.ts'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { makeFilename } from '../../vfs/gdocs/doc_entry.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { detectScope } from '../gdocs/scope.ts'
-import { GoogleApiError, TokenManager } from './client.ts'
-import type { DriveFile } from './drive.ts'
+import { GoogleApiError } from './client.ts'
 import { resolveAppEntry } from './entry.ts'
-import { stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import { installApi } from '../../../tests/core/google/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { FILE, FILES, GoogleAccount, UNTIL_CLEARED } from '../../../tests/core/google/account.ts'
 
-const ITEM = {
-  id: 'doc1',
-  name: 'Notes',
-  mimeType: 'application/vnd.google-apps.document',
-  modifiedTime: '2026-04-01T12:00:00Z',
-  owners: [{ me: true }],
-  size: '1000',
-}
-const NAME = makeFilename(ITEM.name, ITEM.id, ITEM.modifiedTime)
-const PATH = new PathSpec({
-  virtual: `/docs/owned/${NAME}`,
-  directory: `/docs/owned/${NAME}`,
-  vfsPath: `owned/${NAME}`,
+const MIME = 'application/vnd.google-apps.document'
+const MODIFIED = '2026-04-01T12:00:00.000Z'
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
 })
-const TM = new TokenManager({ accessToken: 't' })
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
+/** A doc named Notes stamped `MODIFIED`: its id, its name on the mount and its path. */
+async function notes(): Promise<[string, string, PathSpec]> {
+  const made = await account.create('Notes', MIME)
+  await account.patch(made, { modifiedTime: MODIFIED })
+  const name = makeFilename('Notes', made, MODIFIED)
+  const path = new PathSpec({
+    virtual: `/docs/owned/${name}`,
+    directory: `/docs/owned/${name}`,
+    vfsPath: `owned/${name}`,
+  })
+  return [made, name, path]
+}
 
 describe('a direct lookup proves the file', () => {
   it.each([
@@ -54,54 +69,70 @@ describe('a direct lookup proves the file', () => {
     'forbidden',
     'unavailable',
   ])('%s', async (outcome) => {
-    const drive = stubDrive()
-    const item: DriveFile = { ...ITEM }
-    if (outcome === 'renamed') item.name = 'Renamed'
-    if (outcome === 'date') item.modifiedTime = '2026-04-02T12:00:00Z'
-    if (outcome === 'trashed') item.trashed = true
-    if (outcome === 'mime') item.mimeType = 'text/plain'
-    if (outcome === 'owner') item.owners = []
-    const statuses: Record<string, number> = { deleted: 404, forbidden: 403, unavailable: 503 }
-    const status = statuses[outcome]
-    const error = status === undefined ? null : new GoogleApiError('failed', status)
-    if (error) drive.getFile.mockRejectedValue(error)
-    else drive.getFile.mockResolvedValue(item)
-    const result = resolveAppEntry(drive, detectScope(PATH), PATH, ITEM.mimeType, makeFilename)
+    const [made, , path] = await notes()
+    const item = await account.item(made)
+    // Drive's own answer with the source size it gives a native file, which
+    // the fake keeps none of.
+    if (outcome === 'updated')
+      await account.run.answerNext('GET', FILE, 200, { ...item, size: '1000' })
+    if (outcome === 'renamed') await account.patch(made, { name: 'Renamed' })
+    if (outcome === 'date') await account.patch(made, { modifiedTime: '2026-04-02T12:00:00Z' })
+    if (outcome === 'trashed') await account.patch(made, { trashed: true })
+    if (outcome === 'mime') {
+      await account.run.answerNext('GET', FILE, 200, { ...item, mimeType: 'text/plain' })
+    }
+    // Shared with the account by another: Drive names no owner it is.
+    if (outcome === 'owner') await account.run.answerNext('GET', FILE, 200, { ...item, owners: [] })
+    if (outcome === 'deleted') await account.delete(made)
+    if (outcome === 'forbidden') await account.refuse('GET', FILE, 403, 'forbidden')
+    if (outcome === 'unavailable') {
+      await account.refuse('GET', FILE, 503, 'unavailable', {
+        reason: 'backendError',
+        times: UNTIL_CLEARED,
+      })
+    }
+    const drive = account.driveAccessor(new ManualClock()).drive
+    await account.run.recordRequests()
+    const result = resolveAppEntry(drive, detectScope(path), path, MIME, makeFilename)
     if (outcome === 'updated') {
       const row = await result
-      expect(row.modified).toBe(ITEM.modifiedTime)
+      expect(row.modified).toBe(MODIFIED)
       expect(row.size).toBeNull()
-      expect(row.extra).toEqual({ doc_id: 'doc1', doc_name: 'Notes', source_size: 1000 })
+      expect(row.extra).toEqual({ doc_id: made, doc_name: 'Notes', source_size: 1000 })
     } else if (outcome === 'forbidden' || outcome === 'unavailable') {
-      await expect(result).rejects.toBe(error)
+      await expect(result).rejects.toBeInstanceOf(GoogleApiError)
+      await expect(result).rejects.toMatchObject({ message: outcome })
     } else {
       await expect(result).rejects.toMatchObject({ code: 'ENOENT' })
     }
-    expect(drive.getFile).toHaveBeenCalledExactlyOnceWith('doc1')
+    const asked = await account.log()
+    expect(new Set(asked.map(([name, d]) => `${name} ${d}`))).toEqual(new Set([`get ${made}`]))
+    if (outcome !== 'unavailable') expect(asked).toHaveLength(1)
   })
 })
 
 describe('only a complete listing proves absence', () => {
   it.each([true, false])('complete %s', async (complete) => {
-    const drive = stubDrive()
-    drive.getFile.mockResolvedValue(ITEM)
-    drive.listAllFiles.mockResolvedValue({ files: [], complete })
-    installApi({ drive })
-    const vfs = Object.assign(
-      new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
-      { accessor: new GDocsAccessor({ tokenManager: TM }) },
-    )
+    const [made, , path] = await notes()
+    // Drive answers no doc: proof of absence only when it finished.
+    await account.run.answerNext('GET', FILES, 200, { files: [], incompleteSearch: !complete })
+    const vfs = Object.assign(new GDocsVFS(account.config()), {
+      accessor: new GDocsAccessor({ tokenManager: account.tokenManager() }),
+    })
     const ws = new Workspace({ '/docs/': vfs })
+    await account.run.recordRequests()
     // One command lists and stats, so its own complete listing is proof.
     await commandScope(async () => {
       await ws.dispatch('readdir', '/docs/owned')
-      const stat = ws.dispatch('stat', PATH.virtual) as Promise<FileStat>
+      const stat = ws.dispatch('stat', path.virtual) as Promise<FileStat>
+      const gets = async (): Promise<string[]> =>
+        (await account.log()).filter(([name]) => name === 'get').map(([, d]) => d)
       if (complete) {
         await expect(stat).rejects.toMatchObject({ code: 'ENOENT' })
-        expect(drive.getFile).not.toHaveBeenCalled()
+        expect(await gets()).toEqual([])
       } else {
-        expect((await stat).extra.doc_id).toBe(ITEM.id)
-        expect(drive.getFile).toHaveBeenCalledExactlyOnceWith('doc1')
+        expect((await stat).extra.doc_id).toBe(made)
+        expect(await gets()).toEqual([made])
       }
     })
   })

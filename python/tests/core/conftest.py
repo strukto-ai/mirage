@@ -4,6 +4,10 @@ from types import SimpleNamespace
 import aioresponses.core
 from aiohttp import ClientResponse
 
+from tests.fixtures.google_account import google_account
+
+__all__ = ["google_account"]
+
 _NEEDS_STREAM_WRITER = (
     "stream_writer" in inspect.signature(ClientResponse.__init__).parameters
 )

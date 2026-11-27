@@ -214,20 +214,23 @@ export class KitRun {
 
   /**
    * Answer the next `times` requests to `route` with `status`, and `body`
-   * when given: bytes are sent as written. With `path`, only requests to
-   * that one path; with `query`, only requests asked with exactly that
-   * query string, `''` for none.
+   * when given: bytes are sent as written. A null `status` closes the
+   * connection instead. With `path`, only requests to that one path; with
+   * `query`, only requests asked with exactly that query string, `''` for
+   * none. Each request waits `delayMs` before it is answered.
    */
   async answerNext(
     method: string,
     route: string,
-    status: number,
+    status: number | null,
     body?: JsonValue | Uint8Array,
     times = 1,
     path?: string,
     query?: string,
+    delayMs = 0,
   ): Promise<void> {
-    const plan: Record<string, JsonValue> = { method, route, status, times }
+    const plan: Record<string, JsonValue> = { method, route, times, delay_ms: delayMs }
+    if (status !== null) plan.status = status
     if (path !== undefined) plan.path = path
     if (query !== undefined) plan.query = query
     if (body instanceof Uint8Array) plan.text = new TextDecoder().decode(body)

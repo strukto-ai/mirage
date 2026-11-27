@@ -12,71 +12,71 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { GSheetsAccessor } from '../../accessor/gsheets.ts'
 import { recordingScope } from '../../observe/context.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
 import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { TokenManager } from '../google/client.ts'
-import type { SheetsApi } from './api.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  FILE,
+  FILES,
+  GoogleAccount,
+  type DriveListing,
+} from '../../../tests/core/google/account.ts'
 import { read } from './read.ts'
-import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
-import { installApi } from '../../../tests/core/google/_test_util.ts'
 
-const ENC = new TextEncoder()
+const APP = '/gsheets'
+const MIME = 'application/vnd.google-apps.spreadsheet'
+const SUFFIX = '.gsheet.json'
 
-let drive: StubDrive
-let sheets: { readSpreadsheet: ReturnType<typeof vi.fn<SheetsApi['readSpreadsheet']>> }
+let origin: string
+let account: GoogleAccount
 
-beforeEach(() => {
-  drive = stubDrive()
-  sheets = { readSpreadsheet: vi.fn<SheetsApi['readSpreadsheet']>() }
-  installApi({ drive, sheets })
+beforeAll(async () => {
+  origin = await serve('gws')
 })
 
-const STUB_TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
 
-function makeAccessor(): GSheetsAccessor {
-  return new GSheetsAccessor({ tokenManager: STUB_TOKEN_MANAGER })
+afterEach(async () => {
+  await account.run.close()
+})
+
+function accessor(): GSheetsAccessor {
+  return new GSheetsAccessor({ tokenManager: account.tokenManager() })
+}
+
+function spec(virtual: string): PathSpec {
+  return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, APP) })
+}
+
+/** Make a file of the app named `name`, stamped `stamp`, and answer its id. */
+async function made(name: string, stamp: string): Promise<string> {
+  const id = await account.create(name, MIME)
+  await account.patch(id, { modifiedTime: stamp })
+  return id
 }
 
 describe('gsheets read auto-bootstrap', () => {
   it('resolves a read no listing named by its id', async () => {
-    drive.getFile.mockResolvedValue({
-      mimeType: 'application/vnd.google-apps.spreadsheet',
-      id: 'sheet1',
-      name: 'Budget',
-      modifiedTime: '2026-04-01T00:00:00.000Z',
-      owners: [{ me: true }],
-    })
-    sheets.readSpreadsheet.mockResolvedValue(
-      ENC.encode(JSON.stringify({ spreadsheetId: 'sheet1' })),
-    )
-
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
-      directory: '/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json',
-      vfsPath: mountKey('/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json', '/gsheets'),
-    })
-    const out = await read(accessor, path)
-    expect(new TextDecoder().decode(out)).toContain('sheet1')
+    const id = await made('Notes', '2026-04-01T00:00:00.000Z')
+    await account.run.recordRequests()
+    const out = await read(accessor(), spec(`${APP}/owned/2026-04-01_Notes__${id}${SUFFIX}`))
+    expect(new TextDecoder().decode(out)).toContain(id)
+    expect((await account.log()).map(([name]) => name)).toEqual(['get', 'GET /v4/spreadsheets/:id'])
   })
 
   it('throws ENOENT when file missing by ID', async () => {
-    drive.getFile.mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }))
-    sheets.readSpreadsheet.mockRejectedValue(new Error('should not call readSpreadsheet'))
-
-    const accessor = makeAccessor()
-    const path = new PathSpec({
-      virtual: '/gsheets/owned/Missing__xyz.gsheet.json',
-      directory: '/gsheets/owned/Missing__xyz.gsheet.json',
-      vfsPath: mountKey('/gsheets/owned/Missing__xyz.gsheet.json', '/gsheets'),
-    })
-    await expect(read(accessor, path)).rejects.toMatchObject({ code: 'ENOENT' })
+    await account.run.recordRequests()
+    await expect(
+      read(accessor(), spec(`${APP}/owned/Missing__xyz${SUFFIX}`)),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    expect((await account.log()).map(([name]) => name)).toEqual(['get'])
   })
 })
 
@@ -89,29 +89,26 @@ describe('gsheets read token', () => {
   ]
   for (const [stamp, token] of cases) {
     it(`records the token stat reports (stamp ${JSON.stringify(stamp)})`, async () => {
-      const item = {
-        mimeType: 'application/vnd.google-apps.spreadsheet',
-        id: 's1',
-        name: 'My Sheet',
-        modifiedTime: stamp,
-        owners: [{ me: true }],
+      const id = await made('My Sheet', '2026-04-01T00:00:00.000Z')
+      if (stamp === '') {
+        // A file Drive gives no modified time: its own item without one, on
+        // the listing and on the lookup.
+        const listing = await account.run.call<DriveListing>(
+          'GET',
+          `${FILES}?${new URLSearchParams({ q: `mimeType = '${MIME}'` }).toString()}`,
+        )
+        const files = listing.files.map((row) =>
+          row.id === id ? { ...row, modifiedTime: '' } : row,
+        )
+        await account.run.answerNext('GET', FILES, 200, { ...listing, files })
+        const item = await account.item(id)
+        await account.run.answerNext('GET', FILE, 200, { ...item, modifiedTime: '' }, 2)
       }
-      drive.listAllFiles.mockResolvedValue({ files: [item], complete: true })
-      drive.getFile.mockResolvedValue(item)
-      sheets.readSpreadsheet.mockResolvedValue(ENC.encode(JSON.stringify({ spreadsheetId: 's1' })))
-      const accessor = makeAccessor()
-      const vfs = Object.assign(
-        new GSheetsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
-        { accessor },
-      )
-      const ws = new Workspace({ '/gsheets/': vfs })
-      const [target = ''] = (await ws.dispatch('readdir', '/gsheets/owned')) as string[]
-      const path = new PathSpec({
-        virtual: target,
-        directory: target,
-        vfsPath: mountKey(target, '/gsheets'),
-      })
-      const [data, records] = await recordingScope(() => read(accessor, path))
+      const reader = accessor()
+      const vfs = Object.assign(new GSheetsVFS(account.config()), { accessor: reader })
+      const ws = new Workspace({ [`${APP}/`]: vfs })
+      const [target = ''] = (await ws.dispatch('readdir', `${APP}/owned`)) as string[]
+      const [data, records] = await recordingScope(() => read(reader, spec(target)))
       const info = (await ws.dispatch('stat', target)) as FileStat
       expect(records.map((r) => [r.op, r.path, r.source, r.bytes, r.fingerprint])).toEqual([
         ['read', target, 'gsheets', data.byteLength, token],

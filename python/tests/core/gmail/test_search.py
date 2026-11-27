@@ -14,8 +14,6 @@
 
 import pytest
 
-from tests.fixtures.gmail_api import FakeGmail
-
 
 # The listing keeps each message's rendered text, so a message is read when
 # its text holds the word anywhere: e5 holds rtf only in its attachment's
@@ -49,6 +47,16 @@ async def test_only_the_messages_whose_text_holds_it_are_read(
     assert searches == []
 
 
+# g7's snippet, cut inside traveler, is the one place travel is a word of
+# its text, and the read finds it there.
+@pytest.mark.asyncio
+async def test_a_word_only_in_a_snippet_is_found(gmail):
+    out, _, read, _ = await gmail("grep -rlw travel /gmail/INBOX")
+    assert read == ["a1", "g7"]
+    found = sorted(line.split("/")[-1].split("__")[0] for line in out.split())
+    assert found == ["Budget_review", "Trip"]
+
+
 # A message's labels change after the listing kept its text, so the kept
 # text leaves them out and a text that may lie in a labels field reads
 # every message.
@@ -72,4 +80,4 @@ async def test_a_text_a_label_may_hold_reads_every_message(gmail, line):
 async def test_every_message_is_read_for_a_text_that_is_not_ascii(gmail):
     line = "grep -rl caf\u00e9 /gmail"
     full = await gmail(line, walk_limit=-1)
-    assert (await gmail(line, FakeGmail()))[:3] == full[:3]
+    assert (await gmail(line))[:3] == full[:3]

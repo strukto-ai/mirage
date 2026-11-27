@@ -13,54 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
-from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock
+from http import HTTPStatus
 
 import pytest
 
 import mirage.core.gdrive.read as gdrive_read
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.context import session_context as caller
 from mirage.core.gdrive.fingerprint import drive_fingerprint
 from mirage.core.gdrive.read import read, read_file_versioned
-from mirage.core.gdrive.readdir import stat_from_item
+from mirage.core.gdrive.readdir import readdir, stat_from_item
 from mirage.core.gdrive.stat import stat
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
+from mirage.core.google.client import GoogleApiError
 from mirage.observe.context import RecordingScope, recording_active
 from mirage.types import FileStat, FileType, JsonValue, MountMode, PathSpec
-from mirage.utils.ranges import ByteWindow
+from mirage.utils.clock import ManualClock
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
-from tests.fixtures.gdocs_api import StubDocs
-from tests.fixtures.gdrive_api import StubDrive, install_drive
-from tests.fixtures.google_api import StubApi, install_api, serve
+from tests.fixtures.google_account import (
+    FILE,
+    FILES,
+    MEDIA_QUERY,
+    UNTIL_CLEARED,
+)
+from tests.fixtures.handed import entry_at
 
-
-async def fail_list_files(folder_id, drive_id=None):
-    raise RuntimeError("drive unavailable")
-
-
-@pytest.fixture
-def config():
-    return GoogleConfig(
-        client_id="test-id",
-        client_secret="test-secret",
-        refresh_token="test-refresh",
-    )
-
-
-@pytest.fixture
-def token_manager(config):
-    mgr = TokenManager(config)
-    mgr._access_token = "fake-token"
-    mgr._expires_at = 9999999999
-    return mgr
-
-
-@pytest.fixture
-def accessor(config, token_manager):
-    return GDriveAccessor(config=config, token_manager=token_manager)
+DOC = "application/vnd.google-apps.document"
+SHEET = "application/vnd.google-apps.spreadsheet"
+SLIDES = "application/vnd.google-apps.presentation"
 
 
 def _row(
@@ -100,198 +79,157 @@ def _row(
     )
 
 
-def _workspace(accessor) -> Workspace:
-    vfs = GoogleDriveVFS(
-        config=GoogleDriveConfig(client_id="x", refresh_token="y")
-    )
-    vfs.accessor = accessor
-    return Workspace({"/drive/": vfs}, mode=MountMode.READ)
+def _workspace(google_account, clock=None) -> Workspace:
+    # A workspace binds its own clock to its mounts' clients, so retries
+    # in a test that refuses one wait on the clock it is handed.
+    vfs = GoogleDriveVFS(config=google_account.config(GoogleDriveConfig))
+    if clock is None:
+        return Workspace({"/drive/": vfs}, mode=MountMode.READ)
+    return Workspace({"/drive/": vfs}, mode=MountMode.READ, clock=clock)
 
 
 @pytest.mark.asyncio
-async def test_read_file(accessor, monkeypatch):
-    row = _row(
-        "file123",
-        "report.pdf",
-        remote_time="2026-04-01T00:00:00.000Z",
-        extra={"drive_id": "drive1"},
-    )
+async def test_read_file(google_account):
+    drive = await google_account.shared_drive("Team Drive")
     content = b"pdf content here"
-    install_drive(
-        monkeypatch, StubDrive(download_file=AsyncMock(return_value=content))
-    )
-    result = await read(
-        accessor,
-        PathSpec(
-            vfs_path="Team Drive/report.pdf",
-            virtual="/Team Drive/report.pdf",
-            directory="/Team Drive/report.pdf",
-        ),
-        entry=row,
-    )
-    assert result == content
+    await google_account.upload("report.pdf", content, drive)
+    accessor = google_account.drive_accessor()
+    path = PathSpec.from_str_path("/Team Drive/report.pdf")
+    row = await entry_at(readdir, accessor, path)
+    assert row.extra["drive_id"] == drive
+    assert await read(accessor, path, entry=row) == content
 
 
 @pytest.mark.asyncio
 async def test_a_ranged_read_of_a_binary_file_asks_drive_for_the_range(
-    accessor,
-    monkeypatch,
+    google_account,
 ):
-    mock_download = AsyncMock(return_value=b"tent")
-    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    made = await google_account.upload("report.pdf", b"content")
+    await google_account.run.record_requests("range")
     result = await read(
-        accessor,
+        google_account.drive_accessor(),
         PathSpec.from_str_path("/report.pdf"),
         offset=3,
         size=4,
-        entry=_row("file123", "report.pdf"),
+        entry=_row(made, "report.pdf"),
     )
     assert result == b"tent"
-    mock_download.assert_awaited_once_with("file123", ByteWindow(3, 4))
+    assert await google_account.run.headers("GET", FILE) == [
+        {"range": "bytes=3-6"}
+    ]
 
 
 @pytest.mark.asyncio
 async def test_a_ranged_read_of_a_rendered_file_slices_what_we_rendered(
-    accessor,
+    google_account,
 ):
     # A google-apps file has no bytes on Drive to range over: the JSON
     # exists only once we build it, so the window comes off the result.
-    mock_doc = AsyncMock(return_value=b'{"title": "notes"}')
-    with serve(docs=StubDocs(read_doc=mock_doc)):
-        result = await read(
-            accessor,
-            PathSpec.from_str_path("/notes.gdoc"),
-            offset=2,
-            size=5,
-            entry=_row("doc1", "notes.gdoc", "gdrive/gdoc"),
-        )
-    assert result == b"title"
-    mock_doc.assert_awaited_once_with("doc1")
+    made = await google_account.create("notes", DOC)
+    accessor = google_account.drive_accessor()
+    path = PathSpec.from_str_path("/notes.gdoc")
+    entry = _row(made, "notes.gdoc", "gdrive/gdoc")
+    whole = await read(accessor, path, entry=entry)
+    await google_account.run.record_requests()
+    result = await read(accessor, path, offset=2, size=5, entry=entry)
+    assert result == whole[2:7]
+    assert await google_account.log() == [
+        ("GET /v1/documents/:id", f"/v1/documents/{made}")
+    ]
 
 
 @pytest.mark.asyncio
-async def test_read_shared_drive_raises_is_a_directory(accessor, monkeypatch):
+async def test_read_shared_drive_raises_is_a_directory(google_account):
+    drive = await google_account.shared_drive("Team Drive")
     row = _row(
-        "drive1",
+        drive,
         "Team Drive",
         "gdrive/shared_drive",
-        extra={"drive_id": "drive1"},
+        extra={"drive_id": drive},
     )
-    mock_download = AsyncMock()
-    install_drive(monkeypatch, StubDrive(download_file=mock_download))
+    await google_account.run.record_requests()
     # The message is the bare operand, which is what the shell renders
     # ("cat: /Team Drive: Is a directory"). The TS twin asserts the same
     # string through the stamped virtualPath.
     with pytest.raises(IsADirectoryError) as excinfo:
-        await read(accessor, PathSpec.from_str_path("/Team Drive"), entry=row)
-    assert excinfo.value.filename == "/Team Drive"
-    mock_download.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_read_of_nothing_is_not_found(accessor):
-    with pytest.raises(FileNotFoundError):
-        await read(accessor, PathSpec.from_str_path("/missing/file.txt"))
-
-
-async def _yielded(data: bytes) -> AsyncIterator[bytes]:
-    yield data
-
-
-@pytest.mark.asyncio
-async def test_a_cold_read_lists_its_parent_first(accessor, monkeypatch):
-    async def fake_list_files(folder_id, drive_id=None):
-        if folder_id == "root":
-            return [
-                {
-                    "id": "f1",
-                    "name": "report.pdf",
-                    "mimeType": "application/pdf",
-                    "modifiedTime": "2026-04-01T00:00:00.000Z",
-                }
-            ]
-        raise AssertionError(f"unexpected folder_id={folder_id}")
-
-    ws = _workspace(accessor)
-    try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                list_files=fake_list_files,
-                list_shared_drives=AsyncMock(return_value=[]),
-                download_file_stream=lambda file_id: _yielded(b"pdf-bytes"),
-                capture_file_metadata=AsyncMock(return_value=(None, None)),
-            ),
+        await read(
+            google_account.drive_accessor(),
+            PathSpec.from_str_path("/Team Drive"),
+            entry=row,
         )
+    assert excinfo.value.filename == "/Team Drive"
+    assert await google_account.log() == []
+
+
+@pytest.mark.asyncio
+async def test_read_of_nothing_is_not_found(google_account):
+    with pytest.raises(FileNotFoundError):
+        await read(
+            google_account.drive_accessor(),
+            PathSpec.from_str_path("/missing/file.txt"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_cold_read_lists_its_parent_first(google_account):
+    made = await google_account.upload("report.pdf", b"pdf-bytes")
+    await google_account.run.record_requests()
+    ws = _workspace(google_account)
+    try:
         assert await ws.vfs.read("/drive/report.pdf") == b"pdf-bytes"
     finally:
         await ws.close()
+    named = [name for name, _ in await google_account.log()]
+    assert named[0] == "list"
+    assert ("media", made) in await google_account.log()
 
 
 @pytest.mark.asyncio
 async def test_a_name_its_parent_does_not_list_is_never_downloaded(
-    accessor, monkeypatch
+    google_account,
 ):
-    async def fake_list_files(folder_id, drive_id=None):
-        if folder_id == "root":
-            return [
-                {
-                    "id": "f1",
-                    "name": "other.txt",
-                    "mimeType": "text/plain",
-                    "modifiedTime": "2026-04-01T00:00:00.000Z",
-                }
-            ]
-        raise AssertionError(f"unexpected folder_id={folder_id}")
-
-    ws = _workspace(accessor)
+    await google_account.upload("other.txt", b"other")
+    await google_account.run.record_requests()
+    ws = _workspace(google_account)
     try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                list_files=fake_list_files,
-                list_shared_drives=AsyncMock(return_value=[]),
-                download_file=AsyncMock(
-                    side_effect=AssertionError("should not call download_file")
-                ),
-            ),
-        )
         with pytest.raises(FileNotFoundError):
             await ws.vfs.read("/drive/missing.txt")
     finally:
         await ws.close()
+    assert "media" not in [name for name, _ in await google_account.log()]
 
 
 @pytest.mark.asyncio
-async def test_read_propagates_parent_listing_failure(accessor, monkeypatch):
-    ws = _workspace(accessor)
+async def test_read_propagates_parent_listing_failure(google_account):
+    await google_account.refuse(
+        "GET",
+        FILES,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        "Backend Error",
+        reason="backendError",
+        times=UNTIL_CLEARED,
+    )
+    ws = _workspace(google_account, ManualClock())
     try:
-        install_drive(monkeypatch, StubDrive(list_files=fail_list_files))
-        with pytest.raises(RuntimeError, match="drive unavailable"):
+        with pytest.raises(GoogleApiError, match="Backend Error"):
             await ws.vfs.read("/drive/missing.txt")
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_recorded_read_names_the_virtual_path(accessor, monkeypatch):
+async def test_recorded_read_names_the_virtual_path(google_account):
     # The record must carry the full virtual path; a slashless vfs_path
     # ("m/k.txt") names no file the cache or a snapshot pin can match.
+    made = await google_account.upload("k.txt", b"bytes")
     scope = RecordingScope()
     try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                download_file=AsyncMock(return_value=b"bytes"),
-                capture_file_metadata=AsyncMock(return_value=(None, "rev")),
-            ),
-        )
         data = await read(
-            accessor,
+            google_account.drive_accessor(),
             PathSpec(
                 virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
             ),
-            entry=_row("file123", "k.txt"),
+            entry=_row(made, "k.txt"),
         )
     finally:
         scope.close()
@@ -301,17 +239,17 @@ async def test_recorded_read_names_the_virtual_path(accessor, monkeypatch):
 
 CONTENT = b"pdf content here"
 DIGEST = hashlib.md5(CONTENT).hexdigest()
-REVISION = "file123-r1"
 STAMP = "2026-04-01T00:00:00.000Z"
-STALE = hashlib.md5(b"the previous content").hexdigest()
+PREVIOUS = b"the previous content"
+STALE = hashlib.md5(PREVIOUS).hexdigest()
 
 
-def binary_row() -> FileStat:
+def binary_row(file_id: str, revision: str) -> FileStat:
     return _row(
-        "file123",
+        file_id,
         "report.pdf",
         remote_time=STAMP,
-        extra={"md5_checksum": DIGEST, "head_revision_id": REVISION},
+        extra={"md5_checksum": DIGEST, "head_revision_id": revision},
     )
 
 
@@ -320,41 +258,38 @@ def spec_for(name: str = "report.pdf", prefix: str = "") -> PathSpec:
     return PathSpec(vfs_path=name, virtual=virtual, directory=virtual)
 
 
+async def uploaded(google_account, data: bytes = CONTENT) -> tuple[str, str]:
+    """Upload ``report.pdf`` holding ``data`` and return its id and head
+    revision.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        data (bytes): the file's bytes.
+    """
+    made = await google_account.upload("report.pdf", data)
+    return made, (await google_account.item(made))["headRevisionId"]
+
+
 async def read_recording(
-    monkeypatch,
-    accessor,
-    path,
-    entry,
-    *,
-    capture=(DIGEST, REVISION),
-    offset: int = 0,
-    size=None,
+    google_account, path, entry, *, offset: int = 0, size=None
 ):
     """Read under a live recorder and hand back its records.
 
-    The download answers the whole content whatever the window, so only
-    the window guard can keep a ranged read from stamping.
-
     Args:
-        monkeypatch (pytest.MonkeyPatch): the test's monkeypatch.
-        accessor (GDriveAccessor): backend accessor.
+        google_account (GoogleAccount): the account the file is in.
         path (PathSpec): the path to read.
         entry (FileStat): what is at the path.
-        capture (tuple): what ``capture_file_metadata`` answers.
         offset (int): first byte to read.
         size (int | None): how many bytes, or None for the rest.
     """
     scope = RecordingScope()
     try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                download_file=AsyncMock(return_value=CONTENT),
-                capture_file_metadata=AsyncMock(return_value=capture),
-            ),
-        )
         data = await read(
-            accessor, path, offset=offset, size=size, entry=entry
+            google_account.drive_accessor(),
+            path,
+            offset=offset,
+            size=size,
+            entry=entry,
         )
         return data, list(scope.records)
     finally:
@@ -363,77 +298,82 @@ async def read_recording(
 
 @pytest.mark.asyncio
 async def test_the_read_record_and_the_listed_stat_stamp_one_token(
-    accessor, monkeypatch
+    google_account,
 ):
+    made, revision = await uploaded(google_account)
     path = spec_for()
     _, records = await read_recording(
-        monkeypatch, accessor, path, binary_row()
+        google_account, path, binary_row(made, revision)
     )
-    result = await stat(accessor, path, binary_row())
+    result = await stat(
+        google_account.drive_accessor(), path, binary_row(made, revision)
+    )
     assert records[0].fingerprint == DIGEST
     assert result.fingerprint == records[0].fingerprint
 
 
 @pytest.mark.asyncio
 async def test_the_read_record_and_the_drive_item_stamp_one_token(
-    fake_drive, gdrive_accessor, monkeypatch
+    google_account,
 ):
     # The row a listing builds from Drive's own item.
-    file_id = fake_drive.add("report.pdf", content=CONTENT)
-    row = stat_from_item(fake_drive.public(file_id))
-    _, records = await read_recording(
-        monkeypatch,
-        gdrive_accessor,
-        spec_for(),
-        row,
-        capture=(DIGEST, f"{file_id}-r1"),
-    )
+    made, _ = await uploaded(google_account)
+    row = stat_from_item(await google_account.item(made))
+    _, records = await read_recording(google_account, spec_for(), row)
     assert row.fingerprint == DIGEST
     assert row.fingerprint == records[0].fingerprint
 
 
 @pytest.mark.asyncio
-async def test_the_read_record_on_a_root_mount_has_one_slash(
-    accessor, monkeypatch
-):
+async def test_the_read_record_on_a_root_mount_has_one_slash(google_account):
+    made, revision = await uploaded(google_account)
     _, records = await read_recording(
-        monkeypatch, accessor, spec_for(), binary_row()
+        google_account, spec_for(), binary_row(made, revision)
     )
     assert records[0].path == "/report.pdf"
 
 
 @pytest.mark.asyncio
 async def test_a_name_sharing_the_prefixs_leading_text_keeps_its_boundary(
-    accessor,
-    monkeypatch,
+    google_account,
 ):
+    made, revision = await uploaded(google_account)
     _, records = await read_recording(
-        monkeypatch, accessor, spec_for("gd-report.pdf", "/gd"), binary_row()
+        google_account,
+        spec_for("gd-report.pdf", "/gd"),
+        binary_row(made, revision),
     )
     assert records[0].path == "/gd/gd-report.pdf"
 
 
 @pytest.mark.asyncio
-async def test_a_verified_md5_is_stamped_on_the_record(accessor, monkeypatch):
+async def test_a_verified_md5_is_stamped_on_the_record(google_account):
+    made, revision = await uploaded(google_account)
     _, records = await read_recording(
-        monkeypatch, accessor, spec_for(), binary_row()
+        google_account, spec_for(), binary_row(made, revision)
     )
-    assert (records[0].fingerprint, records[0].revision) == (DIGEST, REVISION)
+    assert (records[0].fingerprint, records[0].revision) == (DIGEST, revision)
 
 
 @pytest.mark.asyncio
 async def test_a_captured_md5_that_disagrees_drops_the_revision_too(
-    accessor, monkeypatch
+    google_account,
 ):
-    # The capture predates these bytes, and so does its revision: a pin
+    # Another client writes between the capture and the download: the
+    # capture predates these bytes, and so does its revision, so a pin
     # would replace the drift check and replay the older bytes.
-    _, records = await read_recording(
-        monkeypatch,
-        accessor,
-        spec_for(),
-        binary_row(),
-        capture=(STALE, REVISION),
+    made, revision = await uploaded(google_account, PREVIOUS)
+
+    async def rewrite() -> None:
+        await google_account.update(made, CONTENT)
+
+    await google_account.run.before_next(
+        [("GET", FILE)], rewrite, query=MEDIA_QUERY
     )
+    data, records = await read_recording(
+        google_account, spec_for(), binary_row(made, revision)
+    )
+    assert data == CONTENT
     assert (records[0].fingerprint, records[0].revision) == (None, None)
 
 
@@ -442,31 +382,31 @@ async def test_a_captured_md5_that_disagrees_drops_the_revision_too(
 )
 @pytest.mark.asyncio
 async def test_a_windowed_read_stamps_no_token_but_keeps_the_revision(
-    accessor, offset, size, monkeypatch
+    google_account, offset, size
 ):
+    made, revision = await uploaded(google_account)
     _, records = await read_recording(
-        monkeypatch,
-        accessor,
+        google_account,
         spec_for(),
-        binary_row(),
+        binary_row(made, revision),
         offset=offset,
         size=size,
     )
-    assert (records[0].fingerprint, records[0].revision) == (None, REVISION)
+    assert (records[0].fingerprint, records[0].revision) == (None, revision)
 
 
 @pytest.mark.asyncio
-async def test_a_capture_with_no_md5_is_stamped_unverified(
-    accessor, monkeypatch
-):
+async def test_a_capture_with_no_md5_is_stamped_unverified(google_account):
+    made, revision = await uploaded(google_account)
+    # Drive keeps no md5 for some files; the fake keeps one for every file,
+    # so its own answer to the capture is sent without it.
+    captured = await google_account.item(made)
+    del captured["md5Checksum"]
+    await google_account.run.answer_next("GET", FILE, 200, captured)
     _, records = await read_recording(
-        monkeypatch,
-        accessor,
-        spec_for(),
-        binary_row(),
-        capture=(None, REVISION),
+        google_account, spec_for(), binary_row(made, revision)
     )
-    assert records[0].fingerprint == REVISION
+    assert records[0].fingerprint == revision
 
 
 BODY = b"quarterly numbers\n"
@@ -475,47 +415,49 @@ UNRECORDED_STAMP = "2026-01-02T00:00:00Z"
 
 
 def unrecorded_row(
-    extra: dict[str, JsonValue], remote_time: str = UNRECORDED_STAMP
+    file_id: str,
+    extra: dict[str, JsonValue],
+    remote_time: str = UNRECORDED_STAMP,
 ) -> FileStat:
-    return _row("file123", "a.txt", remote_time=remote_time, extra=extra)
+    return _row(file_id, "a.txt", remote_time=remote_time, extra=extra)
 
 
 async def read_unrecorded(
-    accessor: GDriveAccessor,
+    google_account,
     monkeypatch: pytest.MonkeyPatch,
     extra: dict[str, JsonValue],
     *,
     offset: int = 0,
     size: int | None = None,
-) -> tuple[list[tuple[str, dict]], AsyncMock, AsyncMock]:
+) -> tuple[list[tuple[str, dict]], list[tuple[str, str]]]:
     # Built rather than listed: a listing drops an empty or missing md5, so
     # a listed row could not carry the odd shapes these rows need.
+    made = await google_account.upload("a.txt", BODY)
     records = []
 
     def spy(op, path, source, nbytes, timer, **kwargs):
         records.append((path, kwargs))
 
     monkeypatch.setitem(vars(gdrive_read), "record", spy)
-    download = AsyncMock(
-        return_value=BODY[offset : None if size is None else offset + size]
-    )
-    captured = AsyncMock(return_value=(None, None))
-    install_drive(
-        monkeypatch,
-        StubDrive(download_file=download, capture_file_metadata=captured),
-    )
     assert not recording_active()
+    await google_account.run.record_requests()
     spec = PathSpec(virtual="/gd/a.txt", directory="/gd/", vfs_path="a.txt")
     await read(
-        accessor, spec, offset=offset, size=size, entry=unrecorded_row(extra)
+        google_account.drive_accessor(),
+        spec,
+        offset=offset,
+        size=size,
+        entry=unrecorded_row(made, extra),
     )
-    return records, download, captured
+    return records, await google_account.log()
 
 
 @pytest.mark.asyncio
-async def test_an_unrecorded_read_stamps_the_entry_md5(accessor, monkeypatch):
-    records, _, _ = await read_unrecorded(
-        accessor, monkeypatch, {"md5_checksum": BODY_MD5}
+async def test_an_unrecorded_read_stamps_the_entry_md5(
+    google_account, monkeypatch
+):
+    records, _ = await read_unrecorded(
+        google_account, monkeypatch, {"md5_checksum": BODY_MD5}
     )
     assert records == [
         ("/gd/a.txt", {"fingerprint": BODY_MD5, "revision": None})
@@ -524,10 +466,10 @@ async def test_an_unrecorded_read_stamps_the_entry_md5(accessor, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_read_drops_a_stale_entry_md5(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
-    records, _, _ = await read_unrecorded(
-        accessor,
+    records, _ = await read_unrecorded(
+        google_account,
         monkeypatch,
         {"md5_checksum": "0" * 32, "head_revision_id": "r7"},
     )
@@ -536,30 +478,30 @@ async def test_an_unrecorded_read_drops_a_stale_entry_md5(
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_read_without_an_md5_stamps_the_head_revision(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
-    records, _, _ = await read_unrecorded(
-        accessor, monkeypatch, {"head_revision_id": "r7"}
+    records, _ = await read_unrecorded(
+        google_account, monkeypatch, {"head_revision_id": "r7"}
     )
     assert records[0][1]["fingerprint"] == "r7"
 
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_read_with_neither_token_stamps_none(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
     # A file with content never falls back to its modified stamp.
-    records, _, _ = await read_unrecorded(accessor, monkeypatch, {})
+    records, _ = await read_unrecorded(google_account, monkeypatch, {})
     assert records[0][1]["fingerprint"] is None
 
 
 @pytest.mark.parametrize("odd_md5", ["", 123], ids=["empty", "non-string"])
 @pytest.mark.asyncio
 async def test_an_unusable_entry_md5_falls_through_to_the_head_revision(
-    accessor, monkeypatch, odd_md5
+    google_account, monkeypatch, odd_md5
 ):
-    records, _, _ = await read_unrecorded(
-        accessor,
+    records, _ = await read_unrecorded(
+        google_account,
         monkeypatch,
         {"md5_checksum": odd_md5, "head_revision_id": "r7"},
     )
@@ -568,20 +510,22 @@ async def test_an_unusable_entry_md5_falls_through_to_the_head_revision(
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_windowed_read_stamps_no_token(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
     # No md5 on the entry, so only the window can drop the token.
-    records, _, _ = await read_unrecorded(
-        accessor, monkeypatch, {"head_revision_id": "r7"}, offset=1
+    records, _ = await read_unrecorded(
+        google_account, monkeypatch, {"head_revision_id": "r7"}, offset=1
     )
     assert records[0][1]["fingerprint"] is None
 
 
 @pytest.mark.asyncio
-async def test_an_unrecorded_read_pins_no_revision(accessor, monkeypatch):
+async def test_an_unrecorded_read_pins_no_revision(
+    google_account, monkeypatch
+):
     # The entry's revision can be a TTL old.
-    records, _, _ = await read_unrecorded(
-        accessor,
+    records, _ = await read_unrecorded(
+        google_account,
         monkeypatch,
         {"md5_checksum": BODY_MD5, "head_revision_id": "r7"},
     )
@@ -590,170 +534,144 @@ async def test_an_unrecorded_read_pins_no_revision(accessor, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_an_unrecorded_read_issues_no_metadata_request(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
-    _, download, captured = await read_unrecorded(
-        accessor, monkeypatch, {"md5_checksum": BODY_MD5}
+    _, requests = await read_unrecorded(
+        google_account, monkeypatch, {"md5_checksum": BODY_MD5}
     )
-    assert download.await_count == 1
-    captured.assert_not_awaited()
+    assert [name for name, _ in requests] == ["media"]
 
 
 @pytest.mark.asyncio
 async def test_a_pinned_unrecorded_read_stamps_no_entry_token(
-    accessor, monkeypatch
+    google_account, monkeypatch
 ):
     # Pinned bytes are an old revision; the entry's md5 describes head.
+    made = await google_account.upload("a.txt", BODY)
+    pinned = (await google_account.item(made))["headRevisionId"]
+    await google_account.update(made, b"newer bytes")
     records = []
 
     def spy(op, path, source, nbytes, timer, **kwargs):
         records.append(kwargs)
 
     monkeypatch.setitem(vars(gdrive_read), "record", spy)
-    download = AsyncMock(return_value=BODY)
-    revision = AsyncMock(return_value=BODY)
-    install_drive(
-        monkeypatch,
-        StubDrive(download_file=download, download_revision=revision),
-    )
+    await google_account.run.record_requests()
     token = caller.bind_caller(
-        caller.current_caller().changed({"revisions": {"/gd/a.txt": "r1"}})
+        caller.current_caller().changed({"revisions": {"/gd/a.txt": pinned}})
     )
     try:
-        await read(
-            accessor,
+        data = await read(
+            google_account.drive_accessor(),
             PathSpec(virtual="/gd/a.txt", directory="/gd/", vfs_path="a.txt"),
-            entry=unrecorded_row({"md5_checksum": BODY_MD5}),
+            entry=unrecorded_row(made, {"md5_checksum": BODY_MD5}),
         )
     finally:
         caller.reset_caller(token)
-    assert records == [{"fingerprint": None, "revision": "r1"}]
-    download.assert_not_awaited()
-    assert revision.await_count == 1
+    assert data == BODY
+    assert records == [{"fingerprint": None, "revision": pinned}]
+    assert await google_account.log() == [("revision", pinned)]
 
 
 @pytest.mark.asyncio
 async def test_a_recorded_read_prefers_the_capture_over_the_entry(
-    accessor, monkeypatch
+    google_account,
 ):
     # The capture is the fresher of the two; the entry can be a TTL old.
-    install_drive(
-        monkeypatch,
-        StubDrive(
-            download_file=AsyncMock(return_value=BODY),
-            capture_file_metadata=AsyncMock(return_value=(BODY_MD5, "r9")),
-        ),
-    )
+    made = await google_account.upload("a.txt", BODY)
+    revision = (await google_account.item(made))["headRevisionId"]
     scope = RecordingScope()
     try:
         await read(
-            accessor,
+            google_account.drive_accessor(),
             PathSpec(virtual="/gd/a.txt", directory="/gd/", vfs_path="a.txt"),
-            entry=unrecorded_row({"md5_checksum": "0" * 32}),
+            entry=unrecorded_row(made, {"md5_checksum": "0" * 32}),
         )
     finally:
         scope.close()
     assert [(r.fingerprint, r.revision) for r in scope.records] == [
-        (BODY_MD5, "r9")
+        (BODY_MD5, revision)
     ]
 
 
-RENDERING_SERVICE = {
-    "read_doc": "docs",
-    "read_spreadsheet": "sheets",
-    "read_presentation": "slides",
-}
-
 NATIVE_READS = [
-    ("gdrive/gdoc", "x.gdoc.json", "read_doc"),
-    ("gdrive/gsheet", "x.gsheet.json", "read_spreadsheet"),
-    ("gdrive/gslide", "x.gslide.json", "read_presentation"),
+    ("gdrive/gdoc", "x.gdoc.json", DOC),
+    ("gdrive/gsheet", "x.gsheet.json", SHEET),
+    ("gdrive/gslide", "x.gslide.json", SLIDES),
 ]
 
 
 async def read_native_at(
-    accessor: GDriveAccessor,
-    monkeypatch: pytest.MonkeyPatch,
+    google_account,
     mount: str,
     resource_type: str,
     vfs_name: str,
-    renderer: str,
+    mime: str,
     extra: dict[str, JsonValue] | None = None,
     offset: int = 0,
     size: int | None = None,
 ):
-    install_api(
-        monkeypatch,
-        **{
-            RENDERING_SERVICE[renderer]: StubApi(
-                **{renderer: AsyncMock(return_value=b'{"tabs": []}')}
-            )
-        },
-    )
+    made = await google_account.create("x", mime)
     virtual = f"{mount}/{vfs_name}"
     scope = RecordingScope()
     try:
         data = await read(
-            accessor,
+            google_account.drive_accessor(),
             PathSpec(
                 virtual=virtual, directory=f"{mount}/", vfs_path=vfs_name
             ),
             offset=offset,
             size=size,
-            entry=_row(
-                "doc1", vfs_name, resource_type, UNRECORDED_STAMP, extra
-            ),
+            entry=_row(made, vfs_name, resource_type, UNRECORDED_STAMP, extra),
         )
     finally:
         scope.close()
     return data, list(scope.records)
 
 
-@pytest.mark.parametrize("resource_type,vfs_name,renderer", NATIVE_READS)
+@pytest.mark.parametrize("resource_type,vfs_name,mime", NATIVE_READS)
 @pytest.mark.parametrize("mount", ["/gd", ""], ids=["mounted", "root"])
 @pytest.mark.asyncio
 async def test_a_native_read_records_its_stamp_at_the_virtual_path(
-    accessor, monkeypatch, mount, resource_type, vfs_name, renderer
+    google_account, mount, resource_type, vfs_name, mime
 ):
     _, records = await read_native_at(
-        accessor, monkeypatch, mount, resource_type, vfs_name, renderer
+        google_account, mount, resource_type, vfs_name, mime
     )
     assert [(r.path, r.fingerprint) for r in records] == [
         (f"{mount}/{vfs_name}", UNRECORDED_STAMP)
     ]
 
 
-@pytest.mark.parametrize("resource_type,vfs_name,renderer", NATIVE_READS)
+@pytest.mark.parametrize("resource_type,vfs_name,mime", NATIVE_READS)
 @pytest.mark.asyncio
 async def test_a_native_read_records_no_revision(
-    accessor, monkeypatch, resource_type, vfs_name, renderer
+    google_account, resource_type, vfs_name, mime
 ):
     # A revision pin would replace the drift check, and a render never
     # consults one.
     _, records = await read_native_at(
-        accessor,
-        monkeypatch,
+        google_account,
         "/gd",
         resource_type,
         vfs_name,
-        renderer,
+        mime,
         extra={"head_revision_id": "doc1-r1"},
     )
     assert records[0].revision is None
 
 
-@pytest.mark.parametrize("resource_type,vfs_name,renderer", NATIVE_READS)
+@pytest.mark.parametrize("resource_type,vfs_name,mime", NATIVE_READS)
 @pytest.mark.asyncio
 async def test_a_windowed_native_read_records_its_window_and_no_token(
-    accessor, monkeypatch, resource_type, vfs_name, renderer
+    google_account, resource_type, vfs_name, mime
 ):
     data, records = await read_native_at(
-        accessor,
-        monkeypatch,
+        google_account,
         "/gd",
         resource_type,
         vfs_name,
-        renderer,
+        mime,
         offset=2,
         size=5,
     )
@@ -761,37 +679,47 @@ async def test_a_windowed_native_read_records_its_window_and_no_token(
     assert (records[0].bytes, records[0].fingerprint) == (5, None)
 
 
-VERSIONED = FileStat(
-    name="f.txt",
-    type=FileType.FILE,
-    extra={"file_id": "f1", "resource_type": "gdrive/file"},
-)
+def _versioned(file_id: str) -> FileStat:
+    return FileStat(
+        name="f.txt",
+        type=FileType.FILE,
+        extra={"file_id": file_id, "resource_type": "gdrive/file"},
+    )
 
 
 @pytest.mark.asyncio
-async def test_a_pinned_path_reads_its_revision():
-    pinned_read = AsyncMock(return_value=b"pinned")
-    live_read = AsyncMock()
-    drive = StubDrive(download_revision=pinned_read, download_file=live_read)
+async def test_a_pinned_path_reads_its_revision(google_account):
+    made = await google_account.upload("f.txt", b"pinned")
+    pinned = (await google_account.item(made))["headRevisionId"]
+    await google_account.update(made, b"live")
+    await google_account.run.record_requests()
     token = caller.bind_caller(
-        caller.current_caller().changed({"revisions": {"/data/f.txt": "r1"}})
+        caller.current_caller().changed({"revisions": {"/data/f.txt": pinned}})
     )
     try:
-        data = await read_file_versioned(drive, "f1", "/data/f.txt", VERSIONED)
+        data = await read_file_versioned(
+            google_account.drive_accessor().drive,
+            made,
+            "/data/f.txt",
+            _versioned(made),
+        )
     finally:
         caller.reset_caller(token)
     assert data == b"pinned"
-    pinned_read.assert_awaited_once_with("f1", "r1", None)
-    live_read.assert_not_awaited()
+    assert await google_account.log() == [("revision", pinned)]
 
 
 @pytest.mark.asyncio
-async def test_an_unpinned_unrecorded_path_reads_live_without_a_capture():
-    capture = AsyncMock()
-    drive = StubDrive(
-        download_file=AsyncMock(return_value=b"live"),
-        capture_file_metadata=capture,
+async def test_an_unpinned_unrecorded_path_reads_live_without_a_capture(
+    google_account,
+):
+    made = await google_account.upload("f.txt", b"live")
+    await google_account.run.record_requests()
+    data = await read_file_versioned(
+        google_account.drive_accessor().drive,
+        made,
+        "/data/f.txt",
+        _versioned(made),
     )
-    data = await read_file_versioned(drive, "f1", "/data/f.txt", VERSIONED)
     assert data == b"live"
-    capture.assert_not_awaited()
+    assert await google_account.log() == [("media", made)]

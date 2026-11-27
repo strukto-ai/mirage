@@ -12,68 +12,59 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { truncate } from './truncate.ts'
 
-const ENC = new TextEncoder()
-const DEC = new TextDecoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
   return PathSpec.fromStrPath(virtual)
 }
 
+async function truncated(path: string, size: number): Promise<void> {
+  const accessor = account.driveAccessor()
+  await truncate(accessor, spec(path), size, false, await handedAt(readdir, accessor, spec(path)))
+}
+
 describe('gdrive truncate', () => {
   it('shrinks', async () => {
-    const id = fake.add('f.txt', 'root', undefined, ENC.encode('abcdef'))
-    await truncate(
-      accessor,
-      spec('/f.txt'),
-      3,
-      false,
-      await handedAt(readdir, accessor, spec('/f.txt')),
-    )
-    expect(DEC.decode(fake.items.get(id)?.content)).toBe('abc')
+    const id = await account.upload('f.txt', 'abcdef')
+    await truncated('/f.txt', 3)
+    expect(await account.content(id)).toBe('abc')
   })
 
   it('pads with NULs', async () => {
-    const id = fake.add('f.txt', 'root', undefined, ENC.encode('ab'))
-    await truncate(
-      accessor,
-      spec('/f.txt'),
-      4,
-      false,
-      await handedAt(readdir, accessor, spec('/f.txt')),
-    )
-    expect(fake.items.get(id)?.content).toEqual(new Uint8Array([97, 98, 0, 0]))
+    const id = await account.upload('f.txt', 'ab')
+    await truncated('/f.txt', 4)
+    expect(await account.content(id)).toBe('ab\0\0')
   })
 
   it('creates a missing file', async () => {
-    await truncate(
-      accessor,
-      spec('/new.txt'),
-      2,
-      false,
-      await handedAt(readdir, accessor, spec('/new.txt')),
-    )
-    expect(fake.find('new.txt')?.content).toEqual(new Uint8Array([0, 0]))
+    await truncated('/new.txt', 2)
+    const made = await account.find('new.txt')
+    expect(await account.content(made?.id ?? '')).toBe('\0\0')
   })
 
   it('folder raises EISDIR', async () => {
-    fake.folder('d')
-    await expect(
-      truncate(accessor, spec('/d'), 0, false, await handedAt(readdir, accessor, spec('/d'))),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    await account.folder('d')
+    await expect(truncated('/d', 0)).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })

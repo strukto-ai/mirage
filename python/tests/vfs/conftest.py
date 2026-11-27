@@ -12,11 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from tests.fixtures.google_api import StubApi
+from tests.fixtures.google_account import google_account
 
-
-class StubSlides(StubApi):
-    """A ``SlidesApi`` that answers only the calls a test armed; any other
-    call fails the test."""
-
-    service = "Slides"
+__all__ = ["google_account"]

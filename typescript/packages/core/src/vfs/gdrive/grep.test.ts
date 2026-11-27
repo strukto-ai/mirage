@@ -1,28 +1,44 @@
-import type * as ClientModule from '../../core/google/client.ts'
-import { describe, expect, it, vi } from 'vitest'
-vi.mock('../../core/google/client.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof ClientModule>()),
-  googleGet: vi.fn(),
-}))
-
-import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { googleGet, TokenManager } from '../../core/google/client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { GoogleDriveVFS } from './gdrive.ts'
 
 const DEC = new TextDecoder()
-const TM = new TokenManager({ clientId: 'test', refreshToken: 'test' })
+const MIMES: Record<string, string> = {
+  gdoc: 'application/vnd.google-apps.document',
+  gsheet: 'application/vnd.google-apps.spreadsheet',
+  gslide: 'application/vnd.google-apps.presentation',
+}
+
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 // Mirrors python's test_grep_i_keeps_rendered_google_json: an id-addressed
 // file is reached through a mount, which hands the read the row its listing
 // named.
 describe('Drive grep through a mount', () => {
   it.each(['gdoc', 'gsheet', 'gslide'])('-I keeps rendered %s JSON', async (kind) => {
-    vi.mocked(googleGet).mockResolvedValue({ title: 'needle\0tail' })
-    const vfs = new GoogleDriveVFS({ clientId: 'test', refreshToken: 'test' })
-    Object.assign(vfs, { accessor: new GDriveAccessor({ tokenManager: TM }) })
-    const ws = new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
+    // A title holding a NUL: the rendered JSON escapes it, so the file is
+    // text to grep -I, and the raw byte never reaches the output.
+    const made = await account.create('needle\0tail', MIMES[kind] ?? '')
+    const ws = new Workspace(
+      { '/drive/': new GoogleDriveVFS(account.config()) },
+      { mode: MountMode.READ },
+    )
     const name = `Report.${kind}.json`
     try {
       await ws.mount('/drive/').indexStore.setDir(
@@ -33,7 +49,7 @@ describe('Drive grep through a mount', () => {
             new FileStat({
               name,
               type: FileType.FILE,
-              extra: { file_id: 'file1', resource_type: `gdrive/${kind}` },
+              extra: { file_id: made, resource_type: `gdrive/${kind}` },
             }),
           ],
         ],

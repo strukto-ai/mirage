@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import AsyncIterator, Callable
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -23,116 +21,68 @@ from mirage.cache.index import IndexCacheStore
 from mirage.types import FileStat, FileType
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace.files import Files
-from tests.fixtures.gdocs_api import StubDocs
-from tests.fixtures.gdrive_api import StubDrive, install_drive
-from tests.fixtures.google_api import serve
+
+DOC = "application/vnd.google-apps.document"
 
 
-def _make_gdrive_ops() -> tuple[Files, IndexCacheStore]:
+def _make_gdrive_ops(google_account) -> tuple[Files, IndexCacheStore]:
     # The store to seed is the one the mount runs the driver under.
-    vfs = GoogleDriveVFS(
-        config=GoogleDriveConfig(client_id="x", refresh_token="y")
-    )
+    vfs = GoogleDriveVFS(config=google_account.config(GoogleDriveConfig))
     ws = Workspace({"/gdrive/": vfs}, mode=MountMode.READ)
     return ws.vfs, ws.mount("/gdrive/").index_store
 
 
-def _downloads(
-    data: bytes, calls: list[str]
-) -> Callable[[str], AsyncIterator[bytes]]:
-    """A stream download answering ``data``, each file id it is asked for
-    kept in ``calls``."""
-
-    def download(file_id: str) -> AsyncIterator[bytes]:
-        calls.append(file_id)
-        return _yielded(data)
-
-    return download
-
-
-async def _yielded(data: bytes) -> AsyncIterator[bytes]:
-    yield data
+def _row(name: str, file_id: str, resource_type: str) -> FileStat:
+    return FileStat(
+        name=name,
+        type=FileType.FILE,
+        modified="2026-04-01T00:00:00Z",
+        extra={"file_id": file_id, "resource_type": resource_type},
+    )
 
 
 @pytest.mark.asyncio
-async def test_read_gdoc_via_filetype_cascade():
-    ops, index = _make_gdrive_ops()
+async def test_read_gdoc_via_filetype_cascade(google_account):
+    made = await google_account.create("Report", DOC)
+    ops, index = _make_gdrive_ops(google_account)
     await index.set_dir(
         "/gdrive/docs",
-        [
-            (
-                "report.gdoc.json",
-                FileStat(
-                    name="report.gdoc.json",
-                    type=FileType.FILE,
-                    modified="2026-04-01T00:00:00Z",
-                    extra={
-                        "file_id": "doc123",
-                        "resource_type": "gdrive/gdoc",
-                    },
-                ),
-            )
-        ],
+        [("report.gdoc.json", _row("report.gdoc.json", made, "gdrive/gdoc"))],
     )
-    doc_json = json.dumps({"documentId": "doc123", "title": "Report"}).encode()
-    with serve(docs=StubDocs(read_doc=AsyncMock(return_value=doc_json))):
-        result = await ops.read("/gdrive/docs/report.gdoc.json")
-        parsed = json.loads(result)
-        assert parsed["documentId"] == "doc123"
+    result = await ops.read("/gdrive/docs/report.gdoc.json")
+    parsed = json.loads(result)
+    assert parsed["documentId"] == made
 
 
 @pytest.mark.asyncio
-async def test_read_plain_file_falls_through(monkeypatch):
-    ops, index = _make_gdrive_ops()
+async def test_read_plain_file_falls_through(google_account):
+    made = await google_account.upload("notes.txt", b"plain content")
+    ops, index = _make_gdrive_ops(google_account)
     await index.set_dir(
         "/gdrive",
-        [
-            (
-                "notes.txt",
-                FileStat(
-                    name="notes.txt",
-                    type=FileType.FILE,
-                    modified="2026-04-01T00:00:00Z",
-                    extra={
-                        "file_id": "file789",
-                        "resource_type": "gdrive/file",
-                    },
-                ),
-            )
-        ],
+        [("notes.txt", _row("notes.txt", made, "gdrive/file"))],
     )
     # A cold read through the dispatcher fills the cache, so it asks for the
     # md5 its entry is stamped with, as a command's read does.
-    install_drive(
-        monkeypatch,
-        StubDrive(
-            capture_file_metadata=AsyncMock(return_value=(None, None)),
-            download_file_stream=_downloads(b"plain content", []),
-        ),
-    )
+    await google_account.run.record_requests()
     result = await ops.read("/gdrive/notes.txt")
     assert result == b"plain content"
+    assert await google_account.log() == [("get", made), ("media", made)]
 
 
 @pytest.mark.asyncio
-async def test_readdir():
-    ops, index = _make_gdrive_ops()
+async def test_readdir(google_account):
+    ops, index = _make_gdrive_ops(google_account)
     await index.set_dir(
         "/gdrive/docs",
         [
             (
                 "report.gdoc.json",
-                FileStat(
-                    name="report.gdoc.json",
-                    type=FileType.FILE,
-                    modified="2026-04-01T00:00:00Z",
-                    extra={
-                        "file_id": "doc123",
-                        "resource_type": "gdrive/gdoc",
-                    },
-                ),
+                _row("report.gdoc.json", "doc123", "gdrive/gdoc"),
             )
         ],
     )
+    await google_account.run.record_requests()
     result = await ops.readdir("/gdrive/docs")
     assert "/gdrive/docs/report.gdoc.json" in result
+    assert await google_account.log() == []
