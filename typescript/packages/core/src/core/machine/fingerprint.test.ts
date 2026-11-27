@@ -19,7 +19,7 @@ import { tokenOf } from './fingerprint.ts'
 
 const WRITTEN_MS = 1_700_000_000_123
 const SETTLED = BigInt(WRITTEN_MS) * 1_000_000n + RACY_WINDOW_NS
-const ENTRY: PosixEntry = {
+const UNASKED: PosixEntry = {
   kind: 'f',
   mode: 0o644,
   size: 12,
@@ -32,8 +32,8 @@ const ENTRY: PosixEntry = {
   nlink: 1,
   blocks: 8,
   rel: '',
-  askedNs: SETTLED,
 }
+const ENTRY: PosixEntry = { ...UNASKED, askedNs: SETTLED }
 
 describe('tokenOf', () => {
   it('names a settled entry by its size and millisecond', () => {
@@ -45,6 +45,6 @@ describe('tokenOf', () => {
   })
 
   it('gives an entry with no asking time kept none', () => {
-    expect(tokenOf({ ...ENTRY, askedNs: undefined })).toBeNull()
+    expect(tokenOf(UNASKED)).toBeNull()
   })
 })
