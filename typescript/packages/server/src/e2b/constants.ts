@@ -45,6 +45,16 @@ export const BASE_TEMPLATE = 'base'
 export const DEFAULT_TIMEOUT = 300
 export const ENVD_VERSION = '0.5.6'
 
+/** Fastify's default: the largest body a route reads unless it names its own. */
+export const BODY_LIMIT = 1024 * 1024
+export const BODY_METHODS: ReadonlySet<string> = new Set([
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'OPTIONS',
+])
+
 export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
 export const TYPES: Partial<Record<FileType, string>> = {

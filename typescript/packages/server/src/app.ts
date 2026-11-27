@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Buffer } from 'node:buffer'
-import { timingSafeEqual } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import Fastify, {
@@ -87,19 +85,28 @@ import {
 } from './errors.ts'
 import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
-import { isStopped } from './routers/workspaces.ts'
+import { createSandboxWorkspace, isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_PORT } from './env.ts'
 import { CONNECT_STREAM } from './e2b/constants.ts'
-import { connectCode } from './e2b/errors.ts'
-import { Sandboxes } from './e2b/sandbox.ts'
 import {
-  acceptsRawBody,
-  isDataRequest,
-  isLifecycleRequest,
-  router as registerE2BRoutes,
+  MemoryLifecycleBackend,
+  nodeCommandStream,
   sandboxAccount,
   sandboxWorkspace,
+} from './e2b/node.ts'
+import {
+  acceptsRawBody,
+  type DataAccess,
+  errorBody,
+  isLifecycleRequest,
+  router as registerE2BRoutes,
 } from './routers/e2b.ts'
+
+/**
+ * The sandbox owner when the auth mode names no account: an E2B sandbox
+ * always has an owner, while the daemon's workspaces keep null.
+ */
+const NO_ACCOUNT = ''
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -261,14 +268,6 @@ function noop(): void {
   /* intentional no-op for onIdleExit default */
 }
 
-function matchesAccessToken(expected: string, presented: string): boolean {
-  const expectedBytes = Buffer.from(expected)
-  const presentedBytes = Buffer.from(presented)
-  return (
-    expectedBytes.length === presentedBytes.length && timingSafeEqual(expectedBytes, presentedBytes)
-  )
-}
-
 export function resolveE2bPort(
   port?: number,
   env: Record<string, string | undefined> = process.env,
@@ -368,11 +367,10 @@ function requestGuards(
 
 function e2bError(reply: FastifyReply, error: HttpError): FastifyReply {
   const request = reply.request
-  const data = isDataRequest(request.method, request.routeOptions.url ?? '')
   for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
   return reply
     .code(error.status)
-    .send({ code: data ? connectCode(error.status) : error.status, message: error.message })
+    .send(errorBody(request.method, request.routeOptions.url ?? '', error))
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -458,7 +456,12 @@ export function buildApp(options: BuildAppOptions = {}) {
       ? null
       : {
           app: server(e2bError),
-          sandboxes: new Sandboxes(registry, matchesAccessToken),
+          sandboxes: new MemoryLifecycleBackend(registry, (owner) =>
+            createSandboxWorkspace(
+              { registry, host, resources, snapshotStore: options.snapshotStore },
+              owner === NO_ACCOUNT ? null : owner,
+            ),
+          ),
           port: e2bPort,
         }
   if (companion !== null) {
@@ -498,13 +501,17 @@ export function buildApp(options: BuildAppOptions = {}) {
         }
       })
     }
-    registerE2BRoutes(fastifyRoutes(e2b), {
-      registry,
-      host,
-      resources,
-      snapshotStore: options.snapshotStore,
+    const access: DataAccess = {
+      sandbox: (request) => sandboxes.requireAccess(request.headers).sandbox,
+      draining: () => registry.draining,
+      transport: nodeCommandStream,
+    }
+    registerE2BRoutes(
+      fastifyRoutes(e2b),
       sandboxes,
-    })
+      (request) => request.account ?? NO_ACCOUNT,
+      access,
+    )
     listenTogether(app, e2b, port)
   }
   const ssh: SSHEndpoint = {

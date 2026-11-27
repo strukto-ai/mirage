@@ -35,6 +35,7 @@ export default defineConfig({
     'src/routes.ts',
     'src/errors.ts',
     'src/registry.ts',
+    'src/routers/e2b.ts',
     'src/ssh/config.ts',
     'src/ssh/constants.ts',
     'src/ssh/codex.ts',

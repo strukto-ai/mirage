@@ -69,6 +69,7 @@ import { withPolicies } from '../resources/policies.ts'
 import { withEntries } from '../resources/strukto.ts'
 import { makeBrief, makeDetail, makeStoppedBrief, makeStoppedDetail } from '../summary.ts'
 import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
+import * as e2b from '../e2b/constants.ts'
 import { queryFlag, requireEntry } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
@@ -361,8 +362,12 @@ export async function isStopped(
  * when the server's policies refuse it, before any of it is built or any
  * secret it names is read. Mirrors Python's `_admit`.
  */
-async function admit(deps: WorkspaceRoutesDeps, req: RouteRequest, config: unknown): Promise<void> {
-  const deny = await deps.registry.refusal((config ?? {}) as Record<string, JsonValue>, req.account)
+async function admit(
+  deps: WorkspaceRoutesDeps,
+  account: string | null,
+  config: unknown,
+): Promise<void> {
+  const deny = await deps.registry.refusal((config ?? {}) as Record<string, JsonValue>, account)
   if (deny !== null) throw new HttpError('policy_refused', deny.reason)
 }
 
@@ -527,25 +532,26 @@ async function withSaved(
  * before a second Workspace opens the live one's state; one being deleted or
  * stopped is refused, since its state is about to go or is still being
  * written. The server's policies judge the config as written before any of
- * it is built. Mirrors Python's `_open_workspace`.
+ * it is built. A workspace that keeps state builds under `claim`; one
+ * without a claim is ephemeral. Mirrors Python's `_open_workspace`.
  */
 function openWorkspace<T>(
   deps: WorkspaceRoutesDeps,
-  req: RouteRequest,
-  reply: RouteReply,
+  account: string | null,
   wid: string,
   cfg: WorkspaceConfig,
   config: Record<string, JsonValue>,
   finish: (entry: WorkspaceEntry, created: boolean) => Promise<T>,
-  ephemeral = false,
+  claim?: (build: () => Promise<T>) => Promise<T>,
 ): Promise<T> {
+  const ephemeral = claim === undefined
   const digest = configDigest(config)
   return deps.registry.creating(wid, digest, async (admitted) => {
     if (!admitted) {
       throw new HttpError('already_exists', 'workspace id already exists')
     }
     if (deps.registry.has(wid) || deps.registry.removing(wid)) {
-      const held = deps.registry.visible(wid, req.account)
+      const held = deps.registry.visible(wid, account)
       if (
         held === null ||
         held.ephemeral ||
@@ -557,7 +563,7 @@ function openWorkspace<T>(
       }
       return finish(held, false)
     }
-    await admit(deps, req, config)
+    await admit(deps, account, config)
     const saved = await withSaved(deps, config, cfg)
     const build = async (): Promise<T> => {
       let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
@@ -625,7 +631,7 @@ function openWorkspace<T>(
           await deps.host.mountKernel(ws, prefix, mountpoint, backend)
         }
         if (!ephemeral) await deps.registry.saveConfig(wid, config)
-        entry = deps.registry.add(ws, wid, req.account, [], ephemeral)
+        entry = deps.registry.add(ws, wid, account, [], ephemeral)
         entry.configDigest = digest
       } catch (e) {
         await ws.close()
@@ -633,16 +639,15 @@ function openWorkspace<T>(
       }
       return finish(entry, true)
     }
-    if (!ephemeral) return claimed(deps, req, reply, wid, build)
+    if (claim !== undefined) return claim(build)
     requireBuildRoom(deps.registry)
     return build()
   })
 }
 
-export function createEphemeralWorkspace(
+function createEphemeralWorkspace(
   deps: WorkspaceRoutesDeps,
-  req: RouteRequest,
-  reply: RouteReply,
+  account: string | null,
   config: Record<string, JsonValue>,
 ): Promise<WorkspaceEntry> {
   let cfg: WorkspaceConfig
@@ -652,16 +657,39 @@ export function createEphemeralWorkspace(
     throw loaderError(e, ['config'], config)
   }
   if ((cfg.workspaceId ?? null) !== null) throw new HttpError('invalid_request', NO_WORKSPACE_ID)
-  return openWorkspace(
-    deps,
-    req,
-    reply,
-    newWorkspaceId(),
-    cfg,
-    config,
-    (entry) => Promise.resolve(entry),
-    true,
+  return openWorkspace(deps, account, newWorkspaceId(), cfg, config, (entry) =>
+    Promise.resolve(entry),
   )
+}
+
+/**
+ * Build a new sandbox's workspace for its owner: the server's `base`
+ * template when it keeps one, else a writable home over a read-only root.
+ */
+export async function createSandboxWorkspace(
+  deps: WorkspaceRoutesDeps & { resources: ResourceStore },
+  owner: string | null,
+): Promise<WorkspaceEntry> {
+  let config: Record<string, JsonValue> = {
+    mode: 'read',
+    mounts: { [e2b.HOME]: { vfs: 'ram', mode: 'write' } },
+    env: { HOME: e2b.HOME },
+  }
+  if (!deps.registry.accountsRequired) {
+    try {
+      config = (await deps.resources.getTemplate(e2b.BASE_TEMPLATE)).config
+    } catch (error) {
+      if (!(error instanceof ResourceError)) throw error
+      if (error.code !== 'not_found') throw storeRefusal(error)
+      console.debug('using the built-in E2B base:', error.message)
+    }
+  }
+  const entry = await createEphemeralWorkspace(deps, owner, config)
+  if (deps.registry.draining) {
+    await deps.registry.remove(entry.id)
+    throw new HttpError('shutting_down', 'server is shutting down')
+  }
+  return entry
 }
 
 async function createWorkspace(
@@ -686,8 +714,14 @@ async function createWorkspace(
   // refused.
   const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
   refuseId(wid, deps.host.reservedIds)
-  return openWorkspace(deps, req, reply, wid, cfg, config, async (entry, created) =>
-    answer(reply, created ? 201 : 200, await makeDetail(entry)),
+  return openWorkspace(
+    deps,
+    req.account,
+    wid,
+    cfg,
+    config,
+    async (entry, created) => answer(reply, created ? 201 : 200, await makeDetail(entry)),
+    (build) => claimed(deps, req, reply, wid, build),
   )
 }
 
@@ -738,7 +772,7 @@ async function loadWorkspace(deps: WorkspaceRoutesDeps, req: RouteRequest, reply
   ) {
     throw new HttpError('already_exists', 'workspace id already exists')
   }
-  await admit(deps, req, override)
+  await admit(deps, req.account, override)
   const store = typeof source === 'string' ? snapshotStore(deps) : undefined
   const wid = workspaceId ?? newWorkspaceId()
   // What the snapshot holds is built under the server's network; its own
@@ -918,8 +952,14 @@ async function startWorkspace(
   } catch (e) {
     throw loaderError(e, ['config'], config)
   }
-  return openWorkspace(deps, req, reply, id, cfg, config, async (entry) =>
-    answer(reply, 200, await makeDetail(entry)),
+  return openWorkspace(
+    deps,
+    req.account,
+    id,
+    cfg,
+    config,
+    async (entry) => answer(reply, 200, await makeDetail(entry)),
+    (build) => claimed(deps, req, reply, id, build),
   )
 }
 
@@ -971,7 +1011,7 @@ async function cloneWorkspace(
     throw new HttpError('already_exists', 'workspace id already exists')
   }
   const wid = id ?? newWorkspaceId()
-  await admit(deps, req, override)
+  await admit(deps, req.account, override)
   return building(deps, req, reply, wid, async () => {
     const src = source.runner.ws
     let newWs

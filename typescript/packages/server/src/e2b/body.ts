@@ -1,9 +1,18 @@
-import { Buffer } from 'node:buffer'
-import { Readable } from 'node:stream'
 import { abortable } from '@struktoai/mirage-core/utils/abort'
+import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { RAW_BODIES } from '../constants.ts'
 import { HttpError } from '../errors.ts'
 import type { RouteReply, RouteRequest } from '../routes.ts'
+
+/** Node's request stream, told apart from a web body without loading `node:stream`. */
+interface NodeBody extends AsyncIterable<Uint8Array> {
+  readonly readableEnded: boolean
+  iterator(options: { destroyOnReturn: boolean }): AsyncIterator<Uint8Array>
+}
+
+function isNodeBody(raw: AsyncIterable<Uint8Array>): raw is NodeBody {
+  return 'readableEnded' in raw && 'iterator' in raw && typeof raw.iterator === 'function'
+}
 
 export async function* bodyChunks(
   request: RouteRequest,
@@ -11,8 +20,9 @@ export async function* bodyChunks(
 ): AsyncGenerator<Uint8Array> {
   signal.throwIfAborted()
   const { raw } = request
-  const source: AsyncIterator<Uint8Array> =
-    raw instanceof Readable ? raw.iterator({ destroyOnReturn: false }) : raw[Symbol.asyncIterator]()
+  const source: AsyncIterator<Uint8Array> = isNodeBody(raw)
+    ? raw.iterator({ destroyOnReturn: false })
+    : raw[Symbol.asyncIterator]()
   try {
     for (;;) {
       const chunk = await abortable(source.next(), signal)
@@ -31,7 +41,7 @@ export async function* bodyChunks(
 }
 
 export function closeUnreadBody(request: RouteRequest, reply: RouteReply): void {
-  if (request.raw instanceof Readable && !request.raw.readableEnded) {
+  if (isNodeBody(request.raw) && !request.raw.readableEnded) {
     reply.header('connection', 'close')
   }
 }
@@ -52,7 +62,7 @@ export async function readBody(
     if (size > limit) throw new HttpError('too_large', limitMessage)
     chunks.push(chunk)
   }
-  return Buffer.concat(chunks, size)
+  return concat(chunks)
 }
 
 export function unaryContentType(request: RouteRequest, streamMedia: string): string {
@@ -68,7 +78,11 @@ export async function readJsonBody(
   signal: AbortSignal,
   limit: number,
 ): Promise<unknown> {
-  const bytes = await readBody(request, signal, limit)
+  return parseJson(await readBody(request, signal, limit))
+}
+
+/** A JSON body, refusing a key that would reach an object's prototype; none when empty. */
+export function parseJson(bytes: Uint8Array): unknown {
   if (bytes.byteLength === 0) return undefined
   try {
     const value: unknown = JSON.parse(new TextDecoder().decode(bytes))
