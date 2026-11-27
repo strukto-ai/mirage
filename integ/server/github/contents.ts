@@ -51,6 +51,7 @@ import {
   fail,
   jsonBodyOf,
   param,
+  publicRead,
   route,
   str,
   withRepo,
@@ -504,11 +505,11 @@ export function contentRoutes(): KitRoute<C>[] {
     }),
     route<C>('GET', `${p}/repos/:owner/:repo/readme`, authedRoute(readme)),
     route<C>('GET', `${p}/repos/:owner/:repo/commits/*ref`, authedRoute(oneCommit)),
-    route<C>('GET', `${p}/repos/:owner/:repo/git/trees/*ref`, authedRoute(gitTree)),
+    route<C>('GET', `${p}/repos/:owner/:repo/git/trees/*ref`, publicRead(gitTree)),
     route<C>(
       'GET',
       `${p}/repos/:owner/:repo/git/blobs/:sha`,
-      authedRoute(
+      publicRead(
         withRepo(async (ctx, repo) => {
           // Answered before the sha is looked at, as a tree is.
           if (await repoIsEmpty(ctx.sql, ctx.tenant, repo)) {

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as Constants from '../../core/github/constants.ts'
 
 const scope = vi.hoisted(() => ({ warn: 1 }))
@@ -27,11 +27,17 @@ vi.mock('../../core/github/constants.ts', async () => {
   }
 })
 
-import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  GitHubRepo,
+  TOKEN,
+  TREES,
+  UNTIL_CLEARED,
+  blobSha,
+} from '../../../tests/core/github/repo.ts'
 import { GitHubConfig } from '../../core/github/config.ts'
 import { ensureRef } from '../../core/github/repo.ts'
 import { ensureTree } from '../../core/github/tree.ts'
-import type { GitHubTreeItem } from '../../core/github/client.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -41,49 +47,80 @@ import { parseConfigWithSchema } from '../secrets.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
+const FETCH = globalThis.fetch
 const REFUSED_AT_4 = 'more than 4 files in scope (walk_limit); narrow the path\n'
-
 const STOPPED_AT_4 = 'stopped after 4 files (walk_limit); narrow the path\n'
-const TREE: GitHubTreeItem[] = [
-  { path: 'top.txt', type: 'blob', sha: 'a', size: 2 },
-  { path: 'empty', type: 'tree', sha: 'b' },
-]
+// The tree git names an empty folder by.
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 
-function offline(tree: GitHubTreeItem[] = TREE): void {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: string | URL | Request) => {
-      const url = input instanceof Request ? input.url : String(input)
-      const body = url.includes('/git/trees/')
-        ? { tree, truncated: false }
-        : { default_branch: 'main' }
-      return Promise.resolve(
-        new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } }),
-      )
-    }),
-  )
-}
+let origin: string
+let repo: GitHubRepo
 
-afterEach(() => {
-  vi.unstubAllGlobals()
+beforeAll(async () => {
+  origin = await serve('github')
 })
 
+beforeEach(() => {
+  repo = new GitHubRepo(origin)
+})
+
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  await repo.run.close()
+})
+
+async function mounted(fields: Record<string, string> = {}): Promise<GitHubVFS> {
+  return GitHubVFS.create({
+    token: TOKEN,
+    owner: repo.owner,
+    repo: repo.name,
+    baseUrl: repo.run.url,
+    ...fields,
+  })
+}
+
+// GitHub holds an empty folder as an empty tree written through the git
+// database; the fake's trees hold files only, so its answers carry the
+// folder's row, and the folder lists as empty.
+async function withAnEmptyFolder(name: string): Promise<void> {
+  const row = { path: name, mode: '040000', type: 'tree', sha: EMPTY_TREE }
+  const whole = await repo.tree('main', true)
+  const top = await repo.tree('main')
+  const answers: [string, string, typeof top][] = [
+    ['recursive=1', repo.treePath('main'), whole],
+    ['', repo.treePath('main'), top],
+    ['', repo.treePath('main:'), top],
+  ]
+  for (const [query, path, listing] of answers) {
+    const grown = { ...listing, tree: [...listing.tree, row] }
+    await repo.run.answerNext('GET', TREES, 200, grown, UNTIL_CLEARED, path, query)
+  }
+  const empty = { sha: EMPTY_TREE, tree: [], truncated: false }
+  for (const segment of [EMPTY_TREE, `main:${name}`]) {
+    await repo.run.answerNext('GET', TREES, 200, empty, UNTIL_CLEARED, repo.treePath(segment))
+  }
+}
+
 describe('GitHubVFS', () => {
-  it('opens offline and hydrates an empty repository once across concurrent readers', async () => {
-    const paths: string[] = []
-    const fetch = vi.fn((input: string | URL | Request) => {
-      const path = new URL(input instanceof Request ? input.url : String(input)).pathname
-      paths.push(path)
-      const body = path === '/repos/o/r' ? { default_branch: 'trunk' } : { tree: [] }
-      return Promise.resolve(Response.json(body))
+  it('opens offline and hydrates a repository once across concurrent readers', async () => {
+    await repo.create({ 'a.txt': 'a' })
+    await repo.branch('trunk')
+    await repo.setDefaultBranch('trunk')
+    const vfs = await GitHubVFS.create({
+      token: TOKEN,
+      owner: repo.owner,
+      repo: repo.name,
+      baseUrl: repo.run.url,
+      timeout: 2,
     })
-    vi.stubGlobal('fetch', fetch)
-    const vfs = await GitHubVFS.create({ token: 't', owner: 'o', repo: 'r', timeout: 2 })
-    expect(fetch).not.toHaveBeenCalled()
+    expect(await repo.log()).toEqual([])
     expect(vfs.accessor.account.config.timeout).toBe(2)
     await Promise.all([ensureTree(vfs.accessor), ensureTree(vfs.accessor), ensureRef(vfs.accessor)])
     await ensureTree(vfs.accessor)
-    expect(paths).toEqual(['/repos/o/r', '/repos/o/r/git/trees/trunk'])
+    expect(await repo.log()).toEqual([
+      ['repo', ''],
+      ['recursive', 'trunk'],
+    ])
   })
 
   for (const [mode, refusal] of [
@@ -94,15 +131,9 @@ describe('GitHubVFS', () => {
       // rm, rmdir and unlink stat their operand first; a file `ls` lists
       // must meet the mount's refusal, -f or not, as GNU's does on a
       // filesystem that refuses the removal. Mirrors the Python test.
-      offline()
-      const vfs = await GitHubVFS.create({
-        token: 't',
-        owner: 'o',
-        repo: 'r',
-        ref: 'main',
-        baseUrl: 'http://127.0.0.1:1',
-      })
-      const ws = new Workspace({ '/gh': vfs }, { mode })
+      await repo.create({ 'top.txt': 'to' })
+      await withAnEmptyFolder('empty')
+      const ws = new Workspace({ '/gh': await mounted({ ref: 'main' }) }, { mode })
       try {
         const lines: Record<string, string> = {
           'rm /gh/top.txt': `rm: cannot remove '/gh/top.txt': ${refusal}\n`,
@@ -125,9 +156,6 @@ describe('GitHubVFS', () => {
     })
   }
 
-  // Mirrors test_find_judges_a_directory_by_what_the_session_sees: a walk
-  // asks readTree, which the dispatcher declines under a hide, so -empty sees
-  // the directory as the session does.
   // Python writes an unset field as null, so the config a Python snapshot
   // saves for an anonymous mount names token, app, ref and base_url as null,
   // and a TypeScript workspace rebuilds the mount from it.
@@ -147,20 +175,12 @@ describe('GitHubVFS', () => {
     expect(vfs.listingsPin).toBeNull()
   })
 
+  // Mirrors test_find_judges_a_directory_by_what_the_session_sees: a walk
+  // asks readTree, which the dispatcher declines under a hide, so -empty sees
+  // the directory as the session does.
   it('judges a directory for find by what the session sees', async () => {
-    offline([
-      { path: 'docs', type: 'tree', sha: 'd' },
-      { path: 'docs/guide.md', type: 'blob', sha: 'g', size: 3 },
-      { path: 'top.txt', type: 'blob', sha: 't', size: 2 },
-    ])
-    const vfs = await GitHubVFS.create({
-      token: 't',
-      owner: 'o',
-      repo: 'r',
-      ref: 'main',
-      baseUrl: 'http://127.0.0.1:1',
-    })
-    const ws = new Workspace({ '/gh': vfs }, { mode: MountMode.READ })
+    await repo.create({ 'docs/guide.md': 'gui', 'top.txt': 'to' })
+    const ws = new Workspace({ '/gh': await mounted({ ref: 'main' }) }, { mode: MountMode.READ })
     try {
       const seen = await ws.shell('find /gh; find /gh -type d -empty')
       expect(DEC.decode(seen.stdout)).toBe('/gh\n/gh/docs\n/gh/docs/guide.md\n/gh/top.txt\n')
@@ -210,43 +230,52 @@ function ram(): RAMVFS {
   return vfs
 }
 
-async function onGithub(
-  line: string,
-  hub = new FakeGitHub(REPO),
-  pinned = false,
-  walkLimit = 5000,
-): Promise<[Ran, FakeGitHub]> {
-  vi.stubGlobal('fetch', hub.fetch)
-  const ref = pinned ? { ref: await hub.head() } : {}
-  const vfs = await GitHubVFS.create({
-    token: 't',
-    owner: 'o',
-    repo: 'r',
-    baseUrl: hub.url,
-    ...ref,
-  })
-  hub.log.length = 0
-  return [await run(vfs, line, walkLimit), hub]
+interface Arranged {
+  files?: Record<string, string>
+  pinned?: boolean
+  walkLimit?: number
+  refused?: boolean
+  truncated?: boolean
+}
+
+async function onGithub(line: string, arranged: Arranged = {}): Promise<Ran> {
+  const head = await repo.create(arranged.files ?? REPO)
+  if (arranged.truncated === true) await repo.truncate()
+  if (arranged.refused === true) await repo.refuse('search', 500, 'boom')
+  const vfs = await mounted(arranged.pinned === true ? { ref: head } : {})
+  return run(vfs, line, arranged.walkLimit ?? 5000)
 }
 
 // A file is read by its blob, or in a batch the read-ahead sends.
-async function read(hub: FakeGitHub): Promise<string[]> {
+async function read(): Promise<string[]> {
   const names = new Map<string, string>()
-  for (const [path, data] of Object.entries(REPO)) names.set(await blobSha(data), path)
-  return hub.log
+  for (const [path, data] of Object.entries(REPO)) names.set(blobSha(data), path)
+  return (await repo.log())
     .filter(([route]) => route === 'blob' || route === 'graphql')
     .flatMap(([, raw]) => raw.split(','))
     .map((sha) => names.get(sha) ?? sha)
     .sort()
 }
 
+// github.com's API and raw hosts, reached on the fake's run instead: the
+// accessor names them itself, so only the network under it is rerouted.
+function onGithubCom(): void {
+  const api = 'https://api.github.com'
+  const raw = 'https://raw.githubusercontent.com'
+  vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input)
+    const routed = url.startsWith(raw)
+      ? `${repo.run.url}/raw${url.slice(raw.length)}`
+      : url.startsWith(api)
+        ? `${repo.run.url}${url.slice(api.length)}`
+        : url
+    return FETCH(input instanceof Request ? new Request(routed, input) : routed, init)
+  })
+}
+
 describe('grep and rg over code search', () => {
   beforeEach(() => {
     scope.warn = 1
-  })
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
   })
 
   // Code search matches whole words in any case and never indexes big.txt,
@@ -258,10 +287,10 @@ describe('grep and rg over code search', () => {
     ['rg -w import /gh', ['big.txt', 'docs/c.md', 'src/a.py']],
     ['rg -wl import /gh/docs', ['docs/c.md']],
   ])('%s reads only what code search names', async (line, files) => {
-    const [got, hub] = await onGithub(line)
+    const got = await onGithub(line)
     expect(got).toEqual(await run(ram(), line))
-    expect(hub.count('search')).toBe(1)
-    expect(await read(hub)).toEqual(files)
+    expect(await repo.count('search')).toBe(1)
+    expect(await read()).toEqual(files)
   })
 
   // The last line's word is a qualifier to code search, which would rescope
@@ -274,54 +303,58 @@ describe('grep and rg over code search', () => {
     'grep -w import /gh/src/a.py /gh/src/b.py',
     "grep -rwF 'path:src' /gh",
   ])('%s reads every file without searching', async (line) => {
-    const [got, hub] = await onGithub(line)
+    const got = await onGithub(line)
     expect(got).toEqual(await run(ram(), line))
-    expect(hub.count('search')).toBe(0)
+    expect(await repo.count('search')).toBe(0)
   })
 
   // A truncated tree cannot list the files code search never indexes.
   it.each(['failed', 'truncated-tree'])('a %s search reads every file', async (kind) => {
-    const hub = new FakeGitHub(REPO)
-    if (kind === 'failed') hub.fail.set('search', [500, 'boom'])
-    else hub.truncatedRecursive = true
     const line = 'grep -rw import /gh'
-    const [got] = await onGithub(line, hub)
+    const got = await onGithub(line, {
+      refused: kind === 'failed',
+      truncated: kind === 'truncated-tree',
+    })
     expect(got).toEqual(await run(ram(), line))
-    expect(await read(hub)).toEqual(Object.keys(REPO).sort())
+    expect(await read()).toEqual(Object.keys(REPO).sort())
   })
 
   // Code search indexes the default branch only, so a mount pinned to a
   // commit reads every file as a plain scan does.
   it('reads every file off the default branch', async () => {
     const line = 'grep -rw import /gh'
-    const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true)
+    const got = await onGithub(line, { pinned: true })
     expect(got).toEqual(await run(ram(), line))
-    expect(hub.count('search')).toBe(0)
-    expect(await read(hub)).toEqual(Object.keys(REPO).sort())
+    expect(await repo.count('search')).toBe(0)
+    expect(await read()).toEqual(Object.keys(REPO).sort())
   })
 
   // Twin of test_a_ref_off_the_default_branch_stops_at_the_cap.
   it('stops at the cap off the default branch', async () => {
     const line = 'grep -rw import /gh'
-    const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true, 4)
+    const got = await onGithub(line, { pinned: true, walkLimit: 4 })
     expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`grep: /gh: ${STOPPED_AT_4}`, 2])
     // The walk reads four and warms none past them: the two it read in a row
     // in docs set no pace for src.
-    expect(await read(hub)).toEqual(Object.keys(REPO).sort().slice(0, 4))
+    expect(await read()).toEqual(Object.keys(REPO).sort().slice(0, 4))
   })
 
   // Twin of test_an_anonymous_mount_scans_instead_of_searching: code search
   // refuses a call with no credential, so the walk reads every file, each
   // downloaded.
   it('scans every file of an anonymous mount without searching', async () => {
-    const hub = new FakeGitHub(REPO)
-    vi.stubGlobal('fetch', hub.fetch)
+    await repo.create(REPO)
+    onGithubCom()
     const line = 'grep -rw import /gh'
-    const got = await run(await GitHubVFS.create({ owner: 'o', repo: 'r' }), line)
+    const got = await run(await GitHubVFS.create({ owner: repo.owner, repo: repo.name }), line)
     expect(got).toEqual(await run(ram(), line))
-    expect([hub.count('search'), hub.count('blob'), hub.count('graphql')]).toEqual([0, 0, 0])
-    const downloaded = hub.log
+    expect([
+      await repo.count('search'),
+      await repo.count('blob'),
+      await repo.count('graphql'),
+    ]).toEqual([0, 0, 0])
+    const downloaded = (await repo.log())
       .filter(([route]) => route === 'raw')
       .map(([, raw]) => raw.slice(raw.indexOf('/') + 1))
     expect(new Set(downloaded)).toEqual(new Set(Object.keys(REPO)))
@@ -330,9 +363,9 @@ describe('grep and rg over code search', () => {
   it('does not search a scope cheaper to read', async () => {
     scope.warn = 100
     const line = 'grep -rw import /gh'
-    const [got, hub] = await onGithub(line)
+    const got = await onGithub(line)
     expect(got).toEqual(await run(ram(), line))
-    expect(hub.count('search')).toBe(0)
+    expect(await repo.count('search')).toBe(0)
   })
 
   // Twin of test_a_search_past_the_scope_cap_stops_there.
@@ -341,24 +374,24 @@ describe('grep and rg over code search', () => {
     ['grep -rwv import /gh', 'grep'],
     ["rg 'imp.rt' /gh", 'rg'],
   ])('stops %s past the scope cap', async (line, name) => {
-    const [got, hub] = await onGithub(line, new FakeGitHub(REPO), false, 4)
+    const got = await onGithub(line, { walkLimit: 4 })
     expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`${name}: /gh: ${STOPPED_AT_4}`, 2])
-    expect(hub.count('blob')).toBe(4)
+    expect(await repo.count('blob')).toBe(4)
   })
 
   // Twin of test_a_tree_diff_past_the_scope_cap_is_refused.
   it('refuses a tree diff past the scope cap', async () => {
-    const [got, hub] = await onGithub('diff -r /gh /gh', new FakeGitHub(REPO), false, 4)
+    const got = await onGithub('diff -r /gh /gh', { walkLimit: 4 })
     expect(got).toEqual(['', `diff: ${REFUSED_AT_4}`, 1])
-    expect(hub.count('blob')).toBe(0)
+    expect(await repo.count('blob')).toBe(0)
   })
 
   // Twin of test_an_archive_past_the_scope_cap_is_refused.
   it('refuses an archive past the scope cap', async () => {
-    const [got, hub] = await onGithub('tar -cf - /gh/src', new FakeGitHub(REPO), false, 1)
+    const got = await onGithub('tar -cf - /gh/src', { walkLimit: 1 })
     expect(got).toEqual(['', 'tar: more than 1 files in scope (walk_limit); narrow the path\n', 1])
-    expect(hub.count('blob')).toBe(0)
+    expect(await repo.count('blob')).toBe(0)
   })
 
   // [mount prefix, scope below it, files in scope]
@@ -369,14 +402,8 @@ describe('grep and rg over code search', () => {
   ])('counts the refetched tree after an expiry at %s%s', async (prefix, sub, count) => {
     // One under the refetched count: a count off the expired tree is smaller,
     // and would let the walk run.
-    const hub = new FakeGitHub({ 'docs/a.txt': 'a', 'docs/b.txt': 'b', 'top.txt': 't' })
-    vi.stubGlobal('fetch', hub.fetch)
-    const vfs = await GitHubVFS.create({
-      token: 't',
-      owner: 'o',
-      repo: 'r',
-      baseUrl: hub.url,
-    })
+    await repo.create({ 'docs/a.txt': 'a', 'docs/b.txt': 'b', 'top.txt': 't' })
+    const vfs = await mounted()
     const commandLimits = { [ALL_COMMANDS]: new Limit({ walkLimit: count - 1 }) }
     const ws = new Workspace(
       { [prefix]: new Mount(vfs, { mode: MountMode.READ, commandLimits }) },
@@ -384,16 +411,15 @@ describe('grep and rg over code search', () => {
     )
     try {
       expect((await ws.shell(`ls ${prefix}/docs`)).exitCode).toBe(0)
-      hub.set('docs/c.txt', 'c')
-      hub.set('new/d.txt', 'd')
+      await repo.commit({ 'docs/c.txt': 'c', 'new/d.txt': 'd' })
       await ws.registry.mountFor(prefix).index.invalidate()
-      hub.log.length = 0
+      await repo.run.recordRequests()
       const target = `${prefix}${sub}`
       const result = await ws.shell(`diff -r ${target} ${target}`)
       expect(DEC.decode(result.stderr)).toBe(
         `diff: more than ${String(count - 1)} files in scope (walk_limit); narrow the path\n`,
       )
-      expect(hub.counts()).toEqual([0, 1, 0])
+      expect(await repo.counts()).toEqual([0, 1, 0])
     } finally {
       await ws.close()
     }
@@ -404,9 +430,9 @@ describe('grep and rg over code search', () => {
   it.each(['grep -rw import /gh', 'grep -rwa import /gh', 'rg -w --binary import /gh'])(
     'runs %s, narrowed under the scope cap',
     async (line) => {
-      const [got, hub] = await onGithub(line, new FakeGitHub(REPO), false, 4)
+      const got = await onGithub(line, { walkLimit: 4 })
       expect(got).toEqual(await run(ram(), line))
-      expect(await read(hub)).toEqual(['big.txt', 'docs/c.md', 'src/a.py'])
+      expect(await read()).toEqual(['big.txt', 'docs/c.md', 'src/a.py'])
     },
   )
 
@@ -415,19 +441,19 @@ describe('grep and rg over code search', () => {
   it('does not count a binary the walk skips toward the cap', async () => {
     const weights = { 'w0.bin': REPO['big.txt'] ?? '', 'w1.bin': REPO['big.txt'] ?? '' }
     const line = 'grep -rw import /gh'
-    const [got, hub] = await onGithub(line, new FakeGitHub({ ...REPO, ...weights }), false, 3)
+    const got = await onGithub(line, { files: { ...REPO, ...weights }, walkLimit: 3 })
     expect(got).toEqual(await run(ram(), line))
-    expect(hub.count('search')).toBe(1)
+    expect(await repo.count('search')).toBe(1)
   })
 
   // Twin of test_a_narrowed_search_past_the_scope_cap_stops_there.
   it('stops a narrowed search past the scope cap', async () => {
-    const [got, hub] = await onGithub('grep -rw import /gh', new FakeGitHub(REPO), false, 2)
+    const got = await onGithub('grep -rw import /gh', { walkLimit: 2 })
     expect(got).toEqual([
       '/gh/big.txt:import\n',
       'grep: /gh: stopped after 2 files (walk_limit); narrow the path\n',
       2,
     ])
-    expect(await read(hub)).toEqual(['big.txt', 'docs/c.md'])
+    expect(await read()).toEqual(['big.txt', 'docs/c.md'])
   })
 })

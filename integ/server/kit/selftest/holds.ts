@@ -108,6 +108,28 @@ export async function runHoldTests(): Promise<void> {
     await release('a', either)
     assert.equal((await listing).status, 200)
 
+    const queryHold = await kit('a', HOLDS_PATH, 'POST', { routes: [CARDS], query: 'limit=1' })
+    const byQuery = ((await queryHold.json()) as { hold: number }).hold
+    const plain = await fetch(under('a', '/boards/brd_1/cards'), {
+      headers: { 'x-mirage-tenant': 's1' },
+    })
+    assert.equal(plain.status, 200, 'a hold with a query lets a request without it go on')
+    const limited = fetch(under('a', '/boards/brd_1/cards?limit=1'), {
+      headers: { 'x-mirage-tenant': 's1' },
+    })
+    assert.equal(
+      ((await caught('a', byQuery)) as { path: string }).path,
+      '/boards/brd_1/cards',
+      'and catches the one asked with exactly it',
+    )
+    await release('a', byQuery)
+    assert.equal((await limited).status, 200)
+    assert.equal(
+      (await kit('a', HOLDS_PATH, 'POST', { routes: [CARDS], query: '?limit=1' })).status,
+      400,
+      'a hold query spelled with its ? is refused',
+    )
+
     const faulted = await hold('a', CARDS)
     const late = fetch(under('a', '/boards/brd_1/cards'), { headers: { 'x-mirage-tenant': 's1' } })
     await caught('a', faulted)
@@ -212,6 +234,35 @@ export async function runHoldTests(): Promise<void> {
       scoped.plans.at(-1),
       { method: 'GET', route: CARDS[1], path: '/boards/brd_2/cards', times: 9, served: 2 },
       'the report names the path a plan answers',
+    )
+
+    await kit('a', FAULTS_PATH, 'DELETE')
+    await kit('a', FAULTS_PATH, 'POST', {
+      plans: [{ method: 'GET', route: CARDS[1], query: '', status: 403, times: 9 }],
+    })
+    const asked = (query: string): Promise<Response> =>
+      fetch(under('a', `/boards/brd_1/cards${query}`), { headers: { 'x-mirage-tenant': 's1' } })
+    assert.deepEqual(
+      [(await asked('?limit=1')).status, (await asked('')).status],
+      [200, 403],
+      'a plan that names a query answers only requests asked with exactly it',
+    )
+    const queried = (await (await kit('a', FAULTS_PATH, 'GET')).json()) as {
+      plans: FaultReport[]
+    }
+    assert.deepEqual(
+      queried.plans.at(-1),
+      { method: 'GET', route: CARDS[1], query: '', times: 9, served: 1 },
+      'the report names the query a plan answers',
+    )
+    assert.equal(
+      (
+        await kit('a', FAULTS_PATH, 'POST', {
+          plans: [{ method: 'GET', route: CARDS[1], query: '?limit=1', status: 403 }],
+        })
+      ).status,
+      400,
+      'a fault query spelled with its ? is refused',
     )
 
     const badBodies: [JsonValue, string][] = [

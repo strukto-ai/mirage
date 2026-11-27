@@ -357,8 +357,8 @@ async function holdsEndpoint<C extends MinimalClient>(
       if (method !== 'POST') {
         return { status: 405, body: { error: 'method_not_allowed', method, path } }
       }
-      const routes = parseHoldsBody(raw, (m, r) => router.declares(m, r))
-      return { status: 200, body: { hold: holds.arm(routes) } }
+      const plan = parseHoldsBody(raw, (m, r) => router.declares(m, r))
+      return { status: 200, body: { hold: holds.arm(plan) } }
     }
     const id = Number(HOLD_PATH.exec(path)?.[1])
     if (method === 'GET') {
@@ -555,7 +555,7 @@ async function answer<C extends MinimalClient>(
   watched?.requests.note(arrived, method, hit.spec.path, path, url.search.slice(1), headers, raw)
   // Ahead of the faults, so a test that changed the world while it held a
   // request can still arm the answer that request meets.
-  const held = watched?.holds.take(method, hit.spec.path, path) ?? null
+  const held = watched?.holds.take(method, hit.spec.path, path, url.search.slice(1)) ?? null
   if (held !== null) {
     const how = await held
     if (how === undefined) return null
@@ -566,7 +566,7 @@ async function answer<C extends MinimalClient>(
   // hangs, and a write route faulted with a 5xx has provably not applied.
   // The request's own method, not the route's: a HEAD answered by a GET
   // route must not spend a plan armed for the GET.
-  const fault = watched?.faults.take(method, hit.spec.path, path) ?? null
+  const fault = watched?.faults.take(method, hit.spec.path, path, url.search.slice(1)) ?? null
   if (fault !== null) {
     // Unreferenced, so a hang still pending when the server closes does not
     // keep the process alive past its own teardown.

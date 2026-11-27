@@ -295,7 +295,9 @@ with `status`, optional `headers` and `body`, after `delay_ms`. A `text` in
 place of `body` is sent as written, as `application/json` unless the plan's
 `headers` name another type, for a body JSON cannot carry (a number past
 2^53). A `path` (no run prefix) narrows the plan to requests to that one path,
-so it answers for one item rather than every item the route serves. A plan
+so it answers for one item rather than every item the route serves, and a
+`query` (no `?`, `""` for none) to requests asked with exactly that query
+string, so one path asked two ways is faulted one of them. A plan
 with no `status` never answers: the socket closes after `delay_ms`, which is a
 hang past the client's timeout or a reset connection. `GET` lists the plans with how many
 requests each served; `DELETE` disarms them and returns that list. Each waits
@@ -320,7 +322,9 @@ list. A snapshot does not carry it.
 made and the request it acts on, under the same run prefix and tenant
 selectors. `POST {"routes": [[method, route], ...]}` arms a hold and answers
 `{"hold": n}`; the next request to one of those routes waits, ahead of the
-fault plans, the run's queue and the handler. `GET /_kit/holds/<n>` waits until
+fault plans, the run's queue and the handler. A `query` in the body, as a
+fault plan's, catches only a request asked with exactly that query string.
+`GET /_kit/holds/<n>` waits until
 the hold catches a request and answers its `method`, `route` and `path`, or 404
 once the hold is gone. `DELETE /_kit/holds/<n>` releases it: with no body the
 request is served, so it meets whatever the test changed meanwhile, and with

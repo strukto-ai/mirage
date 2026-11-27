@@ -16,7 +16,7 @@ import type { Ctx, KitRoute, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { treeOf } from './store.ts'
 import type { RepoRow } from './store.ts'
-import { authedRoute, fail, param, route, withRepo } from './http.ts'
+import { fail, param, publicRead, route, withRepo } from './http.ts'
 import { repoRoutes } from './repos.ts'
 import { contentRoutes } from './contents.ts'
 import { gitRoutes } from './git.ts'
@@ -73,7 +73,7 @@ export function githubRoutes(): KitRoute<C>[] {
     ...pageRoutes(),
     ...searchRoutes(),
     ...insightRoutes(),
-    route<C>('GET', '/raw/:owner/:repo/:ref/*path', authedRoute(withRepo(rawContent))),
+    route<C>('GET', '/raw/:owner/:repo/:ref/*path', publicRead(withRepo(rawContent))),
     // A git clone's first request. The fake serves no git transport, so it
     // answers as github.com does for a repository it will not serve: a 404
     // git reports as "repository not found". `gh repo clone` cases read the

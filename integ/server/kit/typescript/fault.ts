@@ -22,6 +22,7 @@ const PLAN_FIELDS = new Set([
   'method',
   'route',
   'path',
+  'query',
   'times',
   'status',
   'headers',
@@ -35,7 +36,9 @@ const PLAN_FIELDS = new Set([
 // (`/drive/v3/files/:id`), not a request path, so one plan covers every id
 // that route serves and a typo'd one is refused on arrival rather than never
 // matching. A plan that also names a `path` answers only requests to that
-// one, the way the vendor refuses a single item while it serves the rest.
+// one, the way the vendor refuses a single item while it serves the rest,
+// and one that names a `query` only requests whose query string is exactly
+// it, `''` for none, so one path asked two ways is faulted one of them.
 // With a `status` the request is answered with it after `delayMs`;
 // with none it is never answered at all, and the socket closes after
 // `delayMs`: a hang past the client's timeout when that is long, a reset
@@ -46,6 +49,7 @@ export interface FaultPlan {
   method: string
   route: string
   path?: string
+  query?: string
   times: number
   status?: number
   headers?: Record<string, string>
@@ -60,6 +64,7 @@ export type FaultReport = {
   method: string
   route: string
   path?: string
+  query?: string
   times: number
   served: number
 }
@@ -86,13 +91,14 @@ export class Faults {
     for (const plan of plans) this.armed.push({ plan, served: 0 })
   }
 
-  // The first unspent plan matching this route and path, consumed by one;
-  // null when none does and the route should run.
-  take(method: string, route: string, path: string): FaultHit | null {
+  // The first unspent plan matching this route, path and query string,
+  // consumed by one; null when none does and the route should run.
+  take(method: string, route: string, path: string, query: string): FaultHit | null {
     for (const entry of this.armed) {
       const { plan } = entry
       if (entry.served >= plan.times || plan.method !== method || plan.route !== route) continue
       if (plan.path !== undefined && plan.path !== path) continue
+      if (plan.query !== undefined && plan.query !== query) continue
       entry.served += 1
       if (plan.status === undefined) return { reply: null, delayMs: plan.delayMs }
       const reply: Reply = {
@@ -119,6 +125,7 @@ export class Faults {
       method: plan.method,
       route: plan.route,
       ...(plan.path === undefined ? {} : { path: plan.path }),
+      ...(plan.query === undefined ? {} : { query: plan.query }),
       times: plan.times,
       served,
     }))
@@ -141,6 +148,7 @@ export class Faults {
           delay_ms: plan.delayMs,
         }
         if (plan.path !== undefined) wire.path = plan.path
+        if (plan.query !== undefined) wire.query = plan.query
         if (plan.status !== undefined) wire.status = plan.status
         if (plan.headers !== undefined) wire.headers = { ...plan.headers }
         if (plan.body !== undefined) wire.body = plan.body
@@ -177,7 +185,7 @@ function parsePlan(
   if (unknown.length > 0) {
     throw new FaultError(`unknown fault plan fields: ${unknown.sort().join(', ')}`)
   }
-  const { method, route, path, headers, body, text } = raw
+  const { method, route, path, query, headers, body, text } = raw
   if (typeof method !== 'string' || method === '') {
     throw new FaultError('fault method must be a string')
   }
@@ -198,6 +206,12 @@ function parsePlan(
       throw new FaultError('fault path must be a request path')
     }
     plan.path = path
+  }
+  if (query !== undefined) {
+    if (typeof query !== 'string' || query.startsWith('?')) {
+      throw new FaultError('fault query must be a query string without its ?')
+    }
+    plan.query = query
   }
   // A 1xx is never the final answer, so a plan carrying one would leave the
   // client waiting on a response that never comes.

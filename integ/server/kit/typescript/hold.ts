@@ -31,8 +31,14 @@ export type HeldRequest = {
 // have run, a reply answers it instead.
 export type Release = Reply | null
 
-interface Hold {
+// What a hold catches: a request to one of `routes`, and with a `query` only
+// one asked with exactly that query string, '' for none.
+export interface HoldPlan {
   routes: { method: string; route: string }[]
+  query?: string
+}
+
+interface Hold extends HoldPlan {
   caught: HeldRequest | null
   waiters: ((caught: HeldRequest | null) => void)[]
   release: ((how: Release | undefined) => void) | null
@@ -42,12 +48,13 @@ function isObject(v: JsonValue | undefined): v is Record<string, JsonValue> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-// The routes a hold body names: `{"routes": [[method, route], ...]}`, each a
-// route this fake declares, so a typo is refused rather than never matching.
+// What a hold body names: `{"routes": [[method, route], ...]}`, each a route
+// this fake declares, so a typo is refused rather than never matching, and an
+// optional `query`, the query string a caught request is asked with.
 export function parseHoldsBody(
   raw: Buffer,
   declares: (method: string, route: string) => boolean,
-): { method: string; route: string }[] {
+): HoldPlan {
   let body: JsonValue
   try {
     body = JSON.parse(raw.toString('utf8')) as JsonValue
@@ -58,7 +65,11 @@ export function parseHoldsBody(
   if (!Array.isArray(routes) || routes.length === 0) {
     throw new HoldsBodyError('routes must be a list of [method, route] pairs')
   }
-  return routes.map((pair) => {
+  const query = isObject(body) ? body.query : undefined
+  if (query !== undefined && (typeof query !== 'string' || query.startsWith('?'))) {
+    throw new HoldsBodyError('a hold query must be a query string without its ?')
+  }
+  const named = routes.map((pair) => {
     const [method, route] = Array.isArray(pair) ? pair : []
     if (typeof method !== 'string' || typeof route !== 'string' || !Array.isArray(pair)) {
       throw new HoldsBodyError('routes must be a list of [method, route] pairs')
@@ -69,6 +80,7 @@ export function parseHoldsBody(
     }
     return { method: upper, route }
   })
+  return query === undefined ? { routes: named } : { routes: named, query }
 }
 
 // What a release body asks: an empty body runs the request, `{"status": n}`
@@ -109,19 +121,25 @@ export class Holds {
   private next = 1
   private readonly armed = new Map<number, Hold>()
 
-  arm(routes: { method: string; route: string }[]): number {
+  arm(plan: HoldPlan): number {
     const id = this.next++
-    this.armed.set(id, { routes, caught: null, waiters: [], release: null })
+    this.armed.set(id, { ...plan, caught: null, waiters: [], release: null })
     return id
   }
 
-  // The wait of a request the earliest armed hold on its route catches; null
-  // when none does and the request goes on. The wait answers how it is
-  // released, and undefined when it is let go unanswered.
-  take(method: string, route: string, path: string): Promise<Release | undefined> | null {
+  // The wait of a request the earliest armed hold on its route and query
+  // catches; null when none does and the request goes on. The wait answers
+  // how it is released, and undefined when it is let go unanswered.
+  take(
+    method: string,
+    route: string,
+    path: string,
+    query: string,
+  ): Promise<Release | undefined> | null {
     for (const hold of this.armed.values()) {
       if (hold.caught !== null) continue
       if (!hold.routes.some((r) => r.method === method && r.route === route)) continue
+      if (hold.query !== undefined && hold.query !== query) continue
       const caught = { method, route, path }
       hold.caught = caught
       for (const wake of hold.waiters.splice(0)) wake(caught)

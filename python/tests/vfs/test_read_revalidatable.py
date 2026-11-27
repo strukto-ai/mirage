@@ -74,10 +74,10 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.core.box.conftest import TOKEN, BoxAccount
 from tests.core.dropbox.conftest import DropboxAccount
+from tests.core.github.conftest import TOKEN as GITHUB_TOKEN
+from tests.core.github.conftest import GitHubRepo, blob_sha
 from tests.e2e.gdrive_mock import FakeDriveApi, FakeGDrive, patch_gdrive
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
-from tests.fixtures.github_api import FakeGitHub, blob_sha
-from tests.fixtures.github_api import serve as serve_github
 from tests.fixtures.handed import ListFn, entry_at
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
@@ -657,39 +657,42 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
 
 @contextmanager
 def _github_fake(
-    shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
+    shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch, origin: str
 ) -> Iterator[Fake]:
     # The nested key's parent is two or more lowercase letters, the spelling
     # Octokit rewrites when the point request goes unencoded; the python
-    # twin keeps the same key so both hosts test one shape.
+    # twin keeps the same key so both hosts test one shape. The repository
+    # runs on a loop of its own, as Dropbox's does.
     key = {"root": "a.txt", "nested": "docs/a.txt"}[shape]
-    hub = FakeGitHub(files={key: data, "other.txt": DECOY})
-    with serve_github(hub):
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "ref": "main",
-                "base_url": hub.url,
-            },
-        )
-        reach = _watch_walks(vfs, monkeypatch)
-
-        def rewrite(new: bytes) -> None:
-            hub.files[key] = new
-
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: hub.count("blob"),
-            rewrite=rewrite,
-            reach=reach,
-            read_mod=github_read,
-            stream_mod=github_read,
-            readdir=github_readdir,
-        )
+    thread = LoopThread()
+    try:
+        repo = thread.run(_account(GitHubRepo, origin))
+        try:
+            thread.run(repo.create({key: data, "other.txt": DECOY}))
+            vfs = build_vfs(
+                "github",
+                {
+                    "token": GITHUB_TOKEN,
+                    "owner": repo.owner,
+                    "repo": repo.name,
+                    "ref": "main",
+                    "base_url": repo.run.url,
+                },
+            )
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(repo.count("blob")),
+                rewrite=lambda new: thread.run(repo.commit({key: new})),
+                reach=_watch_walks(vfs, monkeypatch),
+                read_mod=github_read,
+                stream_mod=github_read,
+                readdir=github_readdir,
+            )
+        finally:
+            thread.run(repo.run.close())
+    finally:
+        thread.close()
 
 
 async def _account(kind: type[A], origin: str) -> A:
@@ -829,7 +832,9 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "github":
-        with _github_fake(shape, data, monkeypatch) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("github_origin")
+        with _github_fake(shape, data, monkeypatch, origin) as fake:
             yield fake
         return
     if HARNESSES[name] in GRAPH:
@@ -1691,7 +1696,9 @@ def test_a_rendered_read_is_the_read_it_records_through():
     assert not vfs.supports("read")
 
 
-def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
+def test_the_contract_goes_red_on_github_stamping_another_kind(
+    monkeypatch, request
+):
     # github forced to stamp an md5 of the bytes while stat reports the blob
     # sha: both tokens exist and differ. A whole read streams, so the
     # override replaces what `record_stream` stamps.
@@ -1707,7 +1714,7 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
             revision=revision,
         )
 
-    with _fake("github", "root", SEED, monkeypatch) as fake:
+    with _fake("github", "root", SEED, monkeypatch, request) as fake:
         monkeypatch.setitem(vars(github_read), "record_stream", md5_record)
         virtual = "/m/" + fake.key
 

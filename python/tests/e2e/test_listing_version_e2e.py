@@ -20,32 +20,33 @@ from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.fixtures.github_api import FakeGitHub, serve
+from tests.core.github.conftest import TOKEN, GitHubRepo
 
 
-async def _ls(ws: Workspace, hub: FakeGitHub, line: str):
-    hub.log.clear()
+async def _ls(ws: Workspace, repo: GitHubRepo, line: str):
+    await repo.run.record_requests()
     result = await asyncio.wait_for(ws.shell(line), 10)
     out = await result.materialize_stdout()
     assert (result.exit_code, await result.stderr_str()) == (0, "")
-    return out, hub.counts()
+    return out, await repo.counts()
 
 
 # A fresh github mount lists the tree once, then pays one check of the head
 # per command while nothing changes, and one check plus one walk after a
 # change outside mirage.
 @pytest.mark.asyncio
-async def test_a_fresh_github_mount_checks_its_head_per_command():
-    hub = FakeGitHub(files={"docs/a.txt": b"a\n", "docs/b.txt": b"b\n"})
-    with serve(hub):
+async def test_a_fresh_github_mount_checks_its_head_per_command(github_origin):
+    repo = GitHubRepo(github_origin)
+    try:
+        await repo.create({"docs/a.txt": b"a\n", "docs/b.txt": b"b\n"})
         vfs = build_vfs(
             "github",
             {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
+                "token": TOKEN,
+                "owner": repo.owner,
+                "repo": repo.name,
                 "ref": "main",
-                "base_url": hub.url,
+                "base_url": repo.run.url,
             },
         )
         ws = Workspace(
@@ -58,18 +59,20 @@ async def test_a_fresh_github_mount_checks_its_head_per_command():
             }
         )
         try:
-            assert await _ls(ws, hub, "ls /gh/docs") == (
+            assert await _ls(ws, repo, "ls /gh/docs") == (
                 b"a.txt\nb.txt\n",
                 (0, 1, 0),
             )
-            assert await _ls(ws, hub, "ls /gh/docs") == (
+            assert await _ls(ws, repo, "ls /gh/docs") == (
                 b"a.txt\nb.txt\n",
                 (1, 0, 0),
             )
-            hub.files["docs/c.txt"] = b"c\n"
-            assert await _ls(ws, hub, "ls /gh/docs") == (
+            await repo.commit({"docs/c.txt": b"c\n"})
+            assert await _ls(ws, repo, "ls /gh/docs") == (
                 b"a.txt\nb.txt\nc.txt\n",
                 (1, 1, 0),
             )
         finally:
             await ws.close()
+    finally:
+        await repo.run.close()

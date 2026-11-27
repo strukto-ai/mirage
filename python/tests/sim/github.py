@@ -17,10 +17,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import pytest
-from pydantic import SecretStr
-
-from mirage.core.github.config import GitHubConfig
 from mirage.core.github.search import SearchResult
 from mirage.core.github.tree_entry import TreeEntry
 
@@ -125,7 +121,10 @@ MOCK_SEARCH_RESULTS = {
 
 @dataclass
 class FakeGitHubApi:
-    """In-memory GitHub API fake simulating repository data and operations.
+    """GitHub's API calls over an in-memory repository, for the simulator.
+
+    The simulator's loop refuses real I/O, so its seam answers Mirage's
+    GitHub calls from here, in process.
 
     Args:
         tree (dict[str, Any]): path to TreeEntry map.
@@ -274,43 +273,3 @@ class FakeGitHubApi:
                     "Skipping binary or non-utf8 blob %s: %s", sha, exc
                 )
         return {"repository": repo_res}
-
-
-@pytest.fixture
-def github_config() -> GitHubConfig:
-    return GitHubConfig(token=SecretStr("ghp_mock_token"))
-
-
-@pytest.fixture
-def mock_github_api(monkeypatch: pytest.MonkeyPatch) -> FakeGitHubApi:
-    api = FakeGitHubApi()
-    # Both are patched in the module that fetches, because the mount is
-    # built without touching the network and hydrates on first use:
-    # `refresh_tree` calls fetch_tree in tree.py, and
-    # `ensure_default_branch` calls fetch_default_branch in repo.py.
-    monkeypatch.setattr(
-        "mirage.core.github.repo.fetch_default_branch",
-        api.fetch_default_branch,
-    )
-    monkeypatch.setattr("mirage.core.github.tree.fetch_tree", api.fetch_tree)
-    monkeypatch.setattr(
-        "mirage.core.github.tree.fetch_head",
-        api.fetch_head,
-    )
-    monkeypatch.setattr(
-        "mirage.core.github.stat.fetch_head",
-        api.fetch_head,
-    )
-    monkeypatch.setattr(
-        "mirage.core.github.readdir.fetch_head",
-        api.fetch_head,
-    )
-    monkeypatch.setattr(
-        "mirage.core.github.tree.fetch_dir_page",
-        api.fetch_dir_page,
-    )
-    monkeypatch.setattr("mirage.core.github.read.fetch_blob", api.fetch_blob)
-    monkeypatch.setattr(
-        "mirage.core.github.search.search_code", api.search_code
-    )
-    return api
