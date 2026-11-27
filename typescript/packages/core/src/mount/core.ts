@@ -1213,17 +1213,28 @@ export class MountCore {
    * persistence fails, so the acknowledged bytes stay for the handle's own
    * flush to retry.
    */
-  private async settle(ctx: Handle): Promise<void> {
+  private async settle(ctx: Handle, last = false): Promise<void> {
     // Queued with nothing buffered too: a flush still landing has taken the
     // buffer, and this one waits for it and retries what it puts back,
-    // rather than reporting the file settled.
+    // rather than reporting the file settled. The landing of the handle's
+    // release (`last`) that fails drops the writes it put back, as close(2)
+    // does, before the next landing in the file's turn can retry them from
+    // the spool the release then closes.
     for (;;) {
       const key = ctx.key
       const landed = await this.mutate(key, async () => {
         // A rename that moved the handle while this waited put its file in
         // another queue: it lands from that one instead.
         if (ctx.key !== key) return false
-        await this.persistBuffered(ctx)
+        try {
+          await this.persistBuffered(ctx)
+        } catch (err) {
+          if (last) {
+            ctx.writeBuf = []
+            ctx.bufferedBytes = 0
+          }
+          throw err
+        }
         return true
       })
       if (landed) return
@@ -1761,7 +1772,9 @@ export class MountCore {
    * Land a handle's buffered writes and let it go. The handle goes even
    * when the landing fails, as close(2) releases its descriptor: no
    * adapter retries a release, so a kept handle would never close. The
-   * failure still reaches the caller, before a sync waiting it out goes on.
+   * failure still reaches the caller, before a sync waiting it out goes on,
+   * and the writes it left go with the handle, so a sync that listed the
+   * handle before it went finds nothing to land.
    */
   release(fd: number): Promise<void> {
     const released = this.letGo(fd)
@@ -1777,10 +1790,12 @@ export class MountCore {
     const ctx = this.handles.get(fd)
     try {
       // The FSKit shim sends RELEASE with no FLUSH before it.
-      if (ctx !== undefined) await this.flush(ctx.path, fd)
+      if (ctx !== undefined) await this.settle(ctx, true)
     } finally {
       this.handles.pop(fd)
-      if (ctx?.spool !== undefined) await ctx.spool.close()
+      const spool = ctx?.spool
+      if (ctx !== undefined) delete ctx.spool
+      if (spool !== undefined) await spool.close()
     }
   }
 
