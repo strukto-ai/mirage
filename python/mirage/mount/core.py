@@ -1685,11 +1685,15 @@ class MountCore:
             await asyncio.wait(set(self._releasing))
         return failed
 
-    async def _settle(self, ctx: Handle) -> None:
+    async def _settle(self, ctx: Handle, last: bool = False) -> None:
         """Land a handle's buffered writes in its file's turn.
 
         Args:
             ctx (Handle): the handle whose buffer to drain.
+            last (bool): the landing of the handle's release. One that
+                fails drops the writes it put back, as close(2) does,
+                before the next landing in the file's turn can retry them
+                from the spool the release then closes.
         """
         # Queued with nothing buffered too: a flush still landing has taken
         # the buffer, and this one waits for it and retries what it puts
@@ -1701,7 +1705,12 @@ class MountCore:
             # in another queue: it lands from that one instead.
             if ctx.key != key:
                 return False
-            await self._persist_buffered(ctx)
+            try:
+                await self._persist_buffered(ctx)
+            except BaseException:
+                if last:
+                    ctx.write_buf, ctx.buffered_bytes = [], 0
+                raise
             return True
 
         while not await self._mutate(key, land):
@@ -2033,7 +2042,9 @@ class MountCore:
 
         The handle goes even when the landing fails, as close(2) releases
         its descriptor: no adapter retries a release, so a kept handle
-        would never close. The failure still reaches the caller.
+        would never close. The failure still reaches the caller, and the
+        writes it left go with the handle, so a sync that listed the
+        handle before it went finds nothing to land.
 
         Args:
             fh (int): the handle to release.
@@ -2044,12 +2055,15 @@ class MountCore:
         try:
             if ctx is not None:
                 # The FSKit shim sends RELEASE with no FLUSH before it.
-                await self.flush(ctx.path, fh)
+                await self._settle(ctx, last=True)
         finally:
             self._handles.pop(fh)
+            spool = None
+            if ctx is not None:
+                spool, ctx.spool = ctx.spool, None
             try:
-                if ctx is not None and ctx.spool is not None:
-                    await ctx.spool.close()
+                if spool is not None:
+                    await spool.close()
             finally:
                 self._releasing.discard(released)
                 released.set_result(None)

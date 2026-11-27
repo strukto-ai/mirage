@@ -22,6 +22,7 @@ import type { Action, Policy, VfsContext } from '../policy/index.ts'
 import { enotsup, erofs, strerrorOf, unnamedFsError } from '../errors/fs.ts'
 import { DIR_SIZE } from '../utils/stat_view.ts'
 import { ByteSlice, MEMORY_LIMIT, type ByteSpool } from '../io/spool.ts'
+import { drain } from '../io/stream.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { Handed } from '../vfs/types.ts'
 import { READ_CHUNK } from '../runtime/handles/constants.ts'
@@ -2190,6 +2191,35 @@ describe('MountCore past the memory limit', () => {
     await expect(core.flush('/data/f', fh)).rejects.toMatchObject({ code: 'EACCES' })
     await core.release(fh)
     landed(store, repeat(24))
+  })
+
+  it('lets a failing release take its writes from a sync beside it', async () => {
+    // The sync lists the handle while its release is still landing, and
+    // settles it once the release has failed and let it go. The release
+    // reported its failure and its writes went with the handle, as close(2)'s
+    // do, so the sync has nothing to land: retrying them read the spool the
+    // release had closed and reported "spool is closed" for the handle, in
+    // place of the release's own error. Mirrors Python's
+    // test_a_sync_beside_a_failing_release_leaves_its_writes_gone.
+    const { core, store } = streamed()
+    const fh = await core.open('/data/f', flags(fsConstants.O_WRONLY | fsConstants.O_CREAT))
+    for (let i = 0; i < 24; i++) await core.write('/data/f', fh, BLOCK, i * BLOCK.byteLength)
+    let entered = (): void => undefined
+    const writing = new Promise<void>((resolve) => (entered = resolve))
+    let go = (): void => undefined
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    vi.spyOn(store, 'write').mockImplementation(async (_path, data) => {
+      await drain(data)
+      entered()
+      await gate
+      throw unnamedFsError('EACCES', 'denied')
+    })
+    const releasing = core.release(fh)
+    await writing
+    const syncing = core.sync()
+    go()
+    await expect(releasing).rejects.toMatchObject({ code: 'EACCES' })
+    expect(await syncing).toEqual([])
   })
 
   it.each([true, false])(

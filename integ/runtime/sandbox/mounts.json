@@ -89,6 +89,42 @@
       ]
     },
     {
+      "id": "mount_type_ssh_fails_a_line_whose_spooled_write_cannot_land",
+      "note": "A file past the 1 MiB a handle keeps in memory waits in a spool. At 64 MB its release is still landing when the line ends and lands every open handle; the release that fails takes its writes with it, so the line reports the landing's own error, not the spool the release closed.",
+      "runtimes": ["docker", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": { "mounts": { "/capped": { "vfs": "ram", "config": { "capacity": 32000000 } } } },
+      "entry": { "captures": ["dash"], "config": { "mount_type": "ssh" } },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 64000000 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_fails_a_line_whose_spooled_write_cannot_land",
+      "note": "A file past the 1 MiB a handle keeps in memory waits in a spool. At 64 MB its release is still landing when the line ends and lands every open handle; the release that fails takes its writes with it, so the line reports the landing's own error, not the spool the release closed, as under ssh.",
+      "runtimes": ["docker", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": { "mounts": { "/capped": { "vfs": "ram", "config": { "capacity": 32000000 } } } },
+      "entry": { "captures": ["dash"], "config": { "mount_type": "mirage" } },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 64000000 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_mirage_lands_a_file_written_in_many_writes",
       "note": "mirage-fuse sends a file's writes ahead of their answers and its close waits for them, so a file seq writes 4 KiB at a time reads back whole on the box, and in Mirage once the line ends.",
       "runtimes": [
