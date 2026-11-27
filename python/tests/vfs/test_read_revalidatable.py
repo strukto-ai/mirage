@@ -171,6 +171,8 @@ RENDERS = {
     "gsheets": ("GET", "/v4/spreadsheets/:id"),
     "gslides": ("GET", "/v1/presentations/:id"),
 }
+# Where a Google app run's clock starts: midday, far from a day's edge.
+NOON = "2026-02-01T12:00:00Z"
 
 # What each family can run, fixed at collection. github and gdrive have no
 # key_prefix. The GAPPS mounts have one flat listing, so only one shape,
@@ -727,10 +729,13 @@ def _gapps_fake(name: str, data: bytes, origin: str) -> Iterator[Fake]:
     try:
         drive = thread.run(_account(GoogleAccount, origin))
         try:
+            # The name carries modifiedTime's day. The run's clock starts at
+            # noon, so the rewrites, a second each, stay on that day and keep
+            # the name; on the wall clock a run near midnight would not.
+            thread.run(drive.reset(epoch=NOON))
             file_id = thread.run(_app_file(drive, name, data.decode()))
             item = thread.run(drive.item(file_id))
-            # The account owns the file, so it lists under owned/. A rewrite
-            # moves modifiedTime within the same day, which keeps the name.
+            # The account owns the file, so it lists under owned/.
             key = "owned/" + filename("a", file_id, item["modifiedTime"])
             thread.run(drive.run.record_requests())
             yield Fake(

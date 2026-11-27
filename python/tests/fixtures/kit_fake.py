@@ -16,7 +16,7 @@ import asyncio
 import base64
 import inspect
 import json
-import select
+import selectors
 import sqlite3
 import subprocess
 import tempfile
@@ -61,7 +61,12 @@ def serve(service: str) -> Iterator[str]:
     )
     assert process.stdout is not None
     try:
-        ready, _, _ = select.select([process.stdout], [], [], START_SECONDS)
+        # A selector, not select(): the root conftest lets a worker hold
+        # 8192 descriptors, and select() refuses one numbered 1024 or more,
+        # so a fake started late in a busy worker failed to start.
+        with selectors.DefaultSelector() as waiting:
+            waiting.register(process.stdout, selectors.EVENT_READ)
+            ready = waiting.select(START_SECONDS)
         line = process.stdout.readline() if ready else ""
         name, _, origin = line.strip().partition("=")
         if name != f"{service.upper().replace('-', '_')}_URL" or not origin:

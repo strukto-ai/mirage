@@ -82,10 +82,11 @@ export function listHistory(st: GwsState, query: URLSearchParams): Reply {
 // Set a message's labels to `next`, recording the labels it gained and the
 // labels it lost, as messages.modify and messages.trash do.
 export function relabel(st: GwsState, msg: GmailMessage, next: string[]): void {
-  const added = next.filter((id) => !msg.labelIds.includes(id))
-  const removed = msg.labelIds.filter((id) => !next.includes(id))
-  msg.labelIds = next
-  st.noteGmail('labelsAdded', msg, [...new Set(added)])
+  const unique = [...new Set(next)]
+  const added = unique.filter((id) => !msg.labelIds.includes(id))
+  const removed = msg.labelIds.filter((id) => !unique.includes(id))
+  msg.labelIds = unique
+  st.noteGmail('labelsAdded', msg, added)
   st.noteGmail('labelsRemoved', msg, [...new Set(removed)])
 }
 

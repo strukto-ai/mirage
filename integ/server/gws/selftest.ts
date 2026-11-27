@@ -1326,6 +1326,14 @@ async function gmailHistoryHttp(at: string): Promise<void> {
     (await post(`${gmail}/messages/${id}/modify`, 't1', { addLabelIds: ['nope'] })).status,
     400,
   )
+  eq(
+    'history: a label named twice in one modify is held once',
+    obj(
+      (await post(`${gmail}/messages/${id}/modify`, 't1', { addLabelIds: ['INBOX', 'INBOX'] }))
+        .body,
+    ).labelIds ?? null,
+    [String(work.id), 'INBOX'],
+  )
   const renamed = obj(
     (
       await api(`${gmail}/labels/${String(work.id)}`, 't1', {
@@ -1496,6 +1504,36 @@ async function calendarSyncHttp(at: string): Promise<void> {
     'calendars.patch: a calendar shared with the account is a 403',
     (await patch(`${base}/calendar/v3/calendars/${team.id}`, { summary: 'Mine' })).status,
     403,
+  )
+  const minted = String(obj((await post(events, 't1', { ...slot, summary: 'Minted' })).body).id)
+  const following = minted.replace(/\d+$/, (n) => String(Number(n) + 1).padStart(n.length, '0'))
+  await post(events, 't1', { ...slot, id: following, summary: 'Taken' })
+  const unpinned = obj((await post(events, 't1', { ...slot, summary: 'Unpinned' })).body)
+  eq(
+    'sync: an insert mints past an id a caller pinned in the minted shape',
+    [
+      unpinned.id === following,
+      obj((await api(`${events}/${following}`, 't1')).body).summary ?? null,
+    ],
+    [false, 'Taken'],
+  )
+  const mark = String(obj((await api(events, 't1')).body).nextSyncToken)
+  const first = obj((await post(events, 't1', { ...slot, summary: 'First' })).body)
+  await post(events, 't1', { ...slot, summary: 'Second' })
+  const pull = `${events}?syncToken=${mark}&maxResults=1`
+  const page1 = obj((await api(pull, 't1')).body)
+  await patch(`${events}/${String(first.id)}`, { summary: 'First again' })
+  const page2 = obj((await api(`${pull}&pageToken=${String(page1.nextPageToken)}`, 't1')).body)
+  const later = obj((await api(`${events}?syncToken=${String(page2.nextSyncToken)}`, 't1')).body)
+  eq(
+    'sync: an event changed between pages leaves the pull for the next, and the rest stay put',
+    [field(page1.items, 'summary'), field(page2.items, 'summary'), field(later.items, 'summary')],
+    [['First'], ['Second'], ['First again']],
+  )
+  eq(
+    'sync: a page token that is not one is a 400',
+    (await api(`${pull}&pageToken=nope`, 't1')).status,
+    400,
   )
 }
 

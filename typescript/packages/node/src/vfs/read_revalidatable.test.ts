@@ -568,6 +568,8 @@ const RENDERS: Record<string, [string, string]> = {
   gsheets: ['GET', '/v4/spreadsheets/:id'],
   gslides: ['GET', '/v1/presentations/:id'],
 }
+// Where a Google app run's clock starts: midday, far from a day's edge.
+const NOON = '2026-02-01T12:00:00Z'
 
 // Write `text` into a Google app's file as its editor's API does, which moves
 // the file's modifiedTime.
@@ -939,6 +941,10 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     const [, filename] = gapp
     const drive = new GoogleAccount(await serve('gws'))
     runs.push(drive.run)
+    // The name carries modifiedTime's day. The run's clock starts at noon,
+    // so the rewrites, a second each, stay on that day and keep the name; on
+    // the wall clock a run near midnight would not.
+    await drive.reset({}, NOON)
     const fileId = await appFile(drive, name, new TextDecoder().decode(data))
     const item = await drive.item(fileId)
     await drive.run.recordRequests()
@@ -946,8 +952,7 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     const accessor = vfs.accessor
     const io = ownReads(vfs)
     expect(vfs.readRevalidatable).toBe(true)
-    // The account owns the file, so it lists under owned/. A rewrite moves
-    // modifiedTime within the same day, which keeps the name.
+    // The account owns the file, so it lists under owned/.
     const fileKey = `owned/${filename('a', fileId, item.modifiedTime)}`
     const [method = 'GET', route = ''] = RENDERS[name] ?? []
     return {

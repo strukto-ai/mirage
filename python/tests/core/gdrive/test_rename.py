@@ -84,6 +84,7 @@ async def test_rename_over_nonempty_dir_raises(google_account):
     await google_account.upload("src.txt", b"x")
     folder = await google_account.folder("d")
     await google_account.upload("f.txt", b"y", folder)
+    await google_account.upload("g.txt", b"z", folder)
     await google_account.run.record_requests()
     with pytest.raises(OSError) as exc_info:
         await call(
@@ -96,7 +97,8 @@ async def test_rename_over_nonempty_dir_raises(google_account):
     assert exc_info.value.errno == errno.ENOTEMPTY
     # The conflict probe is bounded, not a full listing: a listing follows
     # every page token, so asking it with a small page size made one
-    # request per child to answer a yes/no.
+    # request per child to answer a yes/no. Two children, so a probe that
+    # walked every page would make two.
     probes = [
         listing
         for listing in await google_account.listings()

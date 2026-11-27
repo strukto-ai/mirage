@@ -85,11 +85,13 @@ describe('gdrive rename', () => {
     await account.upload('src.txt', 'x')
     const d = await account.folder('d')
     await account.upload('f.txt', 'y', d)
+    await account.upload('g.txt', 'z', d)
     await account.run.recordRequests()
     await expect(renamed('/src.txt', '/d')).rejects.toMatchObject({ code: 'ENOTEMPTY' })
     // The conflict probe is bounded, not a full listing: a listing follows
     // every nextPageToken, so asking it with a small page size made one
-    // request per child to answer a yes/no.
+    // request per child to answer a yes/no. Two children, so a probe that
+    // walked every page would make two.
     const probes = (await account.listings()).filter((l) => l.folders.join() === d)
     expect(probes.map((l) => l.pageSize)).toEqual([1])
   })

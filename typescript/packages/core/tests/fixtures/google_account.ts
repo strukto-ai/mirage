@@ -219,14 +219,32 @@ export class GoogleAccount {
     return this.run.call<DriveItem>('GET', `${FILES}/${fileId}`)
   }
 
-  /** What Drive answers for a listing of a folder's untrashed items. */
+  /**
+   * What Drive answers for a listing of a folder's untrashed items, every
+   * page of it as one answer.
+   */
   listing(folderId = 'root', driveId?: string): Promise<DriveListing> {
     const params = new URLSearchParams({ q: `'${folderId}' in parents and trashed=false` })
     if (driveId !== undefined) {
       params.set('driveId', driveId)
       params.set('includeItemsFromAllDrives', 'true')
     }
-    return this.run.call<DriveListing>('GET', `${FILES}?${params.toString()}`)
+    return this.everyPage(params)
+  }
+
+  /**
+   * A files listing asked page by page until Drive hands out no next page
+   * token, its files gathered into the last answer.
+   */
+  private async everyPage(params: URLSearchParams): Promise<DriveListing> {
+    const files: DriveItem[] = []
+    for (;;) {
+      const made = await this.run.call<DriveListing>('GET', `${FILES}?${params.toString()}`)
+      files.push(...made.files)
+      const token = made.nextPageToken
+      if (typeof token !== 'string') return { ...made, files }
+      params.set('pageToken', token)
+    }
   }
 
   /** Answer the next `times` requests to `route` with Drive's refusal. */
@@ -252,10 +270,13 @@ export class GoogleAccount {
    * Start the run afresh in the fake's base world: the account's own primary
    * calendar and its mailbox's system labels, which no request makes, so a
    * test reading either calls this first. `extras` are further states no
-   * request makes, as `calendars`.
+   * request makes, as `calendars`; `epoch` is the RFC 3339 instant the run's
+   * clock starts at, now when left out.
    */
-  async reset(extras: Record<string, JsonValue> = {}): Promise<void> {
-    await this.run.call('POST', '/reset', { json: { extras } })
+  async reset(extras: Record<string, JsonValue> = {}, epoch?: string): Promise<void> {
+    await this.run.call('POST', '/reset', {
+      json: epoch === undefined ? { extras } : { extras, epoch },
+    })
   }
 
   /**
@@ -315,10 +336,20 @@ export class GoogleAccount {
     await this.run.call('PATCH', `${CALENDARS}/${encodeURIComponent(calendar)}`, { json: fields })
   }
 
-  /** The sync token a whole listing of the calendar ends with now. */
+  /**
+   * The sync token a whole listing of the calendar ends with now; only the
+   * last page hands one out.
+   */
   async syncToken(calendar = PRIMARY): Promise<string> {
-    const made = await this.run.call<{ nextSyncToken: string }>('GET', eventsOf(calendar))
-    return made.nextSyncToken
+    let page = eventsOf(calendar)
+    for (;;) {
+      const made = await this.run.call<{ nextSyncToken?: string; nextPageToken?: string }>(
+        'GET',
+        page,
+      )
+      if (made.nextSyncToken !== undefined) return made.nextSyncToken
+      page = `${eventsOf(calendar)}?pageToken=${encodeURIComponent(made.nextPageToken ?? '')}`
+    }
   }
 
   /**
@@ -437,7 +468,8 @@ export class GoogleAccount {
 
   /** The untrashed item named `name` in My Drive, null when there is none. */
   async find(name: string): Promise<DriveItem | null> {
-    const params = new URLSearchParams({ q: `name = '${name}' and trashed = false` })
+    const literal = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+    const params = new URLSearchParams({ q: `name = '${literal}' and trashed = false` })
     const made = await this.run.call<DriveListing>('GET', `${FILES}?${params.toString()}`)
     return made.files[0] ?? null
   }
@@ -445,7 +477,7 @@ export class GoogleAccount {
   /** Every untrashed item in My Drive, as Drive answers them. */
   async items(): Promise<DriveItem[]> {
     const params = new URLSearchParams({ q: 'trashed = false', pageSize: '1000' })
-    return (await this.run.call<DriveListing>('GET', `${FILES}?${params.toString()}`)).files
+    return (await this.everyPage(params)).files
   }
 
   /** The bytes a file holds now, as text. */

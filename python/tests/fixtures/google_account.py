@@ -286,7 +286,8 @@ class GoogleAccount:
     async def listing(
         self, folder_id: str = "root", drive_id: str | None = None
     ) -> dict[str, Any]:
-        """What Drive answers for a listing of a folder's untrashed items.
+        """What Drive answers for a listing of a folder's untrashed items,
+        every page of it as one answer.
 
         Args:
             folder_id (str): the folder.
@@ -298,8 +299,25 @@ class GoogleAccount:
                 "driveId": drive_id,
                 "includeItemsFromAllDrives": "true",
             }
-        made: dict[str, Any] = await self.run.call("GET", FILES, params=params)
-        return made
+        return await self._every_page(params)
+
+    async def _every_page(self, params: dict[str, str]) -> dict[str, Any]:
+        """A files listing asked page by page until Drive hands out no
+        next page token, its files gathered into the last answer.
+
+        Args:
+            params (dict[str, str]): the listing's query.
+        """
+        files: list[dict[str, Any]] = []
+        while True:
+            made: dict[str, Any] = await self.run.call(
+                "GET", FILES, params=params
+            )
+            files.extend(made["files"])
+            token = made.get("nextPageToken")
+            if token is None:
+                return {**made, "files": files}
+            params = {**params, "pageToken": token}
 
     async def refuse(
         self,
@@ -332,16 +350,21 @@ class GoogleAccount:
             method, route, status, body, times=times, path=path
         )
 
-    async def reset(self, **extras: Any) -> None:
+    async def reset(self, epoch: str | None = None, **extras: Any) -> None:
         """Start the run afresh in the fake's base world: the account's own
         primary calendar and its mailbox's system labels, which no request
         makes, so a test reading either calls this first.
 
         Args:
+            epoch (str | None): the instant the run's clock starts at, an
+                RFC 3339 time; None starts it now.
             **extras (Any): further states no request makes, as
                 ``calendars``.
         """
-        await self.run.call("POST", "/reset", json={"extras": extras})
+        body: dict[str, Any] = {"extras": extras}
+        if epoch is not None:
+            body["epoch"] = epoch
+        await self.run.call("POST", "/reset", json=body)
 
     async def calendars(self, *entries: dict[str, Any]) -> None:
         """Give the account the calendars ``entries`` name, each with its
@@ -449,15 +472,19 @@ class GoogleAccount:
         )
 
     async def sync_token(self, calendar: str = PRIMARY) -> str:
-        """The sync token a whole listing of the calendar ends with now.
+        """The sync token a whole listing of the calendar ends with now; only
+        the last page hands one out.
 
         Args:
             calendar (str): the calendar.
         """
-        made = await self.run.call(
-            "GET", f"{CALENDARS}/{quote(calendar, safe='')}/events"
-        )
-        return str(made["nextSyncToken"])
+        events = f"{CALENDARS}/{quote(calendar, safe='')}/events"
+        params: dict[str, str] = {}
+        while True:
+            made = await self.run.call("GET", events, params=params)
+            if "nextSyncToken" in made:
+                return str(made["nextSyncToken"])
+            params = {"pageToken": made["nextPageToken"]}
 
     async def calendar_log(self) -> list[tuple[str, ...]]:
         """Each Calendar request made since recording started: an events
@@ -630,14 +657,15 @@ class GoogleAccount:
         Args:
             name (str): the item's name.
         """
-        q = f"name = '{name}' and trashed = false"
+        literal = name.replace("\\", "\\\\").replace("'", "\\'")
+        q = f"name = '{literal}' and trashed = false"
         made = await self.run.call("GET", FILES, params={"q": q})
         return made["files"][0] if made["files"] else None
 
     async def items(self) -> list[dict[str, Any]]:
         """Every untrashed item in My Drive, as Drive answers them."""
-        made = await self.run.call(
-            "GET", FILES, params={"q": "trashed = false", "pageSize": "1000"}
+        made = await self._every_page(
+            {"q": "trashed = false", "pageSize": "1000"}
         )
         return list(made["files"])
 
