@@ -1144,6 +1144,55 @@ describe('E2B files', () => {
     }
   })
 
+  it('keeps the connection open and frames small answers on a real socket', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 })
+    const send = (method: string, path: string, body?: string) =>
+      new Promise<{ status: number; headers: Record<string, unknown>; reused: boolean }>(
+        (resolve, reject) => {
+          const client = request(
+            address + path,
+            {
+              method,
+              agent,
+              headers: {
+                ...dataHeaders(sandbox),
+                ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+              },
+            },
+            (response) => {
+              response.resume()
+              response.on('end', () => {
+                resolve({
+                  status: response.statusCode ?? 0,
+                  headers: response.headers,
+                  reused: client.reusedSocket,
+                })
+              })
+            },
+          )
+          client.on('error', reject)
+          client.end(body)
+        },
+      )
+    try {
+      const first = await send('GET', HEALTH)
+      const second = await send('GET', HEALTH)
+      expect(first.status).toBe(204)
+      expect(first.headers.connection).toBe('keep-alive')
+      expect(second.reused).toBe(true)
+      const stat = await send('POST', '/filesystem.Filesystem/Stat', JSON.stringify({ path: '.' }))
+      expect(stat.status).toBe(200)
+      expect(stat.headers['content-length']).toBeDefined()
+      expect(stat.headers['transfer-encoding']).toBeUndefined()
+      expect(stat.reused).toBe(true)
+    } finally {
+      agent.destroy()
+    }
+  })
+
   it('returns a multipart error before a malformed or oversized upload ends', async () => {
     const { app } = await setup()
     const sandbox = await create(app)

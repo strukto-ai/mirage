@@ -275,6 +275,13 @@ function nodeStream(body: ReadableStream<Uint8Array>): Readable {
   return stream
 }
 
+/** Whether `req` carries a body, which an answer that leaves it unread must close the socket for. */
+function hasBody(req: FastifyRequest): boolean {
+  if (req.method === 'GET' || req.method === 'HEAD') return false
+  const length = req.headers['content-length']
+  return req.headers['transfer-encoding'] !== undefined || (length !== undefined && length !== '0')
+}
+
 function webRequest(req: FastifyRequest): Request {
   const headers = new Headers()
   for (const [name, value] of Object.entries(req.headers)) {
@@ -305,7 +312,7 @@ export function webForwarder(deps: {
     const path = req.routeOptions.url ?? ''
     const request = webRequest(req)
     const unread = (): void => {
-      if (!req.raw.readableEnded) reply.header('connection', 'close')
+      if (hasBody(req) && !req.raw.readableEnded) reply.header('connection', 'close')
     }
     let response: Response
     if (isLifecycleRequest(req.method, path)) {
@@ -330,6 +337,10 @@ export function webForwarder(deps: {
     response.headers.forEach((value, name) => {
       void reply.header(name, value)
     })
-    return reply.send(response.body === null ? undefined : nodeStream(response.body))
+    if (response.body === null) return reply.send()
+    if (response.headers.has('content-length')) {
+      return reply.send(Buffer.from(await response.arrayBuffer()))
+    }
+    return reply.send(nodeStream(response.body))
   }
 }

@@ -160,16 +160,21 @@ class WebReply implements RouteReply {
       return new Response(null, { status, headers })
     }
     if (payload instanceof ReadableStream) return new Response(payload, { status, headers })
+    let bytes: Uint8Array
     if (payload instanceof Uint8Array) {
       if (!headers.has('content-type')) headers.set('content-type', 'application/octet-stream')
-      return new Response(payload as Uint8Array<ArrayBuffer>, { status, headers })
-    }
-    if (typeof payload === 'string') {
+      bytes = payload
+    } else if (typeof payload === 'string') {
       if (!headers.has('content-type')) headers.set('content-type', 'text/plain; charset=utf-8')
-      return new Response(payload, { status, headers })
+      bytes = new TextEncoder().encode(payload)
+    } else {
+      if (!headers.has('content-type')) {
+        headers.set('content-type', 'application/json; charset=utf-8')
+      }
+      bytes = new TextEncoder().encode(JSON.stringify(payload))
     }
-    if (!headers.has('content-type')) headers.set('content-type', 'application/json; charset=utf-8')
-    return new Response(JSON.stringify(payload), { status, headers })
+    headers.set('content-length', String(bytes.byteLength))
+    return new Response(bytes as Uint8Array<ArrayBuffer>, { status, headers })
   }
 }
 
@@ -783,7 +788,7 @@ export function checkSandboxAccess(
     if (!(error instanceof HttpError)) throw error
     if (health && error.code === 'unauthorized') return new Response(null, { status: 502 })
     const code = health || path === constants.FILES ? error.status : connectCode(error.status)
-    return Response.json({ code, message: error.message }, { status: error.status })
+    return new WebReply().status(error.status).send({ code, message: error.message }).response()
   }
   return health ? new Response(null, { status: 204 }) : null
 }
