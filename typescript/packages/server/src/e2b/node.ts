@@ -21,6 +21,17 @@ import {
   verifyAccess,
 } from './sandbox.ts'
 
+/**
+ * The sandbox owner when the auth mode names no account. An E2B sandbox
+ * always has an owner; the server's workspaces keep null for it.
+ */
+const DEFAULT_OWNER = 'default'
+
+/** The owner of the sandboxes a request with `account` creates and reaches. */
+export function sandboxOwner(account: string | null): string {
+  return account ?? DEFAULT_OWNER
+}
+
 export function sandboxAccount(
   sandboxes: MemoryLifecycleBackend | null,
   headers: Parameters<MemoryLifecycleBackend['requireAccess']>[0],
@@ -89,12 +100,12 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   constructor(
     private readonly registry: WorkspaceRegistry,
-    private readonly createWorkspace: (owner: string) => Promise<WorkspaceEntry>,
+    private readonly createWorkspace: (owner: string | null) => Promise<WorkspaceEntry>,
   ) {}
 
   /** The server serves only the base template, which the routes check. */
   async start(owner: string): Promise<string> {
-    return (await this.createWorkspace(owner)).id
+    return (await this.createWorkspace(owner === DEFAULT_OWNER ? null : owner)).id
   }
 
   put(record: SandboxRecord): Promise<void> {

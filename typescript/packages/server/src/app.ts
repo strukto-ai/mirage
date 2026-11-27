@@ -92,6 +92,7 @@ import {
   MemoryLifecycleBackend,
   nodeCommandStream,
   sandboxAccount,
+  sandboxOwner,
   sandboxWorkspace,
 } from './e2b/node.ts'
 import {
@@ -101,12 +102,6 @@ import {
   isLifecycleRequest,
   router as registerE2BRoutes,
 } from './routers/e2b.ts'
-
-/**
- * The sandbox owner when the auth mode names no account: an E2B sandbox
- * always has an owner, while the daemon's workspaces keep null.
- */
-const NO_ACCOUNT = ''
 
 export interface BuildAppOptions {
   idleGraceSeconds?: number
@@ -459,7 +454,7 @@ export function buildApp(options: BuildAppOptions = {}) {
           sandboxes: new MemoryLifecycleBackend(registry, (owner) =>
             createSandboxWorkspace(
               { registry, host, resources, snapshotStore: options.snapshotStore },
-              owner === NO_ACCOUNT ? null : owner,
+              owner,
             ),
           ),
           port: e2bPort,
@@ -509,7 +504,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     registerE2BRoutes(
       fastifyRoutes(e2b),
       sandboxes,
-      (request) => request.account ?? NO_ACCOUNT,
+      (request) => sandboxOwner(request.account),
       access,
     )
     listenTogether(app, e2b, port)
