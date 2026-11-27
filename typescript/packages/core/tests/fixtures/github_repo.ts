@@ -124,10 +124,25 @@ export class GitHubRepo {
     return (await this.tree(branch)).sha
   }
 
-  /** Every file path `main` holds. */
+  /**
+   * Every path `main` holds that is no folder: its files and its submodule
+   * gitlinks. A truncated tree names only the top level, so it is walked
+   * folder by folder instead.
+   */
   async paths(): Promise<string[]> {
     const tree = await this.tree('main', true)
-    return tree.tree.filter((row) => row.type === 'blob').map((row) => row.path)
+    if (!tree.truncated) {
+      return tree.tree.filter((row) => row.type !== 'tree').map((row) => row.path)
+    }
+    const found: string[] = []
+    const folders = ['']
+    for (let at = folders.pop(); at !== undefined; at = folders.pop()) {
+      for (const row of (await this.tree(`main:${at}`)).tree) {
+        const path = at === '' ? row.path : `${at}/${row.path}`
+        ;(row.type === 'tree' ? folders : found).push(path)
+      }
+    }
+    return found
   }
 
   /** Commit `changes` onto `branch`, null deleting a path, and answer the new head. */

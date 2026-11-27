@@ -128,9 +128,22 @@ class GitHubRepo:
         return str((await self.tree(branch))["sha"])
 
     async def paths(self) -> list[str]:
-        """Every file path ``main`` holds."""
+        """Every path ``main`` holds that is no folder: its files and its
+        submodule gitlinks. A truncated tree names only the top level, so
+        it is walked folder by folder instead."""
         tree = await self.tree("main", recursive=True)
-        return [row["path"] for row in tree["tree"] if row["type"] == "blob"]
+        if not tree["truncated"]:
+            return [
+                row["path"] for row in tree["tree"] if row["type"] != "tree"
+            ]
+        found: list[str] = []
+        folders = [""]
+        while folders:
+            at = folders.pop()
+            for row in (await self.tree(f"main:{at}"))["tree"]:
+                path = f"{at}/{row['path']}" if at else row["path"]
+                (folders if row["type"] == "tree" else found).append(path)
+        return found
 
     async def commit(
         self, changes: dict[str, bytes | None], branch: str = "main"

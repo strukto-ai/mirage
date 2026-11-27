@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from urllib.parse import unquote
 
 import pytest
 
@@ -611,15 +612,28 @@ async def test_truncated_walk_lists_each_directory_once_per_command(
     ws = _ws(_vfs(repo))
     try:
         await _out(ws, line)
+        named = await _folder_shas(repo)
         await repo.commit({"a/b/c/d/new.txt": b"new"})
+        named |= await _folder_shas(repo)
         await repo.run.record_requests()
         assert b"new.txt" in await _out(ws, line)
-        listings = [
-            kind for kind, _ in await repo.log() if kind in ("dir", "sha_dir")
-        ]
-        assert len(listings) == 5
+        listed = []
+        for kind, segment in await repo.log():
+            if kind == "sha_dir":
+                listed.append(named.get(segment, segment))
+            elif kind == "dir":
+                listed.append(unquote(segment).partition(":")[2])
+        assert sorted(listed) == FOLDERS
     finally:
         await ws.close()
+
+
+FOLDERS = ["", "a", "a/b", "a/b/c", "a/b/c/d"]
+
+
+async def _folder_shas(repo: GitHubRepo) -> dict[str, str]:
+    # Each folder's tree sha, so a listing asked by sha names its folder.
+    return {(await repo.tree(f"main:{f}"))["sha"]: f for f in FOLDERS}
 
 
 # The dispatcher is what FUSE, ws.vfs and the agent file tools reach, and none

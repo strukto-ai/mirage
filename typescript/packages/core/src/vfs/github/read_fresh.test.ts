@@ -568,16 +568,28 @@ describe('github snapshot pins', () => {
 it.each(['find /gh', 'du -a /gh', 'ls -R /gh'])(
   'truncated walk lists each directory once: %s',
   async (line) => {
+    const folders = ['', 'a', 'a/b', 'a/b/c', 'a/b/c/d']
+    // Each folder's tree sha, so a listing asked by sha names its folder.
+    const named = new Map<string, string>()
+    const nameFolders = async (): Promise<void> => {
+      for (const folder of folders) named.set((await repo.tree(`main:${folder}`)).sha, folder)
+    }
     await repo.replace({ 'a/b/c/d/e.txt': 'x' })
     await repo.truncate()
     const workspace = ws(await vfsOf())
     try {
       await out(workspace, line)
+      await nameFolders()
       await repo.commit({ 'a/b/c/d/new.txt': 'new' })
+      await nameFolders()
       await repo.run.recordRequests()
       expect(await out(workspace, line)).toContain('new.txt')
-      const listings = (await repo.log()).filter(([kind]) => kind === 'dir' || kind === 'sha_dir')
-      expect(listings).toHaveLength(5)
+      const listed = (await repo.log()).flatMap(([kind, segment]) => {
+        if (kind === 'sha_dir') return [named.get(segment) ?? segment]
+        if (kind === 'dir') return [decodeURIComponent(segment).split(':').slice(1).join(':')]
+        return []
+      })
+      expect(listed.sort()).toEqual(folders)
     } finally {
       await workspace.close()
     }

@@ -66,10 +66,12 @@ async def test_tree_requests_encode_reference_once(repo, ref):
         with pytest.raises(ApiError):
             await fetch(account, repo.owner, repo.name, ref)
     listed = await repo.run.call("GET", "/_kit/requests")
-    sent = [
-        (unquote(r["path"].split("/git/trees/", 1)[1]), r["query"])
-        for r in listed["requests"]
-    ]
+    sent = []
+    for r in listed["requests"]:
+        # A slash sent unencoded would arrive as a slash of the path.
+        raw = r["path"].split("/git/trees/", 1)[1]
+        assert "/" not in raw, raw
+        sent.append((unquote(raw), r["query"]))
     assert sent == [(ref, "recursive=1"), (ref, ""), (ref, "")]
 
 

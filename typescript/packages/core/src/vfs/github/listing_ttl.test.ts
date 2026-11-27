@@ -326,15 +326,18 @@ describe('github listings respect the mount ttl', () => {
     it.each(FIRST)(
       `${policy}: a listing first filled by %s expires with the mount`,
       async (first) => {
+        // The mount's clock moves only when told, so however long the commit
+        // takes, the cached listing is still inside its ttl when it is read.
+        const clock = new ManualClock(T0)
         await repo.create(DOCS)
-        const w = wsOf(await vfsOf(), { policy, ttl: 1 })
+        const w = wsOf(await vfsOf(), { policy, ttl: 1 }, '/gh', clock)
         try {
           await out(w, first)
           await repo.commit({ 'docs/c.txt': 'charlie\n' })
           // fresh checks the listing, so it sees the add at once; bounded
           // serves the cached one until the mount's ttl runs out.
           expect(await out(w, 'ls /gh/docs')).toBe(policy === ReadPolicy.BOUNDED ? OLD_LS : NEW_LS)
-          await sleep(1100)
+          clock.advance(1.1)
           expect(await out(w, 'ls /gh/docs')).toBe(NEW_LS)
         } finally {
           await w.close()

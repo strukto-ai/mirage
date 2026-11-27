@@ -314,8 +314,13 @@ FIRST_READERS = [
 async def test_a_listing_is_served_until_the_mount_ttl_then_refetched(
     repo, first, policy
 ):
+    # The mount's clock moves only when told, so however long the commit
+    # takes, the cached listing is still inside its ttl when it is read.
+    clock = ManualClock(start=T0.timestamp())
     await repo.create(FILES)
-    ws = _ws(_vfs(repo), policy=policy, ttl=1)
+    ws = Workspace(
+        {"/gh": _mount(_vfs(repo), policy=policy, ttl=1)}, clock=clock
+    )
     try:
         await _out(ws, first)
         await repo.commit({"docs/c.txt": b"charlie\n"})
@@ -324,7 +329,7 @@ async def test_a_listing_is_served_until_the_mount_ttl_then_refetched(
         assert await _out(ws, "ls /gh/docs") == (
             LISTED if policy is ReadPolicy.BOUNDED else GROWN
         )
-        await asyncio.sleep(1.1)
+        clock.advance(1.1)
         assert await _out(ws, "ls /gh/docs") == GROWN
     finally:
         await ws.close()
