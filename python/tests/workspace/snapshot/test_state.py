@@ -1825,6 +1825,39 @@ async def test_a_rebuilt_workspace_keeps_the_cache_it_had(track, cache, limit):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cache, kept",
+    [
+        (None, []),
+        (CacheConfig(limit=8), ["b"]),
+        (CacheConfig(limit="1MB"), ["a", "b"]),
+    ],
+    ids=["none", "smaller", "larger"],
+)
+async def test_a_restore_in_place_keeps_what_the_target_cache_holds(
+    track, cache, kept
+):
+    # Applied to a workspace already built, the saved entries meet that
+    # workspace's own cache: one with none keeps no file content, a smaller
+    # one keeps the newest that fit, and the saved drain, larger than
+    # either, is not forced on them.
+    source = track(
+        Workspace(
+            {"/d": RAMVFS()},
+            cache=CacheConfig(limit="1MB", max_drain_bytes=1048576),
+        )
+    )
+    await source.cache.set("a", b"x" * 6)
+    await source.cache.set("b", b"y" * 6)
+    state = await to_state_dict(source)
+    target = track(Workspace({"/d": RAMVFS()}, cache=cache))
+    await apply_state_dict(target, state)
+    assert [k for k in ("a", "b") if await target.cache.get(k)] == kept
+    assert target.cache.cache_size == 6 * len(kept)
+    assert target.max_drain_bytes is None
+
+
+@pytest.mark.asyncio
 async def test_a_rebuilt_workspace_keeps_its_body_limit():
     ws = Workspace({"/d": RAMVFS()}, max_memory=None, max_body_bytes="2MB")
     try:

@@ -844,6 +844,8 @@ async function restoreSessions(
 
 function restoreCache(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   if (!(ws.cache instanceof RAMFileCacheStore)) return
+  // The target keeps its own limit and drain, so it holds only the saved
+  // entries that fit them: none when it has no cache.
   // A snapshot is a third entry point into the entry table, and a document is not
   // obliged to spell "no token" the way this version does, so each token is
   // folded the way the live write entry points fold it.

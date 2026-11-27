@@ -59,8 +59,7 @@ class MountArgs:
     network: NetworkSetting = True
     # The workspace's system_time, as written; None for the host's time.
     system_time: str | None = None
-    # The file cache, rebuilt in memory at the saved workspace's limit;
-    # None when that cache kept nothing.
+    # The file cache to rebuild in memory; None for none.
     cache: CacheConfig | None = None
 
 

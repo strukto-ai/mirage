@@ -46,8 +46,7 @@ export interface MountArgs {
   network: NetworkSetting
   // The workspace's system_time, as written; null for the host's time.
   systemTime: string | null
-  // The file cache, rebuilt in memory at the saved workspace's limit; null
-  // when that cache kept nothing.
+  // The file cache to rebuild in memory; null for none.
   cache: CacheConfig | null
 }
 

@@ -50,6 +50,35 @@ describe('a cache entry restored from a snapshot', () => {
     },
   )
 
+  // Applied to a workspace already built, the saved entries meet that
+  // workspace's own cache: one with none keeps no file content, a smaller one
+  // keeps the newest that fit, and the saved drain, larger than either, is not
+  // forced on them.
+  it.each([
+    ['none', undefined, []],
+    ['smaller', { limit: 8 }, ['b']],
+    ['larger', { limit: '1MB' }, ['a', 'b']],
+  ] as const)('keeps what a %s target cache holds', async (_name, cache, kept) => {
+    const source = new Workspace(
+      { '/d/': new RAMVFS() },
+      { cache: { limit: '1MB', maxDrainBytes: 1048576 } },
+    )
+    const target = new Workspace({ '/d/': new RAMVFS() }, cache === undefined ? {} : { cache })
+    try {
+      await source.cache.set('a', ENC.encode('x'.repeat(6)))
+      await source.cache.set('b', ENC.encode('y'.repeat(6)))
+      await applyStateDict(target, await toStateDict(source))
+      const held = []
+      for (const key of ['a', 'b']) if ((await target.cache.get(key)) !== null) held.push(key)
+      expect(held).toEqual(kept)
+      expect(target.cache.cacheSize).toBe(6 * kept.length)
+      expect(target.maxDrainBytes).toBeNull()
+    } finally {
+      await source.close()
+      await target.close()
+    }
+  })
+
   it('keeps a real token through the round trip', async () => {
     // The other half of the fold: a token that means something must
     // survive, or the fold would be indistinguishable from dropping
