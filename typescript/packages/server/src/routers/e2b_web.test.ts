@@ -28,6 +28,21 @@ class FakeBackend implements LifecycleBackend {
     return Promise.resolve()
   }
 
+  setExpiry(
+    sandboxId: string,
+    expiresAtMs: number,
+    onlyExtend: boolean,
+  ): Promise<SandboxRecord | null> {
+    const record = this.records.get(sandboxId)
+    if (record === undefined) return Promise.resolve(null)
+    const updated = {
+      ...record,
+      expiresAtMs: onlyExtend ? Math.max(record.expiresAtMs, expiresAtMs) : expiresAtMs,
+    }
+    this.records.set(sandboxId, updated)
+    return Promise.resolve(updated)
+  }
+
   delete(sandboxId: string): Promise<void> {
     this.records.delete(sandboxId)
     return Promise.resolve()
@@ -253,4 +268,81 @@ it('cancels a running command and refuses file work once the host stops the sand
   )
   expect(stat.status).toBe(401)
   expect(await stat.json()).toMatchObject({ code: 'unauthenticated' })
+})
+
+/** A backend whose next reads answer only once released, as slow storage would. */
+class SlowBackend extends FakeBackend {
+  private readonly held: Promise<undefined>[] = []
+
+  holdReads(count: number): () => void {
+    let release = (): void => undefined
+    const released = new Promise<undefined>((resolve) => {
+      release = () => {
+        resolve(undefined)
+      }
+    })
+    for (let i = 0; i < count; i++) this.held.push(released)
+    return release
+  }
+
+  override async get(sandboxId: string): Promise<SandboxRecord | null> {
+    const record = await super.get(sandboxId)
+    const hold = this.held.shift()
+    if (hold !== undefined) await hold
+    return record
+  }
+}
+
+async function createdSandbox(store: FakeBackend): Promise<string> {
+  const created = await lifecycleRoutes(store)(
+    new Request(`${ORIGIN}/v2/sandboxes`, { method: 'POST' }),
+    'alice',
+  )
+  return ((await created.json()) as { sandboxID: string }).sandboxID
+}
+
+function connect(store: FakeBackend, id: string, timeout: number): Promise<Response> {
+  return lifecycleRoutes(store)(
+    new Request(`${ORIGIN}/v2/sandboxes/${id}/connect`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ timeout }),
+    }),
+    'alice',
+  )
+}
+
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+it('keeps the longer timeout when two reconnects interleave', async () => {
+  const store = new SlowBackend()
+  stores.push(store)
+  const id = await createdSandbox(store)
+  const release = store.holdReads(2)
+  const longer = connect(store, id, 600)
+  const shorter = connect(store, id, 60)
+  await tick()
+  release()
+  expect((await longer).status).toBe(200)
+  expect((await shorter).status).toBe(200)
+  expect(store.records.get(id)?.expiresAtMs).toBeGreaterThan(Date.now() + 500_000)
+})
+
+it('answers 404 and keeps no record for a reconnect that read before a kill', async () => {
+  const store = new SlowBackend()
+  stores.push(store)
+  const id = await createdSandbox(store)
+  const release = store.holdReads(1)
+  const reconnect = connect(store, id, 600)
+  await tick()
+  const killed = await lifecycleRoutes(store)(
+    new Request(`${ORIGIN}/sandboxes/${id}`, { method: 'DELETE' }),
+    'alice',
+  )
+  expect(killed.status).toBe(204)
+  release()
+  expect((await reconnect).status).toBe(404)
+  expect(store.records.has(id)).toBe(false)
 })

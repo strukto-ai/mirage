@@ -466,12 +466,9 @@ function registerLifecycle(
         return unsupportedLifecycle(reply, `sandbox connect option is unsupported: ${invalid[0]}`)
       }
       const { backend, owner } = contextOf(req)
-      const record = await ownedSandbox(backend, req.params.id, owner)
-      const extended = {
-        ...record,
-        expiresAtMs: Math.max(record.expiresAtMs, nowMs() + timeout * 1000),
-      }
-      await backend.put(extended)
+      const { sandboxId } = await ownedSandbox(backend, req.params.id, owner)
+      const extended = await backend.setExpiry(sandboxId, nowMs() + timeout * 1000, true)
+      if (extended === null) throw missingSandbox()
       return present(extended)
     },
   )
@@ -482,14 +479,16 @@ function registerLifecycle(
       const input = SetSandboxTimeoutRequest.safeParse(req.body)
       if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox timeout request')
       const { backend, owner } = contextOf(req)
-      const record = await ownedSandbox(backend, req.params.id, owner)
-      await backend.put({ ...record, expiresAtMs: nowMs() + input.data.timeout * 1000 })
+      const { sandboxId } = await ownedSandbox(backend, req.params.id, owner)
+      const set = await backend.setExpiry(sandboxId, nowMs() + input.data.timeout * 1000, false)
+      if (set === null) throw missingSandbox()
       return reply.status(204).send()
     },
   )
   app.delete<{ Params: SandboxParams }>(constants.KILL, async (req, reply) => {
     const { backend, owner } = contextOf(req)
     const record = await ownedSandbox(backend, req.params.id, owner)
+    if ((await backend.setExpiry(record.sandboxId, nowMs(), false)) === null) throw missingSandbox()
     await backend.stop(record.workspaceId)
     await backend.delete(record.sandboxId)
     return reply.status(204).send()

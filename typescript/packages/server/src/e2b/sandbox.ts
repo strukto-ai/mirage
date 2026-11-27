@@ -30,7 +30,18 @@ export interface SandboxRecord {
  */
 export interface LifecycleBackend {
   get(sandboxId: string): Promise<SandboxRecord | null>
+  /** Store a new sandbox's record. */
   put(record: SandboxRecord): Promise<void>
+  /**
+   * Set a stored record's expiry in one step against its stored value,
+   * keeping the later of the two when `onlyExtend`. Answer the updated
+   * record, or null when it is gone; never insert one.
+   */
+  setExpiry(
+    sandboxId: string,
+    expiresAtMs: number,
+    onlyExtend: boolean,
+  ): Promise<SandboxRecord | null>
   delete(sandboxId: string): Promise<void>
   /** Make the workspace a new sandbox for `owner` runs in, from `templateId`, and answer its id. */
   start(owner: string, templateId: string): Promise<string>

@@ -111,12 +111,6 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 
   put(record: SandboxRecord): Promise<void> {
-    const held = this.leases.get(record.sandboxId)
-    if (held !== undefined) {
-      held.record = record
-      this.schedule(held)
-      return Promise.resolve()
-    }
     const entry = this.registry.get(record.workspaceId)
     const lease = new SandboxEntry(record, entry, new Sandbox(entry.runner.ws, record.envVars))
     this.leases.set(record.sandboxId, lease)
@@ -130,6 +124,17 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   get(id: string): Promise<SandboxRecord | null> {
     return Promise.resolve(this.active(id)?.record ?? null)
+  }
+
+  setExpiry(id: string, expiresAtMs: number, onlyExtend: boolean): Promise<SandboxRecord | null> {
+    const lease = this.leases.get(id)
+    if (lease === undefined) return Promise.resolve(null)
+    lease.record = {
+      ...lease.record,
+      expiresAtMs: onlyExtend ? Math.max(lease.record.expiresAtMs, expiresAtMs) : expiresAtMs,
+    }
+    this.schedule(lease)
+    return Promise.resolve(lease.record)
   }
 
   delete(id: string): Promise<void> {
