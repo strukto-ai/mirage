@@ -886,6 +886,28 @@ describe('E2B commands', () => {
     expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
   })
 
+  it('refuses a command whose upload ends after the server starts draining', async () => {
+    const { app } = await setup()
+    const headers = dataHeaders(await create(app))
+    const address = await e2bListener(app).listen({ host: '127.0.0.1', port: 0 })
+    const { client, reply } = streamingPost(address + START, headers)
+    const body = processBody('touch drained')
+    try {
+      client.write(body.subarray(0, 4))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      app.registry.draining = true
+      client.end(body.subarray(4))
+      const response = await reply
+      expect(response.status).toBe(503)
+      expect(response.body.toString()).toContain('server is shutting down')
+    } finally {
+      client.destroy()
+      app.registry.draining = false
+    }
+    const after = await runCommand(app, headers, processBody('test ! -e drained'))
+    expect(after.at(-2)?.payload.event?.end?.exitCode).toBe(0)
+  })
+
   it('starts a command after a streamed request without a Connect timeout', async () => {
     const { app } = await setup()
     const headers = dataHeaders(await create(app))

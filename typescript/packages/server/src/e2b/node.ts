@@ -229,15 +229,27 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 }
 
-/** A request body as a web stream that leaves the socket open when it is dropped unread. */
-function bodyStream(raw: IncomingMessage): ReadableStream<Uint8Array> {
+/**
+ * A request body as a web stream that leaves the socket open when it is
+ * dropped unread, and that fails with `refusedAtEnd`'s error, when it names
+ * one, once the body has arrived.
+ */
+function bodyStream(
+  raw: IncomingMessage,
+  refusedAtEnd: () => HttpError | null,
+): ReadableStream<Uint8Array> {
   const source = raw.iterator({ destroyOnReturn: false }) as AsyncIterator<Uint8Array>
   return new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
         const next = await source.next()
-        if (next.done === true) controller.close()
-        else controller.enqueue(next.value)
+        if (next.done !== true) {
+          controller.enqueue(next.value)
+          return
+        }
+        const refused = refusedAtEnd()
+        if (refused === null) controller.close()
+        else controller.error(refused)
       },
       async cancel() {
         await source.return?.()
@@ -254,15 +266,23 @@ function nodeStream(body: ReadableStream<Uint8Array>): Readable {
     read() {
       reader.read().then(
         (next) => this.push(next.done ? null : next.value),
-        () => this.destroy(),
+        (error: unknown) => {
+          console.debug('sandbox response body failed', error)
+          this.destroy()
+        },
       )
     },
     destroy(_error, done) {
-      void reader.cancel().catch(() => undefined)
+      reader.cancel().catch((error: unknown) => {
+        console.debug('sandbox response body cancel failed', error)
+      })
       done(null)
     },
   })
-  reader.closed.catch(() => stream.destroy())
+  reader.closed.catch((error: unknown) => {
+    console.debug('sandbox response body closed', error)
+    stream.destroy()
+  })
   return stream
 }
 
@@ -273,18 +293,18 @@ function hasBody(req: FastifyRequest): boolean {
   return req.headers['transfer-encoding'] !== undefined || (length !== undefined && length !== '0')
 }
 
-function webRequest(req: FastifyRequest): Request {
+function webRequest(req: FastifyRequest, refusedAtEnd: () => HttpError | null): Request {
   const headers = new Headers()
   for (const [name, value] of Object.entries(req.headers)) {
     if (value === undefined) continue
     for (const item of Array.isArray(value) ? value : [value]) headers.append(name, item)
   }
   const bodied = req.method !== 'GET' && req.method !== 'HEAD'
-  return new Request(`http://localhost${req.url}`, {
+  return new Request(new URL(req.url, 'http://localhost'), {
     method: req.method,
     headers,
     signal: req.closed,
-    ...(bodied ? { body: bodyStream(req.raw), duplex: 'half' } : {}),
+    ...(bodied ? { body: bodyStream(req.raw, refusedAtEnd), duplex: 'half' } : {}),
   } as RequestInit)
 }
 
@@ -301,7 +321,11 @@ export function webForwarder(deps: {
 }): (req: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply> {
   return async (req, reply) => {
     const path = req.routeOptions.url ?? ''
-    const request = webRequest(req)
+    const shuttingDown = (): HttpError | null =>
+      deps.draining() && isProcessStart(req.method, path)
+        ? new HttpError('shutting_down', 'server is shutting down')
+        : null
+    const request = webRequest(req, shuttingDown)
     const unread = (): void => {
       if (hasBody(req) && !req.raw.readableEnded) reply.header('connection', 'close')
     }
@@ -312,13 +336,14 @@ export function webForwarder(deps: {
       const id = sandboxIdOf(req.headers)
       const entry = id === null ? null : deps.sandboxes.active(id)
       const refused = checkSandboxAccess(request, entry?.record ?? null)
+      const draining = shuttingDown()
       if (refused !== null) {
         response = refused
       } else if (entry === null) {
         throw new SandboxNotRunning()
-      } else if (deps.draining() && isProcessStart(req.method, path)) {
+      } else if (draining !== null) {
         unread()
-        throw new HttpError('shutting_down', 'server is shutting down')
+        throw draining
       } else {
         response = await dataRoutes(request, entry.sandbox)
       }
