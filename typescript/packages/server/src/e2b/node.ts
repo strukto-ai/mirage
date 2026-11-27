@@ -10,6 +10,7 @@ import {
   isDataRequest,
   isLifecycleRequest,
 } from '../routers/e2b.ts'
+import * as constants from './constants.ts'
 import { isProcessStart } from './process.ts'
 import { SandboxNotRunning } from './errors.ts'
 import {
@@ -23,15 +24,9 @@ import {
   verifyAccess,
 } from './sandbox.ts'
 
-/**
- * The sandbox owner when the auth mode names no account. An E2B sandbox
- * always has an owner; without accounts the server's workspaces keep null.
- */
-const DEFAULT_OWNER = 'default'
-
 /** The owner of the sandboxes a request with `account` creates and reaches. */
 export function sandboxOwner(account: string | null): string {
-  return account ?? DEFAULT_OWNER
+  return account ?? constants.DEFAULT_OWNER
 }
 
 export function sandboxAccount(
@@ -77,8 +72,6 @@ export function sandboxWorkspace(
   }
   return sandboxes.owned(params.id, request.account)?.workspaceEntry.id ?? null
 }
-
-const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 
 /** One sandbox the server keeps in memory, over a workspace in its registry, as `WorkspaceEntry` is one workspace. */
 class SandboxEntry {
@@ -233,7 +226,7 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
         else if (!isLive(lease.record)) this.expire(lease)
         else this.schedule(lease)
       },
-      Math.min(MAX_TIMER_DELAY_MS, Math.ceil(lease.record.expiresAtMs - nowMs())),
+      Math.min(constants.MAX_TIMER_DELAY_MS, Math.ceil(lease.record.expiresAtMs - nowMs())),
     )
   }
 }

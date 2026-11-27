@@ -621,7 +621,7 @@
     "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature.",
     "createEphemeralWorkspace": "The RouteApp calls an adapter-facing entry point after resolving the saved template; Python calls the existing open_workspace with an ephemeral option.",
     "requireBuildRoom": "The TypeScript builder shares the existing capacity response with the nested build; Python checks it in the shared admission helper.",
-    "createSandboxWorkspace": "Builds a new E2B sandbox's workspace for the daemon's lease store, next to createEphemeralWorkspace; Python's create route builds it inline."
+    "createSandboxWorkspace": "Builds a new E2B sandbox's workspace for the Node server's MemoryLifecycleBackend, next to createEphemeralWorkspace; Python's create route builds it inline."
    }
   },
   "server/schemas": {
@@ -1764,17 +1764,17 @@
   },
   "server/e2b/sandbox": {
    "typescript_only": {
-    "AccessHeaders": "Both TypeScript hosts check a data request's sandbox token alike, the daemon's lease table and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
-    "sameToken": "Both TypeScript hosts check a data request's sandbox token alike, the daemon's lease table and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
-    "sandboxIdOf": "Both TypeScript hosts check a data request's sandbox token alike, the daemon's lease table and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
-    "verifyAccess": "Both TypeScript hosts check a data request's sandbox token alike, the daemon's lease table and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
-    "SandboxRecord": "The sandbox shapes a host without Fastify implements to keep its sandboxes and serve E2B through the server's ./e2b export; the daemon's MemoryLifecycleBackend is one such backend. Python has one host and one sandbox table.",
-    "LifecycleBackend": "The backend a host without Fastify implements to keep its sandboxes and start their workspaces and serve E2B through the server's ./e2b export; the daemon's MemoryLifecycleBackend is one such backend. Python has one host and one sandbox table.",
+    "AccessHeaders": "Both TypeScript hosts check a data request's sandbox token alike, the Node server's MemoryLifecycleBackend and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
+    "sameToken": "Both TypeScript hosts check a data request's sandbox token alike, the Node server's MemoryLifecycleBackend and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
+    "sandboxIdOf": "Both TypeScript hosts check a data request's sandbox token alike, the Node server's MemoryLifecycleBackend and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
+    "verifyAccess": "Both TypeScript hosts check a data request's sandbox token alike, the Node server's MemoryLifecycleBackend and a host through ./e2b; Python's routing module checks it at its FastAPI boundary.",
+    "SandboxRecord": "The sandbox shapes a host implements to keep its sandboxes and serve E2B through the server's ./e2b export; the Node server's MemoryLifecycleBackend is one such backend. Python has one host and one sandbox table.",
+    "LifecycleBackend": "The backend a host implements to keep its sandboxes and start their workspaces and serve E2B through the server's ./e2b export; the Node server's MemoryLifecycleBackend is one such backend. Python has one host and one sandbox table.",
     "isLive": "The lifecycle routes and the access check share one expiry rule for records any host stores; Python's sandbox checks its own deadline.",
     "nowMs": "Sandbox expiry is epoch milliseconds a host can store, read from performance so tests fake it with timers; Python reads its event loop's clock."
    },
    "python_only": {
-    "Sandboxes": "Python's in-memory sandbox table for its one host; the TypeScript server keeps it in app.ts as MemoryLifecycleBackend, behind the LifecycleBackend that ./e2b exports."
+    "Sandboxes": "Python's in-memory sandbox table for its one host; the TypeScript server keeps it in e2b/node.ts as MemoryLifecycleBackend, behind the LifecycleBackend that ./e2b exports."
    }
   },
   "server/e2b/constants": {
@@ -1782,9 +1782,11 @@
     "FileMethod": "Python types the loop callback's method from the Literal of supported unary file operations."
    },
    "typescript_only": {
-    "RPC_PATHS": "Fastify's auth hook checks a set of registered paths. FastAPI matches its registered routes.",
+    "RPC_PATHS": "The data-request check matches a set of file RPC paths for the Node server's auth and rate-limit lookups and the error body; FastAPI matches its registered routes.",
     "BODY_LIMIT": "The web adapter caps an unlimited JSON body at Fastify's default; FastAPI's router reads its bodies itself.",
-    "BODY_METHODS": "The web adapter reads a JSON body only for the methods Fastify parses one for; FastAPI declares the body per handler."
+    "BODY_METHODS": "The web adapter reads a JSON body only for the methods Fastify parses one for; FastAPI declares the body per handler.",
+    "DEFAULT_OWNER": "The Node server gives a sandbox an owner when its auth mode names no account; Python's sandbox keeps the account as given.",
+    "MAX_TIMER_DELAY_MS": "setTimeout fires at once past this delay, so the Node server's expiry timer caps it; Python's event loop has no such cap."
    }
   },
   "server/e2b/errors": {
@@ -1814,8 +1816,8 @@
     "reject_rpc": "FastAPI registers a named rejection handler for unsupported Connect methods.",
     "SandboxAuthMiddleware": "FastAPI authenticates companion requests through ASGI middleware; Fastify registers an onRequest hook.",
     "rate_limit_error": "The ASGI rate limiter calls the router for the appropriate error envelope; Fastify uses e2bError.",
-    "_sandbox_access": "The daemon's Fastify hooks find a request's sandbox in its in-memory lease table; the TypeScript E2B router stays host-agnostic for the ./e2b export, and Python's router serves its one host.",
-    "sandbox_workspace": "The daemon's Fastify hooks find a request's sandbox in its in-memory lease table; the TypeScript E2B router stays host-agnostic for the ./e2b export, and Python's router serves its one host.",
+    "_sandbox_access": "The Node server's auth and rate-limit hooks find a request's sandbox in its MemoryLifecycleBackend in e2b/node.ts; the TypeScript E2B router stays host-agnostic for the ./e2b export, and Python's router serves its one host.",
+    "sandbox_workspace": "The Node server's auth and rate-limit hooks find a request's sandbox in its MemoryLifecycleBackend in e2b/node.ts; the TypeScript E2B router stays host-agnostic for the ./e2b export, and Python's router serves its one host.",
     "router": "FastAPI's E2B routes hang on one APIRouter; TypeScript hosts call the web handlers ./e2b exports instead."
    },
    "typescript_only": {
@@ -1824,24 +1826,24 @@
     "List": "The Zod request schema types the list path and depth; Python validates them after reading the JSON object.",
     "Move": "Zod validates the source and destination paths; Python extracts them from the decoded request.",
     "Path": "The Zod request schema validates the path field; Python checks its decoded JSON value directly.",
-    "SandboxParams": "Fastify reads the typed route parameter from the request object; FastAPI reads it from the handler signature.",
+    "SandboxParams": "The route reads the typed parameter from the request object; FastAPI reads it from the handler signature.",
     "Timeout": "The TypeScript request declarations share one Zod timeout schema; Python inherits the Pydantic field.",
     "downloadOf": "The Fastify adapter wraps the async iterator as a Node stream; Python uses DownloadResponse.",
-    "missingSandbox": "The native Fastify lifecycle handlers share the same missing-lease exception factory.",
+    "missingSandbox": "The lifecycle routes share one missing-sandbox error factory; FastAPI's routes raise the same error inline.",
     "withFiles": "The Fastify handler binds the request abort signal to a file-operation callback; Python uses an async lease scope and its runner.",
-    "E2BRoutes": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
-    "Route": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "E2BRoutes": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "Route": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
     "WEB": "The data routes registered once on the web adapter for every web host request; FastAPI registers them on its router.",
-    "WebReply": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
-    "compile": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
-    "dataRoutes": "A host without Fastify answers data requests through the server's ./e2b export; Python has one host.",
-    "lifecycleRoutes": "A host without Fastify answers lifecycle requests over its own lease store through the server's ./e2b export; Python has one host.",
-    "queryOf": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
-    "refusal": "Serves the E2B routes on web Request and Response for a host without Fastify, through the server's ./e2b export. Python has one host, on FastAPI.",
-    "registerData": "The data routes register on any RouteApp, the daemon's Fastify or the web adapter; FastAPI registers its handlers on the router.",
-    "registerLifecycle": "The lifecycle routes register on any RouteApp, the daemon's Fastify or the web adapter; FastAPI registers its handlers on the router.",
-    "acceptsRawBody": "The scoped Fastify parser checks which routes read their own streams; FastAPI declares the body handling per handler.",
-    "checkSandboxAccess": "A host without Fastify refuses a data request through the server's ./e2b export with the daemon's answers; Python has one host.",
+    "WebReply": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "compile": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "dataRoutes": "Every TypeScript host answers data requests through the server's ./e2b export; Python has one host.",
+    "lifecycleRoutes": "Every TypeScript host answers lifecycle requests over its own LifecycleBackend through the server's ./e2b export; Python has one host.",
+    "queryOf": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "refusal": "Serves the E2B routes on web Request and Response for every TypeScript host, the Node server included, through the server's ./e2b export. Python has one host, on FastAPI.",
+    "registerData": "The data routes register on the web adapter that every TypeScript host serves; FastAPI registers its handlers on the router.",
+    "registerLifecycle": "The lifecycle routes register on the web adapter that every TypeScript host serves; FastAPI registers its handlers on the router.",
+    "acceptsRawBody": "The web adapter checks which routes read their own streams; FastAPI declares the body handling per handler.",
+    "checkSandboxAccess": "Every TypeScript host refuses a data request with the same answers through the server's ./e2b export; Python has one host.",
     "errorBody": "The daemon's error handler and the web adapter answer a route's error with one body; FastAPI's router builds it in its exception handlers.",
     "headersOf": "The web adapter reads a web Request's headers into the record the routes take; FastAPI reads them from its request.",
     "newRecord": "The lifecycle routes make a new sandbox's id and token for every host's backend; Python's store makes them itself.",
@@ -1877,9 +1879,9 @@
     "Selector": "Zod validates the PID selector; Python checks the decoded field.",
     "failure": "Fastify replies with a Connect error through the RouteReply response interface.",
     "isProcessRequest": "Fastify uses the registered command path in its authentication and parser hooks.",
-    "readStart": "The Fastify start route joins and caps raw stream chunks before decoding the frame.",
+    "readStart": "The start route joins and caps raw stream chunks before decoding the frame.",
     "registerStart": "The command stream registers with the data routes every host serves through ./e2b; FastAPI registers its handler on the router.",
-    "registerControl": "Process control registers only on the daemon, which keeps a command past its request; FastAPI registers its handler on the router.",
+    "registerControl": "Process control registers on the web adapter with the other data routes; FastAPI registers its handler on the router.",
     "SandboxOf": "The data routes reach a request's sandbox through the host that registers them; FastAPI resolves it in a dependency."
    }
   },

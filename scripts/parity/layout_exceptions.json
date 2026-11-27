@@ -210,7 +210,7 @@
    },
    "typescript_only": {
     "body": "Node watches the raw input stream and closes connections with unread data; Python uses ASGI body and disconnect messages.",
-    "node": "The Node server's side of the E2B adapter (its in-memory sandbox table, Fastify lookups and Node stream transport) stays out of the host-agnostic modules that the server's ./e2b export loads; Python has one host and keeps its sandbox table in e2b/sandbox."
+    "node": "The Node server's side of the E2B adapter (its in-memory sandbox table, auth and rate-limit lookups, and the Fastify-to-web forwarder) stays out of the host-agnostic modules that the server's ./e2b export loads; Python has one host and keeps its sandbox table in e2b/sandbox."
    }
   },
   "core/disk": {

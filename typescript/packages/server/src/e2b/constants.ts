@@ -55,6 +55,13 @@ export const BODY_METHODS: ReadonlySet<string> = new Set([
   'OPTIONS',
 ])
 
+/**
+ * The sandbox owner when the auth mode names no account. An E2B sandbox
+ * always has an owner; without accounts the server's workspaces keep null.
+ */
+export const DEFAULT_OWNER = 'default'
+export const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
+
 export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024
 
 export const TYPES: Partial<Record<FileType, string>> = {
