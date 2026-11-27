@@ -84,6 +84,9 @@ export class GitHubRepo {
   readonly run: KitRun
   readonly owner = OWNER
   readonly api: string
+  // The repository's default branch: `main` as created, then whatever
+  // setDefaultBranch made it.
+  defaultBranch = 'main'
 
   /** @param origin the GitHub fake's origin. */
   constructor(
@@ -199,6 +202,7 @@ export class GitHubRepo {
   /** Make branch `name` the repository's default. */
   async setDefaultBranch(name: string): Promise<void> {
     await this.run.call('PATCH', this.api, { json: { default_branch: name } })
+    this.defaultBranch = name
   }
 
   private async commitEntries(entries: JsonValue[], branch = 'main'): Promise<string> {

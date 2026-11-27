@@ -108,6 +108,19 @@ describe('filesContaining', () => {
     expect(await filesContaining(accessor, 'needle', [root()])).toBeNull()
     expect(await repo.log()).toEqual([])
   })
+
+  // Twin of test_files_containing_leaves_a_branch_off_the_default_to_the_walk:
+  // code search indexes the default branch only, so a mount on any other
+  // branch is not narrowed by it, even one named main.
+  it('leaves a branch off the default to the walk', async () => {
+    const files: Record<string, string> = {}
+    for (let i = 0; i <= SCOPE_WARN; i++) files[`f${String(i)}`] = 'needle\n'
+    await repo.create(files)
+    await repo.branch('trunk')
+    await repo.setDefaultBranch('trunk')
+    expect(await filesContaining(repo.accessor('main'), 'needle', [root()])).toBeNull()
+    expect(await repo.count('search')).toBe(0)
+  })
 })
 
 // Twin of the search_code tests in python/tests/core/github/test_search.py.

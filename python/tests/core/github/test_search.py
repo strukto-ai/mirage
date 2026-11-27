@@ -694,6 +694,23 @@ async def test_files_containing_asks_nothing_of_an_anonymous_account(
 
 
 @pytest.mark.asyncio
+async def test_files_containing_leaves_a_branch_off_the_default_to_the_walk(
+    repo, monkeypatch
+):
+    # Code search indexes the default branch only, so a mount on any other
+    # branch is not narrowed by it, even one named main.
+    monkeypatch.setattr("mirage.core.github.search.SCOPE_WARN", 0)
+    await repo.create({"src/a.py": b"needle\n"})
+    await repo.branch("trunk")
+    await repo.set_default_branch("trunk")
+    out = await files_containing(
+        repo.accessor("main"), "needle", [PathSpec.from_str_path("/")]
+    )
+    assert out is None
+    assert await repo.count("search") == 0
+
+
+@pytest.mark.asyncio
 async def test_an_anonymous_mount_scans_instead_of_searching(
     repo, monkeypatch
 ):

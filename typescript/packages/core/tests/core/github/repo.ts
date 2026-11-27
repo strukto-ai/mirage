@@ -21,8 +21,8 @@ export * from '../../fixtures/github_repo.ts'
 export class GitHubRepo extends KitRepo {
   /**
    * A Mirage accessor on this repository with a token, reading `ref`. Its
-   * default branch is the repository's, `main`, whatever `ref` it reads, so
-   * a ref off it stays off it.
+   * default branch is the repository's, whatever `ref` it reads, so a ref
+   * off it stays off it.
    */
   accessor(ref = 'main'): GitHubAccessor {
     return new GitHubAccessor({
@@ -30,7 +30,7 @@ export class GitHubRepo extends KitRepo {
       owner: this.owner,
       repo: this.name,
       ref,
-      defaultBranch: 'main',
+      defaultBranch: this.defaultBranch,
     })
   }
 }
