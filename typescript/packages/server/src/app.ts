@@ -466,7 +466,6 @@ export function buildApp(options: BuildAppOptions = {}) {
     e2b.setNotFoundHandler((_req, reply) => {
       void e2bError(reply, new HttpError('not_found', 'not found'))
     })
-    lenientJson(e2b)
     requestGuards(e2b, allowedHosts, e2bError)
     const workspaceOf = (request: FastifyRequest) =>
       sandboxWorkspace(sandboxes, request.routeOptions.url ?? '', request)

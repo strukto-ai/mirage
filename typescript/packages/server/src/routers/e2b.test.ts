@@ -711,6 +711,34 @@ describe('E2B health', () => {
     expect((await health(headers)).statusCode).toBe(502)
     expect((await health(routing)).statusCode).toBe(502)
   })
+
+  it('answers the route the listener matched, whatever the host port, encoding or HEAD', async () => {
+    const { app } = await setup()
+    const sandbox = await create(app)
+    const listener = e2bListener(app)
+    const headers = {
+      'e2b-sandbox-id': sandbox.sandboxID,
+      'e2b-sandbox-port': '49983',
+      'x-access-token': sandbox.envdAccessToken,
+    }
+    const oddHost = await listener.inject({
+      url: HEALTH,
+      headers: { ...headers, host: 'localhost:99999' },
+    })
+    expect(oddHost.statusCode).toBe(204)
+    expect((await listener.inject({ url: '/he%61lth', headers })).statusCode).toBe(204)
+    const stat = await listener.inject({
+      method: 'POST',
+      url: '/filesystem.Filesystem/St%61t',
+      headers: { ...headers, 'content-type': 'application/json' },
+      payload: { path: '.' },
+    })
+    expect(stat.statusCode, stat.body).toBe(200)
+    for (const url of ['/sandboxes', `/sandboxes/${sandbox.sandboxID}`]) {
+      const head = await listener.inject({ method: 'HEAD', url, headers: API_KEY })
+      expect(head.statusCode).toBe(501)
+    }
+  })
 })
 
 describe('E2B commands', () => {

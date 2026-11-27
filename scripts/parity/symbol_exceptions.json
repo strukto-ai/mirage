@@ -1851,7 +1851,8 @@
     "Sandbox": "The server's ./e2b export re-exports the Sandbox class a TypeScript host holds and passes to dataRoutes; Python's single host imports it from its sandbox module.",
     "LIFECYCLE": "Every TypeScript host, the Node server included, serves E2B through the web handlers ./e2b exports, which keep their route tables at module level; Python's single host registers FastAPI routes.",
     "LifecycleContext": "Every TypeScript host, the Node server included, serves E2B through the web handlers ./e2b exports, which keep their route tables at module level; Python's single host registers FastAPI routes.",
-    "ROUTES": "The Node server forwards each E2B route to the web handlers, so it needs the route list; FastAPI registers its routes on a router instead."
+    "ROUTES": "The Node server forwards each E2B route to the web handlers, so it needs the route list; FastAPI registers its routes on a router instead.",
+    "routePath": "The web adapter decodes a path's segments before matching, as Fastify does; FastAPI's router decodes it itself."
    }
   },
   "server/e2b/connect": {

@@ -55,7 +55,7 @@ function failure(reply: RouteReply, status: number, code: string, message: strin
 }
 
 async function control(
-  lease: Sandbox,
+  sandbox: Sandbox,
   method: (typeof constants.CONTROL_METHODS)[number],
   body: unknown,
   reply: RouteReply,
@@ -65,7 +65,7 @@ async function control(
     if (!List.safeParse(body).success) {
       return failure(reply, 400, 'invalid_argument', 'expected a command request')
     }
-    const processes = [...lease.processes].flatMap(([pid, process]) => {
+    const processes = [...sandbox.processes].flatMap(([pid, process]) => {
       if (process.killed) return []
       const { line, cwd, envs } = process.command
       return [
@@ -84,7 +84,7 @@ async function control(
   }
   const selector = Selector.safeParse(body)
   if (!selector.success) return failure(reply, 400, 'invalid_argument', 'expected a command PID')
-  const process = lease.processes.get(selector.data.process.pid)
+  const process = sandbox.processes.get(selector.data.process.pid)
   if (process === undefined || process.killed) {
     return failure(reply, 404, 'not_found', 'command not found')
   }
@@ -141,7 +141,7 @@ export function registerStart(app: RouteApp, sandboxOf: SandboxOf): void {
     }
     let disarm: (() => void) | undefined
     try {
-      const lease = sandboxOf(req)
+      const sandbox = sandboxOf(req)
       const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
       if (contentType !== constants.CONNECT_STREAM) {
         return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
@@ -152,7 +152,7 @@ export function registerStart(app: RouteApp, sandboxOf: SandboxOf): void {
       else if (remaining !== null) disarm = atDeadline(remaining, expire)
       const command = await readStart(
         req,
-        AbortSignal.any([req.closed, uploadDeadline.signal, lease.stopped]),
+        AbortSignal.any([req.closed, uploadDeadline.signal, sandbox.stopped]),
       )
       if (remainingSeconds(deadline) === 0) {
         return reply
@@ -161,8 +161,8 @@ export function registerStart(app: RouteApp, sandboxOf: SandboxOf): void {
       }
       do {
         nextPid = (nextPid % 0xffffffff) + 1
-      } while (lease.processes.has(nextPid))
-      return processResponse(lease, command, deadline, nextPid, req.closed, reply)
+      } while (sandbox.processes.has(nextPid))
+      return processResponse(sandbox, command, deadline, nextPid, req.closed, reply)
     } catch (error) {
       if (uploadDeadline.signal.aborted && error === uploadDeadline.signal.reason) {
         return reply
@@ -193,7 +193,7 @@ export function registerControl(app: RouteApp, sandboxOf: SandboxOf): void {
       }
       let disarm: (() => void) | undefined
       try {
-        const lease = sandboxOf(req)
+        const sandbox = sandboxOf(req)
         if (unaryContentType(req, constants.CONNECT_STREAM) !== 'application/json') {
           return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
         }
@@ -201,13 +201,13 @@ export function registerControl(app: RouteApp, sandboxOf: SandboxOf): void {
         const remaining = remainingSeconds(deadline)
         if (remaining === 0) expire()
         else if (remaining !== null) disarm = atDeadline(remaining, expire)
-        const signal = AbortSignal.any([lease.stopped, req.closed, deadlineSignal.signal])
+        const signal = AbortSignal.any([sandbox.stopped, req.closed, deadlineSignal.signal])
         signal.throwIfAborted()
         const body = await readJsonBody(req, signal, constants.MAX_CONTROL_BODY)
-        lease.stopped.throwIfAborted()
+        sandbox.stopped.throwIfAborted()
         if (remainingSeconds(deadline) === 0) expire()
         signal.throwIfAborted()
-        return await control(lease, method, body, reply, signal)
+        return await control(sandbox, method, body, reply, signal)
       } catch (error) {
         if (deadlineSignal.signal.aborted) {
           return failure(reply, 504, 'deadline_exceeded', constants.DEADLINE_MESSAGE)

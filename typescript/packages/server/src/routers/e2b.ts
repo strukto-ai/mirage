@@ -108,6 +108,25 @@ function compile(path: string): { pattern: RegExp; keys: string[] } {
   return { pattern: new RegExp(`^${source}$`), keys }
 }
 
+/**
+ * `path` with each segment decoded, as Fastify matches it, or null when it
+ * is not percent-encoded. An encoded `/` or `%` stays encoded, so a
+ * parameter keeps its segment and decodes once.
+ */
+function routePath(path: string): string | null {
+  try {
+    return path
+      .split('/')
+      .map((segment) =>
+        decodeURIComponent(segment).replace(/[%/]/g, (char) => encodeURIComponent(char)),
+      )
+      .join('/')
+  } catch (error) {
+    if (!(error instanceof URIError)) throw error
+    return null
+  }
+}
+
 function queryOf(params: URLSearchParams): Record<string, string | string[]> {
   const query: Record<string, string | string[]> = {}
   for (const [key, value] of params) {
@@ -239,13 +258,11 @@ class E2BRoutes<C> implements RouteApp {
   private async answer(request: Request, account: string | null, context: C): Promise<Response> {
     const url = new URL(request.url)
     const method = request.method === 'HEAD' ? 'GET' : request.method
-    let found: [Route, Record<string, string>] | null
-    try {
-      found = this.match(method, url.pathname)
-    } catch (error) {
-      if (!(error instanceof URIError)) throw error
+    const path = routePath(url.pathname)
+    if (path === null) {
       return refusal(method, '', new HttpError('invalid_request', 'path is not percent-encoded'))
     }
+    const found = this.match(method, path)
     if (found === null) return refusal(method, '', new HttpError('not_found', 'not found'))
     const [route, params] = found
     const headers = headersOf(request)
@@ -416,17 +433,16 @@ function newRecord(
   }
 }
 
-/**
- * Create, connect, set timeout and delete, over `backend`, for the account
- * `ownerOf` names; the lifecycle routes E2B serves but Mirage does not
- * answer 501. A sandbox another account owns answers as one that does not
- * exist.
- */
 interface LifecycleContext {
   readonly backend: LifecycleBackend
   readonly owner: string
 }
 
+/**
+ * Create, connect, set timeout and delete, over the context's backend, for
+ * its owner; the lifecycle routes E2B serves but Mirage does not answer 501.
+ * A sandbox another owner owns answers as one that does not exist.
+ */
 function registerLifecycle(
   app: RouteApp,
   contextOf: (request: RouteRequest) => LifecycleContext,
@@ -581,28 +597,28 @@ async function multipartFile(request: RouteRequest, signal: AbortSignal): Promis
 }
 
 function withFiles<T>(
-  lease: Sandbox,
+  sandbox: Sandbox,
   closed: AbortSignal,
   operation: (files: SandboxFiles, signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
-  return lease.runFile(closed, async (signal) => {
-    await lease.workspace.ensureSessionsLoaded()
-    const session = new Session(lease.workspace, null)
+  return sandbox.runFile(closed, async (signal) => {
+    await sandbox.workspace.ensureSessionsLoaded()
+    const session = new Session(sandbox.workspace, null)
     signal.throwIfAborted()
-    lease.stopped.throwIfAborted()
+    sandbox.stopped.throwIfAborted()
     return operation(new SandboxFiles(withCaller(session.vfs, { fileSignal: signal })), signal)
   })
 }
 
 function downloadOf(
-  lease: Sandbox,
+  sandbox: Sandbox,
   path: string,
   closed: AbortSignal,
 ): Promise<ReadableStream<Uint8Array>> {
   const canceled = new AbortController()
   const connection = AbortSignal.any([closed, canceled.signal])
   return new Promise((resolve, reject) => {
-    const running = withFiles(lease, connection, async (files, signal) => {
+    const running = withFiles(sandbox, connection, async (files, signal) => {
       const source = await files.read(path)
       const cursor = source[Symbol.asyncIterator]()
       let finish = (): void => undefined
@@ -612,7 +628,7 @@ function downloadOf(
       let pulling: Promise<IteratorResult<Uint8Array>> | undefined
       let stop: (() => void) | undefined
       try {
-        lease.stopped.throwIfAborted()
+        sandbox.stopped.throwIfAborted()
         signal.throwIfAborted()
         resolve(
           new ReadableStream({
@@ -625,7 +641,7 @@ function downloadOf(
             },
             async pull(controller) {
               try {
-                lease.stopped.throwIfAborted()
+                sandbox.stopped.throwIfAborted()
                 pulling = cursor.next()
                 const next = await pulling
                 if (signal.aborted) return
@@ -660,26 +676,17 @@ function downloadOf(
 
 /**
  * The routes that run against one sandbox's workspace: health, the command
- * stream, upload, download and the filesystem calls. Each finds its sandbox
- * through `access`, which refuses a request it does not admit.
+ * stream, upload, download and the filesystem calls. Each runs against the
+ * sandbox `sandboxOf` gives, once `checkSandboxAccess` let the request through.
  */
 function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
   registerStart(app, sandboxOf)
   registerControl(app, sandboxOf)
-  app.get(constants.HEALTH, (req, reply) => {
-    try {
-      sandboxOf(req)
-    } catch (error) {
-      if (!(error instanceof HttpError)) throw error
-      if (error.code === 'unauthorized') return reply.status(502).send()
-      return reply.status(error.status).send({ code: error.status, message: error.message })
-    }
-    return reply.status(204).send()
-  })
+  app.get(constants.HEALTH, (_req, reply) => reply.status(204).send())
   app.get(constants.FILES, async (request, reply) => {
     try {
-      const lease = sandboxOf(request)
-      const body = await downloadOf(lease, queryPath(request), request.closed)
+      const sandbox = sandboxOf(request)
+      const body = await downloadOf(sandbox, queryPath(request), request.closed)
       return reply.type('application/octet-stream').header('Cache-Control', 'no-store').send(body)
     } catch (error) {
       return failure(reply, error)
@@ -688,13 +695,13 @@ function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
 
   app.post(constants.FILES, async (request, reply) => {
     try {
-      const lease = sandboxOf(request)
+      const sandbox = sandboxOf(request)
       if (Object.keys(request.headers).some((name) => name.startsWith('x-metadata-'))) {
         throw new FileError('unimplemented', 'file metadata is unsupported')
       }
       const path = queryPath(request)
-      const data = await multipartFile(request, AbortSignal.any([lease.stopped, request.closed]))
-      return await withFiles(lease, request.closed, async (files) => [
+      const data = await multipartFile(request, AbortSignal.any([sandbox.stopped, request.closed]))
+      return await withFiles(sandbox, request.closed, async (files) => [
         await files.write(path, data),
       ])
     } catch (error) {
@@ -705,21 +712,21 @@ function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
   for (const method of constants.METHODS) {
     app.post(constants.RPC_PREFIX + method, { rawBody: true }, async (request, reply) => {
       try {
-        const lease = sandboxOf(request)
+        const sandbox = sandboxOf(request)
         unaryContentType(request, constants.CONNECT_STREAM)
         const body = await readJsonBody(
           request,
-          AbortSignal.any([lease.stopped, request.closed]),
+          AbortSignal.any([sandbox.stopped, request.closed]),
           DEFAULT_MAX_REQUEST_BODY_SIZE,
         )
-        lease.stopped.throwIfAborted()
+        sandbox.stopped.throwIfAborted()
         if (method === 'Move') {
           const parsed = Move.safeParse(body)
           if (!parsed.success) {
             throw new FileError('invalid_argument', 'expected source and destination paths')
           }
           const { source, destination } = parsed.data
-          return await withFiles(lease, request.closed, async (files) => ({
+          return await withFiles(sandbox, request.closed, async (files) => ({
             entry: await files.move(source, destination),
           }))
         }
@@ -728,13 +735,13 @@ function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
           if (!parsed.success) {
             throw new FileError('invalid_argument', 'expected a file path and list depth')
           }
-          return await withFiles(lease, request.closed, async (files) => ({
+          return await withFiles(sandbox, request.closed, async (files) => ({
             entries: await files.listDir(parsed.data.path, parsed.data.depth),
           }))
         }
         const parsed = Path.safeParse(body)
         if (!parsed.success) throw new FileError('invalid_argument', 'expected a file path')
-        return await withFiles(lease, request.closed, async (files) => {
+        return await withFiles(sandbox, request.closed, async (files) => {
           const { path } = parsed.data
           if (method === 'Stat') return { entry: await files.stat(path) }
           if (method === 'MakeDir') await files.mkdir(path)
@@ -748,18 +755,13 @@ function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
   }
 
   for (const url of constants.UNSUPPORTED_RPC_PATHS) {
-    app.post(url, (request, reply) => {
-      try {
-        sandboxOf(request)
-      } catch (error) {
-        return failure(reply, error, true)
-      }
-      return failure(
+    app.post(url, (_request, reply) =>
+      failure(
         reply,
         new FileError('unimplemented', 'E2B data operation is unsupported by Mirage'),
         true,
-      )
-    })
+      ),
+    )
   }
 }
 
@@ -780,7 +782,7 @@ export function checkSandboxAccess(
   request: Request,
   record: SandboxRecord | null,
 ): Response | null {
-  const path = new URL(request.url).pathname
+  const path = routePath(new URL(request.url).pathname)
   const health = path === constants.HEALTH
   try {
     verifyAccess(headersOf(request), record)

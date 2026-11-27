@@ -90,7 +90,7 @@ class SandboxEntry {
  * a new sandbox's workspace.
  */
 export class MemoryLifecycleBackend implements LifecycleBackend {
-  private readonly leases = new Map<string, SandboxEntry>()
+  private readonly sandboxes = new Map<string, SandboxEntry>()
   private readonly removing = new Set<Promise<WorkspaceEntry>>()
 
   constructor(
@@ -105,12 +105,12 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   put(record: SandboxRecord): Promise<void> {
     const entry = this.registry.get(record.workspaceId)
-    const lease = new SandboxEntry(record, entry, new Sandbox(entry.runner.ws, record.envVars))
-    this.leases.set(record.sandboxId, lease)
-    this.schedule(lease)
+    const held = new SandboxEntry(record, entry, new Sandbox(entry.runner.ws, record.envVars))
+    this.sandboxes.set(record.sandboxId, held)
+    this.schedule(held)
     entry.beforeStop = async () => {
-      this.forget(lease)
-      await lease.sandbox.stop()
+      this.forget(held)
+      await held.sandbox.stop()
     }
     return Promise.resolve()
   }
@@ -120,26 +120,26 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 
   setExpiry(id: string, expiresAtMs: number, onlyExtend: boolean): Promise<SandboxRecord | null> {
-    const lease = this.leases.get(id)
-    if (lease === undefined) return Promise.resolve(null)
-    lease.record = {
-      ...lease.record,
-      expiresAtMs: onlyExtend ? Math.max(lease.record.expiresAtMs, expiresAtMs) : expiresAtMs,
+    const held = this.sandboxes.get(id)
+    if (held === undefined) return Promise.resolve(null)
+    held.record = {
+      ...held.record,
+      expiresAtMs: onlyExtend ? Math.max(held.record.expiresAtMs, expiresAtMs) : expiresAtMs,
     }
-    this.schedule(lease)
-    return Promise.resolve(lease.record)
+    this.schedule(held)
+    return Promise.resolve(held.record)
   }
 
   delete(id: string): Promise<void> {
-    const lease = this.leases.get(id)
-    if (lease !== undefined) this.forget(lease)
+    const held = this.sandboxes.get(id)
+    if (held !== undefined) this.forget(held)
     return Promise.resolve()
   }
 
   async stop(workspaceId: string): Promise<void> {
-    const lease = [...this.leases.values()].find((held) => held.workspaceEntry.id === workspaceId)
-    if (lease !== undefined) {
-      await this.remove(lease)
+    const held = this.sandboxes.get(workspaceId)
+    if (held !== undefined) {
+      await this.remove(held)
       return
     }
     const entry = this.entryOf(workspaceId)
@@ -148,22 +148,20 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   requireAccess(headers: AccessHeaders): SandboxEntry {
     const id = sandboxIdOf(headers)
-    const lease = id === null ? null : this.active(id)
-    verifyAccess(headers, lease?.record ?? null)
-    if (lease === null) throw new SandboxNotRunning()
-    return lease
+    const held = id === null ? null : this.active(id)
+    verifyAccess(headers, held?.record ?? null)
+    if (held === null) throw new SandboxNotRunning()
+    return held
   }
 
   async close(): Promise<void> {
-    for (const lease of this.leases.values()) this.expire(lease)
+    for (const held of this.sandboxes.values()) this.expire(held)
     await Promise.allSettled(this.removing)
   }
 
   owned(id: string, account: string | null): SandboxEntry | null {
-    const lease = this.active(id)
-    return lease !== null && this.registry.visible(id, account) === lease.workspaceEntry
-      ? lease
-      : null
+    const held = this.active(id)
+    return held !== null && this.registry.visible(id, account) === held.workspaceEntry ? held : null
   }
 
   private entryOf(workspaceId: string): WorkspaceEntry | null {
@@ -171,34 +169,34 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 
   active(id: string): SandboxEntry | null {
-    const lease = this.leases.get(id)
-    if (lease === undefined) return null
-    if (!this.isRegistered(lease)) {
-      this.forget(lease)
+    const held = this.sandboxes.get(id)
+    if (held === undefined) return null
+    if (!this.isRegistered(held)) {
+      this.forget(held)
       return null
     }
-    if (!isLive(lease.record)) {
-      this.expire(lease)
+    if (!isLive(held.record)) {
+      this.expire(held)
       return null
     }
-    return lease
+    return held
   }
 
-  private isRegistered(lease: SandboxEntry): boolean {
-    const { workspaceEntry: entry } = lease
+  private isRegistered(held: SandboxEntry): boolean {
+    const { workspaceEntry: entry } = held
     return entry.acceptingJobs && this.registry.visible(entry.id, entry.owner) === entry
   }
 
-  private forget(lease: SandboxEntry): void {
-    clearTimeout(lease.timer)
-    if (this.leases.get(lease.record.sandboxId) === lease)
-      this.leases.delete(lease.record.sandboxId)
+  private forget(held: SandboxEntry): void {
+    clearTimeout(held.timer)
+    if (this.sandboxes.get(held.record.sandboxId) === held)
+      this.sandboxes.delete(held.record.sandboxId)
   }
 
-  private async remove(lease: SandboxEntry): Promise<void> {
-    this.forget(lease)
-    if (!this.isRegistered(lease)) return
-    await this.removeEntry(lease.workspaceEntry)
+  private async remove(held: SandboxEntry): Promise<void> {
+    this.forget(held)
+    if (!this.isRegistered(held)) return
+    await this.removeEntry(held.workspaceEntry)
   }
 
   private async removeEntry(entry: WorkspaceEntry): Promise<void> {
@@ -211,22 +209,22 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
     }
   }
 
-  private expire(lease: SandboxEntry): void {
-    void this.remove(lease).catch((error: unknown) => {
-      console.error(`removing sandbox ${lease.workspaceEntry.id}:`, error)
+  private expire(held: SandboxEntry): void {
+    void this.remove(held).catch((error: unknown) => {
+      console.error(`removing sandbox ${held.workspaceEntry.id}:`, error)
     })
   }
 
-  private schedule(lease: SandboxEntry): void {
-    clearTimeout(lease.timer)
-    lease.timer = setTimeout(
+  private schedule(held: SandboxEntry): void {
+    clearTimeout(held.timer)
+    held.timer = setTimeout(
       () => {
-        if (this.leases.get(lease.record.sandboxId) !== lease) return
-        if (!this.isRegistered(lease)) this.forget(lease)
-        else if (!isLive(lease.record)) this.expire(lease)
-        else this.schedule(lease)
+        if (this.sandboxes.get(held.record.sandboxId) !== held) return
+        if (!this.isRegistered(held)) this.forget(held)
+        else if (!isLive(held.record)) this.expire(held)
+        else this.schedule(held)
       },
-      Math.min(constants.MAX_TIMER_DELAY_MS, Math.ceil(lease.record.expiresAtMs - nowMs())),
+      Math.min(constants.MAX_TIMER_DELAY_MS, Math.ceil(held.record.expiresAtMs - nowMs())),
     )
   }
 }
@@ -282,7 +280,7 @@ function webRequest(req: FastifyRequest): Request {
     for (const item of Array.isArray(value) ? value : [value]) headers.append(name, item)
   }
   const bodied = req.method !== 'GET' && req.method !== 'HEAD'
-  return new Request(`${req.protocol}://${req.host}${req.url}`, {
+  return new Request(`http://localhost${req.url}`, {
     method: req.method,
     headers,
     signal: req.closed,
@@ -308,7 +306,7 @@ export function webForwarder(deps: {
       if (hasBody(req) && !req.raw.readableEnded) reply.header('connection', 'close')
     }
     let response: Response
-    if (isLifecycleRequest(req.method, path)) {
+    if (isLifecycleRequest(req.method === 'HEAD' ? 'GET' : req.method, path)) {
       response = await deps.lifecycle(request, deps.ownerOf(req))
     } else {
       const id = sandboxIdOf(req.headers)

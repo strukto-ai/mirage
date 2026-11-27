@@ -17,7 +17,7 @@ export function remainingSeconds(deadline: number | null): number | null {
 }
 
 export function processResponse(
-  lease: Sandbox,
+  sandbox: Sandbox,
   command: StartCommand,
   deadlineAt: number | null,
   pid: number,
@@ -37,7 +37,7 @@ export function processResponse(
     deadline.abort(new DOMException(constants.DEADLINE_MESSAGE, 'TimeoutError'))
     closeStalledStream()
   }
-  const signal = AbortSignal.any([connection, deadline.signal, lease.stopped])
+  const signal = AbortSignal.any([connection, deadline.signal, sandbox.stopped])
   let execution: ShellExecution | undefined
 
   async function* events(): AsyncGenerator<Uint8Array> {
@@ -52,23 +52,23 @@ export function processResponse(
     const stdin = command.stdin ? new BytePipe() : undefined
     try {
       execution = await runWithDeadline(timeout, expire, () => {
-        if (lease.stopped.aborted) {
+        if (sandbox.stopped.aborted) {
           throw new DOMException('command canceled', 'AbortError')
         }
-        return lease.workspace.shell(command.line, {
-          sessionId: lease.workspace.defaultSessionId,
+        return sandbox.workspace.shell(command.line, {
+          sessionId: sandbox.workspace.defaultSessionId,
           cwd: command.cwd ?? constants.HOME,
-          env: { ...lease.envVars, ...command.envs },
+          env: { ...sandbox.envVars, ...command.envs },
           ...(stdin === undefined ? {} : { stdin: stdin.stream() }),
           signal,
           stream: true,
         })
       })
-      if (lease.stopped.aborted) execution.cancel()
+      if (sandbox.stopped.aborted) execution.cancel()
       process = { command, execution, stdin, killed: false }
-      lease.processes.set(pid, process)
+      sandbox.processes.set(pid, process)
       execution.onSettled(() => {
-        lease.processes.delete(pid)
+        sandbox.processes.delete(pid)
         stdin?.closeReader()
       })
       yield encodeMessage({ start: { pid } })
@@ -78,7 +78,7 @@ export function processResponse(
       }
       const { exitCode } = await execution.wait()
       if (hasAborted(connection)) return
-      if (lease.stopped.aborted) {
+      if (sandbox.stopped.aborted) {
         yield endStream('canceled', 'command canceled')
         return
       }
@@ -98,7 +98,10 @@ export function processResponse(
       } else if (process?.killed === true) {
         yield encodeMessage({ end: { exitCode: 137, exited: true, status: 'signal: killed' } })
         yield endStream()
-      } else if (lease.stopped.aborted || (error instanceof Error && error.name === 'AbortError')) {
+      } else if (
+        sandbox.stopped.aborted ||
+        (error instanceof Error && error.name === 'AbortError')
+      ) {
         yield endStream('canceled', 'command canceled')
       } else {
         console.error('sandbox command failed:', error)
@@ -120,11 +123,11 @@ export function processResponse(
   const finish = (error?: unknown): void => {
     if (!open) return
     open = false
-    if (error !== undefined && !connection.aborted && !lease.stopped.aborted) {
+    if (error !== undefined && !connection.aborted && !sandbox.stopped.aborted) {
       console.debug('sandbox command transport closed', error)
     }
     clearTimeout(grace)
-    lease.stopped.removeEventListener('abort', revoke)
+    sandbox.stopped.removeEventListener('abort', revoke)
     closed.removeEventListener('abort', disconnect)
     canceled.abort()
     void source.return(undefined).catch((cause: unknown) => {
@@ -168,8 +171,8 @@ export function processResponse(
       finish()
     },
   })
-  if (lease.stopped.aborted) revoke()
-  else lease.stopped.addEventListener('abort', revoke, { once: true })
+  if (sandbox.stopped.aborted) revoke()
+  else sandbox.stopped.addEventListener('abort', revoke, { once: true })
   if (closed.aborted) disconnect()
   else closed.addEventListener('abort', disconnect, { once: true })
   return reply.type(constants.CONNECT_STREAM).send(body)
