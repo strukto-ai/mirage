@@ -17,12 +17,15 @@ import { currentCaller, bindCaller, setMountGate } from '../../../context/sessio
 import { eacces, enoent } from '../../../errors/fs.ts'
 import { GlobLimitError } from '../../../errors/types.ts'
 import { yieldBytes } from '../../../io/stream.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult, materialize, OpReport } from '../../../io/types.ts'
+import { RecentChanges } from '../../../mount/changes.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { BatchedRAM, HeldRAM, readers } from '../../../test-utils.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
+import { ManualClock } from '../../../utils/clock.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { type HeldFile, ReadBatch } from '../../../workspace/dispatcher/read_batch.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { MountRow } from '../../../workspace/types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
@@ -33,6 +36,7 @@ import {
   dirAwareStat,
   dirAwareStream,
   fileSize,
+  ReadAhead,
   resolveOrEmpty,
   withReading,
 } from './files.ts'
@@ -403,6 +407,47 @@ it('reads each file once on a walk back in a parent directory', async () => {
   const read = [...vfs.reads, ...vfs.batches.flat()]
   expect(new Set(read).size).toBe(read.length)
   expect(read).toHaveLength(11)
+})
+
+// Twin of test_a_read_passing_a_report_is_left_to_the_dispatcher: the read of
+// b lands on a batch that holds it, but it passes a report, which only the
+// dispatcher stamps, so the dispatcher reads b; c, read without one, is
+// answered from the batch.
+it('leaves a read passing a report to the dispatcher', async () => {
+  const changes = new RecentChanges(new ManualClock(), 1)
+  const reads: [string, OpReport | undefined][] = []
+  const inner: DispatchFn = (name, p, _args, kwargs = {}, report) => {
+    if (name === 'read_many') {
+      const held = new Map<string, HeldFile>()
+      if (kwargs.hold === true) {
+        for (const spec of [p, ...(kwargs.paths as PathSpec[])]) {
+          held.set(spec.virtual, { followed: spec.virtual, data: ENC.encode('held') })
+        }
+      }
+      const batch = new ReadBatch({ holds: true, held, changes, count: changes.count })
+      return Promise.resolve([batch, new IOResult()])
+    }
+    report?.served()
+    reads.push([p.virtual, report])
+    return Promise.resolve([ENC.encode('read'), new IOResult()])
+  }
+  const [a, b, c] = ['a', 'b', 'c'].map((name) => at(`/r/${name}`)) as [
+    PathSpec,
+    PathSpec,
+    PathSpec,
+  ]
+  const ahead = new ReadAhead(inner, [a, b, c])
+  const report = new OpReport()
+  const text = async (answer: Promise<[unknown, IOResult]>): Promise<string> =>
+    DEC.decode((await answer)[0] as Uint8Array)
+  expect(await text(ahead.dispatch('read', a))).toBe('read')
+  expect(await text(ahead.dispatch('read', b, [], {}, report))).toBe('read')
+  expect(await text(ahead.dispatch('read', c))).toBe('held')
+  expect(reads).toEqual([
+    ['/r/a', undefined],
+    ['/r/b', report],
+  ])
+  expect(report.completed).toBe(true)
 })
 
 // A RAM mount noting each folder its tree read is asked for. Twin of

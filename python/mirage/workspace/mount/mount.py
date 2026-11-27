@@ -2946,9 +2946,10 @@ class MountEntry:
     ) -> dict[str, bytes]:
         """The VFS's batch read, handed what is at each path and at its
         folder as the stored listings name them, where it takes them; a
-        VFS with no batch read has each file read as its streamed read
-        reads it (``_answer``), and one longer than ``limit`` or one that
-        fails is left out. Either way the index is observed once.
+        VFS with no batch read has each file read as its own whole read
+        reads it (``_read_each``), and one longer than ``limit``, one that
+        does not fit in what is left, or one that fails is left out.
+        Either way the index is observed once.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
@@ -2980,25 +2981,37 @@ class MountEntry:
     async def _read_each(
         self, scopes: list[PathSpec], limit: int
     ) -> dict[str, bytes]:
-        """Each file's whole bytes as its streamed read answers them, by
-        virtual path; one longer than ``limit`` bytes, or one whose read
-        fails, is left out for its own read to meet.
+        """Each file's whole bytes as its own whole read answers them, by
+        virtual path, which must fit in what the workspace's
+        ``max_memory`` has left as they must there (``_collected``); one
+        longer than ``limit`` bytes, one that does not fit, or one whose
+        read fails, is left out for its own read to meet.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
             limit (int): the most bytes worth holding for one file.
         """
+        counted = isinstance(self.vfs, RAMVFS)
         read: dict[str, bytes] = {}
         for scope in scopes:
             parts: list[bytes] = []
             size = 0
             source: AsyncIterator[bytes] | None = None
             try:
-                source = _as_stream(await self._answer(self.index, scope))
+                answer = await self._answer(self.index, scope)
+                found = await answer if inspect.isawaitable(answer) else answer
+                if isinstance(found, bytes):
+                    if len(found) <= limit:
+                        if not counted:
+                            check_memory(len(found))
+                        read[scope.virtual] = found
+                    continue
+                source = _as_stream(found)
                 async for chunk in source:
                     size += len(chunk)
                     if size > limit:
                         break
+                    check_memory(size)
                     parts.append(chunk)
                 else:
                     read[scope.virtual] = b"".join(parts)

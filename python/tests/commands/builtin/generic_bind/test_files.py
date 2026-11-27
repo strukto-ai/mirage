@@ -21,6 +21,7 @@ import pytest
 
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
+    ReadAhead,
     Reading,
     command_files,
     dir_aware_stat,
@@ -34,10 +35,13 @@ from mirage.context import reset_caller, set_mount_gate
 from mirage.context import session_context as caller
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
-from mirage.io.types import materialize
+from mirage.io.types import OpReport, materialize
+from mirage.mount.changes import RecentChanges
 from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.dispatcher.read_batch import HeldFile, ReadBatch
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.readers import readers
@@ -374,6 +378,42 @@ async def test_a_walk_back_in_a_parent_directory_reads_each_file_once():
     read = vfs.reads + [p for batch in vfs.batches for p in batch]
     assert sorted(read) == sorted(set(read))
     assert len(read) == 11
+
+
+@pytest.mark.asyncio
+async def test_a_read_passing_a_report_is_left_to_the_dispatcher():
+    # The read of b lands on a batch that holds it, but it passes a report,
+    # which only the dispatcher stamps, so the dispatcher reads b; c, read
+    # without one, is answered from the batch.
+    changes = RecentChanges(ManualClock(), 1)
+    reads: list[tuple[str, OpReport | None]] = []
+
+    async def inner(
+        name: str, path: PathSpec, **options: Any
+    ) -> tuple[Any, IOResult]:
+        if name == "read_many":
+            held: dict[str, HeldFile] = {}
+            if options["hold"]:
+                for spec in [path, *options["paths"]]:
+                    held[spec.virtual] = HeldFile(spec.virtual, b"held")
+            batch = ReadBatch(
+                holds=True, held=held, changes=changes, count=changes.count
+            )
+            return batch, IOResult()
+        report = options.get("report")
+        if report is not None:
+            report.served()
+        reads.append((path.virtual, report))
+        return b"read", IOResult()
+
+    a, b, c = (_path(f"/r/{name}") for name in "abc")
+    ahead = ReadAhead(inner, [a, b, c])
+    report = OpReport()
+    assert (await ahead.dispatch("read", a))[0] == b"read"
+    assert (await ahead.dispatch("read", b, report=report))[0] == b"read"
+    assert (await ahead.dispatch("read", c))[0] == b"held"
+    assert reads == [("/r/a", None), ("/r/b", report)]
+    assert report.completed
 
 
 @pytest.mark.asyncio

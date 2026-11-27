@@ -177,7 +177,8 @@ const READ_AHEAD = 8
 const READ_AHEAD_HELD = 64
 
 // The options of a read a held file answers: the whole stored bytes, whether
-// streamed or not.
+// streamed or not. A read that passes a report is left to the dispatcher,
+// which stamps it.
 const HELD_OPTIONS: ReadonlySet<string> = new Set(['stream', 'filetype', 'offset', 'size'])
 
 // How many of a command's latest listings its reads are matched against.
@@ -304,7 +305,8 @@ export class ReadAhead {
     ) {
       const held = await this.warmed(
         path,
-        Object.keys(asked).every((key) => HELD_OPTIONS.has(key)) &&
+        report === undefined &&
+          Object.keys(asked).every((key) => HELD_OPTIONS.has(key)) &&
           (asked.filetype ?? null) === null,
       )
       if (held !== null) return [held, new IOResult()]

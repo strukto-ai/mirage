@@ -898,3 +898,36 @@ async def test_a_batch_read_without_one_on_the_vfs_reads_each_file():
     assert not vfs.supports("read_many")
     read = await mount.read_many(["/d/a", "/d/big", "/d/bad", "/d/e"], 8)
     assert read == {"/d/a": b"a\n", "/d/e": b""}
+
+
+class _Streamed(BaseVFS):
+    """Answers a whole read as a stream, 16 bytes in four chunks."""
+
+    name = "streamed"
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        for _ in range(4):
+            yield b"x" * 4
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
+    # Each file a batch reads must fit in what the workspace has left, as
+    # its own whole read must, so that read meets the refusal; what a RAM
+    # store holds is already counted.
+    ram = RAMVFS()
+    ram._store.files["/f"] = b"x" * 16
+    budget = MemoryBudget(8, lambda: 0)
+    built = MountEntry("/b/", _Built())
+    streamed = MountEntry("/s/", _Streamed())
+    stored = MountEntry("/r/", ram)
+    assert await run_with_memory(budget, built.read_many(["/b/f"], 64)) == {}
+    assert (
+        await run_with_memory(budget, streamed.read_many(["/s/f"], 64)) == {}
+    )
+    assert await run_with_memory(budget, stored.read_many(["/r/f"], 64)) == {
+        "/r/f": b"x" * 16
+    }
+    assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}

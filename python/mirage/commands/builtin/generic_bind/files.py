@@ -224,7 +224,8 @@ READ_AHEAD = 8
 READ_AHEAD_HELD = 64
 
 # The options of a read a held file answers: the whole stored bytes,
-# whether streamed or not.
+# whether streamed or not. A read that passes a report is left to the
+# dispatcher, which stamps it.
 _HELD_OPTIONS = frozenset({"stream", "filetype", "offset", "size"})
 
 # How many of a command's latest listings its reads are matched against.
