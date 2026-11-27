@@ -17,7 +17,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
-import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { serve, type JsonValue } from '../../../tests/fixtures/kit_fake.ts'
 import { GitHubRepo, SEARCH, blobSha } from '../../../tests/core/github/repo.ts'
 import type { GitHubTransport } from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
@@ -64,7 +64,7 @@ async function asked(): Promise<string[]> {
 
 // A code search answer naming `paths` in the mounted repository; a truncated
 // one counts a row more than it carries.
-function found(paths: string[], truncated: boolean): Record<string, unknown> {
+function found(paths: string[], truncated: boolean): JsonValue {
   return {
     total_count: paths.length + (truncated ? 1 : 0),
     incomplete_results: false,
@@ -121,13 +121,13 @@ describe('filesContaining', () => {
 // each case needs: the fake only answers rows of its own repositories, each
 // counted.
 describe('searchCode', () => {
-  type Item = Record<string, unknown>
+  type Item = Record<string, JsonValue>
 
-  function item(path: string, fullName: unknown): Item {
+  function item(path: string, fullName: JsonValue): Item {
     return { path, sha: path, repository: { full_name: fullName } }
   }
 
-  function body(items: Item[], total?: unknown): Record<string, unknown> {
+  function body(items: Item[], total?: JsonValue): JsonValue {
     return { total_count: total ?? items.length, incomplete_results: false, items }
   }
 
@@ -185,7 +185,7 @@ describe('searchCode', () => {
     expect(out.results).toEqual([])
   })
 
-  it.each<[string, Record<string, unknown>, boolean]>([
+  it.each<[string, Record<string, JsonValue>, boolean]>([
     ['a count equal to the rows', { total_count: 1, incomplete_results: false }, false],
     ['a count below the rows', { total_count: 0, incomplete_results: false }, false],
     ['a count above the rows', { total_count: 2, incomplete_results: false }, true],
