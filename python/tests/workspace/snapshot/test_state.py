@@ -1858,6 +1858,21 @@ async def test_a_restore_in_place_keeps_what_the_target_cache_holds(
 
 
 @pytest.mark.asyncio
+async def test_a_restore_in_place_drops_a_copy_it_cannot_replace(track):
+    # The saved entry does not fit the target, so the target's own older
+    # copy of that key goes too: the restore leaves a miss, never the bytes
+    # the snapshot replaced.
+    source = track(Workspace({"/d": RAMVFS()}, cache=CacheConfig(limit="1MB")))
+    await source.cache.set("a", b"x" * 9)
+    state = await to_state_dict(source)
+    target = track(Workspace({"/d": RAMVFS()}, cache=CacheConfig(limit=8)))
+    await target.cache.set("a", b"old")
+    await apply_state_dict(target, state)
+    assert await target.cache.get("a") is None
+    assert target.cache.cache_size == 0
+
+
+@pytest.mark.asyncio
 async def test_a_rebuilt_workspace_keeps_its_body_limit():
     ws = Workspace({"/d": RAMVFS()}, max_memory=None, max_body_bytes="2MB")
     try:

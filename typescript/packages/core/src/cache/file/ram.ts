@@ -78,11 +78,12 @@ export class RAMFileCacheStore extends RAMVFS implements FileCacheMixin {
 
   /**
    * Keep an entry as it was saved, as a snapshot restores one, and drop the
-   * oldest past the limit. A cache with no room keeps none.
+   * oldest past the limit. A cache with no room keeps none, and one an entry
+   * does not fit keeps no older copy of its key.
    */
   loadEntry(key: string, data: Uint8Array, entry: CacheEntry): void {
-    if (this.limit === 0 || entry.size > this.limit) return
     this.dropEntry(key)
+    if (this.limit === 0 || entry.size > this.limit) return
     this.store.files.set(key, data)
     this.entries.set(key, entry)
     this.size += entry.size

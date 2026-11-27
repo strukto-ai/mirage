@@ -79,6 +79,24 @@ describe('a cache entry restored from a snapshot', () => {
     }
   })
 
+  it('drops a copy it cannot replace', async () => {
+    // The saved entry does not fit the target, so the target's own older copy
+    // of that key goes too: the restore leaves a miss, never the bytes the
+    // snapshot replaced.
+    const source = new Workspace({ '/d/': new RAMVFS() }, { cache: { limit: '1MB' } })
+    const target = new Workspace({ '/d/': new RAMVFS() }, { cache: { limit: 8 } })
+    try {
+      await source.cache.set('a', ENC.encode('x'.repeat(9)))
+      await target.cache.set('a', ENC.encode('old'))
+      await applyStateDict(target, await toStateDict(source))
+      expect(await target.cache.get('a')).toBeNull()
+      expect(target.cache.cacheSize).toBe(0)
+    } finally {
+      await source.close()
+      await target.close()
+    }
+  })
+
   it('keeps a real token through the round trip', async () => {
     // The other half of the fold: a token that means something must
     // survive, or the fold would be indistinguishable from dropping

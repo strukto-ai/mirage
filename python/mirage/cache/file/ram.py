@@ -236,16 +236,17 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
 
     def load_entry(self, key: str, data: bytes, entry: CacheEntry) -> None:
         """Keep an entry as it was saved, as a snapshot restores one, and
-        drop the oldest past the limit. A cache with no room keeps none.
+        drop the oldest past the limit. A cache with no room keeps none,
+        and one an entry does not fit keeps no older copy of its key.
 
         Args:
             key (str): the cache key.
             data (bytes): the saved bytes.
             entry (CacheEntry): the saved entry.
         """
+        self._drop_entry(key)
         if self._cache_limit == 0 or entry.size > self._cache_limit:
             return
-        self._drop_entry(key)
         self._entries[key] = entry
         self._store.files[key] = data
         self._cache_size += entry.size
