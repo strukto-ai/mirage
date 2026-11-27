@@ -191,18 +191,11 @@ export function touched(ino: InoRef, [seconds, nanoseconds]: Stamp): SqlStatemen
   }
 }
 
-/** Set the inode's size, and its mtime to `stamp`. */
-export function resized(ino: InoRef, size: number, [seconds, nanoseconds]: Stamp): SqlStatement {
-  return {
-    sql: `UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ? WHERE ino = ${ino.sql}`,
-    params: [size, seconds, nanoseconds, ...ino.params],
-  }
-}
-
 /**
- * `resized`, landing only on the inode as `node` read it: a size or mtime
- * another writer changed since leaves the size NULL, which its column
- * refuses, so the batch fails whole and the caller reads the file again.
+ * Set the inode's size, and its mtime to `stamp`, landing only on the inode as
+ * `node` read it: a size or mtime another writer changed since leaves the size
+ * NULL, which its column refuses, so the batch fails whole and the caller reads
+ * the file again.
  */
 export function resizedFrom(
   node: Inode,

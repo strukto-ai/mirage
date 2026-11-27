@@ -203,21 +203,11 @@ def touched(ino: InoRef, stamp: Stamp) -> SqlStatement:
     )
 
 
-def resized(ino: InoRef, size: int, stamp: Stamp) -> SqlStatement:
-    """Set the inode's size, and its mtime to ``stamp``."""
-    seconds, nanoseconds = stamp
-    return SqlStatement(
-        "UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ?"
-        f" WHERE ino = {ino.sql}",
-        (size, seconds, nanoseconds, *ino.params),
-    )
-
-
 def resized_from(node: Inode, size: int, stamp: Stamp) -> SqlStatement:
-    """``resized``, landing only on the inode as ``node`` read it: a size
-    or mtime another writer changed since leaves the size NULL, which its
-    column refuses, so the batch fails whole and the caller reads the file
-    again."""
+    """Set the inode's size, and its mtime to ``stamp``, landing only on
+    the inode as ``node`` read it: a size or mtime another writer changed
+    since leaves the size NULL, which its column refuses, so the batch
+    fails whole and the caller reads the file again."""
     seconds, nanoseconds = stamp
     return SqlStatement(
         "UPDATE fs_inode SET size = CASE WHEN size = ? AND mtime = ?"
