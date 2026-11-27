@@ -23,7 +23,7 @@ import {
 
 /**
  * The sandbox owner when the auth mode names no account. An E2B sandbox
- * always has an owner; the server's workspaces keep null for it.
+ * always has an owner; without accounts the server's workspaces keep null.
  */
 const DEFAULT_OWNER = 'default'
 
@@ -105,7 +105,7 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
 
   /** The server serves only the base template, which the routes check. */
   async start(owner: string): Promise<string> {
-    return (await this.createWorkspace(owner === DEFAULT_OWNER ? null : owner)).id
+    return (await this.createWorkspace(this.registry.accountsRequired ? owner : null)).id
   }
 
   put(record: SandboxRecord): Promise<void> {
