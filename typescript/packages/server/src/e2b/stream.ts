@@ -12,14 +12,6 @@ import { encodeMessage, endStream, type StartCommand } from './connect.ts'
 import * as constants from './constants.ts'
 import type { LiveProcess, Sandbox } from './sandbox.ts'
 
-/**
- * What a host sends for a command's output stream: the web stream itself, or
- * a Node stream around it on the daemon. `stalled` aborts when the command
- * outlived its deadline and the client stopped reading, so the host closes
- * the response.
- */
-export type CommandTransport = (body: ReadableStream<Uint8Array>, stalled: AbortSignal) => unknown
-
 export function remainingSeconds(deadline: number | null): number | null {
   return deadline === null ? null : Math.max(0, deadline - performance.now()) / 1000
 }
@@ -31,7 +23,6 @@ export function processResponse(
   pid: number,
   closed: AbortSignal,
   reply: RouteReply,
-  transport: CommandTransport,
 ): RouteReply {
   const canceled = new AbortController()
   const connection = AbortSignal.any([closed, canceled.signal])
@@ -139,14 +130,12 @@ export function processResponse(
       console.debug('sandbox command events closed', cause)
     })
   }
-  const stalled = new AbortController()
   let stall = (): void => undefined
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       stall = () => {
         if (!open) return
         const error = new DOMException('command stream stalled', 'AbortError')
-        stalled.abort(error)
         controller.error(error)
         finish(error)
       }
@@ -174,5 +163,5 @@ export function processResponse(
   })
   if (lease.stopped.aborted) revoke()
   else lease.stopped.addEventListener('abort', revoke, { once: true })
-  return reply.type(constants.CONNECT_STREAM).send(transport(body, stalled.signal))
+  return reply.type(constants.CONNECT_STREAM).send(body)
 }

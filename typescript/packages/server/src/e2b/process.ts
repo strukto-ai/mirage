@@ -6,11 +6,11 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { HttpError } from '../errors.ts'
 import { MAX_REQUEST_PART } from '../multipart.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
-import { closeUnreadBody, readBody, readJsonBody, unaryContentType } from './body.ts'
+import { readBody, readJsonBody, unaryContentType } from './body.ts'
 import { decodeStart, endStream, type StartCommand } from './connect.ts'
 import * as constants from './constants.ts'
 import { InvalidConnectRequest, UnsupportedProcessOption } from './errors.ts'
-import { type CommandTransport, processResponse, remainingSeconds } from './stream.ts'
+import { processResponse, remainingSeconds } from './stream.ts'
 import type { Sandbox } from './sandbox.ts'
 
 const PROCESS_PATHS = new Set([
@@ -128,17 +128,11 @@ async function control(
   return reply.send({})
 }
 
-/** How the data routes reach the sandbox a request runs against. */
-export interface DataAccess {
-  /** The sandbox `request` names, or throw the refusal the daemon answers. */
-  sandbox(request: RouteRequest): Sandbox
-  /** Whether the host is shutting down and starts no new command. */
-  draining(): boolean
-  readonly transport: CommandTransport
-}
+/** How a data route reaches the sandbox its request runs against. */
+export type SandboxOf = (request: RouteRequest) => Sandbox
 
 /** The command stream: run one command and stream its output. */
-export function registerStart(app: RouteApp, access: DataAccess): void {
+export function registerStart(app: RouteApp, sandboxOf: SandboxOf): void {
   let nextPid = 0
   app.post(constants.START, { rawBody: true }, async (req, reply) => {
     const uploadDeadline = new AbortController()
@@ -147,10 +141,9 @@ export function registerStart(app: RouteApp, access: DataAccess): void {
     }
     let disarm: (() => void) | undefined
     try {
-      const lease = access.sandbox(req)
+      const lease = sandboxOf(req)
       const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
       if (contentType !== constants.CONNECT_STREAM) {
-        closeUnreadBody(req, reply)
         return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
       }
       const deadline = requestDeadline(req)
@@ -166,14 +159,11 @@ export function registerStart(app: RouteApp, access: DataAccess): void {
           .type(constants.CONNECT_STREAM)
           .send(endStream('deadline_exceeded', constants.DEADLINE_MESSAGE))
       }
-      access.sandbox(req)
-      if (access.draining()) throw new HttpError('shutting_down', 'server is shutting down')
       do {
         nextPid = (nextPid % 0xffffffff) + 1
       } while (lease.processes.has(nextPid))
-      return processResponse(lease, command, deadline, nextPid, req.closed, reply, access.transport)
+      return processResponse(lease, command, deadline, nextPid, req.closed, reply)
     } catch (error) {
-      closeUnreadBody(req, reply)
       if (uploadDeadline.signal.aborted && error === uploadDeadline.signal.reason) {
         return reply
           .type(constants.CONNECT_STREAM)
@@ -194,7 +184,7 @@ export function registerStart(app: RouteApp, access: DataAccess): void {
  * List, send input, close stdin and send signal: the commands a sandbox
  * still runs, which only a host that keeps them past one request can reach.
  */
-export function registerControl(app: RouteApp, access: DataAccess): void {
+export function registerControl(app: RouteApp, sandboxOf: SandboxOf): void {
   for (const method of constants.CONTROL_METHODS) {
     app.post(constants.PROCESS_PREFIX + method, { rawBody: true }, async (req, reply) => {
       const deadlineSignal = new AbortController()
@@ -203,9 +193,8 @@ export function registerControl(app: RouteApp, access: DataAccess): void {
       }
       let disarm: (() => void) | undefined
       try {
-        const lease = access.sandbox(req)
+        const lease = sandboxOf(req)
         if (unaryContentType(req, constants.CONNECT_STREAM) !== 'application/json') {
-          closeUnreadBody(req, reply)
           return failure(reply, 415, 'invalid_argument', 'expected Connect JSON')
         }
         const deadline = requestDeadline(req)
@@ -220,7 +209,6 @@ export function registerControl(app: RouteApp, access: DataAccess): void {
         signal.throwIfAborted()
         return await control(lease, method, body, reply, signal)
       } catch (error) {
-        closeUnreadBody(req, reply)
         if (deadlineSignal.signal.aborted) {
           return failure(reply, 504, 'deadline_exceeded', constants.DEADLINE_MESSAGE)
         }

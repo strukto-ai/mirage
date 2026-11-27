@@ -1,9 +1,16 @@
 import { Readable } from 'node:stream'
-import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
+import type { IncomingMessage } from 'node:http'
+import type { FastifyReply, FastifyRequest } from 'fastify'
 import { HttpError } from '../errors.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import type { RouteRequest } from '../routes.ts'
-import { isDataRequest, isLifecycleRequest } from '../routers/e2b.ts'
+import {
+  checkSandboxAccess,
+  dataRoutes,
+  isDataRequest,
+  isLifecycleRequest,
+} from '../routers/e2b.ts'
+import { isProcessStart } from './process.ts'
 import { SandboxNotRunning } from './errors.ts'
 import {
   type AccessHeaders,
@@ -165,7 +172,7 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
     return this.registry.has(workspaceId) ? this.registry.get(workspaceId) : null
   }
 
-  private active(id: string): SandboxEntry | null {
+  active(id: string): SandboxEntry | null {
     const lease = this.leases.get(id)
     if (lease === undefined) return null
     if (!this.isRegistered(lease)) {
@@ -226,11 +233,98 @@ export class MemoryLifecycleBackend implements LifecycleBackend {
   }
 }
 
-export function nodeCommandStream(
-  body: ReadableStream<Uint8Array>,
-  stalled: AbortSignal,
-): Readable {
-  const stream = Readable.fromWeb(body as NodeReadableStream<Uint8Array>)
-  stalled.addEventListener('abort', () => stream.destroy(), { once: true })
+/** A request body as a web stream that leaves the socket open when it is dropped unread. */
+function bodyStream(raw: IncomingMessage): ReadableStream<Uint8Array> {
+  const source = raw.iterator({ destroyOnReturn: false }) as AsyncIterator<Uint8Array>
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        const next = await source.next()
+        if (next.done === true) controller.close()
+        else controller.enqueue(next.value)
+      },
+      async cancel() {
+        await source.return?.()
+      },
+    },
+    { highWaterMark: 0 },
+  )
+}
+
+/** A web body as a Node stream that closes, without an error, when the body fails. */
+function nodeStream(body: ReadableStream<Uint8Array>): Readable {
+  const reader = body.getReader()
+  const stream = new Readable({
+    read() {
+      reader.read().then(
+        (next) => this.push(next.done ? null : next.value),
+        () => this.destroy(),
+      )
+    },
+    destroy(_error, done) {
+      void reader.cancel().catch(() => undefined)
+      done(null)
+    },
+  })
+  reader.closed.catch(() => stream.destroy())
   return stream
+}
+
+function webRequest(req: FastifyRequest): Request {
+  const headers = new Headers()
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (value === undefined) continue
+    for (const item of Array.isArray(value) ? value : [value]) headers.append(name, item)
+  }
+  const bodied = req.method !== 'GET' && req.method !== 'HEAD'
+  return new Request(`${req.protocol}://${req.host}${req.url}`, {
+    method: req.method,
+    headers,
+    signal: req.closed,
+    ...(bodied ? { body: bodyStream(req.raw), duplex: 'half' } : {}),
+  } as RequestInit)
+}
+
+/**
+ * Answer a Fastify request through the web handlers every other host calls:
+ * the lifecycle routes as the request's account, the data routes against
+ * the sandbox its headers name.
+ */
+export function webForwarder(deps: {
+  sandboxes: MemoryLifecycleBackend
+  lifecycle: (request: Request, owner: string) => Promise<Response>
+  ownerOf: (request: FastifyRequest) => string
+  draining: () => boolean
+}): (req: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply> {
+  return async (req, reply) => {
+    const path = req.routeOptions.url ?? ''
+    const request = webRequest(req)
+    const unread = (): void => {
+      if (!req.raw.readableEnded) reply.header('connection', 'close')
+    }
+    let response: Response
+    if (isLifecycleRequest(req.method, path)) {
+      response = await deps.lifecycle(request, deps.ownerOf(req))
+    } else {
+      const id = sandboxIdOf(req.headers)
+      const entry = id === null ? null : deps.sandboxes.active(id)
+      const refused = checkSandboxAccess(request, entry?.record ?? null)
+      if (refused !== null) {
+        response = refused
+      } else if (entry === null) {
+        throw new SandboxNotRunning()
+      } else if (deps.draining() && isProcessStart(req.method, path)) {
+        unread()
+        throw new HttpError('shutting_down', 'server is shutting down')
+      } else {
+        response = await dataRoutes(request, entry.sandbox)
+      }
+    }
+    unread()
+    void reply.code(response.status)
+    response.headers.forEach((value, name) => {
+      void reply.header(name, value)
+    })
+    return reply.send(response.body === null ? undefined : nodeStream(response.body))
+  }
 }

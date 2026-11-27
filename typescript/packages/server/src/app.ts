@@ -87,20 +87,18 @@ import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
 import { createSandboxWorkspace, isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_PORT } from './env.ts'
-import { CONNECT_STREAM } from './e2b/constants.ts'
 import {
   MemoryLifecycleBackend,
-  nodeCommandStream,
   sandboxAccount,
   sandboxOwner,
   sandboxWorkspace,
+  webForwarder,
 } from './e2b/node.ts'
 import {
-  acceptsRawBody,
-  type DataAccess,
   errorBody,
   isLifecycleRequest,
-  router as registerE2BRoutes,
+  lifecycleRoutes,
+  ROUTES as E2B_ROUTES,
 } from './routers/e2b.ts'
 
 export interface BuildAppOptions {
@@ -480,33 +478,20 @@ export function buildApp(options: BuildAppOptions = {}) {
       (request) => sandboxAccount(sandboxes, request.headers),
     )
     registerRateLimits(e2b, rateLimitBuckets, true, e2bError, workspaceOf)
-    e2b.removeContentTypeParser(RAW_BODIES)
-    for (const media of [RAW_BODIES, CONNECT_STREAM]) {
-      e2b.addContentTypeParser(media, (request, _payload, parsed) => {
-        const contentType =
-          request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-        if (acceptsRawBody(request.method, request.routeOptions.url ?? '', contentType)) {
-          parsed(null)
-        } else {
-          parsed(
-            new HttpError('invalid_request', 'expected JSON on a unary E2B route', {
-              headers: { connection: 'close' },
-            }),
-          )
-        }
-      })
-    }
-    const access: DataAccess = {
-      sandbox: (request) => sandboxes.requireAccess(request.headers).sandbox,
-      draining: () => registry.draining,
-      transport: nodeCommandStream,
-    }
-    registerE2BRoutes(
-      fastifyRoutes(e2b),
+    const forward = webForwarder({
       sandboxes,
-      (request) => sandboxOwner(request.account),
-      access,
-    )
+      lifecycle: lifecycleRoutes(sandboxes),
+      ownerOf: (request) => sandboxOwner(request.account),
+      draining: () => registry.draining,
+    })
+    void e2b.register((scope, _opts, done) => {
+      scope.removeAllContentTypeParsers()
+      scope.addContentTypeParser('*', (_req, _payload, parsed) => {
+        parsed(null)
+      })
+      for (const { method, url } of E2B_ROUTES) scope.route({ method, url, handler: forward })
+      done()
+    })
     listenTogether(app, e2b, port)
   }
   const ssh: SSHEndpoint = {

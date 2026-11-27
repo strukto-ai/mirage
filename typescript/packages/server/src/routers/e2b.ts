@@ -7,23 +7,16 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { withCaller } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { RAW_BODIES } from '../constants.ts'
-import {
-  bodyChunks,
-  closeUnreadBody,
-  parseJson,
-  readBody,
-  readJsonBody,
-  unaryContentType,
-} from '../e2b/body.ts'
+import { bodyChunks, parseJson, readBody, readJsonBody, unaryContentType } from '../e2b/body.ts'
 import * as constants from '../e2b/constants.ts'
 import { CONNECT_STATUS, FileError, connectCode, fileError } from '../e2b/errors.ts'
 import { SandboxFiles } from '../e2b/files.ts'
 import {
-  type DataAccess,
   isProcessRequest,
   isProcessStart,
   registerControl,
   registerStart,
+  type SandboxOf,
 } from '../e2b/process.ts'
 import {
   isLive,
@@ -45,7 +38,6 @@ import type {
   RouteRequest,
 } from '../routes.ts'
 
-export type { DataAccess } from '../e2b/process.ts'
 export type { LifecycleBackend, SandboxRecord } from '../e2b/sandbox.ts'
 export { Sandbox }
 
@@ -219,6 +211,11 @@ class E2BRoutes<C> implements RouteApp {
         handler: handler as RouteHandler,
       })
     }
+  }
+
+  /** Every method and path registered, for a host whose framework wants them one by one. */
+  get list(): readonly { method: string; url: string }[] {
+    return this.routes.map(({ method, url }) => ({ method, url }))
   }
 
   contextOf(request: RouteRequest): C {
@@ -413,10 +410,14 @@ function newRecord(
  * answer 501. A sandbox another account owns answers as one that does not
  * exist.
  */
+interface LifecycleContext {
+  readonly backend: LifecycleBackend
+  readonly owner: string
+}
+
 function registerLifecycle(
   app: RouteApp,
-  backend: LifecycleBackend,
-  ownerOf: (request: RouteRequest) => string,
+  contextOf: (request: RouteRequest) => LifecycleContext,
 ): void {
   app.post(constants.CREATE, { bodyLimit: MAX_REQUEST_PART }, async (req, reply) => {
     const input = CreateSandboxRequest.safeParse(req.body === undefined ? {} : req.body)
@@ -432,7 +433,7 @@ function registerLifecycle(
     if (templateID !== constants.BASE_TEMPLATE) {
       throw new HttpError('not_found', 'sandbox template not found')
     }
-    const owner = ownerOf(req)
+    const { backend, owner } = contextOf(req)
     const workspaceId = await backend.start(owner, templateID)
     const record = newRecord(owner, workspaceId, envVars, timeout)
     try {
@@ -457,7 +458,8 @@ function registerLifecycle(
       if (invalid !== undefined) {
         return unsupportedLifecycle(reply, `sandbox connect option is unsupported: ${invalid[0]}`)
       }
-      const record = await ownedSandbox(backend, req.params.id, ownerOf(req))
+      const { backend, owner } = contextOf(req)
+      const record = await ownedSandbox(backend, req.params.id, owner)
       const extended = {
         ...record,
         expiresAtMs: Math.max(record.expiresAtMs, nowMs() + timeout * 1000),
@@ -472,13 +474,15 @@ function registerLifecycle(
     async (req, reply) => {
       const input = SetSandboxTimeoutRequest.safeParse(req.body)
       if (!input.success) throw new HttpError('invalid_request', 'invalid sandbox timeout request')
-      const record = await ownedSandbox(backend, req.params.id, ownerOf(req))
+      const { backend, owner } = contextOf(req)
+      const record = await ownedSandbox(backend, req.params.id, owner)
       await backend.put({ ...record, expiresAtMs: nowMs() + input.data.timeout * 1000 })
       return reply.status(204).send()
     },
   )
   app.delete<{ Params: SandboxParams }>(constants.KILL, async (req, reply) => {
-    const record = await ownedSandbox(backend, req.params.id, ownerOf(req))
+    const { backend, owner } = contextOf(req)
+    const record = await ownedSandbox(backend, req.params.id, owner)
     await backend.stop(record.workspaceId)
     await backend.delete(record.sandboxId)
     return reply.status(204).send()
@@ -493,13 +497,14 @@ function registerLifecycle(
   }
 }
 
+const LIFECYCLE = new E2BRoutes<LifecycleContext>()
+registerLifecycle(LIFECYCLE, (request) => LIFECYCLE.contextOf(request))
+
 /** The lifecycle routes over `backend`, as one web handler that runs as `owner`. */
 export function lifecycleRoutes(
   backend: LifecycleBackend,
 ): (request: Request, owner: string) => Promise<Response> {
-  const routes = new E2BRoutes<string>()
-  registerLifecycle(routes, backend, (request) => routes.contextOf(request))
-  return (request, owner) => routes.fetch(request, owner, owner)
+  return (request, owner) => LIFECYCLE.fetch(request, owner, { backend, owner })
 }
 
 const Path = z.object({ path: z.string() })
@@ -647,12 +652,12 @@ function downloadOf(
  * stream, upload, download and the filesystem calls. Each finds its sandbox
  * through `access`, which refuses a request it does not admit.
  */
-function registerData(app: RouteApp, access: DataAccess): void {
-  registerStart(app, access)
-  registerControl(app, access)
+function registerData(app: RouteApp, sandboxOf: SandboxOf): void {
+  registerStart(app, sandboxOf)
+  registerControl(app, sandboxOf)
   app.get(constants.HEALTH, (req, reply) => {
     try {
-      access.sandbox(req)
+      sandboxOf(req)
     } catch (error) {
       if (!(error instanceof HttpError)) throw error
       if (error.code === 'unauthorized') return reply.status(502).send()
@@ -662,7 +667,7 @@ function registerData(app: RouteApp, access: DataAccess): void {
   })
   app.get(constants.FILES, async (request, reply) => {
     try {
-      const lease = access.sandbox(request)
+      const lease = sandboxOf(request)
       const body = await downloadOf(lease, queryPath(request), request.closed)
       return reply.type('application/octet-stream').header('Cache-Control', 'no-store').send(body)
     } catch (error) {
@@ -672,7 +677,7 @@ function registerData(app: RouteApp, access: DataAccess): void {
 
   app.post(constants.FILES, async (request, reply) => {
     try {
-      const lease = access.sandbox(request)
+      const lease = sandboxOf(request)
       if (Object.keys(request.headers).some((name) => name.startsWith('x-metadata-'))) {
         throw new FileError('unimplemented', 'file metadata is unsupported')
       }
@@ -682,7 +687,6 @@ function registerData(app: RouteApp, access: DataAccess): void {
         await files.write(path, data),
       ])
     } catch (error) {
-      closeUnreadBody(request, reply)
       return failure(reply, error)
     }
   })
@@ -690,7 +694,7 @@ function registerData(app: RouteApp, access: DataAccess): void {
   for (const method of constants.METHODS) {
     app.post(constants.RPC_PREFIX + method, { rawBody: true }, async (request, reply) => {
       try {
-        const lease = access.sandbox(request)
+        const lease = sandboxOf(request)
         unaryContentType(request, constants.CONNECT_STREAM)
         const body = await readJsonBody(
           request,
@@ -727,7 +731,6 @@ function registerData(app: RouteApp, access: DataAccess): void {
           return {}
         })
       } catch (error) {
-        closeUnreadBody(request, reply)
         return failure(reply, error, true)
       }
     })
@@ -735,9 +738,8 @@ function registerData(app: RouteApp, access: DataAccess): void {
 
   for (const url of constants.UNSUPPORTED_RPC_PATHS) {
     app.post(url, (request, reply) => {
-      closeUnreadBody(request, reply)
       try {
-        access.sandbox(request)
+        sandboxOf(request)
       } catch (error) {
         return failure(reply, error, true)
       }
@@ -751,11 +753,7 @@ function registerData(app: RouteApp, access: DataAccess): void {
 }
 
 const WEB = new E2BRoutes<Sandbox>()
-registerData(WEB, {
-  sandbox: (request) => WEB.contextOf(request),
-  draining: () => false,
-  transport: (body) => body,
-})
+registerData(WEB, (request) => WEB.contextOf(request))
 
 /** Answer one data request against `sandbox`, after `checkSandboxAccess` let it through. */
 export const dataRoutes = (request: Request, sandbox: Sandbox): Promise<Response> =>
@@ -784,16 +782,5 @@ export function checkSandboxAccess(
   return health ? new Response(null, { status: 204 }) : null
 }
 
-/**
- * The E2B routes on `app`: lifecycle over `backend` for the account
- * `ownerOf` names, data and process control through `access`.
- */
-export function router(
-  app: RouteApp,
-  backend: LifecycleBackend,
-  ownerOf: (request: RouteRequest) => string,
-  access: DataAccess,
-): void {
-  registerLifecycle(app, backend, ownerOf)
-  registerData(app, access)
-}
+/** Every E2B route, for a host whose framework registers routes one by one. */
+export const ROUTES: readonly { method: string; url: string }[] = [...LIFECYCLE.list, ...WEB.list]

@@ -2,27 +2,14 @@ import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { RAW_BODIES } from '../constants.ts'
 import { HttpError } from '../errors.ts'
-import type { RouteReply, RouteRequest } from '../routes.ts'
-
-/** Node's request stream, told apart from a web body without loading `node:stream`. */
-interface NodeBody extends AsyncIterable<Uint8Array> {
-  readonly readableEnded: boolean
-  iterator(options: { destroyOnReturn: boolean }): AsyncIterator<Uint8Array>
-}
-
-function isNodeBody(raw: AsyncIterable<Uint8Array>): raw is NodeBody {
-  return 'readableEnded' in raw && 'iterator' in raw && typeof raw.iterator === 'function'
-}
+import type { RouteRequest } from '../routes.ts'
 
 export async function* bodyChunks(
   request: RouteRequest,
   signal: AbortSignal,
 ): AsyncGenerator<Uint8Array> {
   signal.throwIfAborted()
-  const { raw } = request
-  const source: AsyncIterator<Uint8Array> = isNodeBody(raw)
-    ? raw.iterator({ destroyOnReturn: false })
-    : raw[Symbol.asyncIterator]()
+  const source = request.raw[Symbol.asyncIterator]()
   try {
     for (;;) {
       const chunk = await abortable(source.next(), signal)
@@ -37,12 +24,6 @@ export async function* bodyChunks(
     void source.return?.().catch((error: unknown) => {
       console.debug('sandbox request body closed', error)
     })
-  }
-}
-
-export function closeUnreadBody(request: RouteRequest, reply: RouteReply): void {
-  if (isNodeBody(request.raw) && !request.raw.readableEnded) {
-    reply.header('connection', 'close')
   }
 }
 
