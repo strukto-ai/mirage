@@ -37,6 +37,29 @@ describe('S3 metadata timestamps', () => {
   })
 })
 
+describe('an S3 listing', () => {
+  it('carries the ETag a HEAD stats', async () => {
+    const etag = '"9a0364b9e99bb480dd25e1f0284c8555"'
+    const conn: S3Conn = {
+      config: { bucket: 'b' } as S3Config,
+      mod: { HeadObjectCommand: Command, ListObjectsV2Command: Command } as unknown as S3Module,
+      send: () =>
+        Promise.resolve({
+          ContentLength: 7,
+          ETag: etag,
+          Contents: [{ Key: 'a.txt', Size: 7, ETag: etag }],
+        }),
+    }
+    const head = await DRIVER.head(conn, 'a.txt')
+    const children = []
+    for await (const child of DRIVER.listChildren(conn, '')) children.push(child)
+    const subtree = []
+    for await (const row of DRIVER.listSubtree(conn, '')) subtree.push(row)
+    expect(children[0]?.fingerprint).toBe(head?.fingerprint)
+    expect(subtree[0]?.fingerprint).toBe(head?.fingerprint)
+  })
+})
+
 function failing(send: (cmd: { input: Record<string, unknown> }) => Promise<never>): S3Conn {
   return {
     config: { bucket: 'b' } as S3Config,

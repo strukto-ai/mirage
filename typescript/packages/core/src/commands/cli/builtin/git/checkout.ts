@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { FileType, PathSpec } from '../../../../types.ts'
+import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
 
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -46,7 +46,13 @@ import {
 } from './errors.ts'
 import { GITLINK_MODE, HEAD } from './constants.ts'
 import { short, subject } from './format.ts'
-import { readIndex, refuseUnresolved, updateIndex, type StagedEntry } from './index_file.ts'
+import {
+  readIndex,
+  refuseUnresolved,
+  updateIndex,
+  withFingerprint,
+  type StagedEntry,
+} from './index_file.ts'
 import {
   blockingAncestor,
   dropGitlink,
@@ -82,7 +88,7 @@ import type { HeadRef, IndexEntry, ReadOnlyRefusal, Track } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, splitMarked, startPoint as lineStart, requireVfs } from './util.ts'
 import { GITIGNORE } from './ignore.ts'
-import { scan, UNTRACKED_ALL } from './worktree.ts'
+import { scan, UNTRACKED_ALL, UNTRACKED_NO, UNTRACKED_NORMAL } from './worktree.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { systemNow } from '../../../../utils/clock.ts'
 
@@ -292,12 +298,19 @@ function lostDirectories(
  * change both branches happen to agree about. Every path the trees do disagree
  * about has already been refused by the caller if anything uncommitted stands on
  * it, so the tree diff is the whole decision here.
+ *
+ * Each file written is statted after, as git does to fill its entry, and the
+ * entry keeps the mount's fingerprint, so the next status and checkout know it
+ * unchanged without reading it back. `refreshed` holds entries the caller's
+ * comparison found unchanged and refreshed, kept where the move leaves the
+ * path's entry as it was.
  */
 export async function switchTo(
   repo: Repo,
   vfs: Files,
   before: ReadonlyMap<string, TreeEntry>,
   after: ReadonlyMap<string, TreeEntry>,
+  refreshed: ReadonlyMap<string, StagedEntry> = new Map(),
 ): Promise<string[]> {
   const changed = written(before, after)
   // Every path git refuses to check out is named before anything is written.
@@ -339,11 +352,15 @@ export async function switchTo(
   // The leading directories, each looked at once for every entry below it,
   // and after the removals above, which change them.
   const dirs = new LeadingDirs()
+  const staged = new Map<string, StagedEntry>(refreshed)
+  const sizes = new Map<string, number>()
   for (const path of [...changed.keys()].sort(compareCodePoints)) {
     const entry = changed.get(path)
     if (entry === undefined) continue
+    const kept = restored(entry.oid, Number.parseInt(entry.mode, 8))
     if (entry.mode === GITLINK_MODE) {
       await keepGitlink(vfs, repo.location.worktree.join(path), dirs)
+      staged.set(path, kept)
       continue
     }
     const blob = await readBlobBytes(repo, entry.oid)
@@ -372,6 +389,31 @@ export async function switchTo(
       standing = null
     }
     await restoreEntry(vfs, where, entry.mode, blob, standing, dirs)
+    sizes.set(path, blob.byteLength)
+  }
+  // A tree nothing was checked out in before (a clone) is walked once for what
+  // was written, as one listing of it costs about what a stat of one file does;
+  // otherwise each file written is statted.
+  const stats = new Map<string, FileStat | null>()
+  if (before.size > 0) {
+    for (const path of sizes.keys()) {
+      stats.set(path, await lstat(vfs, repo.location.worktree.join(path)))
+    }
+  } else {
+    const found = await scan(vfs, repo.location, new Set(sizes.keys()), UNTRACKED_NO)
+    for (const path of sizes.keys()) stats.set(path, found.files.get(path) ?? null)
+  }
+  for (const [path, size] of sizes) {
+    const entry = changed.get(path)
+    if (entry === undefined) continue
+    const kept = restored(entry.oid, Number.parseInt(entry.mode, 8))
+    const info = stats.get(path) ?? null
+    // A file that stats other than what was written is not the blob, so its
+    // entry keeps nothing to trust.
+    staged.set(
+      path,
+      info !== null && info.size === size ? withFingerprint({ ...kept, size }, info) : kept,
+    )
   }
   // The index is git's two-way merge, not a copy of the target tree: only a
   // path the two trees disagree about is decided by the target, and where they
@@ -380,11 +422,8 @@ export async function switchTo(
   // dropped a staged addition, which is in neither tree, and resurrected a
   // staged deletion, which is in both and in no entry, turning both into
   // unstaged changes a later commit would silently omit.
-  const staged = new Map<string, StagedEntry>()
-  for (const [path, entry] of changed) {
-    staged.set(path, restored(entry.oid, Number.parseInt(entry.mode, 8)))
-  }
   const removed = [...before.keys()].filter((path) => !after.has(path))
+  for (const path of removed) staged.delete(path)
   await updateIndex(repo, staged, removed)
   return notes
 }
@@ -610,7 +649,17 @@ async function carryAcross(
       (path) => !before.has(path) && !seen.has(path),
     ),
   )
-  const unstaged = await workChanges(repo, vfs, repo.location.worktree, seen, found)
+  const refreshed = new Map<string, StagedEntry>()
+  const unstaged = await workChanges(
+    repo,
+    vfs,
+    repo.location.worktree,
+    seen,
+    found,
+    null,
+    UNTRACKED_NORMAL,
+    refreshed,
+  )
   // Both kinds of uncommitted change count: an edit in the working tree, and
   // one already staged. Leaving the staged ones out is what silently threw
   // them away. The index column wins where a path has both, which is how git's
@@ -631,7 +680,7 @@ async function carryAcross(
   if (blocked.length > 0 || clobbered.length > 0 || lost.length > 0) {
     throw new CheckoutConflictError(blocked, clobbered, lost)
   }
-  return [carried, await switchTo(repo, vfs, before, after)]
+  return [carried, await switchTo(repo, vfs, before, after, refreshed)]
 }
 
 /**

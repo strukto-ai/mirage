@@ -159,9 +159,7 @@ async def _disk() -> AsyncIterator[Harness]:
             )
 
         settle()
-        mp.setattr(
-            "mirage.core.disk.listing_version.time_ns", lambda: clock["now"]
-        )
+        mp.setattr("mirage.utils.dates.time_ns", lambda: clock["now"])
         scans: list[str] = []
         checks: list[str] = []
         scan = disk_readdir.read_entries

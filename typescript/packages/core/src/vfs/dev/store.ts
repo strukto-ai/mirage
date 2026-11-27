@@ -264,6 +264,9 @@ export class DevStore {
   readonly dirs: Set<string>
   /** Never counted: a capacity refuses `/dev`. Read as RAMStore's. */
   readonly usage: StorageUsage | null = null
+  /** The time the store's last write landed at, in nanoseconds. Read as
+   * RAMStore's. */
+  stamp = 0n
   constructor(
     readonly files = new DevFiles(),
     readonly modified = new Map<string, string>(),

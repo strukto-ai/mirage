@@ -13,15 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CommandKey } from '../cache/index/scope.ts'
+import { stampAfter } from '../utils/dates.ts'
 import { Accessor } from './base.ts'
 import type { RedisStoreLike } from '../vfs/redis/store.ts'
 
 export class RedisAccessor extends Accessor {
   readonly store: RedisStoreLike
   readonly walks = new WeakMap<CommandKey, { base: string; names: string[] | null }>()
+  /** The time this mount's last write landed at, in nanoseconds. */
+  stamp = 0n
 
   constructor(store: RedisStoreLike) {
     super()
     this.store = store
+  }
+
+  /** The time a write lands at, in nanoseconds: now, past the time this
+   * mount gave the write before. */
+  stamped(): bigint {
+    this.stamp = stampAfter(this.stamp)
+    return this.stamp
   }
 }

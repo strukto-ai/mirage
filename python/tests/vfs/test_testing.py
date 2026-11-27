@@ -14,6 +14,7 @@
 
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from types import MappingProxyType
 from unittest.mock import AsyncMock
 
@@ -366,6 +367,13 @@ class CountsListings(RAMVFS):
         return await super().readdir(path)
 
 
+class StuckFingerprint(RAMVFS):
+    """Stats the same fingerprint whatever a file holds."""
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        return replace(await super().stat(path), fingerprint="stuck")
+
+
 class KeepsRenameDst(RAMVFS):
     """Refuses to unlink the rename destination."""
 
@@ -438,6 +446,12 @@ async def test_no_listing_for_ops_that_take_no_rows():
     vfs = CountsListings()
     await check_mutation_contract(vfs, SCRATCH)
     assert vfs.listings == 0
+
+
+@pytest.mark.asyncio
+async def test_a_fingerprint_a_same_size_rewrite_leaves_is_caught():
+    with pytest.raises(AssertionError, match="must move the fingerprint"):
+        await check_mutation_contract(StuckFingerprint(), SCRATCH)
 
 
 @pytest.mark.asyncio

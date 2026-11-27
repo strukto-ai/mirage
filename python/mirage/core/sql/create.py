@@ -36,7 +36,7 @@ async def create(accessor: SqlAccessor, path: PathSpec) -> None:
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
-    now = now_stamp()
+    now = now_stamp(accessor)
     if node is None:
         await accessor.batch(
             make_node(accessor, parent_ref(w), leaf(w), FILE, 0, now)

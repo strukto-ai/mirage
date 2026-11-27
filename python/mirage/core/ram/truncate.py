@@ -23,7 +23,7 @@ from mirage.core.ram.dest import (
 from mirage.errors.fs import einval
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -63,7 +63,7 @@ async def truncate(
             data = b""
         check_capacity(store, path, p, length)
         store.files[p] = data[:length].ljust(length, b"\0")
-    now = now_iso()
+    now = stamp_iso(accessor.stamped())
     store.modified[p] = now
     if made:
         touch_parent(store, p, now)

@@ -49,7 +49,7 @@ async def copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
         raise eisdir(dst)
     if there is not None and there.ino == node.ino:
         return
-    now = now_stamp()
+    now = now_stamp(accessor)
     ino = (
         by_ino(there.ino)
         if there is not None

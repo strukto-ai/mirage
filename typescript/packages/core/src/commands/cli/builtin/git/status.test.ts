@@ -31,6 +31,7 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
 import { Limit, MountMode, PathSpec } from '../../../../types.ts'
 import type { SessionProfile } from '../../../../policy/profile.ts'
+import { ManualClock, runWithSystemClock } from '../../../../utils/clock.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
@@ -390,4 +391,95 @@ describe('a narrow path', () => {
       }
     },
   )
+})
+
+/** A one-commit repository mirrored into RAM at `/w/work`, git installed. */
+async function source(): Promise<Workspace> {
+  const repo = mkdtempSync(join(tmp, 'src-'))
+  roots.push(repo)
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'A',
+    GIT_AUTHOR_EMAIL: 'a@example.com',
+    GIT_COMMITTER_NAME: 'A',
+    GIT_COMMITTER_EMAIL: 'a@example.com',
+  }
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { env })
+  put(repo, 'a.txt', 'one\n')
+  put(repo, 'sub/b.txt', 'two\n')
+  execFileSync('git', ['-C', repo, 'add', '-A'], { env })
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'first'], { env })
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
+  for (const rel of walk(repo)) {
+    const target = `/w/work/${rel}`
+    await ensureDir(ws.vfs, PathSpec.fromStrPath(target).parent)
+    await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
+  }
+  ws.registerCli('git', GIT)
+  return ws
+}
+
+/** The clone's own files a run of the op log read since `start`. */
+function worktreeReads(ws: Workspace, start: number): string[] {
+  return ws.records
+    .slice(start)
+    .filter((r) => r.op === 'read' && r.path.startsWith('/w/dst/'))
+    .filter((r) => !r.path.startsWith('/w/dst/.git/'))
+    .map((r) => r.path)
+}
+
+describe('fingerprints the index keeps', () => {
+  it("spare a clone's status every read and still show an edit", async () => {
+    // A RAM mount stamps every write past the one before, so the clock standing
+    // still (as a Durable Object's does for a whole request) still moves the
+    // fingerprint of a same-size edit made after the clone. Mirrors Python's
+    // test_a_clone_s_status_reads_none_of_its_files_yet_sees_an_edit.
+    const ws = await source()
+    try {
+      const [reads, changed] = await runWithSystemClock(
+        new ManualClock(1_800_000_000),
+        async () => {
+          const cloned = await ws.shell('git clone -q /w/work /w/dst')
+          expect([cloned.exitCode, DEC.decode(cloned.stderr)]).toEqual([0, ''])
+          const start = ws.records.length
+          const clean = await ws.shell('git -C /w/dst status --porcelain')
+          expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+          const seen = worktreeReads(ws, start)
+          const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+          expect(edited.exitCode).toBe(0)
+          const after = await ws.shell('git -C /w/dst status --porcelain')
+          return [seen, DEC.decode(after.stdout)] as const
+        },
+      )
+      expect(reads).toEqual([])
+      expect(changed).toBe(' M a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('are kept by a checkout for a file it had to read', async () => {
+    // touch moves a file's time and so its fingerprint, not its bytes: status
+    // reads it to find it unchanged, and the checkout that reads it too keeps
+    // the new fingerprint in the index it writes. Mirrors Python's
+    // test_a_checkout_keeps_the_fingerprint_of_a_file_it_had_to_read.
+    const ws = await source()
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      expect((await ws.shell('touch /w/dst/a.txt')).exitCode).toBe(0)
+      let start = ws.records.length
+      const status = await ws.shell('git -C /w/dst status --porcelain')
+      expect([status.exitCode, DEC.decode(status.stdout)]).toEqual([0, ''])
+      expect(worktreeReads(ws, start)).toEqual(['/w/dst/a.txt'])
+      const moved = await ws.shell('git -C /w/dst checkout -q --detach')
+      expect([moved.exitCode, DEC.decode(moved.stderr)]).toEqual([0, ''])
+      start = ws.records.length
+      const again = await ws.shell('git -C /w/dst status --porcelain')
+      expect([again.exitCode, DEC.decode(again.stdout)]).toEqual([0, ''])
+      expect(worktreeReads(ws, start)).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
 })

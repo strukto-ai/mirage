@@ -211,6 +211,11 @@
    "typescript_only": {
     "body": "Node watches the raw input stream and closes connections with unread data; Python uses ASGI body and disconnect messages."
    }
+  },
+  "core/disk": {
+   "python_only": {
+    "constants": "The knobs python's streamed disk write paces itself by: its aiofiles writer buffers, so a streamed write flushes on STREAM_FLUSH_SECONDS for a reader to see it, and each write is a hop to a worker thread, so it gathers chunks into STREAM_BATCH_BYTES batches. Node's file handle writes each chunk straight to the file and needs neither. The racy window both disk modules once kept is in utils/constants, where every backend whose fingerprint is a time reads it."
+   }
   }
  }
 }

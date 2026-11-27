@@ -26,7 +26,7 @@ export async function create(accessor: SqlAccessor, path: PathSpec): Promise<voi
   checkDestParents(w, path)
   checkWriteTarget(w, path)
   const node = target(w)
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   if (node === null) {
     await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, 0, now))
   } else {

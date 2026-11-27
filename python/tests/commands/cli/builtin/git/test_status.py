@@ -31,7 +31,9 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.commands.spec.flag_view import FlagView
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.types import Limit, MountMode
+from mirage.utils.clock import ManualClock, run_with_system_clock
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import commit_file
 
@@ -372,3 +374,86 @@ async def test_a_narrow_path_walks_no_other_untracked_directory(
         ws.register_cli("git", GIT)
         result = await ws.shell("git -C /repo " + line)
     assert result.exit_code == 0
+
+
+def _worktree_reads(ws: Workspace, start: int) -> list[str]:
+    return [
+        rec.path
+        for rec in list(ws.vfs.records)[start:]
+        if rec.op == "read"
+        and rec.path.startswith("/w/dst/")
+        and not rec.path.startswith("/w/dst/.git/")
+    ]
+
+
+async def _clone_status_edit(ws: Workspace) -> tuple[list[str], bytes]:
+    cloned = await ws.shell("git clone -q /src/work /w/dst")
+    assert cloned.exit_code == 0, cloned.stderr
+    start = len(ws.vfs.records)
+    clean = await ws.shell("git -C /w/dst status --porcelain")
+    assert (clean.exit_code, clean.stdout) == (0, b"")
+    reads = _worktree_reads(ws, start)
+    edited = await ws.shell("sed -i s/one/ONE/ /w/dst/a.txt")
+    assert edited.exit_code == 0, edited.stderr
+    changed = await ws.shell("git -C /w/dst status --porcelain")
+    return reads, changed.stdout
+
+
+@pytest.mark.asyncio
+async def test_a_clone_s_status_reads_none_of_its_files_yet_sees_an_edit(
+    repo_path: Path,
+):
+    # A RAM mount stamps every write past the one before, so the clock
+    # standing still (as a Durable Object's does for a whole request)
+    # still moves the fingerprint of a same-size edit made after the
+    # clone, and the index's kept fingerprints spare status every read.
+    with Workspace(
+        {
+            "/src/": DiskVFS(root=str(repo_path.parent)),
+            "/w/": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        reads, changed = await run_with_system_clock(
+            ManualClock(1_800_000_000), _clone_status_edit(ws)
+        )
+    assert reads == []
+    assert changed == b" M a.txt\n"
+
+
+async def _touch_then_checkout(ws: Workspace) -> tuple[list[str], list[str]]:
+    cloned = await ws.shell("git clone -q /src/work /w/dst")
+    assert cloned.exit_code == 0, cloned.stderr
+    touched = await ws.shell("touch /w/dst/a.txt")
+    assert touched.exit_code == 0, touched.stderr
+    start = len(ws.vfs.records)
+    status = await ws.shell("git -C /w/dst status --porcelain")
+    assert (status.exit_code, status.stdout) == (0, b"")
+    before = _worktree_reads(ws, start)
+    moved = await ws.shell("git -C /w/dst checkout -q --detach")
+    assert moved.exit_code == 0, moved.stderr
+    start = len(ws.vfs.records)
+    status = await ws.shell("git -C /w/dst status --porcelain")
+    assert (status.exit_code, status.stdout) == (0, b"")
+    return before, _worktree_reads(ws, start)
+
+
+@pytest.mark.asyncio
+async def test_a_checkout_keeps_the_fingerprint_of_a_file_it_had_to_read(
+    repo_path: Path,
+):
+    # touch moves a file's time and so its fingerprint, not its bytes:
+    # status reads it to find it unchanged, and the checkout that reads
+    # it too keeps the new fingerprint in the index it writes.
+    with Workspace(
+        {
+            "/src/": DiskVFS(root=str(repo_path.parent)),
+            "/w/": RAMVFS(),
+        },
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        before, after = await _touch_then_checkout(ws)
+    assert before == ["/w/dst/a.txt"]
+    assert after == []

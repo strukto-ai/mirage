@@ -14,7 +14,7 @@
 
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { checkDestParents, lookupError } from './dest.ts'
 
@@ -26,5 +26,5 @@ export async function copy(accessor: RedisAccessor, src: PathSpec, dst: PathSpec
   const data = await store.getFile(s)
   if (data === null) throw await lookupError(store, src, s)
   await store.setFile(d, data)
-  await store.setModified(d, nowIso())
+  await store.setModified(d, stampIso(accessor.stamped()))
 }

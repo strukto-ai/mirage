@@ -14,7 +14,7 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec } from '../../types.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { activePipe } from '../dev/device.ts'
 import {
@@ -67,7 +67,7 @@ export async function copy(
   const made = !accessor.store.files.has(d)
   checkCapacity(accessor, dst, d, data.byteLength)
   accessor.store.files.set(d, data)
-  const now = nowIso()
+  const now = stampIso(accessor.stamped())
   accessor.store.modified.set(d, now)
   if (made) touchParent(accessor.store, d, now)
 }

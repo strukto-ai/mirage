@@ -82,7 +82,7 @@ async def rm_r(accessor: SqlAccessor, path: PathSpec) -> None:
             )
         )
         inos.append(node.ino)
-        statements.append(touched(by_ino(parent.ino), now_stamp()))
+        statements.append(touched(by_ino(parent.ino), now_stamp(accessor)))
     await accessor.batch([*statements, *drop_inodes(inos)])
     if parent is not None and await accessor.query(
         SQL["has_entry"], (parent.ino, leaf(w))

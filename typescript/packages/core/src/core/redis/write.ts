@@ -19,7 +19,7 @@ import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { checkDestParents, checkWriteTarget } from './dest.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 /**
@@ -49,16 +49,16 @@ export async function write(
     if (!append) await store.setFile(p, whole)
     else if (whole.byteLength > 0 || !(await store.hasFile(p))) await store.appendFile(p, whole)
     else return
-    await store.setModified(p, nowIso())
+    await store.setModified(p, stampIso(accessor.stamped()))
     record(op, path.virtual, VFSName.REDIS, whole.byteLength, timer)
     return
   }
   if (!append) {
     await store.setFile(p, new Uint8Array())
-    await store.setModified(p, nowIso())
+    await store.setModified(p, stampIso(accessor.stamped()))
   } else if (!(await store.hasFile(p))) {
     await store.appendFile(p, new Uint8Array())
-    await store.setModified(p, nowIso())
+    await store.setModified(p, stampIso(accessor.stamped()))
   }
   let size = 0
   // TODO(MIRAGE-33): 1 MiB SETRANGEs, one timestamp each; native pwrite.
@@ -66,7 +66,7 @@ export async function write(
     if (chunk.byteLength === 0) continue
     if (append) await store.appendFile(p, chunk)
     else await store.setFileRange(p, size, chunk)
-    await store.setModified(p, nowIso())
+    await store.setModified(p, stampIso(accessor.stamped()))
     size += chunk.byteLength
   }
   record(op, path.virtual, VFSName.REDIS, size, timer)

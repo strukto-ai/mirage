@@ -19,7 +19,7 @@ import { fsStrerror, isEacces, isEisdir, isEnotdir, isMissingPath } from '../../
 import { AmbiguousArgumentError, UnhashableFileError } from './errors.ts'
 import { entryMode } from './add.ts'
 import { EXECUTABLE_MODE, GITLINK_MODE, REGULAR_MODE, SYMLINK } from './constants.ts'
-import { readIndex } from './index_file.ts'
+import { readIndex, unchanged, withFingerprint, type StagedEntry } from './index_file.ts'
 import { entryBytes } from './io.ts'
 import { visibleEntries } from './pathspec.ts'
 
@@ -325,12 +325,11 @@ function modeDiffers(entry: IndexEntry, info: FileStat): boolean {
  * Whether a working-tree file differs from what the index staged.
  *
  * A size the mount already reported settles most of it for free, since an edit
- * that keeps the byte count is the exception. When the sizes agree the file is
- * read and hashed, because that is the only thing that actually answers the
- * question. git normally skips even that by trusting the stat data it cached
- * (device, inode, mtime to the nanosecond); a mount serves none of those
- * meaningfully, so the cheap answer is not available here and a wrong one is
- * worse than a slow one.
+ * that keeps the byte count is the exception. When the sizes agree, the
+ * fingerprint the entry kept settles it if the mount still stats the same one:
+ * git skips the read the same way, trusting the stat data it cached. Otherwise
+ * the file is read and hashed, because that is the only thing that actually
+ * answers the question.
  *
  * A recorded size of zero is read as "not stated" rather than "empty", because
  * that is what mirage writes for an entry it restored from a tree without
@@ -348,6 +347,7 @@ async function differs(
 ): Promise<boolean> {
   if (modeDiffers(entry, info)) return true
   if (info.size !== null && entry.size !== 0 && info.size !== entry.size) return true
+  if (unchanged(entry, info)) return false
   let data: Uint8Array
   try {
     data = await entryBytes(vfs, worktree.join(path), info)
@@ -426,6 +426,11 @@ async function embeddedChange(
  * without it, or with no repository there (a submodule never checked out), a
  * gitlink reads unchanged, which keeps a branch switch from being refused over
  * a file that was never missing.
+ *
+ * With `refreshed`, a file that had to be read and matched its entry gets an
+ * entry keeping its fingerprint there, as git refreshes a stat it had to look
+ * behind; a caller that writes the index keeps them, so the next comparison
+ * skips the read.
  */
 export async function workChanges(
   repo: Repo,
@@ -435,6 +440,7 @@ export async function workChanges(
   found: WorkTree,
   embedded: Map<string, EmbeddedChange> | null = null,
   mode: string = UNTRACKED_NORMAL,
+  refreshed: Map<string, StagedEntry> | null = null,
 ): Promise<Map<string, string>> {
   const changes = new Map<string, string>()
   for (const [path, entry] of entries) {
@@ -453,6 +459,13 @@ export async function workChanges(
       changes.set(path, TYPE_CHANGED)
     } else if (await differs(repo, vfs, worktree, path, entry, info)) {
       changes.set(path, MODIFIED)
+    } else if (
+      refreshed !== null &&
+      info.fingerprint !== null &&
+      info.fingerprint !== '' &&
+      !unchanged(entry, info)
+    ) {
+      refreshed.set(path, withFingerprint(entry, info))
     }
   }
   return changes

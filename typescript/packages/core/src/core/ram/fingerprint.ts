@@ -12,6 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// A folder changed this recently is not versioned: a timestamp is coarser
-// than the changes it would have to tell apart (git's racy-clean rule).
-export const RACY_WINDOW_NS = 2000000000n
+import type { RAMStore } from '../../vfs/ram/store.ts'
+
+/**
+ * A file's fingerprint: the time its last write landed at, to the nanosecond,
+ * null for a file no write dated.
+ *
+ * Every write lands past the time the store gave the write before
+ * (`RAMStore.stamped`), so a rewrite always moves it, a same-size one in the
+ * same instant included. Mirrors Python's `token_of`.
+ *
+ * @param store the mount's store
+ * @param p the file's normalized key
+ */
+export function tokenOf(store: RAMStore, p: string): string | null {
+  return store.modified.get(p) ?? null
+}

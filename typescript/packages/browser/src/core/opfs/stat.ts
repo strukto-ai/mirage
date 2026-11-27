@@ -16,6 +16,8 @@ import { FileStat, FileType } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { contentTypeForPath } from '@struktoai/mirage-core/utils/filetype'
 import type { OPFSAccessor } from '../../accessor/opfs.ts'
+import { wallNs } from '@struktoai/mirage-core/utils/dates'
+import { tokenOf } from './fingerprint.ts'
 import {
   destError,
   isNotFound,
@@ -51,13 +53,13 @@ export async function stat(accessor: OPFSAccessor, p: PathSpec): Promise<FileSta
   }
   try {
     const fileHandle = await parentDir.getFileHandle(entryName, { create: false })
+    const nowNs = wallNs()
     const file = await fileHandle.getFile()
-    const modified = new Date(file.lastModified).toISOString()
     return new FileStat({
       name,
       size: file.size,
-      modified,
-      fingerprint: modified,
+      modified: new Date(file.lastModified).toISOString(),
+      fingerprint: tokenOf(file, nowNs),
       type: FileType.FILE,
       content: contentTypeForPath(name),
     })

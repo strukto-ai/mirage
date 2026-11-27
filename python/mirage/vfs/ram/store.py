@@ -268,6 +268,9 @@ class RAMStore:
     # When the store was made: the time of a folder no write dated (its
     # root) and of a device it serves.
     made: str = field(default_factory=now_iso)
+    # The time the store's last write landed at, in nanoseconds,
+    # through any mount on it.
+    stamp: int = 0
 
     @property
     def lock(self) -> AbstractContextManager[bool | None]:

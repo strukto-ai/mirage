@@ -34,7 +34,11 @@ from mirage.commands.cli.builtin.git.embedded import (
     embedded_location,
 )
 from mirage.commands.cli.builtin.git.errors import UnhashableFileError
-from mirage.commands.cli.builtin.git.index_file import read_index
+from mirage.commands.cli.builtin.git.index_file import (
+    read_index,
+    unchanged,
+    with_fingerprint,
+)
 from mirage.commands.cli.builtin.git.io import entry_bytes
 from mirage.commands.cli.builtin.git.objects import VfsObjectStore
 from mirage.commands.cli.builtin.git.pathspec import decoded, visible_entries
@@ -364,12 +368,10 @@ async def _differs(
 
     A size the mount already reported settles most of it for free, since
     an edit that keeps the byte count is the exception. When the sizes
-    agree the file is read and hashed, because that is the only thing
-    that actually answers the question. git normally skips even that by
-    trusting the stat data it cached (device, inode, mtime to the
-    nanosecond); a mount serves none of those meaningfully, so the cheap
-    answer is not available here and a wrong one is worse than a slow
-    one.
+    agree, the fingerprint the entry kept settles it if the mount still
+    stats the same one: git skips the read the same way, trusting the
+    stat data it cached. Otherwise the file is read and hashed, because
+    that is the only thing that actually answers the question.
 
     A recorded size of zero is read as "not stated" rather than "empty",
     because that is what mirage writes for an entry it restored from a
@@ -389,6 +391,8 @@ async def _differs(
         return True
     if info.size is not None and entry.size and info.size != entry.size:
         return True
+    if unchanged(entry, info):
+        return False
     try:
         data = await entry_bytes(vfs, worktree.join(path), info)
     except MISS_ERRORS:
@@ -474,6 +478,7 @@ async def work_changes(
     found: WorkTree,
     embedded: dict[str, EmbeddedChange] | None = None,
     mode: str = UNTRACKED_NORMAL,
+    refreshed: dict[bytes, IndexEntry] | None = None,
 ) -> dict[str, str]:
     """Compare the index with the working tree: what is not staged yet.
 
@@ -486,6 +491,11 @@ async def work_changes(
     which keeps a branch switch from being refused over a file that was
     never missing.
 
+    With ``refreshed``, a file that had to be read and matched its entry
+    gets an entry keeping its fingerprint there, as git refreshes a stat
+    it had to look behind; a caller that writes the index keeps them, so
+    the next comparison skips the read.
+
     Args:
         vfs (Files): the session's files.
         worktree (PathSpec): absolute virtual path of the working tree root.
@@ -496,6 +506,8 @@ async def work_changes(
             unchanged.
         mode (str): the untracked mode, which a gitlink's own status takes
             for ``no``.
+        refreshed (dict[bytes, IndexEntry] | None): where to keep the
+            entries of files read and found unchanged; None keeps none.
     """
     changes: dict[str, str] = {}
     for path, entry in entries.items():
@@ -519,6 +531,12 @@ async def work_changes(
             changes[name] = TYPE_CHANGED
         elif await _differs(vfs, worktree, name, entry, found.files[name]):
             changes[name] = MODIFIED
+        elif (
+            refreshed is not None
+            and found.files[name].fingerprint
+            and not unchanged(entry, found.files[name])
+        ):
+            refreshed[path] = with_fingerprint(entry, found.files[name])
     return changes
 
 

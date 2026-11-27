@@ -79,6 +79,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         dir_keys: set[str] = set()
         sizes: dict[str, int | None] = {}
         times: dict[str, str] = {}
+        prints: dict[str, str | None] = {}
         saw_key = False
         cut = False
         past: str | None = None
@@ -101,6 +102,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                 else:
                     sizes[key] = child.size
                     times[key] = child.modified
+                    prints[key] = child.fingerprint
                 if past is None and limit is not None and len(names) >= limit:
                     past = max(
                         (k + "/" for k in names if k not in dir_keys),
@@ -144,6 +146,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                         name=name,
                         size=sizes.get(key),
                         modified=times.get(key) or None,
+                        fingerprint=prints.get(key),
                         type=FileType.FILE,
                         content=content_type_for_path(name),
                     )
@@ -239,6 +242,7 @@ def make_tree(driver: ObjectStoreDriver[A, C]) -> TreeFn[A]:
                 name=parts[-1],
                 size=row.size,
                 modified=row.modified or None,
+                fingerprint=row.fingerprint,
                 type=FileType.FILE,
                 content=content_type_for_path(parts[-1]),
             )

@@ -96,6 +96,7 @@ async def _list_children(
                 kind="f",
                 size=doc["length"],
                 modified=to_iso_z(upload) if upload else "",
+                fingerprint=str(doc["_id"]),
             )
         else:
             # A deeper filename or a "seg/" directory marker both imply
@@ -113,6 +114,7 @@ async def _list_subtree(
             key=doc["filename"],
             size=doc["length"],
             modified=to_iso_z(upload) if upload else "",
+            fingerprint=str(doc["_id"]),
         )
 
 

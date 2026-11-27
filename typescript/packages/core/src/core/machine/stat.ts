@@ -14,12 +14,13 @@
 
 import type { MachineAccessor } from '../../accessor/machine.ts'
 import { FileStat, FileType, type PathSpec } from '../../types.ts'
-import { msToRfc3339 } from '../../utils/dates.ts'
+import { msToRfc3339, wallNs } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { refusal } from '../posix/errors.ts'
 import { parseEntries, treeCommand } from '../posix/stat.ts'
 import type { PosixEntry } from '../posix/types.ts'
 import { KINDS } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 import type { Holder } from './types.ts'
 import { runChecked, leaf, mountPrefix, machinePath, virtualPath } from './utils.ts'
 import { currentCaller } from '../../context/session_context.ts'
@@ -42,7 +43,7 @@ export function entryStat(name: string, entry: PosixEntry): FileStat {
     name,
     size: regular ? entry.size : null,
     modified,
-    fingerprint: modified,
+    fingerprint: tokenOf(entry),
     type: kind,
     ...(regular ? { content: contentTypeForPath(name) } : {}),
     mode: entry.mode,
@@ -82,13 +83,14 @@ export async function entries(
   path: PathSpec,
   depth: number | null,
 ): Promise<PosixEntry[]> {
+  const askedNs = wallNs()
   const out = await runChecked(
     accessor,
     machine,
     treeCommand(machinePath(accessor, path), depth),
     path,
   )
-  const found = parseEntries(out)
+  const found = parseEntries(out, askedNs)
   if (found?.[0]?.rel !== '') throw refusal(path, new Uint8Array())
   return found
 }

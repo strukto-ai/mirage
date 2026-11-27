@@ -63,7 +63,7 @@ export async function rmR(accessor: SqlAccessor, path: PathSpec): Promise<void> 
       params: [parent.ino, leaf(w)],
     })
     inos.push(node.ino)
-    statements.push(touched(byIno(parent.ino), nowStamp()))
+    statements.push(touched(byIno(parent.ino), nowStamp(accessor)))
   }
   await accessor.batch([...statements, ...dropInodes(inos)])
   if (parent !== null && (await accessor.query(SQL.hasEntry, [parent.ino, leaf(w)])).length > 0) {

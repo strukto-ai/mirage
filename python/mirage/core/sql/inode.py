@@ -27,8 +27,8 @@ from mirage.core.sql.constants import (
     SQL,
     subdirs_of,
 )
+from mirage.core.sql.fingerprint import token_of
 from mirage.types import FileStat, FileType
-from mirage.utils.clock import system_date
 from mirage.utils.dates import to_iso_z
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import gnu_basename
@@ -68,10 +68,15 @@ def is_file(node: Inode) -> bool:
     return node.mode == FILE
 
 
-def now_stamp() -> Stamp:
-    """Now, as ``fs_inode`` keeps a time."""
-    now = system_date()
-    return math.floor(now.timestamp()), now.microsecond * 1000
+def now_stamp(accessor: SqlAccessor) -> Stamp:
+    """Now, as ``fs_inode`` keeps a time: past every time a write on the
+    database landed at before, so a rewrite always moves its file's time.
+
+    Args:
+        accessor (SqlAccessor): the mount whose database is written.
+    """
+    seconds, nanoseconds = divmod(accessor.stamped(), 1_000_000_000)
+    return seconds, nanoseconds
 
 
 def stamp_of(iso: str) -> Stamp:
@@ -108,6 +113,7 @@ def inode_stat(p: str, node: Inode, subdirs: int = 0) -> FileStat:
         name=gnu_basename(p),
         size=node.size,
         modified=modified,
+        fingerprint=token_of(node.ino, node.mtime, node.mtime_nsec),
         type=FileType.FILE,
         content=content_type_for_path(p),
         nlink=1,

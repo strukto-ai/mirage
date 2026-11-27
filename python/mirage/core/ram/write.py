@@ -30,7 +30,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import now_iso, stamp_iso
 from mirage.utils.path import norm
 
 
@@ -107,7 +107,7 @@ async def write(
             else:
                 check_capacity(store, path_spec, p, len(whole))
                 store.files[p] = whole
-        now = now_iso()
+        now = stamp_iso(accessor.stamped())
         store.modified[p] = now
         if made:
             touch_parent(store, p, now)
@@ -115,7 +115,7 @@ async def write(
         return
     if not append or p not in store.files:
         store.files[p] = b""
-        now = now_iso()
+        now = stamp_iso(accessor.stamped())
         store.modified[p] = now
         if made:
             touch_parent(store, p, now)
@@ -146,7 +146,7 @@ async def write(
                 )
                 store.files.splice(p, position, arrived)
                 position += len(arrived)
-            store.modified[p] = now_iso()
+            store.modified[p] = stamp_iso(accessor.stamped())
         finally:
             pending.clear()
             queued = 0

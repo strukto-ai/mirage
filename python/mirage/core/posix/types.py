@@ -39,6 +39,8 @@ class PosixEntry:
         nlink (int): the link count.
         blocks (int): the 512-byte blocks it takes.
         rel (str): the path under the listed scope, empty for the scope.
+        asked_ns (int): this host's wall clock when find was asked, 0
+            when not kept.
     """
 
     kind: str
@@ -53,3 +55,4 @@ class PosixEntry:
     nlink: int
     blocks: int
     rel: str
+    asked_ns: int = 0

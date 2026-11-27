@@ -36,7 +36,7 @@ export async function truncate(
   checkDestParents(w, path)
   checkWriteTarget(w, path)
   const node = target(w)
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   if (node === null) {
     if (noCreate) return
     await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, length, now))

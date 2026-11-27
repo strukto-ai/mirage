@@ -20,9 +20,10 @@ from mirage.accessor.ssh import SSHAccessor
 from mirage.core.posix.stat import parse_entries, tree_command
 from mirage.core.posix.utils import join_root
 from mirage.core.ssh.constants import SFTP_KINDS
+from mirage.core.ssh.fingerprint import token_of
 from mirage.errors.fs import eacces, enoent, exdev
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import epoch_to_iso
+from mirage.utils.dates import epoch_to_iso, wall_ns
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.path import posix_normpath
@@ -36,7 +37,9 @@ FIND_TYPES = {
 }
 
 
-def attrs_to_file_stat(name: str, attrs: asyncssh.SFTPAttrs) -> FileStat:
+def attrs_to_file_stat(
+    name: str, attrs: asyncssh.SFTPAttrs, now_ns: int
+) -> FileStat:
     """A remote inode's attributes as ``stat`` renders them.
 
     Fields setattr applies natively (mode, times) read from the remote
@@ -50,6 +53,7 @@ def attrs_to_file_stat(name: str, attrs: asyncssh.SFTPAttrs) -> FileStat:
     Args:
         name (str): the entry's name.
         attrs (asyncssh.SFTPAttrs): its attributes, links followed.
+        now_ns (int): this host's wall clock, read before the request.
     """
     kind = (
         SFTP_KINDS.get(attrs.type)
@@ -61,7 +65,11 @@ def attrs_to_file_stat(name: str, attrs: asyncssh.SFTPAttrs) -> FileStat:
         name=name,
         size=None if kind == FileType.DIRECTORY else attrs.size,
         modified=mod_str,
-        fingerprint=mod_str or None,
+        fingerprint=(
+            token_of(attrs.size, attrs.mtime, now_ns)
+            if kind == FileType.FILE
+            else None
+        ),
         type=kind,
         content=content_type_for_path(name) if kind == FileType.FILE else None,
         mode=(
@@ -80,6 +88,7 @@ async def stat(
     virtual = path_spec.virtual
     path = path_spec.mount_path
     sftp = await accessor.sftp()
+    now_ns = wall_ns()
     try:
         attrs = await sftp.stat(join_root(accessor.config.root, path))
     except asyncssh.SFTPPermissionDenied as exc:
@@ -87,7 +96,7 @@ async def stat(
     except asyncssh.SFTPNoSuchFile:
         raise enoent(virtual)
     return attrs_to_file_stat(
-        path.rstrip("/").rsplit("/", 1)[-1] or "/", attrs
+        path.rstrip("/").rsplit("/", 1)[-1] or "/", attrs, now_ns
     )
 
 
@@ -137,6 +146,7 @@ async def tree(
         path_spec (PathSpec): the directory.
     """
     scope = join_root(accessor.config.root, path_spec.mount_path)
+    now_ns = wall_ns()
     try:
         status, out, err = await accessor.run(tree_command(scope))
     except (asyncssh.Error, OSError) as exc:
@@ -162,5 +172,6 @@ async def tree(
                 atime=row.atime,
                 mtime=row.mtime,
             ),
+            now_ns,
         )
     return rows if top else None

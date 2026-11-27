@@ -17,6 +17,7 @@ import asyncio
 from mirage.accessor.machine import MachineAccessor
 from mirage.context.session_context import current_caller
 from mirage.core.machine.constants import KINDS
+from mirage.core.machine.fingerprint import token_of
 from mirage.core.machine.types import Holder
 from mirage.core.machine.utils import (
     leaf,
@@ -29,7 +30,7 @@ from mirage.core.posix.errors import refusal
 from mirage.core.posix.stat import parse_entries, tree_command
 from mirage.core.posix.types import PosixEntry
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import ms_to_rfc3339
+from mirage.utils.dates import ms_to_rfc3339, wall_ns
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.hidden import hidden_under, path_visible
 from mirage.utils.path import norm
@@ -51,7 +52,7 @@ def entry_stat(name: str, entry: PosixEntry) -> FileStat:
         name=name,
         size=entry.size if regular else None,
         modified=modified,
-        fingerprint=modified,
+        fingerprint=token_of(entry),
         type=kind,
         content=content_type_for_path(name) if regular else None,
         mode=entry.mode,
@@ -91,13 +92,14 @@ async def entries(
         depth (int | None): 0 for the path alone, 1 for its children,
             None for everything below.
     """
+    asked_ns = wall_ns()
     out = await run_checked(
         accessor,
         machine,
         tree_command(machine_path(accessor, path), depth),
         path,
     )
-    found = parse_entries(out)
+    found = parse_entries(out, asked_ns)
     if not found or found[0].rel:
         raise refusal(path, b"")
     return found

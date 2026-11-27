@@ -14,13 +14,13 @@
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { systemDate } from '../../utils/clock.ts'
 import { isoToEpoch } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import type { SqlRow, SqlStatement, SqlValue } from '../../vfs/sql/types.ts'
 import type { INODE_COLUMNS } from './constants.ts'
 import { DIR, FILE, LAST_INO, MAX_PARAMS, SQL, subdirsOf } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 
 /** One `fs_inode` row. Mirrors Python's `Inode`. */
 export interface Inode {
@@ -61,11 +61,15 @@ export function isFile(node: Inode): boolean {
   return node.mode === FILE
 }
 
-/** Now, as `fs_inode` keeps a time. */
-export function nowStamp(): Stamp {
-  const ms = systemDate().getTime()
-  const seconds = Math.floor(ms / 1000)
-  return [seconds, (ms - seconds * 1000) * 1_000_000]
+/**
+ * Now, as `fs_inode` keeps a time: past every time a write on the database
+ * landed at before, so a rewrite always moves its file's time.
+ *
+ * @param accessor the mount whose database is written
+ */
+export function nowStamp(accessor: SqlAccessor): Stamp {
+  const ns = accessor.stamped()
+  return [Number(ns / 1_000_000_000n), Number(ns % 1_000_000_000n)]
 }
 
 /** The stamp an ISO time names, to the nanosecond its fraction gives; one
@@ -97,6 +101,7 @@ export function inodeStat(p: string, node: Inode, subdirs = 0): FileStat {
     ...common,
     type: FileType.FILE,
     size: node.size,
+    fingerprint: tokenOf(node.ino, node.mtime, node.mtimeNsec),
     content: contentTypeForPath(p),
     nlink: 1,
   })

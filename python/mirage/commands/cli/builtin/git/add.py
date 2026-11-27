@@ -40,7 +40,11 @@ from mirage.commands.cli.builtin.git.errors import (
     UnknownPathspecError,
 )
 from mirage.commands.cli.builtin.git.ignore import IgnoreStack, load_ignores
-from mirage.commands.cli.builtin.git.index_file import read_index, write_index
+from mirage.commands.cli.builtin.git.index_file import (
+    read_index,
+    with_fingerprint,
+    write_index,
+)
 from mirage.commands.cli.builtin.git.io import (
     entry_bytes,
     lstat,
@@ -128,28 +132,30 @@ def entry_mode(info: FileStat) -> int:
 def staged_entry(sha: ObjectID, info: FileStat, size: int) -> IndexEntry:
     """An index entry for a file just written into the object database.
 
-    The stat fields git caches to avoid re-hashing (device, inode,
-    timestamps) are recorded as zero, because a mount serves none of
-    them meaningfully. That is not a corrupt entry: it is exactly what
-    git calls a smudged one, and the only consequence is that git
-    re-hashes the file next time instead of trusting the cache. A wrong
-    value there would be far worse, since git would trust it.
+    The entry keeps the mount's fingerprint of the file, taken before it
+    was read, where git caches the stat it hashes past next time
+    (``with_fingerprint``). Times stay zero, because a mount serves none
+    git could hold a later stat against; that is not a corrupt entry but
+    what git calls a smudged one, which it re-hashes rather than trusts.
 
     Args:
         sha (bytes): the blob id that was written.
         info (FileStat): what the mount says about the file.
         size (int): the byte length actually staged.
     """
-    return IndexEntry(
-        ctime=0,
-        mtime=0,
-        dev=0,
-        ino=0,
-        mode=entry_mode(info),
-        uid=0,
-        gid=0,
-        size=size,
-        sha=sha,
+    return with_fingerprint(
+        IndexEntry(
+            ctime=0,
+            mtime=0,
+            dev=0,
+            ino=0,
+            mode=entry_mode(info),
+            uid=0,
+            gid=0,
+            size=size,
+            sha=sha,
+        ),
+        info,
     )
 
 

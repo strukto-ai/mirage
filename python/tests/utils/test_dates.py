@@ -4,6 +4,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from mirage.utils.clock import ManualClock, run_with_system_clock
+from mirage.utils.constants import RACY_WINDOW_NS
 from mirage.utils.dates import (
     epoch_to_iso,
     iso_timestamp,
@@ -15,6 +17,9 @@ from mirage.utils.dates import (
     parse_date_expr_async,
     parse_posix_time_async,
     rfc3339_of,
+    settled,
+    stamp_after,
+    stamp_iso,
     timestamp_iso,
     to_iso_z,
 )
@@ -810,3 +815,40 @@ def test_ms_to_rfc3339_rounds_to_the_millisecond(ms, want):
 )
 def test_rfc3339_of_reads_one_iso_grammar(text, want):
     assert rfc3339_of(text) == want
+
+
+async def _stamps(count: int) -> list[int]:
+    stamps: list[int] = []
+    for _ in range(count):
+        stamps.append(stamp_after(stamps[-1] if stamps else 0))
+    return stamps
+
+
+@pytest.mark.asyncio
+async def test_a_clock_that_stands_still_still_gives_every_write_its_own_stamp():
+    stamps = await run_with_system_clock(
+        ManualClock(1_800_000_000), _stamps(3)
+    )
+    now = 1_800_000_000 * 1_000_000_000
+    assert stamps == [now, now + 1, now + 2]
+
+
+@pytest.mark.asyncio
+async def test_a_stamp_follows_the_clock_once_it_moves_past_the_last():
+    clock = ManualClock(1_800_000_000)
+    first = await run_with_system_clock(clock, _stamps(1))
+    clock.advance(2)
+    later = await run_with_system_clock(clock, _stamps(1))
+    assert later[0] - first[0] == 2_000_000_000
+
+
+def test_a_stamp_spells_every_nanosecond():
+    assert (
+        stamp_iso(1_800_000_000_000_000_001)
+        == "2027-01-15T08:00:00.000000001Z"
+    )
+
+
+def test_an_entry_settles_once_it_is_a_racy_window_old():
+    assert not settled(0, RACY_WINDOW_NS - 1)
+    assert settled(0, RACY_WINDOW_NS)

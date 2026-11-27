@@ -17,9 +17,11 @@ import { FileSystem } from 'isomorphic-git/models'
 
 import { ResolveIndexError } from './errors.ts'
 import { exists } from './io.ts'
+import { Digest } from '../../../../utils/hash.ts'
 
 import type { Repo } from './repo.ts'
 import type { ConflictedEntry, IndexEntry, IndexState } from './types.ts'
+import type { FileStat } from '../../../../types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
 const MERGE_HEAD = 'MERGE_HEAD'
@@ -29,6 +31,58 @@ export interface StagedEntry {
   readonly oid: string
   readonly mode: number
   readonly size: number
+  /** The fingerprint the entry keeps, as `withFingerprint` sets it; 0 for none. */
+  readonly dev?: number
+  readonly ino?: number
+}
+
+/**
+ * The `dev` and `ino` an entry keeps a fingerprint as: the first eight bytes
+ * of its SHA-1. Mirrors Python's `_kept`.
+ */
+function kept(fingerprint: string): readonly [number, number] {
+  const digest = new Digest('sha1')
+  digest.update(new TextEncoder().encode(fingerprint))
+  const hex = digest.digest()
+  return [Number.parseInt(hex.slice(0, 8), 16), Number.parseInt(hex.slice(8, 16), 16)]
+}
+
+/**
+ * `entry` keeping what the mount says of the file it was read from or written
+ * to, so a later comparison can find it unchanged unread.
+ *
+ * git caches a file's stat (device, inode, times, size) in its entry to the
+ * same end. A mount has no inode or device a later stat could be held
+ * against, but it has a fingerprint that moves whenever the file's bytes
+ * change, so the entry keeps that in the two fields instead. A mount that
+ * answers none leaves them zero, which git reads as nothing cached, and the
+ * file is read next time. Mirrors Python's `with_fingerprint`.
+ *
+ * @param entry the entry for the file's bytes
+ * @param info the mount's stat of the file, taken before it was read or
+ *   after it was written
+ */
+export function withFingerprint(entry: StagedEntry, info: FileStat): StagedEntry {
+  if (info.fingerprint === null || info.fingerprint === '') return { ...entry, dev: 0, ino: 0 }
+  const [dev, ino] = kept(info.fingerprint)
+  return { ...entry, dev, ino }
+}
+
+/**
+ * Whether the mount says the file is still the one `entry` kept, which
+ * settles it without reading the file. Mirrors Python's `unchanged`.
+ *
+ * @param entry what the index records for the path
+ * @param info what the mount says about it now
+ */
+export function unchanged(entry: StagedEntry, info: FileStat): boolean {
+  const dev = entry.dev ?? 0
+  const ino = entry.ino ?? 0
+  if (info.fingerprint === null || info.fingerprint === '' || (dev === 0 && ino === 0)) {
+    return false
+  }
+  const [keptDev, keptIno] = kept(info.fingerprint)
+  return keptDev === dev && keptIno === ino
 }
 
 /**
@@ -51,6 +105,8 @@ async function withIndex<T>(
       oid: string
       mode: number
       size: number
+      dev: number
+      ino: number
       stage?: number
       flags?: { stage?: number }
     }[]
@@ -89,6 +145,8 @@ export async function readIndex(repo: Repo, vfs: Files): Promise<IndexState> {
       oid: entry.oid,
       mode: entry.mode,
       size: entry.size,
+      dev: entry.dev,
+      ino: entry.ino,
       stage: entry.stage ?? entry.flags?.stage ?? 0,
     })),
   )
@@ -113,10 +171,10 @@ export async function readIndex(repo: Repo, vfs: Files): Promise<IndexState> {
 /**
  * Replace the staged entries, leaving conflicts alone.
  *
- * The stat cache is written zeroed, which git reads as "do not trust it": it
- * then compares content rather than believing a size or an mtime mirage cannot
- * promise is meaningful. A zeroed `size` therefore means "not stated" to every
- * reader here, never "empty".
+ * The times are written zeroed, which git reads as "do not trust them": a
+ * mount serves none git could hold a later stat against. `dev` and `ino` keep
+ * the fingerprint `withFingerprint` set, zero for none. A zeroed `size` means
+ * "not stated" to every reader here, never "empty".
  *
  * @param repo the opened repository
  * @param staged the paths to set, mapped to what should be recorded for them
@@ -138,8 +196,8 @@ export async function updateIndex(
           ctimeNanoseconds: 0,
           mtimeSeconds: 0,
           mtimeNanoseconds: 0,
-          dev: 0,
-          ino: 0,
+          dev: entry.dev ?? 0,
+          ino: entry.ino ?? 0,
           mode: entry.mode,
           uid: 0,
           gid: 0,

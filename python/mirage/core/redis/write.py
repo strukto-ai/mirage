@@ -21,7 +21,7 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -64,15 +64,15 @@ async def write(
             await store.append_file(p, whole)
         else:
             return
-        await store.set_modified(p, now_iso())
+        await store.set_modified(p, stamp_iso(accessor.stamped()))
         record(op, path_spec.virtual, "redis", len(whole), timer)
         return
     if not append:
         await store.set_file(p, b"")
-        await store.set_modified(p, now_iso())
+        await store.set_modified(p, stamp_iso(accessor.stamped()))
     elif not await store.has_file(p):
         await store.append_file(p, b"")
-        await store.set_modified(p, now_iso())
+        await store.set_modified(p, stamp_iso(accessor.stamped()))
     size = 0
     # TODO(MIRAGE-33): 1 MiB SETRANGEs, one timestamp each; native pwrite.
     async with aclosing(chunks(data)) as source:
@@ -83,6 +83,6 @@ async def write(
                 await store.append_file(p, chunk)
             else:
                 await store.set_file_range(p, size, chunk)
-            await store.set_modified(p, now_iso())
+            await store.set_modified(p, stamp_iso(accessor.stamped()))
             size += len(chunk)
     record(op, path_spec.virtual, "redis", size, timer)

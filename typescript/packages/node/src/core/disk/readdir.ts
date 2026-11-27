@@ -20,7 +20,8 @@ import { DirListing, type FileStat, type PathSpec } from '@struktoai/mirage-core
 import { enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { diskError } from './errors.ts'
-import { folderVersion, wallNs } from './listing_version.ts'
+import { wallNs } from '@struktoai/mirage-core/utils/dates'
+import { folderVersion } from './listing_version.ts'
 import { statOf } from './stat.ts'
 import { readEntries, resolveInside } from './utils.ts'
 

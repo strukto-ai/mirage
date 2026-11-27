@@ -58,12 +58,14 @@ def _milliseconds(stamp: str) -> int:
     return (nanoseconds + 500_000) // 1_000_000
 
 
-def parse_entries(out: bytes) -> list[PosixEntry] | None:
+def parse_entries(out: bytes, asked_ns: int = 0) -> list[PosixEntry] | None:
     """The records a ``tree_command`` printed, None when the output is not
     whole records.
 
     Args:
         out (bytes): find's output.
+        asked_ns (int): this host's wall clock when find was asked, kept
+            on each entry; 0 keeps none.
     """
     if not out.endswith(b"\0"):
         return None
@@ -87,6 +89,7 @@ def parse_entries(out: bytes) -> list[PosixEntry] | None:
                     nlink=int(nlink),
                     blocks=int(blocks),
                     rel=rel,
+                    asked_ns=asked_ns,
                 )
             )
         except (UnicodeDecodeError, ValueError) as exc:

@@ -22,7 +22,7 @@ from mirage.core.ram.dest import (
     touch_parent,
 )
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -70,7 +70,7 @@ async def copy(
     with store.lock:
         check_capacity(store, dst_spec, d, len(data))
         store.files[d] = data
-    now = now_iso()
+    now = stamp_iso(accessor.stamped())
     store.modified[d] = now
     if made:
         touch_parent(store, d, now)

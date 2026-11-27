@@ -16,6 +16,7 @@ import { DEFAULT_CHUNK_SIZE, DIR, LAST_INO, ROOT_INO, SCHEMA, SQL } from '../cor
 import { enoent, enotdir } from '../errors/fs.ts'
 import { PathSpec } from '../types.ts'
 import { systemDate } from '../utils/clock.ts'
+import { stampAfter } from '../utils/dates.ts'
 import { norm } from '../utils/path.ts'
 import { stripSlash } from '../utils/slash.ts'
 import type { SqlDriver, SqlRow, SqlStatement, SqlValue } from '../vfs/sql/types.ts'
@@ -24,6 +25,9 @@ import { Accessor } from './base.ts'
 // How many times each driver's tree lost or moved an entry, through any
 // mount on it.
 const STRUCTURE = new WeakMap<SqlDriver, number>()
+// The last time each driver's writes landed at, in nanoseconds, through
+// any mount on it.
+const STAMPS = new WeakMap<SqlDriver, bigint>()
 // A statement that removes or moves an entry or an inode.
 const RESHAPES = /DELETE FROM fs_(?:inode|dentry)|UPDATE fs_dentry/
 
@@ -153,5 +157,15 @@ export class SqlAccessor extends Accessor {
   /** Mark the tree as having lost or moved an entry. */
   reshaped(): void {
     STRUCTURE.set(this.driver, this.structure() + 1)
+  }
+
+  /**
+   * The time a write lands at, in nanoseconds: now, past every time a mount
+   * on the driver gave a write before.
+   */
+  stamped(): bigint {
+    const ns = stampAfter(STAMPS.get(this.driver) ?? 0n)
+    STAMPS.set(this.driver, ns)
+    return ns
   }
 }

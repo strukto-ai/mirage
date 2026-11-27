@@ -28,6 +28,6 @@ export async function unlink(accessor: SqlAccessor, path: PathSpec): Promise<voi
   await accessor.batch([
     { sql: SQL.removeEntry, params: [parent?.ino ?? null, leaf(w)] },
     ...dropInodes([node.ino]),
-    ...(parent !== null ? [touched(byIno(parent.ino), nowStamp())] : []),
+    ...(parent !== null ? [touched(byIno(parent.ino), nowStamp(accessor))] : []),
   ])
 }

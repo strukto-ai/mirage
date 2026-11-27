@@ -17,6 +17,7 @@ import type { FileEntryWithStats, Stats } from 'ssh2'
 import { FileStat, FileType, type PathSpec } from '@struktoai/mirage-core/types'
 import { eacces, listingError } from '@struktoai/mirage-core/errors/fs'
 import { mountPrefixOf, rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
+import { wallNs } from '@struktoai/mirage-core/utils/dates'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -64,18 +65,21 @@ async function rowOf(
   accessor: SSHAccessor,
   key: string,
   entry: FileEntryWithStats,
+  nowNs: bigint,
 ): Promise<FileStat> {
   // ssh2 types every field as present, but a server may leave the times (or
   // size) out of a readdir entry; read them as optional.
   const attrs: SshAttrs = entry.attrs
   const kind = modeType(attrs.mode)
-  if (kind !== undefined && kind !== FileType.SYMLINK) return attrsToFileStat(entry.filename, attrs)
+  if (kind !== undefined && kind !== FileType.SYMLINK) {
+    return attrsToFileStat(entry.filename, attrs, nowNs)
+  }
   const followed = await attrsOrNull(accessor, key).catch((err: unknown) => {
     if (isPermissionDenied(err)) return null
     throw err
   })
   if (followed === null) return new FileStat({ name: entry.filename, type: FileType.FILE })
-  return attrsToFileStat(entry.filename, followed)
+  return attrsToFileStat(entry.filename, followed, nowNs)
 }
 
 export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<FileStat[]> {
@@ -83,6 +87,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<FileS
   const virtual = p.pattern !== null ? p.directory.slice(mountPrefix.length) || '/' : rawPathOf(p)
   const sftp = await accessor.sftp()
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
+  const nowNs = wallNs()
   const list = await new Promise<FileEntryWithStats[] | null>((resolveFn, rejectFn) => {
     sftp.readdir(remote, (err, entries) => {
       if (err !== undefined) {
@@ -105,5 +110,7 @@ export async function readdir(accessor: SSHAccessor, p: PathSpec): Promise<FileS
   const found = list
     .filter((entry) => entry.filename !== '.' && entry.filename !== '..')
     .sort((x, y) => compareCodePoints(x.filename, y.filename))
-  return Promise.all(found.map((entry) => rowOf(accessor, `${base}/${entry.filename}`, entry)))
+  return Promise.all(
+    found.map((entry) => rowOf(accessor, `${base}/${entry.filename}`, entry, nowNs)),
+  )
 }

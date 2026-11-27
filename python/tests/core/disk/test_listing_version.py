@@ -22,9 +22,9 @@ import pytest
 
 from mirage import MountMode, Workspace
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.disk import listing_version
 from mirage.core.disk.listing_version import folder_version
 from mirage.types import ReadPolicy, ReadSpec
+from mirage.utils import dates
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace.mount import Mount
 from mirage.workspace.reconcile import Reconciler
@@ -44,7 +44,7 @@ class Clock:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.now = 0
-        monkeypatch.setattr(listing_version, "time_ns", lambda: self.now)
+        monkeypatch.setattr(dates, "time_ns", lambda: self.now)
 
     def settle(self, *folders: Path) -> None:
         """Sit 3 s past the latest change of every folder given.

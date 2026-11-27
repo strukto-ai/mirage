@@ -13,17 +13,29 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.stat import stat
 from mirage.types import PathSpec
 
 
-def test_disk_stat_returns_fingerprint_from_mtime(tmp_path):
+def test_a_settled_file_stats_its_fingerprint(tmp_path, monkeypatch):
     p = tmp_path / "f.txt"
     p.write_bytes(b"hi")
+    st = os.stat(p)
+    later = max(st.st_ctime_ns, st.st_mtime_ns) + 3_000_000_000
+    monkeypatch.setattr("mirage.utils.dates.time_ns", lambda: later)
     accessor = DiskAccessor(root=tmp_path)
     scope = PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/")
     result = asyncio.run(stat(accessor, scope))
-    assert result.fingerprint is not None
-    assert result.fingerprint == result.modified
+    assert result.fingerprint == (
+        f"{st.st_dev}:{st.st_ino}:{st.st_ctime_ns}:{st.st_mtime_ns}"
+    )
+
+
+def test_a_file_written_just_now_stats_no_fingerprint(tmp_path):
+    (tmp_path / "f.txt").write_bytes(b"hi")
+    accessor = DiskAccessor(root=tmp_path)
+    scope = PathSpec(vfs_path="f.txt", virtual="/f.txt", directory="/")
+    assert asyncio.run(stat(accessor, scope)).fingerprint is None

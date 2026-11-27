@@ -15,6 +15,7 @@
 import { FileStat, FileType } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import { lookupError } from './dest.ts'
+import { tokenOf } from './fingerprint.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import type { RedisStoreLike } from '../../vfs/redis/store.ts'
@@ -61,6 +62,7 @@ function fromFields(
     name: gnuBasename(p),
     size,
     modified,
+    fingerprint: tokenOf(modified),
     type: FileType.FILE,
     content: contentTypeForPath(p),
     mode: attrs.mode ?? null,

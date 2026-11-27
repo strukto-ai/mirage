@@ -20,7 +20,7 @@ import { STREAM_PUBLISH_SECONDS } from './constants.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { nowIso, stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 import {
@@ -89,7 +89,7 @@ export async function write(
     checkCapacity(accessor, path, p, (current?.byteLength ?? 0) + whole.byteLength)
     if (current === undefined) files.set(p, whole)
     else files.splice(p, current.byteLength, whole)
-    const now = nowIso()
+    const now = stampIso(accessor.stamped())
     modified.set(p, now)
     if (made) touchParent(accessor.store, p, now)
     record(op, path.virtual, VFSName.RAM, whole.byteLength, timer)
@@ -97,7 +97,7 @@ export async function write(
   }
   if (!append || !files.has(p)) {
     files.set(p, append ? (files.get(p) ?? new Uint8Array()) : new Uint8Array())
-    const now = nowIso()
+    const now = stampIso(accessor.stamped())
     modified.set(p, now)
     if (made) touchParent(accessor.store, p, now)
   }
@@ -120,7 +120,7 @@ export async function write(
       checkRoom(path, Math.max(current, start + arrived.byteLength) - current)
       files.splice(p, start, arrived)
       if (!append) position = start + arrived.byteLength
-      modified.set(p, nowIso())
+      modified.set(p, stampIso(accessor.stamped()))
     } finally {
       pending = []
       queued = 0

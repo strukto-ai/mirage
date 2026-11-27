@@ -80,7 +80,7 @@ async function landing(
   data: Uint8Array,
   append: boolean,
 ): Promise<SqlStatement[]> {
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   if (node === null) {
     const ref = byEntry(parentRef(w), leaf(w))
     return [
@@ -149,7 +149,7 @@ export async function write(
   const flush = async (): Promise<void> => {
     if (held === 0) return
     const block = concat(pending)
-    const stamp = nowStamp()
+    const stamp = nowStamp(accessor)
     let at = offset
     let size = 0
     const used = await landFresh(accessor, node, async (n) => {

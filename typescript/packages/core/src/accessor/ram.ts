@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RAMStore } from '../vfs/ram/store.ts'
+import { stampAfter } from '../utils/dates.ts'
 import { Accessor } from './base.ts'
 
 export class RAMAccessor extends Accessor {
@@ -21,5 +22,12 @@ export class RAMAccessor extends Accessor {
   constructor(store: RAMStore) {
     super()
     this.store = store
+  }
+
+  /** The time a write lands at, in nanoseconds: now, past every time a
+   * mount on the store gave a write before. */
+  stamped(): bigint {
+    this.store.stamp = stampAfter(this.store.stamp)
+    return this.store.stamp
   }
 }

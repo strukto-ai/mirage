@@ -65,6 +65,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     const dirKeys = new Set<string>()
     const sizes = new Map<string, number | null>()
     const times = new Map<string, string>()
+    const prints = new Map<string, string | null>()
     let sawKey = false
     let cut = false
     let past: string | null = null
@@ -90,6 +91,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         } else {
           sizes.set(key, child.size ?? null)
           times.set(key, child.modified ?? '')
+          prints.set(key, child.fingerprint ?? null)
         }
         if (past === null && limit !== undefined && names.size >= limit) {
           past = ''
@@ -133,6 +135,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         name,
         size: sizes.get(key) ?? null,
         modified: modified !== '' ? modified : null,
+        fingerprint: prints.get(key) ?? null,
         type: FileType.FILE,
         content: contentTypeForPath(name),
       })
@@ -205,6 +208,7 @@ export function makeTree<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
           name,
           size: row.size ?? null,
           modified: row.modified !== undefined && row.modified !== '' ? row.modified : null,
+          fingerprint: row.fingerprint ?? null,
           type: FileType.FILE,
           content: contentTypeForPath(name),
         }),

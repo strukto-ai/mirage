@@ -15,7 +15,7 @@
 from mirage.accessor.redis import RedisAccessor
 from mirage.core.redis.dest import check_dest_parents, lookup_error
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -33,4 +33,4 @@ async def copy(
     if data is None:
         raise await lookup_error(store, src_spec, s)
     await store.set_file(d, data)
-    await store.set_modified(d, now_iso())
+    await store.set_modified(d, stamp_iso(accessor.stamped()))

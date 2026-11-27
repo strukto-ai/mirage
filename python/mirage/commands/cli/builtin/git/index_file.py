@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
+from dataclasses import replace
 from io import BytesIO
 from typing import IO, BinaryIO, cast
 
@@ -25,10 +27,58 @@ from dulwich.index import (
 from mirage.commands.cli.builtin.git.errors import ResolveIndexError
 from mirage.commands.cli.builtin.git.io import read_optional, write_file
 from mirage.commands.cli.builtin.git.types import IndexState
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 from mirage.workspace.files import Files
 
 MERGE_HEAD = "MERGE_HEAD"
+
+
+def _kept(fingerprint: str) -> tuple[int, int]:
+    """The ``dev`` and ``ino`` an entry keeps a fingerprint as: the first
+    eight bytes of its SHA-1.
+
+    Args:
+        fingerprint (str): what the mount stats for the file.
+    """
+    digest = hashlib.sha1(fingerprint.encode()).digest()
+    return int.from_bytes(digest[:4], "big"), int.from_bytes(
+        digest[4:8], "big"
+    )
+
+
+def with_fingerprint(entry: IndexEntry, info: FileStat) -> IndexEntry:
+    """``entry`` keeping what the mount says of the file it was read from
+    or written to, so a later comparison can find it unchanged unread.
+
+    git caches a file's stat (device, inode, times, size) in its entry to
+    the same end. A mount has no inode or device a later stat could be
+    held against, but it has a fingerprint that moves whenever the file's
+    bytes change, so the entry keeps that in the two fields instead. A
+    mount that answers none leaves them zero, which git reads as nothing
+    cached, and the file is read next time.
+
+    Args:
+        entry (IndexEntry): the entry for the file's bytes.
+        info (FileStat): the mount's stat of the file, taken before it
+            was read or after it was written.
+    """
+    if not info.fingerprint:
+        return replace(entry, dev=0, ino=0)
+    dev, ino = _kept(info.fingerprint)
+    return replace(entry, dev=dev, ino=ino)
+
+
+def unchanged(entry: IndexEntry, info: FileStat) -> bool:
+    """Whether the mount says the file is still the one ``entry`` kept,
+    which settles it without reading the file.
+
+    Args:
+        entry (IndexEntry): what the index records for the path.
+        info (FileStat): what the mount says about it now.
+    """
+    if not info.fingerprint or (entry.dev == 0 and entry.ino == 0):
+        return False
+    return _kept(info.fingerprint) == (entry.dev, entry.ino)
 
 
 async def read_index(vfs: Files, gitdir: PathSpec) -> IndexState:

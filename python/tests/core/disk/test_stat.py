@@ -143,9 +143,7 @@ async def test_a_folder_with_an_overlay_still_drops_the_index_under_fresh(
         # probe compares it instead of finding no fingerprint at all.
         st = os.stat(folder)
         quiet_ns = max(st.st_ctime_ns, st.st_mtime_ns) + 3_000_000_000
-        monkeypatch.setattr(
-            "mirage.core.disk.listing_version.time_ns", lambda: quiet_ns
-        )
+        monkeypatch.setattr("mirage.utils.dates.time_ns", lambda: quiet_ns)
     ws = Workspace(
         {
             "/m": Mount(

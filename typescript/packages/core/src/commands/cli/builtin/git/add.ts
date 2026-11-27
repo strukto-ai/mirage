@@ -34,7 +34,7 @@ import {
 import { embeddedHead, embeddedLocation } from './embedded.ts'
 import { configValues } from './fs.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
-import { readIndex, updateIndex, type StagedEntry } from './index_file.ts'
+import { readIndex, updateIndex, withFingerprint, type StagedEntry } from './index_file.ts'
 import { entryBytes, lstat, statOf } from './io.ts'
 
 import { repoArgs, type Repo } from './repo.ts'
@@ -79,14 +79,14 @@ export function entryMode(info: FileStat): number {
 /**
  * An index entry for a file just written into the object database.
  *
- * The stat fields git caches to avoid re-hashing (device, inode, timestamps) are
- * recorded as zero, because a mount serves none of them meaningfully. That is
- * not a corrupt entry: it is exactly what git calls a smudged one, and the only
- * consequence is that git re-hashes the file next time instead of trusting the
- * cache. A wrong value there would be far worse, since git would trust it.
+ * The entry keeps the mount's fingerprint of the file, taken before it was
+ * read, where git caches the stat it hashes past next time (`withFingerprint`).
+ * Times stay zero, because a mount serves none git could hold a later stat
+ * against; that is not a corrupt entry but what git calls a smudged one, which
+ * it re-hashes rather than trusts.
  */
 function stagedEntry(oid: string, info: FileStat, size: number): StagedEntry {
-  return { oid, mode: entryMode(info), size }
+  return withFingerprint({ oid, mode: entryMode(info), size }, info)
 }
 
 /**

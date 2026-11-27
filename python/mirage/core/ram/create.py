@@ -16,7 +16,7 @@ from mirage.accessor.ram import RAMAccessor
 from mirage.core.ram.dest import check_dest_parents, touch_parent
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
-from mirage.utils.dates import now_iso
+from mirage.utils.dates import stamp_iso
 from mirage.utils.path import norm
 
 
@@ -26,7 +26,7 @@ async def create(accessor: RAMAccessor, path: PathSpec) -> None:
     p = norm(path.mount_path)
     check_dest_parents(store, path, p)
     made = p not in store.files
-    now = now_iso()
+    now = stamp_iso(accessor.stamped())
     store.files[p] = b""
     store.modified[p] = now
     if made:

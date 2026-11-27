@@ -88,7 +88,7 @@ async def _landing(
 ) -> list[SqlStatement]:
     # The statements that land ``data`` whole: a new file made with it,
     # an existing one's rows replaced, or ``data`` added at its end.
-    now = now_stamp()
+    now = now_stamp(accessor)
     if node is None:
         ref = by_entry(parent_ref(w), leaf(w))
         return [
@@ -170,7 +170,7 @@ async def write(
         if not pending:
             return
         block = bytes(pending)
-        stamp = now_stamp()
+        stamp = now_stamp(accessor)
         at = offset
         size = 0
 

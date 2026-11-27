@@ -17,7 +17,7 @@ import { VFSName } from '../../types.ts'
 import type { PathSpec } from '../../types.ts'
 import type { RedisAccessor } from '../../accessor/redis.ts'
 import { checkDestParents } from './dest.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 export async function create(accessor: RedisAccessor, path: PathSpec): Promise<void> {
@@ -26,6 +26,6 @@ export async function create(accessor: RedisAccessor, path: PathSpec): Promise<v
   const store = accessor.store
   await checkDestParents(store, path, p)
   await store.setFile(p, new Uint8Array(0))
-  await store.setModified(p, nowIso())
+  await store.setModified(p, stampIso(accessor.stamped()))
   record('create', path.virtual, VFSName.REDIS, 0, timer)
 }
