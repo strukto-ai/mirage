@@ -13,13 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import ipaddress
 import json
 import logging
 import os
 import time
-from typing import Any, cast
+from collections.abc import Coroutine, Iterable
+from typing import Any, TypeVar, cast
+from urllib.parse import urlparse
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 
 from examples.rl.constants import VERIFIER_SCRIPT_PATH
 from examples.rl.dataset import load_mirage_tasks
@@ -31,6 +34,85 @@ from examples.rl.schemas import BenchCase, BenchFixtures, MirageTask
 from examples.rl.server import ServerPool
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+_FIXED_TEMP_FAMILIES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _supports_temperature(model: str) -> bool:
+    """Return whether ``model`` accepts an explicit ``temperature`` parameter.
+
+    Args:
+        model (str): Model identifier (optionally ``provider/model``).
+
+    Returns:
+        bool: ``False`` for reasoning families that reject ``temperature``.
+    """
+    name = model.rsplit("/", 1)[-1].lower()
+    if name.startswith("gpt-5-chat"):
+        return True
+    return not any(
+        name == prefix
+        or name.startswith(f"{prefix}-")
+        or name.startswith(f"{prefix}.")
+        for prefix in _FIXED_TEMP_FAMILIES
+    )
+
+
+def _is_loopback_host(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError as exc:
+        logger.debug("Host %s is not an IP literal: %s", hostname, exc)
+        return False
+
+
+def _validate_eval_base_url(base_url: str | None, api_key: str | None) -> None:
+    """Reject cleartext HTTP to non-loopback hosts when an API key is set.
+
+    Args:
+        base_url (str | None): Configured OpenAI-compatible base URL.
+        api_key (str | None): Configured API key, if any.
+    """
+    if not base_url or not api_key:
+        return
+    parsed = urlparse(base_url)
+    scheme = parsed.scheme.lower()
+    if scheme == "https":
+        return
+    if scheme == "http" and _is_loopback_host(parsed.hostname):
+        return
+    raise SystemExit(
+        f"Refusing to send OPENAI_API_KEY over non-HTTPS base URL "
+        f"{base_url!r}. Use https:// for remote endpoints, a loopback "
+        "host for local servers, or unset OPENAI_API_KEY."
+    )
+
+
+async def _gather_cancelling(
+    coros: Iterable[Coroutine[Any, Any, _T]],
+) -> list[_T]:
+    """Await ``coros`` concurrently, cancelling unfinished siblings on error.
+
+    Args:
+        coros (Iterable[Coroutine[Any, Any, _T]]): Episode coroutines to run.
+
+    Returns:
+        list[_T]: Ordered results when every coroutine succeeds.
+    """
+    tasks = [asyncio.create_task(coro) for coro in coros]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def run_synthetic_rollout(
@@ -91,16 +173,14 @@ async def run_bench(config: OpenEnvRunConfig) -> None:
     )
     try:
         t0 = time.perf_counter()
-        outcomes = await asyncio.gather(
-            *(
-                run_synthetic_rollout(
-                    task,
-                    servers,
-                    fixtures.passing if i % 2 == 0 else fixtures.failing,
-                    seed=i,
-                )
-                for i in range(config.rollouts)
+        outcomes = await _gather_cancelling(
+            run_synthetic_rollout(
+                task,
+                servers,
+                fixtures.passing if i % 2 == 0 else fixtures.failing,
+                seed=i,
             )
+            for i in range(config.rollouts)
         )
         elapsed = time.perf_counter() - t0
     finally:
@@ -131,7 +211,7 @@ async def run_eval_episode(
 
     Args:
         client (AsyncOpenAI): OpenAI-compatible chat client.
-        sem (asyncio.Semaphore): Concurrency gate around LLM completions.
+        sem (asyncio.Semaphore): Concurrency gate bounding active episodes.
         config (OpenEnvRunConfig): Validated runtime configuration.
         task (MirageTask): Task to evaluate.
         servers (ServerPool): Shared pool of ``integ/server`` backends.
@@ -140,80 +220,96 @@ async def run_eval_episode(
     Returns:
         EpisodeMetrics: Recorded reward, step count, refusals, and duration.
     """
-    harness = OpenEnvHarness(
-        task=task,
-        servers=servers,
-        max_steps=config.max_steps,
-        timeout_s=config.action_timeout_s,
-    )
-    t0 = time.perf_counter()
-    steps = 0
-    refusals = 0
-    try:
-        await harness.reset(seed=trial)
-        system_prompt = await harness.build_system_prompt()
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task.instruction},
-        ]
+    async with sem:
+        harness = OpenEnvHarness(
+            task=task,
+            servers=servers,
+            max_steps=config.max_steps,
+            timeout_s=config.action_timeout_s,
+        )
+        t0 = time.perf_counter()
+        steps = 0
+        refusals = 0
+        send_temp = _supports_temperature(config.model)
+        try:
+            await harness.reset(seed=trial)
+            system_prompt = await harness.build_system_prompt()
+            messages: list[dict[str, Any]] = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": task.instruction},
+            ]
 
-        done = False
-        while not done and steps < config.max_steps:
-            async with sem:
-                resp = await client.chat.completions.create(
-                    model=config.model,
-                    messages=cast(Any, messages),
-                    tools=cast(Any, [SHELL_TOOL_SCHEMA]),
-                    temperature=config.temperature,
-                )
-            choice = resp.choices[0].message
-            messages.append(choice.model_dump(exclude_none=True))
-
-            tool_calls = choice.tool_calls or []
-            if not tool_calls:
-                break
-
-            for tc in tool_calls:
-                fn = getattr(tc, "function", None)
-                if fn is None:
-                    continue
+            done = False
+            while not done and steps < config.max_steps:
+                req_kwargs: dict[str, Any] = {
+                    "model": config.model,
+                    "messages": cast(Any, messages),
+                    "tools": cast(Any, [SHELL_TOOL_SCHEMA]),
+                }
+                if send_temp:
+                    req_kwargs["temperature"] = config.temperature
                 try:
-                    parsed = json.loads(fn.arguments or "{}")
-                except json.JSONDecodeError as exc:
-                    logger.debug("Invalid tool arguments JSON: %s", exc)
-                    parsed = {}
-                cmd = (
-                    str(parsed.get("command", ""))
-                    if isinstance(parsed, dict)
-                    else ""
-                )
-                obs = await harness.step_shell(cmd)
-                steps += 1
-                if obs.refusal is not None:
-                    refusals += 1
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": format_observation(obs),
-                    }
-                )
-                if obs.done or steps >= config.max_steps:
-                    done = True
+                    resp = await client.chat.completions.create(**req_kwargs)
+                except BadRequestError as exc:
+                    if not send_temp or "temperature" not in str(exc).lower():
+                        raise
+                    logger.debug(
+                        "Model %s rejected temperature; retrying without: %s",
+                        config.model,
+                        exc,
+                    )
+                    send_temp = False
+                    req_kwargs.pop("temperature", None)
+                    resp = await client.chat.completions.create(**req_kwargs)
+
+                choice = resp.choices[0].message
+                messages.append(choice.model_dump(exclude_none=True))
+
+                tool_calls = choice.tool_calls or []
+                if not tool_calls:
                     break
 
-        reward = await harness.grade()
-        elapsed = time.perf_counter() - t0
-        return EpisodeMetrics(
-            task_name=task.task_name,
-            trial=trial,
-            reward=reward,
-            steps=steps,
-            refusals=refusals,
-            elapsed_s=elapsed,
-        )
-    finally:
-        await harness.close()
+                for tc in tool_calls:
+                    fn = getattr(tc, "function", None)
+                    if fn is None:
+                        continue
+                    try:
+                        parsed = json.loads(fn.arguments or "{}")
+                    except json.JSONDecodeError as exc:
+                        logger.debug("Invalid tool arguments JSON: %s", exc)
+                        parsed = {}
+                    cmd = (
+                        str(parsed.get("command", ""))
+                        if isinstance(parsed, dict)
+                        else ""
+                    )
+                    obs = await harness.step_shell(cmd)
+                    steps += 1
+                    if obs.refusal is not None:
+                        refusals += 1
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": format_observation(obs),
+                        }
+                    )
+                    if obs.done or steps >= config.max_steps:
+                        done = True
+                        break
+
+            reward = await harness.grade()
+            elapsed = time.perf_counter() - t0
+            return EpisodeMetrics(
+                task_name=task.task_name,
+                trial=trial,
+                reward=reward,
+                steps=steps,
+                refusals=refusals,
+                elapsed_s=elapsed,
+            )
+        finally:
+            await harness.close()
 
 
 async def run_eval(config: OpenEnvRunConfig) -> None:
@@ -228,6 +324,7 @@ async def run_eval(config: OpenEnvRunConfig) -> None:
             "OPENAI_API_KEY is not set. Set OPENAI_API_KEY (or "
             "--base-url for a local server) in .env.development."
         )
+    _validate_eval_base_url(config.base_url, api_key)
 
     tasks = load_mirage_tasks(config.data_dir)
     if not tasks:
@@ -243,12 +340,11 @@ async def run_eval(config: OpenEnvRunConfig) -> None:
         endpoints=config.endpoints,
     )
     try:
-        jobs = [
+        results = await _gather_cancelling(
             run_eval_episode(client, sem, config, task, servers, trial)
             for task in tasks
             for trial in range(config.trials)
-        ]
-        results = await asyncio.gather(*jobs)
+        )
     finally:
         await servers.close()
         await client.close()
