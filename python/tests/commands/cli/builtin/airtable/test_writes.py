@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from tests.fixtures.airtable_api import FEATURES, OPS, ROADMAP
+from tests.fixtures.airtable_account import FEATURES, OPS, RECORDS, ROADMAP
 
 TABLE_DIR = (
     "/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001"
@@ -45,7 +45,7 @@ def _usage(message: str) -> tuple[int, str, str]:
 
 @pytest.mark.asyncio
 async def test_create_sends_ten_records_to_a_request(
-    airtable_ws, airtable_api
+    airtable_ws, airtable_account
 ):
     ws = airtable_ws()
     await _lines(ws, "/s/new.jsonl", _named(23))
@@ -56,13 +56,15 @@ async def test_create_sends_ten_records_to_a_request(
     created = [json.loads(line) for line in out.splitlines()]
     assert [r["fields"]["Name"] for r in created][-1] == "New 23"
     assert list(created[0]) == ["record_id", "created_time", "fields"]
-    bodies = [p["body"] for kind, p in airtable_api.write_calls()]
+    bodies = [body for _, body in await airtable_account.writes()]
     assert [len(b["records"]) for b in bodies] == [10, 10, 3]
     assert all("typecast" not in b for b in bodies)
 
 
 @pytest.mark.asyncio
-async def test_create_takes_one_record_and_typecast(airtable_ws, airtable_api):
+async def test_create_takes_one_record_and_typecast(
+    airtable_ws, airtable_account
+):
     ws = airtable_ws()
     code, out, _ = await _run(
         ws,
@@ -70,8 +72,9 @@ async def test_create_takes_one_record_and_typecast(airtable_ws, airtable_api):
         '--fields \'{"Name": "x", "Priority": "4"}\'',
     )
     assert code == 0
-    assert json.loads(out)["fields"] == {"Name": "x", "Priority": "4"}
-    assert airtable_api.write_calls()[0][1]["body"] == {
+    # Typecast turns the text "4" into the number field's 4.
+    assert json.loads(out)["fields"] == {"Name": "x", "Priority": 4}
+    assert (await airtable_account.writes())[0][1] == {
         "records": [{"fields": {"Name": "x", "Priority": "4"}}],
         "typecast": True,
     }
@@ -79,7 +82,7 @@ async def test_create_takes_one_record_and_typecast(airtable_ws, airtable_api):
 
 @pytest.mark.asyncio
 async def test_a_mount_line_round_trips_through_update(
-    airtable_ws, airtable_api
+    airtable_ws, airtable_account
 ):
     ws = airtable_ws()
     code, out, _ = await _run(
@@ -90,7 +93,9 @@ async def test_a_mount_line_round_trips_through_update(
     )
     assert code == 0
     assert out.splitlines()[0] == '["rec00000000000001",9]'
-    assert [kind for kind, _ in airtable_api.write_calls()] == ["update"]
+    assert [kind for kind, _ in (await airtable_account.writes())] == [
+        "update"
+    ]
     _, after, _ = await _run(
         ws,
         f"jq -r 'select(.fields.Priority == 9) | .record_id' "
@@ -105,14 +110,20 @@ async def test_a_mount_line_round_trips_through_update(
 
 
 @pytest.mark.asyncio
-async def test_a_stdin_line_drops_computed_fields(airtable_ws, airtable_api):
-    airtable_api.tables[ROADMAP][0]["fields"].append(
-        {
-            "id": "fldTicket0000001",
-            "name": "Ticket",
-            "type": "formula",
-        }
+async def test_a_stdin_line_drops_computed_fields(
+    airtable_ws, airtable_account
+):
+    # A computed field, added to the schema as a base admin would; no
+    # request of this API adds one.
+    await airtable_account.run.execute(
+        "INSERT INTO AirtableField"
+        " (tenant, id, tableId, name, type, options, seq)"
+        " VALUES ('default', ?, ?, 'Ticket', 'formula', ?, 10)",
+        "fldTicket00000001",
+        FEATURES,
+        json.dumps({"formula": '"FT-" & {Priority}'}),
     )
+    await airtable_account.run.record_requests()
     ws = airtable_ws()
     await _lines(
         ws,
@@ -127,20 +138,20 @@ async def test_a_stdin_line_drops_computed_fields(airtable_ws, airtable_api):
     )
     code, _, _ = await _run(ws, f"airtable record update {AT} < /s/one.jsonl")
     assert code == 0
-    body = airtable_api.write_calls()[0][1]["body"]
+    body = (await airtable_account.writes())[0][1]
     assert body["records"] == [{"id": FIRST, "fields": {"Name": "Renamed"}}]
     await _run(
         ws,
         f"airtable record update {AT} {FIRST} "
         '--fields \'{"Ticket": "FT-9"}\'',
     )
-    assert airtable_api.write_calls()[1][1]["body"]["records"][0][
-        "fields"
-    ] == {"Ticket": "FT-9"}
+    assert (await airtable_account.writes())[1][1]["records"][0]["fields"] == {
+        "Ticket": "FT-9"
+    }
 
 
 @pytest.mark.asyncio
-async def test_update_patches_one_record(airtable_ws, airtable_api):
+async def test_update_patches_one_record(airtable_ws, airtable_account):
     ws = airtable_ws()
     code, out, _ = await _run(
         ws,
@@ -149,11 +160,13 @@ async def test_update_patches_one_record(airtable_ws, airtable_api):
     assert code == 0
     assert json.loads(out)["fields"]["Name"] == "Feature 1"
     assert json.loads(out)["fields"]["Priority"] == 0
-    assert airtable_api.write_calls()[0][0] == "update"
+    assert (await airtable_account.writes())[0][0] == "update"
 
 
 @pytest.mark.asyncio
-async def test_delete_takes_operands_or_stdin_lines(airtable_ws, airtable_api):
+async def test_delete_takes_operands_or_stdin_lines(
+    airtable_ws, airtable_account
+):
     ws = airtable_ws()
     code, out, _ = await _run(ws, f"airtable record delete {AT} {FIRST}")
     assert (code, out) == (
@@ -165,24 +178,30 @@ async def test_delete_takes_operands_or_stdin_lines(airtable_ws, airtable_api):
         ws, f"airtable record delete {AT} < /s/all.jsonl"
     )
     assert (code, len(out.splitlines())) == (0, 6)
-    assert airtable_api.records[FEATURES] == []
+    assert await airtable_account.records(ROADMAP, FEATURES) == []
 
 
 @pytest.mark.asyncio
-async def test_deletes_go_ten_to_a_request(airtable_ws, airtable_api):
+async def test_deletes_go_ten_to_a_request(airtable_ws, airtable_account):
     ws = airtable_ws()
     await _lines(ws, "/s/new.jsonl", _named(5))
     await _run(ws, f"airtable record create {AT} < /s/new.jsonl")
-    ids = " ".join(r["id"] for r in airtable_api.records[FEATURES])
+    ids = " ".join(
+        r["id"] for r in await airtable_account.records(ROADMAP, FEATURES)
+    )
     code, out, _ = await _run(ws, f"airtable record delete {AT} {ids}")
     assert (code, len(out.splitlines())) == (0, 12)
-    deletes = [p for kind, p in airtable_api.write_calls() if kind == "delete"]
-    assert [len(d["records"]) for d in deletes] == [10, 2]
+    deletes = [
+        named
+        for kind, named in await airtable_account.writes()
+        if kind == "delete"
+    ]
+    assert [len(named) for named in deletes] == [10, 2]
 
 
 @pytest.mark.asyncio
 async def test_a_failed_batch_still_prints_what_landed(
-    airtable_ws, airtable_api
+    airtable_ws, airtable_account
 ):
     ws = airtable_ws()
     await _lines(
@@ -198,22 +217,26 @@ async def test_a_failed_batch_still_prints_what_landed(
         f"/{ROADMAP}/{FEATURES}): HTTP 422: UNKNOWN_FIELD_NAME: "
         'Unknown field name: "Nope"\n'
     )
-    assert len(airtable_api.records[FEATURES]) == 17
+    assert len(await airtable_account.records(ROADMAP, FEATURES)) == 17
 
 
 @pytest.mark.asyncio
-async def test_a_write_is_never_retried_on_a_502(airtable_ws, airtable_api):
-    airtable_api.faults[1] = (502, "BAD_GATEWAY")
+async def test_a_write_is_never_retried_on_a_502(
+    airtable_ws, airtable_account
+):
+    await airtable_account.run.answer_next(
+        "POST", RECORDS, 502, {"error": {"type": "BAD_GATEWAY"}}
+    )
     code, out, err = await _run(
         airtable_ws(), f"airtable record create {AT} --fields '{{}}'"
     )
     assert (code, out) == (1, "")
     assert "HTTP 502" in err
-    assert len(airtable_api.write_calls()) == 1
+    assert len(await airtable_account.writes()) == 1
 
 
 @pytest.mark.asyncio
-async def test_comment_add_takes_text_or_stdin(airtable_ws, airtable_api):
+async def test_comment_add_takes_text_or_stdin(airtable_ws, airtable_account):
     ws = airtable_ws()
     code, out, _ = await _run(
         ws, f"airtable comment add {AT} {FIRST} --text 'from a flag'"
@@ -221,7 +244,7 @@ async def test_comment_add_takes_text_or_stdin(airtable_ws, airtable_api):
     assert (code, json.loads(out)["text"]) == (0, "from a flag")
     await _run(ws, f"printf 'piped\\n\\n' | airtable comment add {AT} {FIRST}")
     await _run(ws, f"printf 'bare' | airtable comment add {AT} {FIRST}")
-    texts = [p["body"]["text"] for _, p in airtable_api.write_calls()]
+    texts = [body["text"] for _, body in await airtable_account.writes()]
     assert texts == ["from a flag", "piped\n", "bare"]
     _, listed, _ = await _run(ws, f"airtable comment list {AT} {FIRST}")
     assert json.loads(listed)[0]["text"] == "bare"
@@ -282,11 +305,11 @@ async def test_comment_add_takes_text_or_stdin(airtable_ws, airtable_api):
     ],
 )
 async def test_missing_or_malformed_input_is_a_usage_error(
-    airtable_ws, airtable_api, line, message
+    airtable_ws, airtable_account, line, message
 ):
     " ".join(line.split()[1:3])
     assert await _run(airtable_ws(), line) == _usage(message)
-    assert airtable_api.calls == []
+    assert await airtable_account.asked() == []
 
 
 @pytest.mark.asyncio
@@ -342,14 +365,14 @@ async def test_missing_or_malformed_input_is_a_usage_error(
     ],
 )
 async def test_every_stdin_line_is_checked_before_anything_is_sent(
-    airtable_ws, airtable_api, verb, text, message
+    airtable_ws, airtable_account, verb, text, message
 ):
     ws = airtable_ws()
     await ws.shell(f"printf '%s' '{text}' > /s/in.jsonl")
     assert await _run(
         ws, f"airtable record {verb} {AT} < /s/in.jsonl"
     ) == _usage(message)
-    assert airtable_api.calls == []
+    assert await airtable_account.asked() == []
 
 
 @pytest.mark.asyncio
@@ -363,7 +386,7 @@ async def test_every_stdin_line_is_checked_before_anything_is_sent(
     ],
 )
 async def test_a_write_outside_the_scope_is_refused_unsent(
-    airtable_ws, airtable_api, line
+    airtable_ws, airtable_account, line
 ):
     ws = airtable_ws(base_ids=[ROADMAP])
     verb = " ".join(line.split()[:3])
@@ -372,4 +395,4 @@ async def test_a_write_outside_the_scope_is_refused_unsent(
         "",
         f"{verb}: {OPS}: Permission denied\n",
     )
-    assert airtable_api.calls == []
+    assert await airtable_account.asked() == []

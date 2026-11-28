@@ -15,27 +15,40 @@
 import { backendCommands } from '../../workspace/mount/backends.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
 import { Command } from '../../commands/config.ts'
-import { describe, expect, it } from 'vitest'
-import { FakeAirtable, TOKEN } from '../../../tests/core/airtable/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { AirtableAccount, TOKEN } from '../../../tests/fixtures/airtable_account.ts'
 import { VFSName } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { AirtableVFS, VFS_MD } from './airtable.ts'
 
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
 const TABLE = '/at/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001'
 const DEC = new TextDecoder()
 
-function vfs(fake: FakeAirtable, overrides: { maxReadRecords?: number } = {}): AirtableVFS {
-  return new AirtableVFS(
-    { token: TOKEN, requestsPerSecond: 10_000, ...overrides },
-    {
-      fetchFn: fake.fetch,
-    },
-  )
+function vfs(overrides: { maxReadRecords?: number } = {}): AirtableVFS {
+  return new AirtableVFS(account.config(overrides))
 }
 
 describe('AirtableVFS', () => {
   it('never serves reads from the file cache', () => {
-    const mount = vfs(new FakeAirtable())
+    const mount = vfs()
     expect(mount.name).toBe(VFSName.AIRTABLE)
     expect(mount.cachesReads).toBe(false)
     expect(mount.sizesAlwaysKnown).toBe(false)
@@ -44,26 +57,24 @@ describe('AirtableVFS', () => {
 
   it('exposes a read-only file surface', () => {
     const names = new Set(
-      [
-        ...GENERIC_COMMANDS,
-        ...backendCommands(vfs(new FakeAirtable())),
-        ...vfs(new FakeAirtable()).commands(),
-      ].flatMap((c) => (c instanceof Command ? [c.name] : [])),
+      [...GENERIC_COMMANDS, ...backendCommands(vfs()), ...vfs().commands()].flatMap((c) =>
+        c instanceof Command ? [c.name] : [],
+      ),
     )
     for (const name of ['cat', 'ls', 'find', 'grep', 'head', 'jq', 'wc']) {
       expect(names.has(name)).toBe(true)
     }
-    expect(vfs(new FakeAirtable()).supports('write')).toBe(false)
+    expect(vfs().supports('write')).toBe(false)
   })
 
   it('redacts the token from its state', () => {
-    const state = vfs(new FakeAirtable()).getState()
+    const state = vfs().getState()
     expect(state.type).toBe('airtable')
     expect(JSON.stringify(state)).not.toContain(TOKEN)
   })
 
   it('browses bases, tables and records through a workspace', async () => {
-    const ws = new Workspace({ '/at/': vfs(new FakeAirtable(), { maxReadRecords: 5 }) }, {})
+    const ws = new Workspace({ '/at/': vfs({ maxReadRecords: 5 }) }, {})
     try {
       const tree = await ws.shell('tree /at/bases/Product_Roadmap__appRoadmapBase001')
       expect(DEC.decode(tree.stdout)).toContain('records.jsonl')
@@ -84,8 +95,7 @@ describe('AirtableVFS', () => {
   })
 
   it('pushes the head line count into maxRecords', async () => {
-    const fake = new FakeAirtable()
-    const ws = new Workspace({ '/at/': vfs(fake, { maxReadRecords: 5 }) })
+    const ws = new Workspace({ '/at/': vfs({ maxReadRecords: 5 }) })
     try {
       const result = await ws.shell(`head -n 2 ${TABLE}/records.jsonl`)
       expect(result.exitCode).toBe(0)
@@ -102,7 +112,7 @@ describe('AirtableVFS', () => {
     } finally {
       await ws.close()
     }
-    const calls = fake.recordCalls()
+    const calls = await account.recordQueries()
     expect(calls.map((c) => c.maxRecords)).toEqual(['2', '6', '6'])
     expect(calls[2]?.offset).toBeDefined()
   })

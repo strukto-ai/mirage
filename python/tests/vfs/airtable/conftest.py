@@ -12,6 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from tests.fixtures.airtable_api import airtable_api
+from tests.fixtures.airtable_account import airtable_account
 
-__all__ = ["airtable_api"]
+__all__ = ["airtable_account"]

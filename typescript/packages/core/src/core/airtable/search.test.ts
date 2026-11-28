@@ -12,11 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { FakeAirtable, ROADMAP, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  AirtableAccount,
+  FEATURES,
+  RECORDS as RECORDS_ROUTE,
+} from '../../../tests/fixtures/airtable_account.ts'
 import { linesContaining } from './search.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 const ROOT = '/at'
 const TABLE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001`
@@ -49,47 +71,51 @@ function ids(body: Uint8Array | null): string[] {
     .map((l) => (JSON.parse(l) as { record_id: string }).record_id)
 }
 
-function statusHolds(query: string) {
-  return (row: Record<string, unknown>) => {
-    const status = (row.fields as Record<string, unknown>).Status
-    return typeof status === 'string' && status.toLowerCase().includes(query)
-  }
-}
-
 // Twin of python/tests/core/airtable/test_search.py.
 describe('airtable linesContaining', () => {
+  // The fake evaluates the formula: only Status, Done on the odd records,
+  // holds "one".
   it('lists only the records a formula names', async () => {
-    const fake = new FakeAirtable()
-    fake.formulas[formula('one')] = statusHolds('one')
-    const out = await linesContaining(makeAccessor(fake), spec(RECORDS), 'one', ROW)
+    const out = await linesContaining(account.accessor(), spec(RECORDS), 'one', ROW)
     expect(ids(out)).toEqual(DONE_IDS)
-    const call = fake.recordCalls().at(-1)
+    const call = (await account.recordQueries()).at(-1)
     expect(call?.filterByFormula).toBe(formula('one'))
     expect(call?.maxRecords).toBe('10001')
   })
 
+  // Every name holds "ure" (Feature n), so the view decides.
   it('lists what the view and the formula name for a view file', async () => {
-    const fake = new FakeAirtable()
-    fake.formulas[formula('ure')] = () => true
-    const out = await linesContaining(makeAccessor(fake), spec(DONE), 'ure', ROW)
+    const out = await linesContaining(account.accessor(), spec(DONE), 'ure', ROW)
     expect(ids(out)).toEqual(DONE_IDS)
-    expect(fake.recordCalls().at(-1)?.view).toBe('viwDone0000000001')
+    expect((await account.recordQueries()).at(-1)?.view).toBe('viwDone0000000001')
   })
 
   // A link, an AI text or an attachment holds no space outside the text a
   // formula reads of it: a text with a space leaves a link out and asks the
   // others, and a single word reads the file.
   it('asks a text with a space of a table with links', async () => {
-    const fake = new FakeAirtable()
-    const fields = (fake.tables[ROADMAP]?.[0]?.fields ?? []) as Record<string, unknown>[]
-    fields.push(
-      { id: 'fldRelease000001', name: 'Release', type: 'multipleRecordLinks' },
-      { id: 'fldSummary000001', name: 'Summary', type: 'aiText' },
-    )
-    fake.formulas[formula('lone plan', [...CELLS, '{Summary} & ""'])] = () => false
-    const accessor = makeAccessor(fake)
+    // Fields no record here fills, added to the schema as a base admin
+    // would; no request of this API adds one.
+    for (const [seq, field, name, kind] of [
+      [10, 'fldRelease0000001', 'Release', 'multipleRecordLinks'],
+      [11, 'fldSummary0000001', 'Summary', 'aiText'],
+    ] as const) {
+      await account.run.execute(
+        "INSERT INTO AirtableField (tenant, id, tableId, name, type, seq) VALUES ('default', ?, ?, ?, ?, ?)",
+        field,
+        FEATURES,
+        name,
+        kind,
+        seq,
+      )
+    }
+    await account.run.recordRequests()
+    const accessor = account.accessor()
     const out = await linesContaining(accessor, spec(RECORDS), 'lone plan', ROW)
     expect(out).toEqual(new Uint8Array())
+    expect((await account.recordQueries()).at(-1)?.filterByFormula).toBe(
+      formula('lone plan', [...CELLS, '{Summary} & ""']),
+    )
     expect(await linesContaining(accessor, spec(RECORDS), 'one', ROW)).toBeNull()
   })
 
@@ -101,32 +127,47 @@ describe('airtable linesContaining', () => {
     ['add', RECORDS],
     ['one', `${TABLE}/table.json`],
     ['one', `${TABLE}/views/Nope__viwNope000000000001.jsonl`],
-    ['zzz', RECORDS],
   ])('reads the file for %j at %s', async (text, virtual) => {
     const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
       // A view no listing names is handed no row.
       const row = virtual.includes('Nope') ? null : ROW
-      const out = await linesContaining(makeAccessor(new FakeAirtable()), spec(virtual), text, row)
+      const out = await linesContaining(account.accessor(), spec(virtual), text, row)
       expect(out).toBeNull()
     } finally {
       warn.mockRestore()
     }
   })
 
-  // A listing that fails to connect leaves the file to a read.
-  it('reads the file when the listing fails to connect', async () => {
-    const fake = new FakeAirtable()
-    fake.formulas[formula('one')] = statusHolds('one')
-    const real = fake.fetch
-    vi.spyOn(fake, 'fetch').mockImplementation((input, init) =>
-      typeof input === 'string' && input.includes('filterByFormula')
-        ? Promise.reject(new TypeError('fetch failed'))
-        : real(input, init),
-    )
+  // A formula Airtable refuses proves nothing, so the file is read; one it
+  // answers with no record is the answer, and no line holds the text.
+  it('reads the file when Airtable refuses the formula', async () => {
+    await account.run.answerNext('GET', RECORDS_ROUTE, 422, {
+      error: {
+        type: 'INVALID_FILTER_BY_FORMULA',
+        message: 'The formula for filtering records is invalid',
+      },
+    })
     const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
     try {
-      const out = await linesContaining(makeAccessor(fake), spec(RECORDS), 'one', ROW)
+      expect(await linesContaining(account.accessor(), spec(RECORDS), 'zzz', ROW)).toBeNull()
+    } finally {
+      debug.mockRestore()
+    }
+  })
+
+  it('lists nothing for a text no record holds', async () => {
+    const out = await linesContaining(account.accessor(), spec(RECORDS), 'zzz', ROW)
+    expect(out).toEqual(new Uint8Array())
+  })
+
+  // A listing that fails to connect leaves the file to a read: every
+  // attempt finds its connection closed.
+  it('reads the file when the listing fails to connect', async () => {
+    await account.run.answerNext('GET', RECORDS_ROUTE, null, undefined, 50)
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    try {
+      const out = await linesContaining(account.accessor(), spec(RECORDS), 'one', ROW)
       expect(out).toBeNull()
     } finally {
       debug.mockRestore()
@@ -134,10 +175,8 @@ describe('airtable linesContaining', () => {
   })
 
   it('reads the file when more records match than the cap', async () => {
-    const fake = new FakeAirtable()
-    fake.formulas[formula('one')] = statusHolds('one')
     const out = await linesContaining(
-      makeAccessor(fake, { maxReadRecords: 2 }),
+      account.accessor({ maxReadRecords: 2 }),
       spec(RECORDS),
       'one',
       ROW,

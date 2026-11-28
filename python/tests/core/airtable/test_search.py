@@ -13,14 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 
 from mirage.core.airtable.search import lines_containing
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mount_key
-from tests.fixtures.airtable_api import ROADMAP, make_accessor
+from tests.fixtures.airtable_account import FEATURES
+from tests.fixtures.airtable_account import RECORDS as ROUTE
 
 ROOT = "/at"
 TABLE = f"{ROOT}/bases/Product_Roadmap__appRoadmapBase001/Features__tblFeatures000001"
@@ -53,28 +54,31 @@ def _ids(body: bytes | None) -> list[str]:
     return [json.loads(line)["record_id"] for line in body.splitlines()]
 
 
-def _status_holds(query: str):
-    return lambda r: query in r["fields"].get("Status", "").lower()
-
-
 # Airtable lists only the records the formula names, as a read lists them;
-# a view's file applies the view too.
+# a view's file applies the view too. The fake evaluates the formula: only
+# Status, Done on the odd records, holds "one".
 @pytest.mark.asyncio
-async def test_only_the_records_a_formula_names_are_listed(airtable_api):
-    airtable_api.formulas[_formula("one")] = _status_holds("one")
-    out = await lines_containing(make_accessor(), _spec(RECORDS), "one", ROW)
+async def test_only_the_records_a_formula_names_are_listed(airtable_account):
+    out = await lines_containing(
+        airtable_account.accessor(), _spec(RECORDS), "one", ROW
+    )
     assert _ids(out) == DONE_IDS
-    call = airtable_api.record_calls()[-1]
+    call = (await airtable_account.record_queries())[-1]
     assert call["filterByFormula"] == _formula("one")
     assert call["maxRecords"] == "10001"
 
 
 @pytest.mark.asyncio
-async def test_a_view_file_lists_what_the_view_and_formula_name(airtable_api):
-    airtable_api.formulas[_formula("ure")] = lambda r: True
-    out = await lines_containing(make_accessor(), _spec(DONE), "ure", ROW)
+async def test_a_view_file_lists_what_the_view_and_formula_name(
+    airtable_account,
+):
+    # Every name holds "ure" (Feature n), so the view decides.
+    out = await lines_containing(
+        airtable_account.accessor(), _spec(DONE), "ure", ROW
+    )
     assert _ids(out) == DONE_IDS
-    assert airtable_api.record_calls()[-1]["view"] == "viwDone0000000001"
+    queries = await airtable_account.record_queries()
+    assert queries[-1]["view"] == "viwDone0000000001"
 
 
 # A link, an AI text or an attachment holds no space outside the text a
@@ -82,21 +86,34 @@ async def test_a_view_file_lists_what_the_view_and_formula_name(airtable_api):
 # others, and a single word reads the file.
 @pytest.mark.asyncio
 async def test_a_text_with_a_space_is_asked_of_a_table_with_links(
-    airtable_api,
+    airtable_account,
 ):
-    airtable_api.tables[ROADMAP][0]["fields"] += [
-        {
-            "id": "fldRelease000001",
-            "name": "Release",
-            "type": "multipleRecordLinks",
-        },
-        {"id": "fldSummary000001", "name": "Summary", "type": "aiText"},
-    ]
-    cells = (*CELLS, '{Summary} & ""')
-    airtable_api.formulas[_formula("lone plan", cells)] = lambda r: False
-    accessor = make_accessor()
+    # Fields no record here fills, added to the schema as a base admin
+    # would; no request of this API adds one.
+    for seq, (field, name, kind) in enumerate(
+        [
+            ("fldRelease0000001", "Release", "multipleRecordLinks"),
+            ("fldSummary0000001", "Summary", "aiText"),
+        ],
+        start=10,
+    ):
+        await airtable_account.run.execute(
+            "INSERT INTO AirtableField"
+            " (tenant, id, tableId, name, type, seq)"
+            " VALUES ('default', ?, ?, ?, ?, ?)",
+            field,
+            FEATURES,
+            name,
+            kind,
+            seq,
+        )
+    await airtable_account.run.record_requests()
+    accessor = airtable_account.accessor()
     out = await lines_containing(accessor, _spec(RECORDS), "lone plan", ROW)
     assert out == b""
+    cells = (*CELLS, '{Summary} & ""')
+    queries = await airtable_account.record_queries()
+    assert queries[-1]["filterByFormula"] == _formula("lone plan", cells)
     assert await lines_containing(accessor, _spec(RECORDS), "one", ROW) is None
 
 
@@ -111,21 +128,52 @@ async def test_a_text_with_a_space_is_asked_of_a_table_with_links(
         ("add", RECORDS),
         ("one", f"{TABLE}/table.json"),
         ("one", f"{TABLE}/views/Nope__viwNope000000000001.jsonl"),
-        ("zzz", RECORDS),
     ],
 )
-async def test_an_unsure_answer_reads_the_file(airtable_api, text, virtual):
+async def test_an_unsure_answer_reads_the_file(
+    airtable_account, text, virtual
+):
     # A view no listing names is handed no row.
     row = None if "Nope" in virtual else ROW
-    out = await lines_containing(make_accessor(), _spec(virtual), text, row)
+    out = await lines_containing(
+        airtable_account.accessor(), _spec(virtual), text, row
+    )
+    assert out is None
+
+
+# A formula Airtable refuses proves nothing, so the file is read; one it
+# answers with no record is the answer, and no line holds the text.
+@pytest.mark.asyncio
+async def test_a_refused_formula_reads_the_file(airtable_account):
+    await airtable_account.run.answer_next(
+        "GET",
+        ROUTE,
+        422,
+        {
+            "error": {
+                "type": "INVALID_FILTER_BY_FORMULA",
+                "message": "The formula for filtering records is invalid",
+            }
+        },
+    )
+    out = await lines_containing(
+        airtable_account.accessor(), _spec(RECORDS), "zzz", ROW
+    )
     assert out is None
 
 
 @pytest.mark.asyncio
-async def test_more_matches_than_the_cap_read_the_file(airtable_api):
-    airtable_api.formulas[_formula("one")] = _status_holds("one")
+async def test_a_text_no_record_holds_lists_nothing(airtable_account):
     out = await lines_containing(
-        make_accessor(max_read_records=2),
+        airtable_account.accessor(), _spec(RECORDS), "zzz", ROW
+    )
+    assert out == b""
+
+
+@pytest.mark.asyncio
+async def test_more_matches_than_the_cap_read_the_file(airtable_account):
+    out = await lines_containing(
+        airtable_account.accessor(max_read_records=2),
         _spec(RECORDS),
         "one",
         ROW,
@@ -134,14 +182,18 @@ async def test_more_matches_than_the_cap_read_the_file(airtable_api):
 
 
 # A listing that times out or fails to connect leaves the file to a read.
+# Every attempt fails, each retry waiting on a manual clock.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error", [TimeoutError(), OSError("reset")])
-async def test_a_failed_listing_reads_the_file(
-    airtable_api, monkeypatch, error
-):
-    monkeypatch.setattr(
-        "mirage.core.airtable.search.list_records",
-        AsyncMock(side_effect=error),
+@pytest.mark.parametrize("failure", ["timeout", "reset"])
+async def test_a_failed_listing_reads_the_file(airtable_account, failure):
+    await airtable_account.run.answer_next(
+        "GET",
+        ROUTE,
+        200 if failure == "timeout" else None,
+        times=50,
+        delay_ms=1000 if failure == "timeout" else 0,
     )
-    out = await lines_containing(make_accessor(), _spec(RECORDS), "one", ROW)
+    accessor = airtable_account.accessor(timeout=0.05)
+    accessor.bind_clock(ManualClock(), object())
+    out = await lines_containing(accessor, _spec(RECORDS), "one", ROW)
     assert out is None

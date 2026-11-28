@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from tests.fixtures.airtable_api import (
+from tests.fixtures.airtable_account import (
     DONE,
     DONE_FORMULA,
     FEATURES,
@@ -91,7 +91,7 @@ async def test_record_list_prints_records_jsonl_lines(airtable_ws):
 
 @pytest.mark.asyncio
 async def test_the_read_cap_refuses_rather_than_paging(
-    airtable_ws, airtable_api
+    airtable_ws, airtable_account
 ):
     ws = airtable_ws(max_read_records=5)
     code, out, err = await _run(ws, f"airtable record list {AT}")
@@ -101,16 +101,18 @@ async def test_the_read_cap_refuses_rather_than_paging(
         "(max_read_records); narrow them with --formula or --view,"
         " or take the first N with --max-records N\n"
     )
-    assert [c["maxRecords"] for c in airtable_api.record_calls()] == ["6"] * 2
+    assert [
+        c["maxRecords"] for c in (await airtable_account.record_queries())
+    ] == ["6"] * 2
 
 
 @pytest.mark.asyncio
-async def test_max_records_is_honored_as_asked(airtable_ws, airtable_api):
+async def test_max_records_is_honored_as_asked(airtable_ws, airtable_account):
     ws = airtable_ws(max_read_records=5)
     code, out, _ = await _run(ws, f"airtable record list {AT} --max-records 7")
     assert code == 0
     assert len(out.splitlines()) == 7
-    assert airtable_api.record_calls()[0]["maxRecords"] == "7"
+    assert (await airtable_account.record_queries())[0]["maxRecords"] == "7"
     assert await _run(ws, f"airtable record list {AT} --max-records 0") == (
         2,
         "",
@@ -119,7 +121,7 @@ async def test_max_records_is_honored_as_asked(airtable_ws, airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_formula_and_view_pass_through(airtable_ws, airtable_api):
+async def test_formula_and_view_pass_through(airtable_ws, airtable_account):
     ws = airtable_ws()
     code, out, _ = await _run(
         ws,
@@ -127,7 +129,7 @@ async def test_formula_and_view_pass_through(airtable_ws, airtable_api):
         f'--formula "{DONE_FORMULA}" | jq -r .fields.Priority',
     )
     assert (code, out) == (0, "1\n3\n5\n7\n")
-    call = airtable_api.record_calls()[0]
+    call = (await airtable_account.record_queries())[0]
     assert (call["view"], call["filterByFormula"]) == (DONE, DONE_FORMULA)
 
 
@@ -177,7 +179,7 @@ async def test_comment_list_is_normalized_in_api_order(airtable_ws):
     ],
 )
 async def test_a_base_outside_the_scope_is_refused_unsent(
-    airtable_ws, airtable_api, line
+    airtable_ws, airtable_account, line
 ):
     ws = airtable_ws(base_ids=[ROADMAP])
     verb = " ".join(line.split()[:3])
@@ -186,7 +188,7 @@ async def test_a_base_outside_the_scope_is_refused_unsent(
         "",
         f"{verb}: {OPS}: Permission denied\n",
     )
-    assert airtable_api.calls == []
+    assert await airtable_account.asked() == []
 
 
 @pytest.mark.asyncio
@@ -211,7 +213,7 @@ async def test_a_base_outside_the_scope_is_refused_unsent(
     ],
 )
 async def test_operand_refusals_are_usage_errors(
-    airtable_ws, airtable_api, line, message
+    airtable_ws, airtable_account, line, message
 ):
     assert await _run(airtable_ws(), line) == (2, "", f"{message}\n")
-    assert airtable_api.calls == []
+    assert await airtable_account.asked() == []

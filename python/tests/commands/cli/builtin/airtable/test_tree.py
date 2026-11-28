@@ -19,7 +19,7 @@ from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.core.airtable.config import AirtableConfig
-from tests.fixtures.airtable_api import FEATURES, OPS, ROADMAP, TOKEN
+from tests.fixtures.airtable_account import FEATURES, OPS, ROADMAP
 
 VERBS = {
     "base": ["list", "get"],
@@ -83,16 +83,12 @@ def test_every_verb_below_base_names_its_base_and_table():
 
 
 @pytest.mark.asyncio
-async def test_a_second_install_answers_under_its_own_name(airtable_ws):
+async def test_a_second_install_answers_under_its_own_name(
+    airtable_ws, airtable_account
+):
     ws = airtable_ws()
     ws.register_cli(
-        "work",
-        AIRTABLE,
-        {
-            "token": TOKEN,
-            "base_ids": [ROADMAP],
-            "requests_per_second": 10_000.0,
-        },
+        "work", AIRTABLE, airtable_account.fields(base_ids=[ROADMAP])
     )
     refused = await ws.shell(f"work base get {OPS}")
     assert refused.exit_code == 1

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   RETRY,
   WRITE_RETRY,
@@ -26,17 +26,34 @@ import {
   listTables,
   updateRecords,
 } from './client.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import {
-  API,
+  AirtableAccount,
+  COMMENTS,
   DONE_FORMULA,
   FEATURES,
-  FakeAirtable,
   MODEL_NOT_FOUND,
   OPS,
+  RECORDS,
   ROADMAP,
-  TOKEN,
-  makeAccessor,
-} from '../../../tests/core/airtable/_test_util.ts'
+} from '../../../tests/fixtures/airtable_account.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 const FIRST = 'rec00000000000001'
 
@@ -64,15 +81,12 @@ describe('airtable client', () => {
   })
 
   it('honors the configured base scope', async () => {
-    const fake = new FakeAirtable()
-    expect((await listBases(makeAccessor(fake))).map((b) => b.id)).toEqual([ROADMAP, OPS])
-    expect((await listBases(makeAccessor(fake, { baseIds: [OPS] }))).map((b) => b.id)).toEqual([
-      OPS,
-    ])
+    expect((await listBases(account.accessor())).map((b) => b.id)).toEqual([ROADMAP, OPS])
+    expect((await listBases(account.accessor({ baseIds: [OPS] }))).map((b) => b.id)).toEqual([OPS])
   })
 
   it('names the call and the type on a bad token', async () => {
-    const failure = listBases(makeAccessor(new FakeAirtable(), { token: 'wrong' }))
+    const failure = listBases(account.accessor({ token: 'wrong' }))
     await expect(failure).rejects.toThrow(
       'Airtable API error (GET /meta/bases): HTTP 401: AUTHENTICATION_REQUIRED: Authentication required',
     )
@@ -83,29 +97,28 @@ describe('airtable client', () => {
   })
 
   it('returns the schema', async () => {
-    const tables = await listTables(makeAccessor(new FakeAirtable()), ROADMAP)
+    const tables = await listTables(account.accessor(), ROADMAP)
     expect(tables.map((t) => t.id)).toEqual([FEATURES])
   })
 
   it('pages through every offset', async () => {
-    const fake = new FakeAirtable()
-    expect(await listRecords(makeAccessor(fake), ROADMAP, FEATURES)).toHaveLength(7)
-    const calls = fake.recordCalls()
+    expect(await listRecords(account.accessor(), ROADMAP, FEATURES)).toHaveLength(7)
+    const calls = await account.recordQueries()
     expect(calls).toHaveLength(3)
     expect(calls[0]?.offset).toBeUndefined()
-    expect(calls[1]?.offset).toBe('itrFakeIterator01/3')
+    expect(calls[1]?.offset).toBeTruthy()
+    expect(calls[2]?.offset).not.toBe(calls[1]?.offset)
     expect(calls.every((c) => c.pageSize === '100')).toBe(true)
   })
 
   it('sends maxRecords on the wire and stops the collector there', async () => {
-    const fake = new FakeAirtable()
-    const found = await listRecords(makeAccessor(fake), ROADMAP, FEATURES, { maxRecords: 2 })
+    const found = await listRecords(account.accessor(), ROADMAP, FEATURES, { maxRecords: 2 })
     expect(found.map((r) => r.id)).toEqual(['rec00000000000001', 'rec00000000000002'])
-    expect(fake.recordCalls()[0]?.maxRecords).toBe('2')
+    expect((await account.recordQueries())[0]?.maxRecords).toBe('2')
   })
 
   it('filters a view through the api', async () => {
-    const found = await listRecords(makeAccessor(new FakeAirtable()), ROADMAP, FEATURES, {
+    const found = await listRecords(account.accessor(), ROADMAP, FEATURES, {
       view: 'viwDone0000000001',
     })
     expect(found.map((r) => (r.fields as Record<string, unknown>).Priority)).toEqual([1, 3, 5, 7])
@@ -118,20 +131,19 @@ describe('airtable client writes and comments', () => {
   })
 
   it('sends a formula on the wire', async () => {
-    const fake = new FakeAirtable()
-    const found = await listRecords(makeAccessor(fake), ROADMAP, FEATURES, {
+    const found = await listRecords(account.accessor(), ROADMAP, FEATURES, {
       formula: DONE_FORMULA,
     })
     expect(found.map((r) => (r.fields as Record<string, unknown>).Priority)).toEqual([1, 3, 5, 7])
-    expect(fake.recordCalls()[0]?.filterByFormula).toBe(DONE_FORMULA)
+    expect((await account.recordQueries())[0]?.filterByFormula).toBe(DONE_FORMULA)
   })
 
   it('takes a table name as well as its id', async () => {
-    expect(await listRecords(makeAccessor(new FakeAirtable()), ROADMAP, 'Features')).toHaveLength(7)
+    expect(await listRecords(account.accessor(), ROADMAP, 'Features')).toHaveLength(7)
   })
 
   it('reads one record by id', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const accessor = account.accessor()
     const record = await getRecord(accessor, ROADMAP, FEATURES, FIRST)
     expect((record.fields as Record<string, unknown>).Name).toBe('Feature 1')
     const missing = getRecord(accessor, ROADMAP, FEATURES, 'recZZZZZZZZZZZZZZ')
@@ -143,106 +155,113 @@ describe('airtable client writes and comments', () => {
   })
 
   it('creates ten records to a request', async () => {
-    const fake = new FakeAirtable()
-    expect(await drain(createRecords(makeAccessor(fake), ROADMAP, FEATURES, names(23)))).toEqual([
+    expect(await drain(createRecords(account.accessor(), ROADMAP, FEATURES, names(23)))).toEqual([
       10, 10, 3,
     ])
-    const bodies = fake.writeCalls().map(bodyOf)
+    const bodies = (await account.writes()).map(bodyOf)
     expect(bodies.map((b) => (b.records as unknown[]).length)).toEqual([10, 10, 3])
     expect((bodies[0]?.records as unknown[])[0]).toEqual({ fields: { Name: 'New 1' } })
     expect(bodies.every((b) => !('typecast' in b))).toBe(true)
-    expect(fake.records[FEATURES]).toHaveLength(30)
+    expect(await account.records(ROADMAP, FEATURES)).toHaveLength(30)
   })
 
+  // Airtable refuses a write body it is not told is JSON.
   it('sends its write bodies as JSON', async () => {
-    const fake = new FakeAirtable()
-    const bare = await fake.fetch(`${API}/${ROADMAP}/${FEATURES}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${TOKEN}` },
-      body: '{"records": [{"fields": {}}]}',
-    })
-    expect([bare.status, ((await bare.json()) as { error: { type: string } }).error.type]).toEqual([
-      422,
-      'INVALID_REQUEST_BODY',
+    await account.run.recordRequests('content-type')
+    await drain(createRecords(account.accessor(), ROADMAP, FEATURES, names(1)))
+    expect(await account.run.headers('POST', RECORDS)).toEqual([
+      { 'content-type': 'application/json' },
     ])
-    await drain(createRecords(makeAccessor(fake), ROADMAP, FEATURES, names(1)))
-    expect(fake.records[FEATURES]).toHaveLength(8)
+    expect(await account.records(ROADMAP, FEATURES)).toHaveLength(8)
   })
 
   it('sends typecast as a body key', async () => {
-    const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake)
+    const accessor = account.accessor()
     await drain(createRecords(accessor, ROADMAP, FEATURES, names(1), { typecast: true }))
     await drain(
       updateRecords(accessor, ROADMAP, FEATURES, [[FIRST, { Priority: 9 }]], { typecast: true }),
     )
-    expect(fake.writeCalls().map((c) => bodyOf(c).typecast)).toEqual([true, true])
+    expect((await account.writes()).map((c) => bodyOf(c).typecast)).toEqual([true, true])
   })
 
   it('patches ten records to a request', async () => {
-    const fake = new FakeAirtable()
-    const ids = (fake.records[FEATURES] ?? []).map((r) => String(r.id))
+    const ids = (await account.records(ROADMAP, FEATURES)).map((r) => r.id)
     const updates = [...ids, ...ids]
       .slice(0, 12)
       .map((id): [string, Record<string, unknown>] => [id, { Priority: 0 }])
-    expect(await drain(updateRecords(makeAccessor(fake), ROADMAP, FEATURES, updates))).toEqual([
+    expect(await drain(updateRecords(account.accessor(), ROADMAP, FEATURES, updates))).toEqual([
       10, 2,
     ])
-    const calls = fake.writeCalls()
+    const calls = await account.writes()
     expect(calls.map((c) => c.kind)).toEqual(['update', 'update'])
     expect((bodyOf(calls[0] ?? {}).records as unknown[])[0]).toEqual({
       id: FIRST,
       fields: { Priority: 0 },
     })
-    expect((fake.records[FEATURES]?.[0]?.fields as Record<string, unknown>).Name).toBe('Feature 1')
+    const [first] = await account.records(ROADMAP, FEATURES)
+    expect((first?.fields as Record<string, unknown>).Name).toBe('Feature 1')
   })
 
   it('deletes by records[] ten to a request', async () => {
-    const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake)
+    const accessor = account.accessor()
     await drain(createRecords(accessor, ROADMAP, FEATURES, names(5)))
-    const ids = (fake.records[FEATURES] ?? []).map((r) => String(r.id))
+    const ids = (await account.records(ROADMAP, FEATURES)).map((r) => r.id)
     expect(await drain(deleteRecords(accessor, ROADMAP, FEATURES, ids))).toEqual([10, 2])
-    const deletes = fake.writeCalls().filter((c) => c.kind === 'delete')
-    expect(deletes.map((d) => d.params.records)).toEqual([
-      ids.slice(0, 10).join(','),
-      ids.slice(10).join(','),
-    ])
-    expect(fake.records[FEATURES]).toEqual([])
+    const deletes = (await account.writes()).filter((c) => c.kind === 'delete')
+    expect(deletes.map((d) => d.body)).toEqual([ids.slice(0, 10), ids.slice(10)])
+    expect(await account.records(ROADMAP, FEATURES)).toEqual([])
   })
 
   it('stops a failed write after what landed', async () => {
-    const fake = new FakeAirtable()
     const landed: number[] = []
     const rows = [...names(10), { Nope: 1 }, ...names(2)]
     const failure = (async () => {
-      for await (const batch of createRecords(makeAccessor(fake), ROADMAP, FEATURES, rows)) {
+      for await (const batch of createRecords(account.accessor(), ROADMAP, FEATURES, rows)) {
         landed.push(batch.length)
       }
     })()
     await expect(failure).rejects.toMatchObject({ errorType: 'UNKNOWN_FIELD_NAME' })
     expect(landed).toEqual([10])
-    expect(fake.writeCalls()).toHaveLength(2)
-    expect(fake.records[FEATURES]).toHaveLength(17)
+    expect(await account.writes()).toHaveLength(2)
+    expect(await account.records(ROADMAP, FEATURES)).toHaveLength(17)
   })
 
   it('never retries a 503 on a write', async () => {
-    const fake = new FakeAirtable({ faults: { 1: [503, 'SERVICE_UNAVAILABLE'] } })
+    await account.run.answerNext('POST', RECORDS, 503, {
+      error: { type: 'SERVICE_UNAVAILABLE' },
+    })
     await expect(
-      drain(createRecords(makeAccessor(fake), ROADMAP, FEATURES, names(1))),
+      drain(createRecords(account.accessor(), ROADMAP, FEATURES, names(1))),
     ).rejects.toMatchObject({ status: 503 })
-    expect(fake.writeCalls()).toHaveLength(1)
+    expect(await account.writes()).toHaveLength(1)
   })
 
   it('waits out a 429 and retries the write', async () => {
-    vi.useFakeTimers()
-    const fake = new FakeAirtable({ faults: { 1: [429, 'RATE_LIMIT_REACHED'] } })
-    const done = drain(createRecords(makeAccessor(fake), ROADMAP, FEATURES, names(1)))
-    await vi.advanceTimersByTimeAsync(29_000)
-    expect(fake.writeCalls()).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(await done).toEqual([1])
-    expect(fake.writeCalls()).toHaveLength(2)
+    await account.run.answerNext('POST', RECORDS, 429, { error: { type: 'RATE_LIMIT_REACHED' } })
+    // The retry's own 30 s wait is recorded and skipped; every other timer
+    // (the socket's own, the request's 10 s deadline) runs as it is. Fake
+    // timers would stall the socket.
+    const waits: number[] = []
+    const realSetTimeout = globalThis.setTimeout
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((
+      fn: () => void,
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      if (ms === 30_000) {
+        waits.push(ms)
+        return realSetTimeout(fn, 0)
+      }
+      return realSetTimeout(fn, ms, ...rest)
+    }) as typeof setTimeout)
+    try {
+      const accessor = account.accessor({ timeout: 10 })
+      expect(await drain(createRecords(accessor, ROADMAP, FEATURES, names(1)))).toEqual([1])
+    } finally {
+      spy.mockRestore()
+    }
+    expect(waits).toEqual([30_000])
+    expect(await account.writes()).toHaveLength(2)
   })
 
   it('retries only the 429 on a write', () => {
@@ -255,8 +274,7 @@ describe('airtable client writes and comments', () => {
   })
 
   it('pages comments newest first', async () => {
-    const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake)
+    const accessor = account.accessor()
     for (const n of [0, 1, 2]) {
       await createComment(accessor, ROADMAP, FEATURES, FIRST, `note ${String(n)}`)
     }
@@ -268,21 +286,21 @@ describe('airtable client writes and comments', () => {
       'Shipped it.',
       'Looks good.',
     ])
-    const pages = fake.calls.filter((c) => c.kind === 'comments')
+    const pages = await account.run.params('GET', COMMENTS)
     expect(pages).toHaveLength(2)
-    expect(pages[1]?.params.offset).toBe('itrFakeIterator01/3')
+    expect(pages[0]?.offset).toBeUndefined()
+    expect(pages[1]?.offset).toBeTruthy()
   })
 
   it('posts only the text of a comment', async () => {
-    const fake = new FakeAirtable()
-    const made = await createComment(makeAccessor(fake), ROADMAP, FEATURES, FIRST, 'hello')
+    const made = await createComment(account.accessor(), ROADMAP, FEATURES, FIRST, 'hello')
     expect(made.text).toBe('hello')
     expect((made.author as Record<string, unknown>).email).toBe('ada@example.com')
-    expect(fake.writeCalls()[0]?.body).toEqual({ text: 'hello' })
+    expect((await account.writes())[0]?.body).toEqual({ text: 'hello' })
   })
 
   it('paces every request under its base', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const accessor = account.accessor()
     const keys: string[] = []
     const acquire = accessor.limiter.acquire.bind(accessor.limiter)
     vi.spyOn(accessor.limiter, 'acquire').mockImplementation((key: string) => {

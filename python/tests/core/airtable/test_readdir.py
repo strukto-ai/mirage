@@ -19,7 +19,6 @@ from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.airtable import AirtableVFS
 from mirage.workspace import Workspace
-from tests.fixtures.airtable_api import make_accessor
 from tests.fixtures.vfs_io import vfs_over
 
 ROOT = "/at"
@@ -37,21 +36,21 @@ def _names(rows: list[FileStat]) -> list[str]:
     return [row.name for row in rows]
 
 
-def _mounted(**overrides) -> Workspace:
+def _mounted(account, **overrides) -> Workspace:
     return Workspace(
-        {f"{ROOT}/": vfs_over(AirtableVFS, make_accessor(**overrides))}
+        {f"{ROOT}/": vfs_over(AirtableVFS, account.accessor(**overrides))}
     )
 
 
 @pytest.mark.asyncio
-async def test_the_root_is_the_bases_directory(airtable_api):
-    listed = await readdir(make_accessor(), _spec(f"{ROOT}/"))
+async def test_the_root_is_the_bases_directory(airtable_account):
+    listed = await readdir(airtable_account.accessor(), _spec(f"{ROOT}/"))
     assert _names(listed) == ["bases"]
 
 
 @pytest.mark.asyncio
-async def test_bases_list_as_named_directories(airtable_api):
-    listed = await readdir(make_accessor(), _spec(f"{ROOT}/bases"))
+async def test_bases_list_as_named_directories(airtable_account):
+    listed = await readdir(airtable_account.accessor(), _spec(f"{ROOT}/bases"))
     assert _names(listed) == [
         "Product_Roadmap__appRoadmapBase001",
         "Ops_Finance__appOpsFinance0001",
@@ -59,8 +58,8 @@ async def test_bases_list_as_named_directories(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_a_base_lists_base_json_and_its_tables(airtable_api):
-    accessor = make_accessor()
+async def test_a_base_lists_base_json_and_its_tables(airtable_account):
+    accessor = airtable_account.accessor()
     base, _ = await readdir(accessor, _spec(f"{ROOT}/bases"))
     listed = await readdir(accessor, _spec(BASE), base)
     assert _names(listed.entries) == [
@@ -70,15 +69,17 @@ async def test_a_base_lists_base_json_and_its_tables(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_one_schema_call_seeds_every_table_and_views_dir(airtable_api):
-    ws = _mounted()
+async def test_one_schema_call_seeds_every_table_and_views_dir(
+    airtable_account,
+):
+    ws = _mounted(airtable_account)
     await ws.dispatch("readdir", PathSpec.from_str_path(BASE))
-    before = len(airtable_api.calls)
+    before = len(await airtable_account.asked())
     table, _ = await ws.dispatch("readdir", PathSpec.from_str_path(TABLE))
     views, _ = await ws.dispatch(
         "readdir", PathSpec.from_str_path(f"{TABLE}/views")
     )
-    assert len(airtable_api.calls) == before
+    assert len(await airtable_account.asked()) == before
     assert table == [
         f"{TABLE}/table.json",
         f"{TABLE}/records.jsonl",
@@ -91,21 +92,21 @@ async def test_one_schema_call_seeds_every_table_and_views_dir(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_a_cold_table_listing_warms_through_its_base(airtable_api):
-    listed, _ = await _mounted().dispatch(
+async def test_a_cold_table_listing_warms_through_its_base(airtable_account):
+    listed, _ = await _mounted(airtable_account).dispatch(
         "readdir", PathSpec.from_str_path(TABLE)
     )
     assert f"{TABLE}/records.jsonl" in listed
 
 
 @pytest.mark.asyncio
-async def test_an_unknown_or_out_of_scope_base_is_enoent(airtable_api):
+async def test_an_unknown_or_out_of_scope_base_is_enoent(airtable_account):
     with pytest.raises(FileNotFoundError):
-        await _mounted().dispatch(
+        await _mounted(airtable_account).dispatch(
             "readdir",
             PathSpec.from_str_path(f"{ROOT}/bases/X__appNope000000001"),
         )
     with pytest.raises(FileNotFoundError):
-        await _mounted(base_ids=["appOpsFinance0001"]).dispatch(
-            "readdir", PathSpec.from_str_path(BASE)
-        )
+        await _mounted(
+            airtable_account, base_ids=["appOpsFinance0001"]
+        ).dispatch("readdir", PathSpec.from_str_path(BASE))

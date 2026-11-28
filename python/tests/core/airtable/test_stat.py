@@ -17,7 +17,6 @@ import pytest
 from mirage.types import ContentType, FileStat, FileType, PathSpec
 from mirage.vfs.airtable import AirtableVFS
 from mirage.workspace import Workspace
-from tests.fixtures.airtable_api import make_accessor
 from tests.fixtures.vfs_io import vfs_over
 
 ROOT = "/at"
@@ -25,8 +24,8 @@ BASE = f"{ROOT}/bases/Product_Roadmap__appRoadmapBase001"
 TABLE = f"{BASE}/Features__tblFeatures000001"
 
 
-def _mounted() -> Workspace:
-    return Workspace({f"{ROOT}/": vfs_over(AirtableVFS, make_accessor())})
+def _mounted(account) -> Workspace:
+    return Workspace({f"{ROOT}/": vfs_over(AirtableVFS, account.accessor())})
 
 
 async def _stat(ws: Workspace, path: str) -> FileStat:
@@ -35,8 +34,8 @@ async def _stat(ws: Workspace, path: str) -> FileStat:
 
 
 @pytest.mark.asyncio
-async def test_json_leaves_stat_at_their_rendered_size(airtable_api):
-    ws = _mounted()
+async def test_json_leaves_stat_at_their_rendered_size(airtable_account):
+    ws = _mounted(airtable_account)
     for leaf in (f"{BASE}/base.json", f"{TABLE}/table.json"):
         info = await _stat(ws, leaf)
         body, _ = await ws.dispatch("read", PathSpec.from_str_path(leaf))
@@ -46,8 +45,8 @@ async def test_json_leaves_stat_at_their_rendered_size(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_record_files_are_size_unknown(airtable_api):
-    ws = _mounted()
+async def test_record_files_are_size_unknown(airtable_account):
+    ws = _mounted(airtable_account)
     records = await _stat(ws, f"{TABLE}/records.jsonl")
     view = await _stat(
         ws, f"{TABLE}/views/Done_shipped__viwDone0000000001.jsonl"
@@ -57,13 +56,16 @@ async def test_record_files_are_size_unknown(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_directories_stat_as_directories(airtable_api):
-    ws = _mounted()
+async def test_directories_stat_as_directories(airtable_account):
+    ws = _mounted(airtable_account)
     for path in (f"{ROOT}/bases", BASE, TABLE, f"{TABLE}/views"):
         assert (await _stat(ws, path)).type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_an_unlisted_view_is_enoent(airtable_api):
+async def test_an_unlisted_view_is_enoent(airtable_account):
     with pytest.raises(FileNotFoundError):
-        await _stat(_mounted(), f"{TABLE}/views/Gone__viwGone0000000001.jsonl")
+        await _stat(
+            _mounted(airtable_account),
+            f"{TABLE}/views/Gone__viwGone0000000001.jsonl",
+        )

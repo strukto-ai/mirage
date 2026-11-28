@@ -12,14 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import type { AirtableConfig } from './config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { FakeAirtable, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { AirtableAccount } from '../../../tests/fixtures/airtable_account.ts'
 import { read, readStream } from './read.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 const ROOT = '/at'
 const BASE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001`
@@ -33,9 +51,9 @@ const DEC = new TextDecoder()
 const ROW = new FileStat({ name: 'file', type: FileType.FILE })
 const DIR = new FileStat({ name: 'dir', type: FileType.DIRECTORY })
 
-function mounted(fake: FakeAirtable, overrides: Partial<AirtableConfig> = {}): Workspace {
+function mounted(overrides: Partial<AirtableConfig> = {}): Workspace {
   const vfs = Object.assign(new AirtableVFS({ token: 'pat' }), {
-    accessor: makeAccessor(fake, overrides),
+    accessor: account.accessor(overrides),
   })
   return new Workspace({ [`${ROOT}/`]: vfs })
 }
@@ -57,7 +75,7 @@ function ids(body: Uint8Array): string[] {
 
 describe('airtable read', () => {
   it('renders every record across pages', async () => {
-    const body = await read(makeAccessor(new FakeAirtable()), spec(RECORDS), ROW, DIR)
+    const body = await read(account.accessor(), spec(RECORDS), ROW, DIR)
     expect(ids(body)).toHaveLength(7)
     expect(JSON.parse(DEC.decode(body).split('\n')[0] ?? '')).toEqual({
       record_id: 'rec00000000000001',
@@ -67,48 +85,41 @@ describe('airtable read', () => {
   })
 
   it('fetches only as many records as a limit asks for', async () => {
-    const fake = new FakeAirtable()
-    const body = await read(makeAccessor(fake), spec(RECORDS), ROW, DIR, {
+    const body = await read(account.accessor(), spec(RECORDS), ROW, DIR, {
       limit: 2,
     })
     expect(ids(body)).toEqual(['rec00000000000001', 'rec00000000000002'])
-    const calls = fake.recordCalls()
+    const calls = await account.recordQueries()
     expect(calls).toHaveLength(1)
     expect(calls[0]?.maxRecords).toBe('2')
   })
 
   it('applies the view of a view file', async () => {
-    const fake = new FakeAirtable()
-    const body = await read(makeAccessor(fake), spec(DONE), ROW, DIR)
+    const body = await read(account.accessor(), spec(DONE), ROW, DIR)
     expect(ids(body)).toHaveLength(4)
-    expect(fake.recordCalls()[0]?.view).toBe('viwDone0000000001')
+    expect((await account.recordQueries())[0]?.view).toBe('viwDone0000000001')
   })
 
   it('refuses a full read past the cap', async () => {
-    const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake, { maxReadRecords: 5 })
+    const accessor = account.accessor({ maxReadRecords: 5 })
     await expect(read(accessor, spec(RECORDS), ROW, DIR)).rejects.toMatchObject({
       code: 'EFBIG',
     })
     // the refusal needed cap + 1 records, not the whole table
-    expect(fake.recordCalls().at(-1)?.maxRecords).toBe('6')
+    expect((await account.recordQueries()).at(-1)?.maxRecords).toBe('6')
     const body = await read(accessor, spec(RECORDS), ROW, DIR, { limit: 3 })
     expect(ids(body)).toHaveLength(3)
   })
 
   it('reads a window past the cap on a small view', async () => {
-    const body = await read(
-      makeAccessor(new FakeAirtable(), { maxReadRecords: 5 }),
-      spec(DONE),
-      ROW,
-      DIR,
-      { limit: 50 },
-    )
+    const body = await read(account.accessor({ maxReadRecords: 5 }), spec(DONE), ROW, DIR, {
+      limit: 50,
+    })
     expect(ids(body)).toHaveLength(4)
   })
 
   it('skips records for an offset', async () => {
-    const body = await read(makeAccessor(new FakeAirtable()), spec(RECORDS), ROW, DIR, {
+    const body = await read(account.accessor(), spec(RECORDS), ROW, DIR, {
       limit: 2,
       offset: 3,
     })
@@ -116,7 +127,7 @@ describe('airtable read', () => {
   })
 
   it('answers ENOENT for missing tables and views', async () => {
-    const ws = mounted(new FakeAirtable())
+    const ws = mounted()
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
@@ -127,17 +138,15 @@ describe('airtable read', () => {
   })
 
   it('answers ENOENT for a base outside baseIds', async () => {
-    const fake = new FakeAirtable()
-    const ws = mounted(fake, { baseIds: ['appOpsFinance0001'] })
+    const ws = mounted({ baseIds: ['appOpsFinance0001'] })
     for (const path of [RECORDS, `${BASE}/base.json`, `${TABLE}/table.json`]) {
       await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
-    expect(fake.recordCalls()).toEqual([])
+    expect(await account.recordQueries()).toEqual([])
   })
 
   it('answers ENOENT for a name the listing does not hold', async () => {
-    const fake = new FakeAirtable()
-    const ws = mounted(fake)
+    const ws = mounted()
     const ops = `${ROOT}/bases/Ops_Finance__appOpsFinance0001`
     for (const path of [
       `${ROOT}/bases/Wrong__appRoadmapBase001/base.json`,
@@ -149,23 +158,21 @@ describe('airtable read', () => {
       await expect(ws.dispatch('read', path)).rejects.toMatchObject({ code: 'ENOENT' })
     }
     // the ids resolve at the API; only the listing knows the names
-    expect(fake.recordCalls()).toEqual([])
+    expect(await account.recordQueries()).toEqual([])
   })
 
   it('proves nothing with no rows handed', async () => {
-    const fake = new FakeAirtable()
-    const accessor = makeAccessor(fake)
+    const accessor = account.accessor()
     for (const path of [DONE, RECORDS]) {
       await expect(read(accessor, spec(path))).rejects.toMatchObject({ code: 'ENOENT' })
     }
-    expect(fake.recordCalls()).toEqual([])
+    expect(await account.recordQueries()).toEqual([])
   })
 
   it('answers ENOENT for a view gone since its listing', async () => {
-    const fake = new FakeAirtable()
     // the schema still lists the view; Airtable answers its id missing
-    Reflect.deleteProperty(fake.views, 'viwDone0000000001')
-    await expect(read(makeAccessor(fake), spec(DONE), ROW, DIR)).rejects.toMatchObject({
+    await account.run.execute('DELETE FROM AirtableView WHERE id = ?', 'viwDone0000000001')
+    await expect(read(account.accessor(), spec(DONE), ROW, DIR)).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
@@ -179,7 +186,7 @@ async function drain(stream: AsyncIterable<Uint8Array>): Promise<Uint8Array[]> {
 
 describe('airtable read stream', () => {
   it('renders the read a page at a time', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const accessor = account.accessor()
     const chunks = await drain(readStream(accessor, spec(RECORDS), ROW, DIR))
     expect(chunks.map((c) => ids(c).length)).toEqual([3, 3, 1])
     expect(Buffer.concat(chunks)).toEqual(
@@ -188,21 +195,19 @@ describe('airtable read stream', () => {
   })
 
   it('stops paging when the reader stops', async () => {
-    const fake = new FakeAirtable()
-    const stream = readStream(makeAccessor(fake), spec(RECORDS), ROW, DIR)
+    const stream = readStream(account.accessor(), spec(RECORDS), ROW, DIR)
     const first = await stream.next()
     await stream.return()
     expect(ids(first.value as Uint8Array)).toHaveLength(3)
-    expect(fake.recordCalls()).toHaveLength(1)
+    expect(await account.recordQueries()).toHaveLength(1)
   })
 
   it('stops past the cap after that many records', async () => {
-    const fake = new FakeAirtable()
     const got: Uint8Array[] = []
     await expect(
       (async () => {
         for await (const chunk of readStream(
-          makeAccessor(fake, { maxReadRecords: 5 }),
+          account.accessor({ maxReadRecords: 5 }),
           spec(RECORDS),
           ROW,
           DIR,
@@ -211,14 +216,14 @@ describe('airtable read stream', () => {
       })(),
     ).rejects.toMatchObject({ code: 'EFBIG' })
     expect(ids(Buffer.concat(got))).toHaveLength(5)
-    expect(fake.recordCalls().at(-1)?.maxRecords).toBe('6')
+    expect((await account.recordQueries()).at(-1)?.maxRecords).toBe('6')
   })
 
   it('applies a view and proves its paths', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const accessor = account.accessor()
     const body = Buffer.concat(await drain(readStream(accessor, spec(DONE), ROW, DIR)))
     expect(ids(body)).toHaveLength(4)
-    const ws = mounted(new FakeAirtable())
+    const ws = mounted()
     for (const path of [
       `${BASE}/Gone__tblGone0000000001/records.jsonl`,
       `${TABLE}/views/Gone__viwGone0000000001.jsonl`,
@@ -230,7 +235,7 @@ describe('airtable read stream', () => {
   })
 
   it('reads another file whole', async () => {
-    const accessor = makeAccessor(new FakeAirtable())
+    const accessor = account.accessor()
     const chunks = await drain(readStream(accessor, spec(`${TABLE}/table.json`), ROW, DIR))
     expect(chunks).toEqual([await read(accessor, spec(`${TABLE}/table.json`), ROW, DIR)])
   })
