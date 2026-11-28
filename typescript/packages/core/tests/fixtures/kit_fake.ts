@@ -236,7 +236,8 @@ export class KitRun {
    * when given: bytes are sent as written. A null `status` closes the
    * connection instead. With `path`, only requests to that one path; with
    * `query`, only requests asked with exactly that query string, `''` for
-   * none. Each request waits `delayMs` before it is answered.
+   * none. Each request waits `delayMs` before it is answered, and the answer
+   * carries `headers` when given.
    */
   async answerNext(
     method: string,
@@ -247,9 +248,11 @@ export class KitRun {
     path?: string,
     query?: string,
     delayMs = 0,
+    headers?: Record<string, string>,
   ): Promise<void> {
     const plan: Record<string, JsonValue> = { method, route, times, delay_ms: delayMs }
     if (status !== null) plan.status = status
+    if (headers !== undefined) plan.headers = headers
     if (path !== undefined) plan.path = path
     if (query !== undefined) plan.query = query
     if (body instanceof Uint8Array) plan.text = new TextDecoder().decode(body)
@@ -347,12 +350,18 @@ export class KitRun {
     await this.call('POST', `${ops}/load`, { json: snapshot })
   }
 
-  /** Drop the run and what it holds, and throw what a change threw. */
-  async close(): Promise<void> {
+  /**
+   * Drop the run and what it holds, and throw what a change threw.
+   *
+   * @param drop drop the run; false keeps it, for a run other tests share.
+   */
+  async close(drop = true): Promise<void> {
     this.stop.abort()
     const done = await Promise.allSettled(this.changes)
-    const res = await FETCH(`${this.origin}/_kit/runs/${this.name}`, { method: 'DELETE' })
-    if (res.status !== 204) throw new Error(`drop ${this.name} -> ${String(res.status)}`)
+    if (drop) {
+      const res = await FETCH(`${this.origin}/_kit/runs/${this.name}`, { method: 'DELETE' })
+      if (res.status !== 204) throw new Error(`drop ${this.name} -> ${String(res.status)}`)
+    }
     for (const result of done) if (result.status === 'rejected') throw result.reason
   }
 }

@@ -13,27 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { describe, expect, it } from 'vitest'
-import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { HfBucket } from '../../../tests/fixtures/hf_bucket.ts'
 import { rmR } from './rm.ts'
 
-async function accessorWith(files: Record<string, string | Buffer>) {
-  const accessor = new HfBucketsAccessor({ bucket: 'ns/bucket' })
-  const fake = fakeHfOperator(files)
-  await installFakeOperator(accessor, fake)
-  return { accessor, fake }
-}
+let origin = ''
+const buckets: HfBucket[] = []
+
+beforeAll(async () => {
+  origin = await serve('hf')
+})
+
+afterEach(async () => {
+  await Promise.all(buckets.splice(0).map((bucket) => bucket.close()))
+})
 
 describe('hf rmR', () => {
   it('deletes every key under the prefix and keeps siblings', async () => {
-    const { accessor, fake } = await accessorWith({
+    const bucket = new HfBucket(origin)
+    buckets.push(bucket)
+    await bucket.reset()
+    await bucket.put({
       'data/a.txt': 'a',
       'data/sub/b.txt': 'b',
       'data/sub/deep/c.txt': 'c',
       'other/keep.txt': 'k',
     })
-    await rmR(accessor, PathSpec.fromStrPath('/data'))
-    expect([...fake.files.keys()]).toEqual(['other/keep.txt'])
+    await rmR(bucket.accessor(), PathSpec.fromStrPath('/data'))
+    expect(Object.keys(await bucket.files())).toEqual(['other/keep.txt'])
   })
 })

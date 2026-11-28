@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
+import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 
 from mirage.cache.index import LookupResult, LookupStatus
@@ -40,22 +41,29 @@ from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from mirage.workspace.reconcile import Reconciler
-from tests.fixtures.hf_hub_api import FakeHub, serve
+from tests.fixtures.hub_repo import (
+    REVISION,
+    TREE,
+    TREE_UNDER,
+    UNTIL_CLEARED,
+    HubRepo,
+)
 
-REPO = ("models", "acme/widget")
 ROOT = PathSpec(virtual="/m", directory="/m", vfs_path="")
 LISTED = b"b.txt\n"
 GROWN = b"b.txt\nnew.txt\n"
+FILES = {"a.txt": b"alpha\n", "docs/sub/b.txt": b"bravo\n"}
 
 
-def _hub() -> FakeHub:
-    return FakeHub(
-        repos={REPO: {"a.txt": b"alpha\n", "docs/sub/b.txt": b"bravo\n"}}
-    )
+@pytest_asyncio.fixture
+async def repo(hub: HubRepo) -> HubRepo:
+    await hub.commit(FILES)
+    await hub.run.record_requests()
+    return hub
 
 
-def _vfs(hub: FakeHub, revision: str | None = None):
-    config = {"repo_id": "acme/widget", "endpoint": hub.url}
+def _vfs(hub: HubRepo, revision: str | None = None):
+    config = hub.config()
     if revision is not None:
         config["revision"] = revision
     return build_vfs("hf_models", config)
@@ -90,15 +98,6 @@ async def _open(
         await ws.close()
 
 
-@asynccontextmanager
-async def _served(
-    make=_vfs, index=None, clock: ManualClock | None = None
-) -> AsyncIterator[tuple[FakeHub, Workspace]]:
-    with serve(_hub()) as hub:
-        async with _open(make(hub), index, clock) as ws:
-            yield hub, ws
-
-
 async def _out(ws: Workspace, line: str) -> bytes:
     result = await asyncio.wait_for(ws.shell(line), 10)
     out = await result.materialize_stdout()
@@ -107,96 +106,90 @@ async def _out(ws: Workspace, line: str) -> bytes:
     return out
 
 
-def _counts(hub: FakeHub) -> tuple[int, int, int, int]:
+async def _counts(hub: HubRepo) -> tuple[int, int, int, int]:
     return (
-        hub.count("revision"),
-        hub.count("tree"),
-        hub.count("paths_info"),
-        hub.count("resolve"),
+        await hub.count("revision"),
+        await hub.count("tree"),
+        await hub.count("paths_info"),
+        await hub.count("resolve"),
     )
 
 
-def _revs(hub: FakeHub, route: str) -> set[str]:
-    return {rev for name, _, rev, _ in hub.log if name == route}
+async def _revs(hub: HubRepo, route: str) -> set[str]:
+    return {rev for name, _, rev, _ in await hub.log() if name == route}
 
 
-def _add(hub: FakeHub) -> None:
-    hub.repos[REPO]["docs/sub/new.txt"] = b"new\n"
+async def _add(hub: HubRepo, xet: bool = True) -> None:
+    await hub.commit({"docs/sub/new.txt": b"new\n"}, xet=xet)
 
 
 async def _stored(ws: Workspace, key: str = "/m") -> str | None:
     return (await ws.mount("/m").index_store.list_dir(key)).version
 
 
-def _at_head(hub: FakeHub):
-    return _vfs(hub, revision=hub.head(REPO))
-
-
 # Named counts (revision, tree, paths_info, resolve).
 @pytest.mark.asyncio
-async def test_an_unchanged_second_command_costs_one_revision():
-    async with _served() as (hub, ws):
+async def test_an_unchanged_second_command_costs_one_revision(repo):
+    async with _open(_vfs(repo)) as ws:
         await _out(ws, "ls /m")
-        hub.log.clear()
+        await repo.run.record_requests()
         assert await _out(ws, "ls /m/docs/sub") == LISTED
-        assert _counts(hub) == (1, 0, 0, 0)
+        assert await _counts(repo) == (1, 0, 0, 0)
 
 
 # The gate's check misses, and the refill asks the head once more for the
 # commit it walks the tree at.
 @pytest.mark.asyncio
-async def test_a_changed_second_command_checks_then_walks_once():
-    async with _served() as (hub, ws):
+async def test_a_changed_second_command_checks_then_walks_once(repo):
+    async with _open(_vfs(repo)) as ws:
         await _out(ws, "ls /m")
-        _add(hub)
-        hub.log.clear()
+        await _add(repo)
         assert await _out(ws, "ls /m/docs/sub") == GROWN
-        assert _counts(hub) == (2, 1, 0, 0)
+        assert await _counts(repo) == (2, 1, 0, 0)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("line", ["find /m -type f", "ls -R /m"])
-async def test_a_walk_after_an_outside_add_sees_it(line):
-    async with _served() as (hub, ws):
+async def test_a_walk_after_an_outside_add_sees_it(repo, line):
+    async with _open(_vfs(repo)) as ws:
         await _out(ws, "ls /m")
-        hub.log.clear()
+        await repo.run.record_requests()
         assert b"new.txt" not in await _out(ws, line)
-        assert _counts(hub) == (1, 0, 0, 0)
-        _add(hub)
-        hub.log.clear()
+        assert await _counts(repo) == (1, 0, 0, 0)
+        await _add(repo)
         assert b"new.txt" in await _out(ws, line)
-        assert _counts(hub) == (2, 1, 0, 0)
+        assert await _counts(repo) == (2, 1, 0, 0)
 
 
 # Repeated root stats on a mount that has not listed send nothing, and a
 # fresh one's cold root stat sends nothing either: only the gate's check
 # store asks the head.
 @pytest.mark.asyncio
-async def test_a_cold_root_stat_sends_no_request():
-    async with _served() as (hub, ws):
+async def test_a_cold_root_stat_sends_no_request(repo):
+    async with _open(_vfs(repo)) as ws:
         for _ in range(5):
             assert (await ws.stat("/m")).type == FileType.DIRECTORY
         assert await _out(ws, "stat -c %n /m") == b"/m\n"
-        assert _counts(hub) == (0, 0, 0, 0)
+        assert await _counts(repo) == (0, 0, 0, 0)
 
 
 # A second mount over a warm shared store; the gate's root stat, through
 # its check store, asks the head once and never walks the tree.
 @pytest.mark.asyncio
-async def test_a_root_stat_through_a_throwaway_index_never_walks():
+async def test_a_root_stat_through_a_throwaway_index_never_walks(repo):
     shared = RAMIndexCacheStore()
-    with serve(_hub()) as hub:
-        async with (
-            _open(_vfs(hub), shared) as one,
-            _open(_vfs(hub), shared) as two,
-        ):
-            await _out(one, "ls /m")
-            hub.log.clear()
-            found = await two.mount("/m").call(
-                "stat", "/m", index=ListingCheckStore()
-            )
-            assert found.fingerprint == hub.head(REPO)
-            assert _counts(hub) == (1, 0, 0, 0)
+    async with (
+        _open(_vfs(repo), shared) as one,
+        _open(_vfs(repo), shared) as two,
+    ):
+        await _out(one, "ls /m")
+        head = await repo.head()
+        await repo.run.record_requests()
+        found = await two.mount("/m").call(
+            "stat", "/m", index=ListingCheckStore()
+        )
+        assert found.fingerprint == head
+        assert await _counts(repo) == (1, 0, 0, 0)
 
 
 def _count_list_dirs(monkeypatch, store) -> list[str]:
@@ -216,14 +209,14 @@ def _count_list_dirs(monkeypatch, store) -> list[str]:
 # the backend, however stale the trust is (it used to answer the stored one).
 @pytest.mark.asyncio
 async def test_a_root_stat_through_the_mount_index_names_no_version(
-    monkeypatch,
+    repo, monkeypatch
 ):
     clock = ManualClock(start=100.0)
-    async with _served(clock=clock) as (hub, ws):
+    async with _open(_vfs(repo), clock=clock) as ws:
         await _out(ws, "ls /m")
         stored = await _stored(ws)
         clock.advance(LISTING_TRUST_WINDOW * 2)
-        hub.log.clear()
+        await repo.run.record_requests()
         mount = ws.mount("/m")
         reads = _count_list_dirs(monkeypatch, mount.index_store)
         async with command_scope():
@@ -231,43 +224,49 @@ async def test_a_root_stat_through_the_mount_index_names_no_version(
         assert stored is not None
         assert found.fingerprint is None
         assert reads == []
-        assert _counts(hub) == (0, 0, 0, 0)
+        assert await _counts(repo) == (0, 0, 0, 0)
 
 
 # A refused head names no version, and the root stat never falls into a
 # refill of the throwaway index.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("refusal", [(404, "RevisionNotFound"), (401, "")])
-async def test_a_refused_head_names_no_version_and_walks_nothing(refusal):
-    async with _served() as (hub, ws):
+async def test_a_refused_head_names_no_version_and_walks_nothing(
+    repo, refusal
+):
+    async with _open(_vfs(repo)) as ws:
         await _out(ws, "ls /m")
-        hub.fail["revision"] = refusal
-        hub.log.clear()
+        await repo.refuse("revision", *refusal)
+        await repo.run.record_requests()
         found = await stat(
             ws.mount("/m").vfs.accessor, ROOT, None, ListingCheckStore()
         )
         assert found.fingerprint is None
-        assert (hub.count("revision"), hub.count("tree")) == (1, 0)
+        assert (await repo.count("revision"), await repo.count("tree")) == (
+            1,
+            0,
+        )
 
 
 # A mount at an older commit's revision, over a store a `main` mount
 # filled, must not serve main's listing.
 @pytest.mark.asyncio
-async def test_an_older_commit_revision_never_serves_another_revisions_listing():
-    with serve(_hub()) as hub:
-        old = hub.head(REPO)
-        shared = RAMIndexCacheStore()
-        async with _open(_vfs(hub), shared) as main:
-            await _out(main, "ls /m/docs/sub")
-            _add(hub)
-            assert await _out(main, "ls /m/docs/sub") == GROWN
-        async with _open(_vfs(hub, revision=old), shared) as older:
-            hub.log.clear()
-            assert await _out(older, "ls /m/docs/sub") == LISTED
-            assert _counts(hub) == (2, 1, 0, 0)
-            hub.log.clear()
-            assert await _out(older, "ls /m/docs/sub") == LISTED
-            assert _counts(hub) == (1, 0, 0, 0)
+async def test_an_older_commit_revision_never_serves_another_revisions_listing(
+    repo,
+):
+    old = await repo.head()
+    shared = RAMIndexCacheStore()
+    async with _open(_vfs(repo), shared) as main:
+        await _out(main, "ls /m/docs/sub")
+        await _add(repo)
+        assert await _out(main, "ls /m/docs/sub") == GROWN
+    async with _open(_vfs(repo, revision=old), shared) as older:
+        await repo.run.record_requests()
+        assert await _out(older, "ls /m/docs/sub") == LISTED
+        assert await _counts(repo) == (2, 1, 0, 0)
+        await repo.run.record_requests()
+        assert await _out(older, "ls /m/docs/sub") == LISTED
+        assert await _counts(repo) == (1, 0, 0, 0)
 
 
 # An hf mount checks its head every command, even at a full-sha revision:
@@ -275,43 +274,50 @@ async def test_an_older_commit_revision_never_serves_another_revisions_listing()
 # commit, so a branch named like it, made after the mount listed, is seen
 # on the next command.
 @pytest.mark.asyncio
-async def test_a_full_sha_revision_checks_its_head_every_command():
-    async with _served(_at_head) as (hub, ws):
-        name = hub.head(REPO)
+async def test_a_full_sha_revision_checks_its_head_every_command(repo):
+    name = await repo.head()
+    async with _open(_vfs(repo, revision=name)) as ws:
         assert await _out(ws, "ls /m/docs/sub") == LISTED
         assert await _stored(ws, "/m/docs/sub") == name
-        hub.log.clear()
+        await repo.run.record_requests()
         assert await _out(ws, "ls /m/docs/sub") == LISTED
-        assert _counts(hub) == (1, 0, 0, 0)
-        _add(hub)
-        hub.branches.add(name)
-        hub.log.clear()
+        assert await _counts(repo) == (1, 0, 0, 0)
+        await _add(repo)
+        await repo.branch(name, await repo.head())
         assert await _out(ws, "ls /m/docs/sub") == GROWN
-        assert _counts(hub) == (2, 1, 0, 0)
+        assert await _counts(repo) == (2, 1, 0, 0)
 
 
 # A commit landing between the head and the tree walk: the tree is walked
 # at the head that was named, so the rows match their version, and the
 # next command's check sees the change.
 @pytest.mark.asyncio
-async def test_a_commit_between_the_head_and_the_walk_is_caught_next_command():
-    async with _served() as (hub, ws):
-        old = hub.head(REPO)
-        hub.after_revision = lambda: _add(hub)
+async def test_a_commit_between_the_head_and_the_walk_is_caught_next_command(
+    repo,
+):
+    old = await repo.head()
+    await repo.run.record_requests()
+
+    async def land() -> None:
+        # Plain, not Xet: storing one on Xet reloads the run, which would
+        # drop the walk it holds.
+        await _add(repo, xet=False)
+
+    await repo.run.before_next([("GET", TREE), ("GET", TREE_UNDER)], land)
+    async with _open(_vfs(repo)) as ws:
         assert await _out(ws, "ls /m/docs/sub") == LISTED
-        hub.after_revision = None
-        assert _revs(hub, "tree") == {old}
+        assert await _revs(repo, "tree") == {old}
         assert await _stored(ws, "/m/docs/sub") == old
-        hub.log.clear()
+        await repo.run.record_requests()
         assert await _out(ws, "ls /m/docs/sub") == GROWN
-        assert _counts(hub) == (2, 1, 0, 0)
+        assert await _counts(repo) == (2, 1, 0, 0)
 
 
 # A revision the Hub does not know: the refusal wording is the one the
 # tree walk gave before the head was asked first.
 @pytest.mark.asyncio
-async def test_a_bad_revision_reads_as_permission_denied():
-    async with _served(lambda hub: _vfs(hub, revision="f" * 40)) as (_, ws):
+async def test_a_bad_revision_reads_as_permission_denied(repo):
+    async with _open(_vfs(repo, revision="f" * 40)) as ws:
         ls = await ws.shell("ls /m")
         assert (ls.exit_code, await ls.stderr_str()) == (
             2,
@@ -328,19 +334,18 @@ async def test_a_bad_revision_reads_as_permission_denied():
 # On Redis a versioned listing is served on the version alone, nested
 # folders included: the store does not check the children's rows.
 @pytest.mark.asyncio
-async def test_an_unchanged_listing_on_redis_costs_one_revision():
+async def test_an_unchanged_listing_on_redis_costs_one_revision(repo):
     client = FakeRedis()
     try:
-        async with _served(index=RedisIndexCacheStore(client=client)) as (
-            hub,
-            ws,
-        ):
+        async with _open(
+            _vfs(repo), RedisIndexCacheStore(client=client)
+        ) as ws:
             await _out(ws, "ls /m")
-            hub.log.clear()
+            await repo.run.record_requests()
             assert await _out(ws, "ls /m /m/docs /m/docs/sub") == (
                 b"/m:\na.txt\ndocs\n\n/m/docs:\nsub\n\n/m/docs/sub:\nb.txt\n"
             )
-            assert _counts(hub) == (1, 0, 0, 0)
+            assert await _counts(repo) == (1, 0, 0, 0)
     finally:
         await client.aclose()
 
@@ -364,20 +369,20 @@ async def _drop_row(store, client, key: str) -> None:
 # row and refills once, so it answers the child rather than a hole.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["ram", "redis"])
-async def test_a_listed_child_without_a_row_refills_once(backend):
+async def test_a_listed_child_without_a_row_refills_once(repo, backend):
     store, client = _store(backend)
     try:
-        async with _served(index=store) as (hub, ws):
+        async with _open(_vfs(repo), store) as ws:
             await _out(ws, "ls /m")
             await _drop_row(store, client, "/m/docs/sub/b.txt")
-            hub.log.clear()
+            await repo.run.record_requests()
             assert await _out(ws, "cat /m/docs/sub/b.txt") == b"bravo\n"
-            assert hub.count("tree") == 1
+            assert await repo.count("tree") == 1
             assert await _out(ws, "stat -c %n /m/docs/sub/b.txt") == (
                 b"/m/docs/sub/b.txt\n"
             )
             assert await _out(ws, "ls /m/docs/sub") == LISTED
-            assert hub.count("tree") == 1
+            assert await repo.count("tree") == 1
     finally:
         if client is not None:
             await client.aclose()
@@ -386,16 +391,16 @@ async def test_a_listed_child_without_a_row_refills_once(backend):
 # A name the live listing does not hold is absent, and costs no refill.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("backend", ["ram", "redis"])
-async def test_an_unlisted_name_is_absent_without_a_refill(backend):
+async def test_an_unlisted_name_is_absent_without_a_refill(repo, backend):
     store, client = _store(backend)
     try:
-        async with _served(index=store) as (hub, ws):
+        async with _open(_vfs(repo), store) as ws:
             await _out(ws, "ls /m")
-            hub.log.clear()
+            await repo.run.record_requests()
             result = await ws.shell("stat /m/docs/sub/zz.txt")
             assert result.exit_code == 1
             assert "No such file" in await result.stderr_str()
-            assert hub.count("tree") == 0
+            assert await repo.count("tree") == 0
     finally:
         if client is not None:
             await client.aclose()
@@ -420,21 +425,21 @@ def _row_stays_missing(store, key: str) -> None:
 # refill bumps the accessor's refill count, which used to send the retry
 # into a second refill of its own.
 @pytest.mark.asyncio
-async def test_a_row_missing_after_its_refill_costs_one_refill():
+async def test_a_row_missing_after_its_refill_costs_one_refill(repo):
     store = RAMIndexCacheStore()
-    async with _served(index=store) as (hub, ws):
+    async with _open(_vfs(repo), store) as ws:
         await _out(ws, "ls /m")
         _row_stays_missing(store, "/m/docs/sub/b.txt")
         for command in (1, 2):
-            hub.log.clear()
+            await repo.run.record_requests()
             result = await ws.shell("stat /m/docs/sub/b.txt")
             assert result.exit_code == 1
             assert "No such file" in await result.stderr_str()
-            assert hub.count("tree") == 1, command
+            assert await repo.count("tree") == 1, command
 
 
-def _prefixed(hub: FakeHub, key_prefix: str | None, revision: str | None):
-    config = {"repo_id": "acme/widget", "endpoint": hub.url}
+def _prefixed(hub: HubRepo, key_prefix: str | None, revision: str | None):
+    config = hub.config()
     if key_prefix is not None:
         config["key_prefix"] = key_prefix
     if revision is not None:
@@ -448,50 +453,50 @@ def _prefixed(hub: FakeHub, key_prefix: str | None, revision: str | None):
 # subtree as its own root.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("full_sha", [False, True])
-async def test_a_key_prefix_keeps_shared_listings_apart(full_sha):
+async def test_a_key_prefix_keeps_shared_listings_apart(repo, full_sha):
     shared = RAMIndexCacheStore()
-    with serve(_hub()) as hub:
-        revision = hub.head(REPO) if full_sha else None
-        async with (
-            _open(_prefixed(hub, "docs/", revision), shared) as sub,
-            _open(_prefixed(hub, None, revision), shared) as whole,
-        ):
-            assert await _out(sub, "ls /m") == b"sub\n"
-            assert await _out(whole, "ls /m") == b"a.txt\ndocs\n"
-            assert await _out(sub, "ls /m") == b"sub\n"
-            assert await _out(whole, "ls /m/docs/sub") == LISTED
+    revision = await repo.head() if full_sha else None
+    async with (
+        _open(_prefixed(repo, "docs/", revision), shared) as sub,
+        _open(_prefixed(repo, None, revision), shared) as whole,
+    ):
+        assert await _out(sub, "ls /m") == b"sub\n"
+        assert await _out(whole, "ls /m") == b"a.txt\ndocs\n"
+        assert await _out(sub, "ls /m") == b"sub\n"
+        assert await _out(whole, "ls /m/docs/sub") == LISTED
 
 
 # The composed version is what the root stat names, so the gate's check
 # still matches what a prefixed mount's fill stored, and a mount with no
 # key prefix keeps the plain head.
 @pytest.mark.asyncio
-async def test_a_prefixed_mount_checks_the_version_it_stored():
-    with serve(_hub()) as hub:
-        async with _open(_prefixed(hub, "docs/", None)) as ws:
-            await _out(ws, "ls /m")
-            stored = await _stored(ws)
-            assert stored is not None and stored != hub.head(REPO)
-            hub.log.clear()
-            assert await _out(ws, "ls /m") == b"sub\n"
-            assert _counts(hub) == (1, 0, 0, 0)
-        async with _open(_prefixed(hub, None, None)) as plain:
-            await _out(plain, "ls /m")
-            assert await _stored(plain) == hub.head(REPO)
+async def test_a_prefixed_mount_checks_the_version_it_stored(repo):
+    head = await repo.head()
+    async with _open(_prefixed(repo, "docs/", None)) as ws:
+        await _out(ws, "ls /m")
+        stored = await _stored(ws)
+        assert stored is not None and stored != head
+        await repo.run.record_requests()
+        assert await _out(ws, "ls /m") == b"sub\n"
+        assert await _counts(repo) == (1, 0, 0, 0)
+    async with _open(_prefixed(repo, None, None)) as plain:
+        await _out(plain, "ls /m")
+        assert await _stored(plain) == head
 
 
 # A Hub that cannot be reached answers EXPIRED at the gate, logged, and the
-# listing stays stored for the re-list to diff.
+# listing stays stored for the re-list to diff. A connection the Hub drops
+# unanswered is one it cannot be reached on.
 @pytest.mark.asyncio
-async def test_an_unreachable_hub_keeps_the_listing(caplog, monkeypatch):
+async def test_an_unreachable_hub_keeps_the_listing(repo, caplog, monkeypatch):
     monkeypatch.setattr(
         "mirage.core.hf_hub.client.RETRY", RetryPolicy(retry_transport=False)
     )
     caplog.set_level(logging.DEBUG, logger="mirage.workspace.reconcile")
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        await _out(ws, "ls /m")
+    ws = _ws(_vfs(repo))
+    await _out(ws, "ls /m")
     try:
+        await repo.run.answer_next("GET", REVISION, None, times=UNTIL_CLEARED)
         mount = ws.mount("/m")
         stored = await mount.index_store.list_dir("/m/docs/sub")
         rec = Reconciler(ws.cache, ws.namespace)
@@ -512,7 +517,7 @@ async def test_an_unreachable_hub_keeps_the_listing(caplog, monkeypatch):
 # A FUSE or programmatic read belongs to no command: it trusts a listing
 # for the window, then pays one version check, never a tree walk.
 @pytest.mark.asyncio
-async def test_an_unscoped_read_checks_once_past_the_window():
+async def test_an_unscoped_read_checks_once_past_the_window(repo):
     clock = ManualClock(start=100.0)
     readdir = PathSpec(
         virtual="/m/docs/sub", directory="/m/docs/sub", vfs_path="docs/sub"
@@ -522,14 +527,14 @@ async def test_an_unscoped_read_checks_once_past_the_window():
         directory="/m/docs/sub",
         vfs_path="docs/sub/b.txt",
     )
-    async with _served(clock=clock) as (hub, ws):
+    async with _open(_vfs(repo), clock=clock) as ws:
         await _out(ws, "ls /m")
-        hub.log.clear()
+        await repo.run.record_requests()
         listed, _ = await ws.dispatch("readdir", readdir)
         assert listed == ["/m/docs/sub/b.txt"]
         await ws.dispatch("stat", one)
-        assert _counts(hub) == (0, 0, 0, 0)
+        assert await _counts(repo) == (0, 0, 0, 0)
         clock.advance(LISTING_TRUST_WINDOW)
         await ws.dispatch("readdir", readdir)
         await ws.dispatch("stat", one)
-        assert _counts(hub) == (1, 0, 0, 0)
+        assert await _counts(repo) == (1, 0, 0, 0)

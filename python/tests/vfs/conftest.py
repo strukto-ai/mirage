@@ -14,5 +14,7 @@
 
 from tests.fixtures.google_account import google_account
 from tests.fixtures.graph_drive import onedrive, sharepoint
+from tests.fixtures.hf_bucket import bucket
+from tests.fixtures.hub_repo import hub
 
-__all__ = ["google_account", "onedrive", "sharepoint"]
+__all__ = ["bucket", "google_account", "hub", "onedrive", "sharepoint"]

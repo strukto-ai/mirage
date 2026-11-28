@@ -19,8 +19,8 @@ from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
-async def test_rm_r_deletes_all_keys_under_prefix(make_acc):
-    acc = make_acc(
+async def test_rm_r_deletes_all_keys_under_prefix(make_acc, bucket):
+    acc = await make_acc(
         {
             "data/a.txt": b"a",
             "data/sub/b.txt": b"b",
@@ -29,11 +29,11 @@ async def test_rm_r_deletes_all_keys_under_prefix(make_acc):
         }
     )
     await rm_r(acc, PathSpec.from_str_path("/data"))
-    assert sorted(acc._fake.files) == ["other/keep.txt"]
+    assert sorted(await bucket.files()) == ["other/keep.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rm_r_on_empty_prefix_is_noop(make_acc):
-    acc = make_acc({"other/keep.txt": b"k"})
+async def test_rm_r_on_empty_prefix_is_noop(make_acc, bucket):
+    acc = await make_acc({"other/keep.txt": b"k"})
     await rm_r(acc, PathSpec.from_str_path("/missing"))
-    assert sorted(acc._fake.files) == ["other/keep.txt"]
+    assert sorted(await bucket.files()) == ["other/keep.txt"]

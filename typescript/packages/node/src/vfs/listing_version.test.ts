@@ -25,7 +25,7 @@ import type { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace as NodeWorkspace } from '../workspace.ts'
-import { FakeHub, serveHub } from '../../tests/core/hf_hub/_test_util.ts'
+import { madeRepo } from '../../../core/tests/fixtures/hub_repo.ts'
 import * as diskUtils from '../core/disk/utils.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
@@ -88,12 +88,10 @@ async function githubHarness(): Promise<Harness> {
 
 function hfHarness(name: string, segment: string): () => Promise<Harness> {
   return async () => {
-    const hub = new FakeHub()
-    const files = hub.files(segment)
-    files.set('docs/sub/a.txt', new TextEncoder().encode('a\n'))
-    files.set('top.txt', new TextEncoder().encode('t\n'))
-    await serveHub(hub)
-    const vfs = await buildVfs(name, { repo_id: 'acme/widget', endpoint: hub.url })
+    const repo = await madeRepo(await serve('hf_hub'), segment)
+    await repo.commit({ 'docs/sub/a.txt': 'a\n', 'top.txt': 't\n' })
+    await repo.run.recordRequests()
+    const vfs = await buildVfs(name, repo.config())
     const ws = new NodeWorkspace({
       '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
     })
@@ -101,11 +99,9 @@ function hfHarness(name: string, segment: string): () => Promise<Harness> {
       ws,
       key: '/m',
       nested: '/m/docs/sub',
-      counts: () => [hub.count('revision'), hub.count('tree')],
-      change: () => {
-        files.set('docs/new.txt', new TextEncoder().encode('n\n'))
-      },
-      close: () => hub.close(),
+      counts: async () => [await repo.count('revision'), await repo.count('tree')],
+      change: () => repo.commit({ 'docs/new.txt': 'n\n' }),
+      close: () => repo.run.close(),
     }
   }
 }

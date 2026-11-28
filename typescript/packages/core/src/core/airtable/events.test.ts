@@ -12,81 +12,70 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { AirtableAccessor } from '../../accessor/airtable.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { AirtableAccount, BASES, TABLES } from '../../../tests/fixtures/airtable_account.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { type Delta, FileChangeKind, PathSpec } from '../../types.ts'
+import type { AirtableConfig } from './config.ts'
 import { AirtableDeltaHook } from './events.ts'
 
 const { CREATE: C, UPDATE: U, DELETE: D, UNKNOWN: X } = FileChangeKind
-const API = 'https://api.airtable.com/v0'
-const BASE = '/at/bases/Roadmap__appA'
-const FEATURES = `${BASE}/Features__tblF`
+// The world integ/fixtures/airtable/events.json seeds: one base holding one
+// table, and a page of two payloads.
+const ROADMAP = 'appRoadmap0000001'
+const FEATURES_ID = 'tblFeatures000001'
+const OPS = 'appOps00000000001'
+const NOTES = 'tblNotes000000001'
+const OTHER = 'tblOther000000001'
+const BASE = `/at/bases/Roadmap__${ROADMAP}`
+const FEATURES = `${BASE}/Features__${FEATURES_ID}`
 
-type Row = Record<string, unknown>
+type Row = Parameters<AirtableAccount['push']>[1]
 
-/**
- * Bases, their schemas, and each webhook's payloads, numbered from 1 and kept
- * from `oldest` on, served two to a page.
- */
-class FakeAirtable {
-  bases: Row[] = [{ id: 'appA', name: 'Roadmap' }]
-  tables: Record<string, Row[]> = { appA: [{ id: 'tblF', name: 'Features' }] }
-  hooks: Record<string, Record<string, Row[]>> = { appA: { achH: [] } }
-  oldest = 1
-  calls: string[] = []
-
-  readonly fetchFn = ((input: string | URL | Request): Promise<Response> => {
-    const url = new URL(input instanceof Request ? input.url : String(input))
-    return Promise.resolve(this.answer(url.pathname.slice('/v0'.length), url.searchParams))
-  }) as typeof fetch
-
-  private answer(path: string, query: URLSearchParams): Response {
-    if (path === '/meta/bases') {
-      this.calls.push('bases')
-      return json({ bases: this.bases })
-    }
-    const parts = path.split('/')
-    if (parts[1] === 'meta') {
-      const baseId = parts[3] ?? ''
-      this.calls.push(`tables ${baseId}`)
-      return json({ tables: this.tables[baseId] ?? [] })
-    }
-    const hooks = this.hooks[parts[2] ?? ''] ?? {}
-    if (parts.length === 4) {
-      return json({
-        webhooks: Object.entries(hooks).map(([id, log]) => ({
-          id,
-          cursorForNextPayload: log.length + 1,
-        })),
-      })
-    }
-    const log = hooks[parts[4] ?? '']
-    if (log === undefined) return json({ error: 'NOT_FOUND' }, 404)
-    const start = Math.max(Number(query.get('cursor') ?? 1), this.oldest)
-    const page = log.slice(start - 1, start + 1)
-    return json({
-      payloads: page,
-      cursor: start + page.length,
-      mightHaveMore: start + page.length <= log.length,
-    })
-  }
-
-  push(payload: Row, hookId = 'achH'): void {
-    const log = this.hooks.appA?.[hookId]
-    if (log === undefined) throw new Error(`no webhook ${hookId}`)
-    log.push(payload)
-  }
+/** The account and the webhook its base already has. */
+interface World {
+  account: AirtableAccount
+  hook: string
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  })
+let origin = ''
+let opened: AirtableAccount[] = []
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+afterEach(async () => {
+  const closing = opened
+  opened = []
+  await Promise.all(closing.map((account) => account.run.close()))
+})
+
+async function worldOf(): Promise<World> {
+  const account = new AirtableAccount(origin)
+  opened.push(account)
+  await account.reset(undefined, 'events')
+  const hook = await account.webhook(ROADMAP)
+  await account.recordRequests()
+  return { account, hook }
 }
 
-function records(tableId = 'tblF'): Row {
-  return { changedTablesById: { [tableId]: { changedRecordsById: { rec1: { current: {} } } } } }
+// Each base listing and table listing asked, in order.
+async function calls(world: World): Promise<string[]> {
+  const out: string[] = []
+  for (const r of await world.account.listed()) {
+    if (r.route === BASES) out.push('bases')
+    else if (r.route === TABLES) out.push(`tables ${r.path.split('/')[4] ?? ''}`)
+  }
+  return out
+}
+
+function records(tableId = FEATURES_ID): Row {
+  return {
+    changedTablesById: {
+      [tableId]: { changedRecordsById: { rec00000000000001: { current: {} } } },
+    },
+  }
 }
 
 function root(vfsPath = ''): PathSpec {
@@ -94,12 +83,8 @@ function root(vfsPath = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath })
 }
 
-function hookFor(fake: FakeAirtable): AirtableDeltaHook {
-  const accessor = new AirtableAccessor(
-    { token: 't', baseUrl: API, requestsPerSecond: 10_000 },
-    { fetchFn: fake.fetchFn },
-  )
-  return new AirtableDeltaHook(accessor)
+function hookFor(world: World, overrides: Partial<AirtableConfig> = {}): AirtableDeltaHook {
+  return new AirtableDeltaHook(world.account.accessor(overrides))
 }
 
 function pairs(delta: Delta): [FileChangeKind, string][] {
@@ -108,14 +93,21 @@ function pairs(delta: Delta): [FileChangeKind, string][] {
 
 describe('AirtableDeltaHook', () => {
   it('starts a baseline at the present and reads on at each ping', async () => {
-    const fake = new FakeAirtable()
-    fake.push(records())
-    const hook = hookFor(fake)
+    // The payload before the baseline changes the table's description, which no
+    // later payload touches, so a baseline that read from the webhook's first
+    // payload would name the table.json too.
+    const world = await worldOf()
+    await world.account.push(world.hook, {
+      changedTablesById: { [FEATURES_ID]: { changedMetadata: { current: { description: 'd' } } } },
+    })
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
     expect(base.changes).toEqual([])
-    fake.push(records())
-    fake.push(records())
-    fake.push({ changedTablesById: { tblF: { changedViewsById: { v: {} } } } })
+    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, {
+      changedTablesById: { [FEATURES_ID]: { changedViewsById: { v: {} } } },
+    })
     const delta = await hook.pull(root(), base.checkpoint)
     expect(pairs(delta)).toEqual([
       [U, `${FEATURES}/records.jsonl`],
@@ -125,61 +117,64 @@ describe('AirtableDeltaHook', () => {
   })
 
   it('names the files of fields and tables', async () => {
-    const fake = new FakeAirtable()
-    const hook = hookFor(fake)
+    const world = await worldOf()
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    fake.push({
-      changedTablesById: { tblF: { changedFieldsById: { fld1: { current: {} } } } },
-      createdTablesById: { tblN: { metadata: { name: 'Notes' }, fieldsById: {} } },
+    await world.account.push(world.hook, {
+      changedTablesById: {
+        [FEATURES_ID]: { changedFieldsById: { fldNew00000000001: { current: {} } } },
+      },
+      createdTablesById: { [NOTES]: { metadata: { name: 'Notes' }, fieldsById: {} } },
     })
     const delta = await hook.pull(root(), base.checkpoint)
     expect(pairs(delta)).toEqual([
-      [C, `${BASE}/Notes__tblN/table.json`],
-      [C, `${BASE}/Notes__tblN/records.jsonl`],
-      [X, `${BASE}/Notes__tblN/views`],
+      [C, `${BASE}/Notes__${NOTES}/table.json`],
+      [C, `${BASE}/Notes__${NOTES}/records.jsonl`],
+      [X, `${BASE}/Notes__${NOTES}/views`],
       [U, `${BASE}/base.json`],
       [U, `${FEATURES}/table.json`],
       [U, `${FEATURES}/records.jsonl`],
       [X, `${FEATURES}/views`],
     ])
-    fake.push({
+    await world.account.push(world.hook, {
       changedTablesById: {
-        tblN: { changedMetadata: { current: { name: 'Ideas' }, previous: { name: 'Notes' } } },
+        [NOTES]: { changedMetadata: { current: { name: 'Ideas' }, previous: { name: 'Notes' } } },
       },
     })
-    fake.push({ destroyedTableIds: ['tblF'] })
-    fake.push(records('tblN'))
+    await world.account.push(world.hook, { destroyedTableIds: [FEATURES_ID] })
+    await world.account.push(world.hook, records(NOTES))
     const next = await hook.pull(root(), delta.checkpoint)
     expect(pairs(next)).toEqual([
-      [X, `${BASE}/Notes__tblN`],
-      [X, `${BASE}/Ideas__tblN`],
+      [X, `${BASE}/Notes__${NOTES}`],
+      [X, `${BASE}/Ideas__${NOTES}`],
       [U, `${BASE}/base.json`],
       [D, FEATURES],
-      [U, `${BASE}/Ideas__tblN/records.jsonl`],
-      [X, `${BASE}/Ideas__tblN/views`],
+      [U, `${BASE}/Ideas__${NOTES}/records.jsonl`],
+      [X, `${BASE}/Ideas__${NOTES}/views`],
     ])
-    expect(fake.calls.filter((c) => c === 'tables appA')).toHaveLength(1)
+    expect((await calls(world)).filter((c) => c === `tables ${ROADMAP}`)).toHaveLength(1)
   })
 
   it('is UNKNOWN on the event root for lost payloads', async () => {
-    const fake = new FakeAirtable()
-    const hook = hookFor(fake)
+    const world = await worldOf()
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    fake.push(records())
-    fake.push(records())
-    fake.oldest = 2
+    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, records())
+    await world.account.expire(world.hook, 2)
     const delta = await hook.pull(root(), base.checkpoint)
     expect(pairs(delta)[0]).toEqual([X, '/at'])
-    fake.push({ error: true, code: 'INVALID_HOOK' })
+    await world.account.push(world.hook, { error: true, code: 'INVALID_HOOK' })
     expect(pairs(await hook.pull(root(), delta.checkpoint))).toEqual([[X, '/at']])
   })
 
   it('loses a webhook that is gone and reads a new one from its start', async () => {
-    const fake = new FakeAirtable()
-    const hook = hookFor(fake)
+    const world = await worldOf()
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    fake.hooks.appA = { achNew: [] }
-    fake.push(records(), 'achNew')
+    await world.account.dropWebhook(ROADMAP, world.hook)
+    const made = await world.account.webhook(ROADMAP)
+    await world.account.push(made, records())
     expect(pairs(await hook.pull(root(), base.checkpoint))).toEqual([
       [X, '/at'],
       [U, `${FEATURES}/records.jsonl`],
@@ -188,15 +183,15 @@ describe('AirtableDeltaHook', () => {
   })
 
   it('loses the first payloads a new webhook let expire', async () => {
-    const fake = new FakeAirtable()
-    fake.push(records())
-    fake.push(records())
-    const hook = hookFor(fake)
+    const world = await worldOf()
+    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, records())
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    if (fake.hooks.appA !== undefined) fake.hooks.appA.achNew = []
-    fake.push(records(), 'achNew')
-    fake.push(records(), 'achNew')
-    fake.oldest = 2
+    const made = await world.account.webhook(ROADMAP)
+    await world.account.push(made, records())
+    await world.account.push(made, records())
+    await world.account.expire(made, 2)
     expect(pairs(await hook.pull(root(), base.checkpoint))).toEqual([
       [X, '/at'],
       [U, `${FEATURES}/records.jsonl`],
@@ -204,57 +199,78 @@ describe('AirtableDeltaHook', () => {
     ])
   })
 
-  it('follows bases that come and go and lists no bases for a base root', async () => {
-    const fake = new FakeAirtable()
-    const hook = hookFor(fake)
+  it('follows bases that come and go', async () => {
+    const world = await worldOf()
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    fake.bases = [{ id: 'appB', name: 'Ops' }]
-    fake.tables.appB = []
-    fake.hooks.appB = {}
+    await world.account.store(
+      "DELETE FROM AirtableBase WHERE tenant = 'default' AND id = ?",
+      ROADMAP,
+    )
+    await world.account.store(
+      'INSERT INTO AirtableBase (tenant, id, name, permissionLevel, seq) ' +
+        "VALUES ('default', ?, 'Ops', 'create', 2)",
+      OPS,
+    )
     expect(pairs(await hook.pull(root(), base.checkpoint))).toEqual([
-      [X, '/at/bases/Ops__appB'],
+      [X, `/at/bases/Ops__${OPS}`],
       [D, BASE],
     ])
-    const tableRoot = root('bases/Roadmap__appA/Features__tblF')
-    fake.calls = []
+  })
+
+  it('lists no bases for a base root', async () => {
+    const world = await worldOf()
+    const hook = hookFor(world)
+    const tableRoot = root(`bases/Roadmap__${ROADMAP}/Features__${FEATURES_ID}`)
     const start = await hook.pull(tableRoot, null)
-    fake.push(records())
-    fake.push(records('tblOther'))
-    fake.tables.appA?.push({ id: 'tblOther', name: 'Other' })
+    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, records(OTHER))
+    await world.account.store(
+      'INSERT INTO AirtableTable (tenant, id, baseId, name, primaryFieldId, seq) ' +
+        "VALUES ('default', ?, ?, 'Other', 'fldOther000000001', 2)",
+      OTHER,
+      ROADMAP,
+    )
+    await world.account.store(
+      'INSERT INTO AirtableField (tenant, id, tableId, name, type, seq) ' +
+        "VALUES ('default', 'fldOther000000001', ?, 'Name', 'singleLineText', 2)",
+      OTHER,
+    )
     expect(pairs(await hook.pull(tableRoot, start.checkpoint))).toEqual([
       [U, `${FEATURES}/records.jsonl`],
       [X, `${FEATURES}/views`],
     ])
-    expect(fake.calls).not.toContain('bases')
+    expect(await calls(world)).not.toContain('bases')
   })
 
   it('reads nothing of a base the mount leaves out', async () => {
-    const fake = new FakeAirtable()
-    const accessor = new AirtableAccessor(
-      { token: 't', baseUrl: API, baseIds: ['appB'], requestsPerSecond: 10_000 },
-      { fetchFn: fake.fetchFn },
-    )
-    const hook = new AirtableDeltaHook(accessor)
-    const baseRoot = root('bases/Roadmap__appA')
+    const world = await worldOf()
+    const hook = hookFor(world, { baseIds: [OPS] })
+    const baseRoot = root(`bases/Roadmap__${ROADMAP}`)
     const base = await hook.pull(baseRoot, null)
-    fake.push(records())
+    await world.account.push(world.hook, records())
     expect((await hook.pull(baseRoot, base.checkpoint)).changes).toEqual([])
-    expect(fake.calls).toEqual([])
+    expect(await calls(world)).toEqual([])
   })
 
   it('names the tables of a base that lost payloads again', async () => {
-    const fake = new FakeAirtable()
-    const hook = hookFor(fake)
+    const world = await worldOf()
+    const hook = hookFor(world)
     const base = await hook.pull(root(), null)
-    fake.push({ changedTablesById: { tblF: { changedMetadata: { current: { name: 'Ideas' } } } } })
-    fake.oldest = 2
-    fake.tables.appA = [{ id: 'tblF', name: 'Ideas' }]
+    await world.account.push(world.hook, {
+      changedTablesById: { [FEATURES_ID]: { changedMetadata: { current: { name: 'Ideas' } } } },
+    })
+    await world.account.expire(world.hook, 2)
+    await world.account.store(
+      "UPDATE AirtableTable SET name = 'Ideas' WHERE tenant = 'default' AND id = ?",
+      FEATURES_ID,
+    )
     const delta = await hook.pull(root(), base.checkpoint)
     expect(pairs(delta)).toEqual([[X, '/at']])
-    fake.push(records())
+    await world.account.push(world.hook, records())
     expect(pairs(await hook.pull(root(), delta.checkpoint))).toEqual([
-      [U, `${BASE}/Ideas__tblF/records.jsonl`],
-      [X, `${BASE}/Ideas__tblF/views`],
+      [U, `${BASE}/Ideas__${FEATURES_ID}/records.jsonl`],
+      [X, `${BASE}/Ideas__${FEATURES_ID}/views`],
     ])
   })
 })

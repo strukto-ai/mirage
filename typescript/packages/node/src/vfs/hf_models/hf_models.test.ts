@@ -16,7 +16,6 @@ import { ops } from '@struktoai/mirage-core/test-utils'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
-import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
 import { HfBucketsVFS } from '../hf_buckets/hf_buckets.ts'
 import { HfModelsVFS } from '@struktoai/mirage-core/vfs/hf_models/hf_models'
 
@@ -124,11 +123,10 @@ describe('HfModelsVFS', () => {
 })
 
 describe('HfBucketsVFS', () => {
-  it('uses the bucket field and normalizes keyPrefix', async () => {
+  it('uses the bucket field and normalizes keyPrefix', () => {
     const vfs = new HfBucketsVFS({ bucket: 'ns/store', keyPrefix: '/lead/' })
     expect(vfs.name).toBe('hf_buckets')
     expect(vfs.config.keyPrefix).toBe('lead/')
     expect(vfs.accessor.bucketUri).toBe('hf://buckets/ns/store')
-    await installFakeOperator(vfs.accessor, fakeHfOperator({ 'config.json': '{}' }))
   })
 })

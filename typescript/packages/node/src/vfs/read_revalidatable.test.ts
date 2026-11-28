@@ -42,8 +42,8 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import type { GridFSAccessor } from '../accessor/gridfs.ts'
 import type { HfBucketsAccessor } from '../accessor/hf_buckets.ts'
-import { fakeHfOperator } from '../../tests/core/hf_buckets/mock.ts'
-import { FakeHub, blobOid, serveHub, xetHash } from '../../tests/core/hf_hub/_test_util.ts'
+import { HfBucket } from '../../tests/fixtures/hf_bucket.ts'
+import { blobOid, madeRepo, xetHash } from '../../../core/tests/fixtures/hub_repo.ts'
 import { readdir as hfReaddir } from '@struktoai/mirage-core/core/hf_hub/readdir'
 import type { HfHubVFS } from '@struktoai/mirage-core/vfs/hf_hub/base'
 import { DRIVE_NAME, GraphDrive, ONEDRIVE } from '../../../core/tests/fixtures/graph_drive.ts'
@@ -681,7 +681,7 @@ function md5Hex(data: Uint8Array): string {
 }
 
 let s3: S3Mock
-let hubs: FakeHub[] = []
+let buckets: HfBucket[] = []
 let runs: KitRun[] = []
 
 async function requestsTo(run: KitRun, [method, route]: [string, string]): Promise<number> {
@@ -975,35 +975,29 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     }
   }
   if (HARNESSES[name] === 'hf_buckets') {
-    // One Map behind both entry points: the Hub serves it over HTTP and the opendal
-    // fake lists and writes it. The opendal fake refuses every read, so a
-    // stat or read that fell back to opendal fails here.
-    const op = fakeHfOperator()
-    const hub = new FakeHub()
-    hub.repos.set('buckets|acme/bkt', op.files)
-    await serveHub(hub)
-    hubs.push(hub)
-    op.files.set(stored, Buffer.from(data))
-    if (prefix !== null) op.files.set(key, Buffer.from(DECOY))
-    const vfs = await buildVfs('hf_buckets', {
-      bucket: 'acme/bkt',
-      endpoint: hub.url,
-      ...(prefix === null ? {} : { key_prefix: prefix }),
-    })
+    // A stat or read that fell back to opendal would answer the same bytes,
+    // so its reads are what the bucket's request list is watched for. The
+    // bucket shares the fake's one Xet run, so it is reset, never dropped.
+    const bucket = new HfBucket(await serve('hf'))
+    await bucket.reset()
+    buckets.push(bucket)
+    await bucket.put({ [stored]: data, ...(prefix === null ? {} : { [key]: DECOY }) })
+    await bucket.run.recordRequests()
+    const vfs = await buildVfs(
+      'hf_buckets',
+      bucket.fields(prefix === null ? {} : { key_prefix: prefix }),
+    )
     const accessor = vfs.accessor as HfBucketsAccessor
     expect(vfs.readRevalidatable).toBe(true)
-    op.root = accessor.operatorOptions().root ?? ''
-    op.reach = H.reach
-    vi.spyOn(accessor, 'operator').mockResolvedValue(op as never)
-    const before = hub.count('bucket_resolve')
     return {
       vfs,
       accessor,
       key,
-      fetches: () => hub.count('bucket_resolve') - before,
-      rewrite: (next) => {
-        op.files.set(stored, Buffer.from(next))
-      },
+      fetches: () => bucket.count('resolve'),
+      rewrite: (next) => bucket.put({ [stored]: next }),
+      reached: async () =>
+        Array.from({ length: await bucket.count('opendal_read') }, () => 'read through opendal'),
+      item: async () => ({ ...(await bucket.row(stored)) }),
       readBytes: (p) => ownReads(vfs).readBytes(p),
       readStream: (p) => ownReads(vfs).readStream(p),
       stat: (p) => ownReads(vfs).stat(p),
@@ -1011,26 +1005,20 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
     }
   }
   if (HARNESSES[name] === 'hf_models') {
-    // Files are served Xet-shaped, so the download's ETag is the xet hash, not
+    // Files are stored on Xet, so the download's ETag is the xet hash, not
     // the oid stat stamps: a read that trusted only the oid would stamp
-    // nothing. The repo is filed under the family's own API segment, so a
-    // request built for another repo type gets no answer.
-    const hub = await serveHub(new FakeHub())
-    hubs.push(hub)
-    const files = hub.files(HF_FAMILY[name], 'acme/widget')
-    files.set(stored, data)
-    if (prefix !== null) files.set(key, DECOY)
-    const vfs = await buildVfs(name, {
-      repo_id: 'acme/widget',
-      endpoint: hub.url,
-      ...(prefix === null ? {} : { key_prefix: prefix }),
-    })
+    // nothing. The repo is made under the family's own kind, so a request
+    // built for another repo type gets no answer.
+    const repo = await madeRepo(await serve('hf_hub'), HF_FAMILY[name])
+    runs.push(repo.run)
+    await repo.commit({ [stored]: data, ...(prefix === null ? {} : { [key]: DECOY }) })
+    await repo.run.recordRequests()
+    const vfs = await buildVfs(name, repo.config(prefix === null ? {} : { key_prefix: prefix }))
     const hfVfs = vfs as HfHubVFS
     const accessor = hfVfs.accessor
     expect(vfs.readRevalidatable).toBe(true)
     expect(accessor.keyPrefix).toBe(prefix ?? '')
     watchWalks(vfs)
-    const before = hub.count('resolve')
     // The tree's rows carry each oid, so each direct call is handed the row
     // its parent's listing names, as the mount hands it.
     const handed = async (p: PathSpec): Promise<Handed> => ({
@@ -1040,9 +1028,9 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       vfs,
       accessor,
       key,
-      fetches: () => hub.count('resolve') - before,
-      rewrite: (next) => {
-        files.set(stored, next)
+      fetches: () => repo.count('resolve'),
+      rewrite: async (next) => {
+        await repo.commit({ [stored]: next })
       },
       readBytes: async (p) => bytesOf(hfVfs.read(p, await handed(p))),
       readStream: async function* (p) {
@@ -1306,8 +1294,9 @@ describe('the read-token contract', () => {
   afterEach(async () => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
-    await Promise.all(hubs.map((hub) => hub.close()))
-    hubs = []
+    const shared = buckets
+    buckets = []
+    await Promise.all(shared.map((bucket) => bucket.close()))
     // Detached first, so a close that throws leaves the next test none.
     const closing = runs
     runs = []
@@ -1718,9 +1707,10 @@ describe('the read-token contract', () => {
     // fresh, and the warm read refetches exactly once. The override sits on
     // the bytes slot, so the line is a cp.
     const fake = await makeFake('hf_buckets', 'root', SEED)
-    const otherKind = createHash('sha1')
-      .update(`"${xetHash(SEED)}"`)
-      .digest('hex')
+    const item = await fake.item?.()
+    if (item === undefined) throw new Error('a bucket row answers its item')
+    const xet = String(item.xetHash)
+    const otherKind = createHash('sha1').update(`"${xet}"`).digest('hex')
     H.stampOverride = otherKind
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
@@ -1728,7 +1718,7 @@ describe('the read-token contract', () => {
       await ws.vfs.read(virtual)
       expect(await ws.cache.isFresh(virtual, otherKind)).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
-      expect(stat.fingerprint).toBe(xetHash(SEED))
+      expect(stat.fingerprint).toBe(xet)
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
       const before = await fake.fetches()
       await ws.vfs.read(virtual)

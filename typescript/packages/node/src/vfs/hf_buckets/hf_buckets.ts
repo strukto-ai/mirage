@@ -40,8 +40,7 @@ export class HfBucketsVFS extends BaseVFS {
   override readonly name: string = VFSName.HF_BUCKETS
   override readonly cachesReads: boolean = true
   // The Hub tree API reports each file's exact byte size (the LFS
-  // object size for LFS files); readdir backfills any lister-omitted
-  // size with one stat.
+  // object size for LFS files), and readdir lists it as the row has it.
   override readonly sizesAlwaysKnown: boolean = true
   override readonly supportsSnapshot: boolean = true
   // stat stamps the paths-info xet hash and a read stamps its download's

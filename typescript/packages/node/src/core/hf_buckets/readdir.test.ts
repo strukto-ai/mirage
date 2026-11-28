@@ -14,25 +14,42 @@
 
 import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
-import { describe, expect, it } from 'vitest'
-import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { fakeHfOperator, installFakeOperator } from '../../../tests/core/hf_buckets/mock.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { HfBucket, TREE } from '../../../tests/fixtures/hf_bucket.ts'
 import { readdir as listStats } from './readdir.ts'
+
+let origin = ''
+const buckets: HfBucket[] = []
+
+beforeAll(async () => {
+  origin = await serve('hf')
+})
+
+afterEach(async () => {
+  await Promise.all(buckets.splice(0).map((bucket) => bucket.close()))
+})
 
 async function readdir(accessor: HfBucketsAccessor, path: PathSpec): Promise<string[]> {
   const rows = (await listStats(accessor, path)) as FileStat[]
   return rows.map((row) => `${path.virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 
+// A bucket of its own after another client wrote `files` to it.
+async function seeded(files: Record<string, string>): Promise<HfBucket> {
+  const bucket = new HfBucket(origin)
+  buckets.push(bucket)
+  await bucket.reset()
+  await bucket.put(files)
+  return bucket
+}
+
 async function accessorWith(
-  files: Record<string, string | Buffer>,
+  files: Record<string, string>,
   keyPrefix?: string,
 ): Promise<HfBucketsAccessor> {
-  const accessor = new HfBucketsAccessor(
-    keyPrefix === undefined ? { bucket: 'ns/model' } : { bucket: 'ns/model', keyPrefix },
-  )
-  await installFakeOperator(accessor, fakeHfOperator(files))
-  return accessor
+  return (await seeded(files)).accessor(keyPrefix)
 }
 
 const FILES = {
@@ -103,31 +120,32 @@ describe('hf readdir', () => {
     // The hf service refuses a directory marker client-side, so unlike s3
     // there is no empty-directory trace to keep: removing the last key
     // removes the directory, which is what stat has always reported.
-    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
-    const fake = fakeHfOperator(FILES)
-    await installFakeOperator(accessor, fake)
+    const bucket = await seeded(FILES)
+    const accessor = bucket.accessor()
     expect(await readdir(accessor, PathSpec.fromStrPath('/onnx'))).toEqual(['/onnx/model.onnx'])
-    await fake.delete('onnx/model.onnx')
+    await bucket.remove('onnx/model.onnx')
     await expect(readdir(accessor, PathSpec.fromStrPath('/onnx'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
-  it('backfills a lister-omitted size with one stat', async () => {
-    const accessor = await accessorWith(FILES)
-    const fake = fakeHfOperator(FILES)
-    const realList = fake.list.bind(fake)
-    fake.list = async (path, options) => {
-      const entries = await realList(path, options)
-      return entries.map((entry) =>
-        entry.path() === 'config.json'
-          ? { ...entry, metadata: () => ({ ...entry.metadata(), contentLength: null }) }
-          : entry,
-      )
-    }
-    await installFakeOperator(accessor, fake)
-    const rows = (await listStats(accessor, PathSpec.fromStrPath('/'))) as FileStat[]
-    expect(rows.find((row) => row.name === 'config.json')?.size).toBe(2)
+  it('lists each size as its row has it', async () => {
+    // One tree request and no stat. The Hub sends a size for every file
+    // (its own client requires one); a row without one, which it does not
+    // send, reads as 0 through opendal, whose row size defaults to 0, so
+    // the listing never holds a missing size to fill.
+    const bucket = await seeded({ 'data/a.txt': 'hello', 'data/b.txt': 'abc' })
+    await bucket.run.recordRequests()
+    await bucket.run.answerNext('GET', TREE, 200, [
+      { type: 'file', path: 'data/a.txt', size: 5 },
+      { type: 'file', path: 'data/b.txt' },
+    ])
+    const rows = (await listStats(bucket.accessor(), PathSpec.fromStrPath('/data'))) as FileStat[]
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.size]))).toEqual({
+      'a.txt': 5,
+      'b.txt': 0,
+    })
+    expect((await bucket.log()).map(([name]) => name)).toEqual(['tree'])
   })
 
   it('lists mount-relative under a key prefix', async () => {

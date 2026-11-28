@@ -27,6 +27,8 @@ export const DONE_FORMULA = "{Status}='Done'"
 export const RECORDS = '/v0/:base/:table'
 export const RECORD = '/v0/:base/:table/:record'
 export const COMMENTS = '/v0/:base/:table/:record/comments'
+export const BASES = '/v0/meta/bases'
+export const TABLES = '/v0/meta/bases/:base/tables'
 // Airtable's answer for a base, table or record the token cannot reach.
 export const MODEL_NOT_FOUND =
   'Invalid permissions, or the requested model was not found. Check that both your user ' +
@@ -61,16 +63,20 @@ interface Listed {
  */
 export class AirtableAccount {
   readonly run: KitRun
+  // What was recorded before the run was last reloaded.
+  private earlier: Listed['requests'] = []
 
   constructor(origin: string) {
     this.run = new KitRun(origin, { Authorization: `Bearer ${TOKEN}` })
   }
 
-  /** Seed the run afresh with the unit world; `pageCap` caps each page. */
-  async reset(pageCap?: number): Promise<void> {
+  /**
+   * Seed the run afresh with a fixture's world, the unit one unless named;
+   * `pageCap` caps each page of records, comments or payloads.
+   */
+  async reset(pageCap?: number, fixture = FIXTURE): Promise<void> {
     await this.run.call('POST', '/reset', {
-      json:
-        pageCap === undefined ? { fixture: FIXTURE } : { fixture: FIXTURE, extras: { pageCap } },
+      json: pageCap === undefined ? { fixture } : { fixture, extras: { pageCap } },
     })
   }
 
@@ -117,8 +123,72 @@ export class AirtableAccount {
     return made.records.map((r) => r.id)
   }
 
-  private async listed(): Promise<Listed['requests']> {
+  /** Start listing the account's requests afresh. */
+  async recordRequests(): Promise<void> {
+    this.earlier = []
+    await this.run.recordRequests()
+  }
+
+  /**
+   * Store a state no Airtable request makes, one SQL statement on the run.
+   * That reloads the run, which stops a recording, so the requests listed so
+   * far are kept and the recording starts again.
+   */
+  async store(sql: string, ...params: (string | number)[]): Promise<void> {
+    this.earlier.push(...(await this.recorded()))
+    await this.run.execute(sql, ...params)
+    await this.run.recordRequests()
+  }
+
+  /** Make a webhook on a base, as its owner would, and its id. */
+  async webhook(base: string): Promise<string> {
+    const made = await this.run.call<{ id: string }>('POST', `/v0/bases/${base}/webhooks`, {
+      json: { specification: { options: { filters: { dataTypes: ['tableData'] } } } },
+    })
+    return made.id
+  }
+
+  /** Delete a webhook, as its owner would. */
+  async dropWebhook(base: string, hook: string): Promise<void> {
+    await this.run.call('DELETE', `/v0/bases/${base}/webhooks/${hook}`)
+  }
+
+  /**
+   * Add a payload to a webhook, numbered after its last. The fake writes
+   * payloads only for record writes, so one about a schema or an error is
+   * stored as Airtable would leave it.
+   */
+  async push(hook: string, payload: Row): Promise<void> {
+    await this.store(
+      'INSERT INTO AirtableWebhookPayload (tenant, webhookId, cursor, "transaction", body) ' +
+        'SELECT tenant, id, lastCursor + 1, ' +
+        '(SELECT COALESCE(MAX("transaction"), 0) + 1 FROM AirtableWebhookPayload ' +
+        "WHERE tenant = 'default'), ? FROM AirtableWebhook WHERE tenant = 'default' AND id = ?",
+      JSON.stringify(payload),
+      hook,
+    )
+    await this.store(
+      "UPDATE AirtableWebhook SET lastCursor = lastCursor + 1 WHERE tenant = 'default' AND id = ?",
+      hook,
+    )
+  }
+
+  /** Let a webhook's payloads before `oldest` expire, as Airtable lets them after seven days. */
+  async expire(hook: string, oldest: number): Promise<void> {
+    await this.store(
+      "DELETE FROM AirtableWebhookPayload WHERE tenant = 'default' AND webhookId = ? AND cursor < ?",
+      hook,
+      oldest,
+    )
+  }
+
+  private async recorded(): Promise<Listed['requests']> {
     return (await this.run.call<Listed>('GET', '/_kit/requests')).requests
+  }
+
+  /** Each request since recording started, the ones before a reload included. */
+  async listed(): Promise<Listed['requests']> {
+    return [...this.earlier, ...(await this.recorded())]
   }
 
   /** The query of each records listing since recording started, with the table it names. */

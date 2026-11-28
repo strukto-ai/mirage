@@ -22,10 +22,9 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { ContentDriftError } from '@struktoai/mirage-core/workspace/snapshot/drift'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { FakeHub, serveHub, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
-import { type FakeHfOperator, fakeHfOperator } from '../../../tests/core/hf_buckets/mock.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { HfBucket } from '../../../tests/fixtures/hf_bucket.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 
@@ -34,39 +33,38 @@ const DEC = new TextDecoder()
 const OLD = ENC.encode('version one\n')
 const NEW = ENC.encode('version two, longer\n')
 
-let hubs: FakeHub[] = []
+let origin = ''
+let buckets: HfBucket[] = []
 
-afterEach(async () => {
-  await Promise.all(hubs.map((hub) => hub.close()))
-  hubs = []
+beforeAll(async () => {
+  origin = await serve('hf')
 })
 
-interface Bucket {
-  hub: FakeHub
-  op: FakeHfOperator
+afterEach(async () => {
+  // A stat or read that fell back to opendal would answer the same bytes, so
+  // only the request list can tell.
+  const watched = buckets
+  buckets = []
+  for (const b of watched) {
+    const reads = await b.count('opendal_read')
+    await b.close()
+    expect(reads).toBe(0)
+  }
+})
+
+// A bucket of its own after another client wrote `files` to it, the requests
+// recorded from then on.
+async function bucket(files: Record<string, Uint8Array>): Promise<HfBucket> {
+  const b = new HfBucket(origin)
+  buckets.push(b)
+  await b.reset()
+  await b.put(files)
+  await b.run.recordRequests()
+  return b
 }
 
-async function bucket(files: Record<string, Uint8Array>): Promise<Bucket> {
-  // The opendal fake lists and writes the very Map the Hub serves, so a write
-  // through the mount is what the next HTTP read downloads.
-  // Its reads refuse into `reach`, so a stat or read that fell back to
-  // opendal fails loudly rather than answering from the same Map.
-  const op = fakeHfOperator()
-  op.reach = []
-  for (const [path, data] of Object.entries(files)) op.files.set(path, Buffer.from(data))
-  const hub = new FakeHub()
-  hub.repos.set('buckets|acme/bkt', op.files)
-  hubs.push(hub)
-  await serveHub(hub)
-  return { hub, op }
-}
-
-async function vfsOf({ hub, op }: Bucket, extra: Record<string, string> = {}): Promise<BaseVFS> {
-  const vfs = await buildVfs('hf_buckets', { bucket: 'acme/bkt', endpoint: hub.url, ...extra })
-  const accessor = vfs.accessor as HfBucketsAccessor
-  op.root = accessor.operatorOptions().root ?? ''
-  vi.spyOn(accessor, 'operator').mockResolvedValue(op as never)
-  return vfs
+function vfsOf(b: HfBucket, extra: Record<string, string> = {}): Promise<BaseVFS> {
+  return buildVfs('hf_buckets', b.fields(extra))
 }
 
 function ws(vfs: BaseVFS, policy: ReadPolicy = ReadPolicy.FRESH): Workspace {
@@ -110,11 +108,11 @@ describe('hf_buckets under read: fresh', () => {
       expect(
         await w.cache.isFresh('/m/w.txt', createHash('md5').update('hi\n').digest('hex')),
       ).toBe(false)
-      const before = b.hub.count('bucket_resolve')
+      const before = await b.count('resolve')
       expect(DEC.decode(await out(w, 'cat /m/w.txt'))).toBe('hi\n')
-      expect(b.hub.count('bucket_resolve')).toBe(before + 1)
+      expect(await b.count('resolve')).toBe(before + 1)
       expect(DEC.decode(await out(w, 'cat /m/w.txt'))).toBe('hi\n')
-      expect(b.hub.count('bucket_resolve')).toBe(before + 1)
+      expect(await b.count('resolve')).toBe(before + 1)
     } finally {
       await w.close()
     }
@@ -129,13 +127,13 @@ describe('hf_buckets under read: fresh', () => {
     try {
       await out(w, 'cat /m/a.txt')
       await w.namespace.setAttrs('/m/a.txt', { mode: 0o600 })
-      b.hub.fail.set('bucket_paths_info', [status, code])
+      await b.refuse('paths_info', status, code)
       // Cross-mount cp reads through the dispatcher, the dispatcher whose "no such
       // file" drops the overlay; a plain cat never reaches it.
       const cp = await w.shell('cp /m/a.txt /r/x')
       expect(cp.exitCode).toBe(1)
       expect(DEC.decode(cp.stderr)).toBe("cp: cannot stat '/m/a.txt': Permission denied\n")
-      b.hub.fail.clear()
+      await b.run.clearAnswers()
       expect(w.namespace.metaFor('/m/a.txt')?.mode).toBe(0o600)
     } finally {
       await w.close()
@@ -151,9 +149,9 @@ describe('hf_buckets under read: fresh', () => {
       await w.cache.remove('/m/a.txt')
       // A CDN-shaped 404 carries no error code: it is a failed download, not a
       // deleted file. Measured on the first green run: the raw Hub error.
-      b.hub.fail.set('bucket_resolve', [404, ''])
+      await b.refuse('resolve', 404, '')
       const cp = await w.shell('cp /m/a.txt /r/x')
-      expect([cp.exitCode, DEC.decode(cp.stderr)]).toEqual([1, 'cp: fake bucket_resolve refused\n'])
+      expect([cp.exitCode, DEC.decode(cp.stderr)]).toEqual([1, 'cp: fake resolve refused\n'])
       expect(w.namespace.metaFor('/m/a.txt')?.mode).toBe(0o600)
     } finally {
       await w.close()
@@ -162,7 +160,7 @@ describe('hf_buckets under read: fresh', () => {
 
   it('does not let a gated bucket hide the other mounts', async () => {
     const b = await bucket({ 'a.txt': ENC.encode('needle\n') })
-    b.hub.fail.set('bucket_resolve', [403, ''])
+    await b.refuse('resolve', 403, '')
     const w = new Workspace({
       '/m': [await vfsOf(b), MountMode.READ],
       '/r': [new RAMVFS(), MountMode.WRITE],
@@ -185,7 +183,7 @@ describe('hf_buckets under read: fresh', () => {
   // listing alone, so only the dispatcher can mistake a refusal for an absence.
   it('never lists a refused bucket as absent', async () => {
     const b = await bucket({ 'a.txt': OLD })
-    b.hub.fail.set('bucket_paths_info', [401, ''])
+    await b.refuse('paths_info', 401, '')
     const vfs = await vfsOf(b)
     const w = ws(vfs, ReadPolicy.BOUNDED)
     try {
@@ -193,7 +191,7 @@ describe('hf_buckets under read: fresh', () => {
       // The raw refusal, never "No such file"; pinned on the first green run.
       expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
         1,
-        'ls: fake bucket_paths_info refused\n',
+        'ls: fake paths_info refused\n',
       ])
       expect((await w.mount('/m').indexStore.get('/m/a.txt')).entry ?? null).toBeNull()
     } finally {
@@ -237,16 +235,16 @@ describe('hf_buckets warm read cost', () => {
     try {
       await out(w, 'cat /m/a.txt')
       if (prep !== '') await out(w, prep)
-      b.hub.log.length = 0
+      await b.run.recordRequests()
       await out(w, command)
-      expect([b.hub.count('bucket_paths_info'), b.hub.count('bucket_resolve')]).toEqual([posts, 0])
+      expect([await b.count('paths_info'), await b.count('resolve')]).toEqual([posts, 0])
     } finally {
       await w.close()
     }
   })
 })
 
-async function pinnedState(b: Bucket) {
+async function pinnedState(b: HfBucket) {
   const w = ws(await vfsOf(b))
   try {
     await out(w, 'cat /m/a.txt')
@@ -274,26 +272,25 @@ describe('hf_buckets snapshot pins', () => {
   it('pins a read, and a changed file drifts', async () => {
     const b = await bucket({ 'a.txt': OLD })
     const state = await pinnedState(b)
-    b.op.files.set('a.txt', Buffer.from(NEW))
+    await b.put({ 'a.txt': NEW })
     await expect(load(state, await vfsOf(b))).rejects.toBeInstanceOf(ContentDriftError)
   })
 
   it('pins the read own token', async () => {
     const b = await bucket({ 'a.txt': OLD })
-    b.hub.etags.set('a.txt', '"other"')
+    await b.serveEtag(OLD, '"other"')
     const state = await pinnedState(b)
-    b.hub.etags.clear()
     // Upstream never changed; the pin is what the read vouched for, and stat's
     // token differs from it, which the check reports.
     const err = await load(state, await vfsOf(b)).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ContentDriftError)
-    expect((err as ContentDriftError).liveFingerprint).toBe(xetHash(OLD))
+    expect((err as ContentDriftError).liveFingerprint).toBe((await b.row('a.txt')).xetHash)
   })
 
   it('does not call a refused drift check drift', async () => {
     const b = await bucket({ 'a.txt': OLD })
     const state = await pinnedState(b)
-    b.hub.fail.set('bucket_paths_info', [401, ''])
+    await b.refuse('paths_info', 401, '')
     const err = await load(state, await vfsOf(b)).catch((e: unknown) => e)
     expect((err as { code?: string }).code).toBe('EACCES')
   })
@@ -301,15 +298,15 @@ describe('hf_buckets snapshot pins', () => {
   it('loads an unchanged file on one paths-info', async () => {
     const b = await bucket({ 'a.txt': OLD })
     const state = await pinnedState(b)
-    b.hub.log.length = 0
+    await b.run.recordRequests()
     await load(state, await vfsOf(b), 'true')
-    expect([b.hub.count('bucket_paths_info'), b.hub.count('bucket_resolve')]).toEqual([1, 0])
+    expect([await b.count('paths_info'), await b.count('resolve')]).toEqual([1, 0])
   })
 
   it('drifts to nothing for a file deleted upstream', async () => {
     const b = await bucket({ 'a.txt': OLD })
     const state = await pinnedState(b)
-    b.op.files.delete('a.txt')
+    await b.remove('a.txt')
     const err = await load(state, await vfsOf(b), 'true').catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ContentDriftError)
     expect((err as ContentDriftError).liveFingerprint ?? null).toBeNull()

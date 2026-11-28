@@ -15,38 +15,48 @@
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
-import { describe, expect, it } from 'vitest'
-import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
-import { type FakeHub, NO_ETAG, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
-import {
-  type FakeHfOperator,
-  fakeHfOperator,
-  installFakeOperator,
-} from '../../../tests/core/hf_buckets/mock.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { CDN, HfBucket } from '../../../tests/fixtures/hf_bucket.ts'
 import { read } from './read.ts'
 
 const SEED = Buffer.from('name,age\nalice,30\n')
 
 interface Mounted {
   accessor: HfBucketsAccessor
-  fake: FakeHfOperator
-  hub: FakeHub
+  bucket: HfBucket
 }
 
+let origin = ''
+const buckets: HfBucket[] = []
+
+beforeAll(async () => {
+  origin = await serve('hf')
+})
+
+afterEach(async () => {
+  await Promise.all(buckets.splice(0).map((bucket) => bucket.close()))
+})
+
+// An accessor on a bucket of its own after another client wrote `files` to
+// it, the requests recorded from then on.
 async function mounted(
-  files: Record<string, string | Buffer>,
+  files: Record<string, string | Uint8Array>,
   keyPrefix?: string,
 ): Promise<Mounted> {
-  const accessor = new HfBucketsAccessor(
-    keyPrefix === undefined ? { bucket: 'ns/model' } : { bucket: 'ns/model', keyPrefix },
-  )
-  const fake = fakeHfOperator(files)
-  const hub = await installFakeOperator(accessor, fake)
-  return { accessor, fake, hub }
+  const bucket = new HfBucket(origin)
+  buckets.push(bucket)
+  await bucket.reset()
+  await bucket.put(files)
+  await bucket.run.recordRequests()
+  return { accessor: bucket.accessor(keyPrefix), bucket }
 }
 
-async function accessorWith(files: Record<string, string | Buffer>): Promise<HfBucketsAccessor> {
+async function accessorWith(
+  files: Record<string, string | Uint8Array>,
+): Promise<HfBucketsAccessor> {
   return (await mounted(files)).accessor
 }
 
@@ -63,8 +73,7 @@ async function stamped(
 
 describe('hf read', () => {
   it('reads a file', async () => {
-    const accessor = new HfBucketsAccessor({ bucket: 'ns/model' })
-    await installFakeOperator(accessor, fakeHfOperator({ 'a.csv': SEED }))
+    const accessor = await accessorWith({ 'a.csv': SEED })
     const data = await read(accessor, PathSpec.fromStrPath('/a.csv'))
     expect(Buffer.from(data).equals(SEED)).toBe(true)
   })
@@ -110,28 +119,33 @@ describe('hf read', () => {
     [{}, SEED],
     [{ offset: 5, size: 3 }, SEED.subarray(5, 8)],
   ])('stamps the download etag (window %o)', async (window, expected) => {
-    const { accessor, fake, hub } = await mounted({ 'a.txt': SEED })
-    fake.reach = []
+    const { accessor, bucket } = await mounted({ 'a.txt': SEED })
+    const row = await bucket.row('a.txt')
+    await bucket.run.recordRequests()
     const [data, stamps] = await stamped(accessor, '/a.txt', window)
     expect(Buffer.from(data)).toEqual(Buffer.from(expected))
     // The strong ETag the bytes came with is the xet hash stat reports, for a
     // ranged 206 as for a whole read (measured 2026-09-25).
-    expect(stamps).toEqual([xetHash(SEED)])
-    expect([hub.count('bucket_resolve'), hub.count('bucket_paths_info')]).toEqual([1, 0])
-    expect(fake.reach).toEqual([])
+    expect(stamps).toEqual([row.xetHash])
+    expect([
+      await bucket.count('resolve'),
+      await bucket.count('paths_info'),
+      await bucket.count('opendal_read'),
+    ]).toEqual([1, 0, 0])
   })
 
   it.each([
     ['"other"', 'other'],
-    [`W/"${xetHash(SEED)}"`, null],
+    ['weak', null],
     ['""', null],
-    [NO_ETAG, null],
+    [null, null],
   ])('stamps only the response own strong etag (%s)', async (served, stamp) => {
     // "other" proves the token rides the read itself rather than a second
     // request; a weak validator does not vouch for bytes, and an empty or
     // missing one stamps nothing rather than "".
-    const { accessor, hub } = await mounted({ 'a.txt': SEED })
-    hub.etags.set('a.txt', served)
+    const { accessor, bucket } = await mounted({ 'a.txt': SEED })
+    const etag = served === 'weak' ? `W/"${(await bucket.row('a.txt')).xetHash}"` : served
+    await bucket.serveEtag(SEED, etag)
     const [, stamps] = await stamped(accessor, '/a.txt')
     expect(stamps).toEqual([stamp])
   })
@@ -145,8 +159,8 @@ describe('hf read', () => {
   ])('is absent only for a missing entry (%i %s)', async (status, code, want) => {
     // A 404 without EntryNotFound (a CDN or bucket-level one) must not read as
     // a deleted file: reconcile would drop the overlay for it.
-    const { accessor, hub } = await mounted({ 'a.txt': SEED })
-    hub.fail.set('bucket_resolve', [status, code])
+    const { accessor, bucket } = await mounted({ 'a.txt': SEED })
+    await bucket.refuse('resolve', status, code)
     const err = await read(accessor, PathSpec.fromStrPath('/a.txt')).catch((e: unknown) => e)
     if (want === 'raw') {
       expect(err).toBeInstanceOf(HfHubError)
@@ -159,11 +173,11 @@ describe('hf read', () => {
   it('answers the mount root as a directory even under a prefix', async () => {
     // The prefix stem is itself a readable file; a read of the mount root must
     // not serve it.
-    const { accessor, hub } = await mounted({ pfx: 'stem', 'pfx/a.txt': SEED }, 'pfx/')
+    const { accessor, bucket } = await mounted({ pfx: 'stem', 'pfx/a.txt': SEED }, 'pfx/')
     await expect(read(accessor, PathSpec.fromStrPath('/'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
-    expect(hub.count('bucket_resolve')).toBe(0)
+    expect(await bucket.count('resolve')).toBe(0)
   })
 
   it('reads a directory key directly as absent', async () => {
@@ -175,12 +189,13 @@ describe('hf read', () => {
   })
 
   it('reads a window past EOF as empty and stamps nothing', async () => {
-    const { accessor, hub } = await mounted({ 'a.txt': 'abc' })
+    const { accessor, bucket } = await mounted({ 'a.txt': 'abc' })
+    await bucket.run.recordRequests('range')
     const [data, stamps] = await stamped(accessor, '/a.txt', { offset: 99, size: 5 })
     expect([data.byteLength, stamps]).toEqual([0, [null]])
     // The Hub answers 416 here (measured 2026-09-25); the fold is the read's
     // own, since a caller reading the range directly has no other.
-    expect(hub.statuses).toContainEqual(['bucket_cdn', 416])
+    expect(await bucket.run.headers('GET', CDN)).toEqual([{ range: 'bytes=99-103' }])
     const [short] = await stamped(accessor, '/a.txt', { offset: 0, size: 100 })
     expect(Buffer.from(short).toString()).toBe('abc')
   })
@@ -189,19 +204,19 @@ describe('hf read', () => {
     // The table's range read reaches here with no factory short-circuit, and a
     // zero-length Range header is not one the client can build; the read still
     // has to say whether the file is there, as opendal's open did.
-    const { accessor, hub } = await mounted({ 'a.txt': 'abc' })
+    const { accessor, bucket } = await mounted({ 'a.txt': 'abc' })
     const data = await read(accessor, PathSpec.fromStrPath('/a.txt'), {
       offset: 1,
       size: 0,
     })
-    expect([data.byteLength, hub.count('bucket_resolve')]).toEqual([0, 1])
+    expect([data.byteLength, await bucket.count('resolve')]).toEqual([0, 1])
     await expect(
       read(accessor, PathSpec.fromStrPath('/missing.txt'), { offset: 0, size: 0 }),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('serves the prefixed object under a key prefix', async () => {
-    const { accessor, fake } = await mounted({ 'pfx/a.txt': SEED, 'a.txt': 'decoy' }, 'pfx/')
+    const { accessor, bucket } = await mounted({ 'pfx/a.txt': SEED, 'a.txt': 'decoy' }, 'pfx/')
     expect(Buffer.from(await read(accessor, PathSpec.fromStrPath('/a.txt')))).toEqual(SEED)
     const window = await read(accessor, PathSpec.fromStrPath('/a.txt'), {
       offset: 5,
@@ -209,8 +224,8 @@ describe('hf read', () => {
     })
     expect(Buffer.from(window)).toEqual(SEED.subarray(5, 8))
     // A write through opendal lands where an HTTP read looks.
-    await fake.write('b.txt', 'written')
-    expect(fake.files.get('pfx/b.txt')?.toString()).toBe('written')
+    await (await accessor.operator()).write('b.txt', Buffer.from('written'))
+    expect((await bucket.files())['pfx/b.txt']).toBe('written')
     expect(Buffer.from(await read(accessor, PathSpec.fromStrPath('/b.txt'))).toString()).toBe(
       'written',
     )

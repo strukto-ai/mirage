@@ -42,6 +42,7 @@ export interface Blob {
   oid: string
   lfsOid: string
   pointerSize: number
+  xetHash: string
   lastCommit: string
   lastModified: string
   seq: number
@@ -136,6 +137,7 @@ export function treeRow(blob: Blob, expand: boolean): JsonValue {
       pointerSize: blob.pointerSize,
     }
   }
+  if (blob.xetHash !== '') row.xetHash = blob.xetHash
   if (expand) {
     row.lastCommit = { id: blob.lastCommit, title: 'seed', date: blob.lastModified }
   }

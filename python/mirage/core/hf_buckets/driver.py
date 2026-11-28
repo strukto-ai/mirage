@@ -84,17 +84,13 @@ async def _list_children(conn: HfConn, pfx: str) -> AsyncIterator[ChildEntry]:
             if rel.endswith("/"):
                 yield ChildEntry(key=rel.rstrip("/"), kind="d")
                 continue
-            meta = entry.metadata
-            size = meta.content_length if meta is not None else None
-            if size is None:
-                # The Hub tree API carries a size for every file (for LFS
-                # files it is the object size, not the pointer's); when
-                # the lister omits the metadata, one stat per affected
-                # file fills the gap so the index never caches an unknown
-                # size.
-                md = await conn.op.stat(rel)
-                size = md.content_length
-            yield ChildEntry(key=rel, kind="f", size=size)
+            # The size is the row's, with no stat to fill one in: the Hub
+            # sends a size for every file (its own client requires one),
+            # and opendal reads a row without one as 0 before it gets
+            # here, so no listed file reaches this point without a size.
+            yield ChildEntry(
+                key=rel, kind="f", size=entry.metadata.content_length
+            )
     except NotFound:
         # The Hub answers a missing subpath with 200 and [] more often
         # than with an error; either way an empty yield is what lets the
@@ -124,13 +120,12 @@ async def _list_subtree(conn: HfConn, stem: str) -> AsyncIterator[TreeEntry]:
             if not rel or rel.endswith("/"):
                 continue
             meta = entry.metadata
-            size = meta.content_length if meta is not None else None
             modified = (
-                meta.last_modified.isoformat()
-                if meta is not None and meta.last_modified
-                else ""
+                meta.last_modified.isoformat() if meta.last_modified else ""
             )
-            yield TreeEntry(key=rel, size=size, modified=modified)
+            yield TreeEntry(
+                key=rel, size=meta.content_length, modified=modified
+            )
     except NotFound:
         return
 

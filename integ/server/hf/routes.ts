@@ -128,39 +128,45 @@ async function cdn(ctx: Ctx<C>): Promise<Reply> {
   return { ...reply, headers: { ...reply.headers, ETag: `"${hash}"` } }
 }
 
+// The Hub's answer to a paths-info body it cannot read, which is what an
+// untyped JSON body arrives as (measured against huggingface.co, 2026-09-25).
+const INVALID_PATHS = '✖ Invalid input\n  → at paths'
+
 /**
- * The paths this request asks about.
+ * The paths this request asks about, or null for a body that names none.
  *
  * The vendor takes a form here, one `paths` field per entry. A JSON body is
  * accepted too because the documented shape is `{"paths": [...]}` and a client
- * that sends it should not read as asking about nothing. Anything else throws:
- * answering an empty list for a body we did not understand would report every
- * path as missing, which is a wrong answer wearing a valid one's clothes.
+ * that sends it should not read as asking about nothing. Anything else is
+ * refused as the vendor refuses it: answering an empty list for a body we did
+ * not understand would report every path as missing, which is a wrong answer
+ * wearing a valid one's clothes.
  *
  * Args:
  *   ctx (Ctx<C>): the request being answered.
  */
-function requestedPaths(ctx: Ctx<C>): string[] {
+function requestedPaths(ctx: Ctx<C>): string[] | null {
   if (ctx.body.length === 0) return []
   if (headerOf(ctx, 'content-type').includes('json')) {
     const body = ctx.json()
     const named = Array.isArray(body) ? body : ((body as Record<string, JsonValue>).paths ?? [])
-    if (!Array.isArray(named)) throw new Error('paths-info: `paths` is not a list')
+    if (!Array.isArray(named)) return null
     return named.map((p) => String(p))
   }
   const form = new URLSearchParams(ctx.body.toString('utf8'))
   const named = form.getAll('paths')
-  if (named.length === 0) throw new Error(`paths-info: no paths in a ${ctx.body.length}-byte body`)
-  return named
+  return named.length === 0 ? null : named
 }
 
 async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   const bucket = bucketOf(ctx)
+  const asked = requestedPaths(ctx)
+  if (asked === null) return { status: 400, body: { error: INVALID_PATHS } }
   const entries: Record<string, JsonValue>[] = []
   // Exact names only, and files only: the Hub answers `[]` for a directory
   // and for a leading-slash spelling of a file (measured 2026-09-25), and a
   // fake that normalised either would pass a key production never finds.
-  for (const raw of requestedPaths(ctx)) {
+  for (const raw of asked) {
     const row = await objectAt(ctx.sql, ctx.tenant, bucket, raw)
     if (row !== null) entries.push(fileEntry(row))
   }

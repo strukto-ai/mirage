@@ -114,6 +114,11 @@ model HfBlob {
   // to keep honest: `size` is the CONTENT length, and reporting the pointer
   // length there makes wc -c lie and truncates a copy.
   pointerSize Int @default(0)
+  // The Xet content hash, "" for a file not stored on Xet. An LFS file in a
+  // Xet repo has one: its tree row carries `xetHash`, and resolve redirects
+  // to the Xet bridge, whose answer's ETag is this hash rather than either
+  // oid. The fake takes no Xet upload, so a row gets one only by being set.
+  xetHash String @default("")
   // The commit that last touched this path, which `expand=true` renders and
   // which is a Hub file's only source of an mtime.
   lastCommit String

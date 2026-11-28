@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
-from mirage.accessor.airtable import AirtableAccessor
-from mirage.core.airtable.config import AirtableConfig
-from mirage.core.airtable.errors import AirtableAPIError
 from mirage.core.airtable.events import AirtableDeltaHook
 from mirage.types import FileChangeKind, PathSpec
+from tests.fixtures.airtable_account import BASES, TABLES, AirtableAccount
 
 C, U, D, X = (
     FileChangeKind.CREATE,
@@ -28,57 +28,59 @@ C, U, D, X = (
     FileChangeKind.DELETE,
     FileChangeKind.UNKNOWN,
 )
-BASE = "/at/bases/Roadmap__appA"
-FEATURES = f"{BASE}/Features__tblF"
+# The world integ/fixtures/airtable/events.json seeds: one base holding one
+# table, and a page of two payloads.
+ROADMAP = "appRoadmap0000001"
+FEATURES_ID = "tblFeatures000001"
+OPS = "appOps00000000001"
+NOTES = "tblNotes000000001"
+OTHER = "tblOther000000001"
+BASE = f"/at/bases/Roadmap__{ROADMAP}"
+FEATURES = f"{BASE}/Features__{FEATURES_ID}"
 
 
-class FakeAirtable:
-    """Bases, their schemas, and each webhook's payloads, numbered from
-    1 and kept from ``oldest`` on, served two to a page."""
+class World:
+    """The account and the webhook its base already has.
 
-    def __init__(self) -> None:
-        self.bases = [{"id": "appA", "name": "Roadmap"}]
-        self.tables = {"appA": [{"id": "tblF", "name": "Features"}]}
-        self.hooks: dict[str, dict[str, list[dict[str, Any]]]] = {
-            "appA": {"achH": []}
-        }
-        self.oldest = 1
-        self.calls: list[str] = []
+    Args:
+        account (AirtableAccount): the account.
+        hook (str): the webhook on the Roadmap base.
+    """
 
-    async def list_bases(self, accessor):
-        self.calls.append("bases")
-        return list(self.bases)
+    def __init__(self, account: AirtableAccount, hook: str) -> None:
+        self.account = account
+        self.hook = hook
 
-    async def list_tables(self, accessor, base_id):
-        self.calls.append(f"tables {base_id}")
-        return list(self.tables[base_id])
+    async def push(self, payload: dict[str, Any], hook: str | None = None):
+        await self.account.push(hook or self.hook, payload)
 
-    async def list_webhooks(self, accessor, base_id):
-        return [
-            {"id": hook_id, "cursorForNextPayload": len(log) + 1}
-            for hook_id, log in self.hooks[base_id].items()
-        ]
-
-    async def webhook_payloads(self, accessor, base_id, hook_id, cursor):
-        log = self.hooks[base_id].get(hook_id)
-        if log is None:
-            raise AirtableAPIError("not found", status=404)
-        start = max(cursor or 1, self.oldest)
-        page = log[start - 1 : start + 1]
-        return {
-            "payloads": page,
-            "cursor": start + len(page),
-            "mightHaveMore": start + len(page) <= len(log),
-        }
-
-    def push(self, payload: dict[str, Any], hook_id: str = "achH") -> None:
-        self.hooks["appA"][hook_id].append(payload)
+    async def calls(self) -> list[str]:
+        """Each base listing and table listing asked, in order."""
+        out = []
+        for r in await self.account._listed():
+            if r["route"] == BASES:
+                out.append("bases")
+            elif r["route"] == TABLES:
+                out.append(f"tables {r['path'].split('/')[4]}")
+        return out
 
 
-def _records(table_id: str = "tblF") -> dict[str, Any]:
+@pytest_asyncio.fixture
+async def world(airtable_origin: str) -> AsyncIterator[World]:
+    account = AirtableAccount(airtable_origin)
+    await account.reset(fixture="events")
+    hook = await account.webhook(ROADMAP)
+    await account.record_requests()
+    yield World(account, hook)
+    await account.run.close()
+
+
+def _records(table_id: str = FEATURES_ID) -> dict[str, Any]:
     return {
         "changedTablesById": {
-            table_id: {"changedRecordsById": {"rec1": {"current": {}}}}
+            table_id: {
+                "changedRecordsById": {"rec00000000000001": {"current": {}}}
+            }
         }
     }
 
@@ -88,21 +90,8 @@ def _root(vfs_path: str = "") -> PathSpec:
     return PathSpec(virtual=virtual, directory=virtual, vfs_path=vfs_path)
 
 
-@pytest.fixture
-def fake(monkeypatch) -> FakeAirtable:
-    fake = FakeAirtable()
-    for name in ("list_bases", "list_tables", "list_webhooks"):
-        monkeypatch.setattr(
-            f"mirage.core.airtable.events.{name}", getattr(fake, name)
-        )
-    monkeypatch.setattr(
-        "mirage.core.airtable.events.webhook_payloads", fake.webhook_payloads
-    )
-    return fake
-
-
-def _hook() -> AirtableDeltaHook:
-    return AirtableDeltaHook(AirtableAccessor(AirtableConfig(token="t")))
+def _hook(world: World, **config: Any) -> AirtableDeltaHook:
+    return AirtableDeltaHook(world.account.accessor(**config))
 
 
 def _pairs(delta) -> list[tuple[FileChangeKind, str]]:
@@ -111,15 +100,28 @@ def _pairs(delta) -> list[tuple[FileChangeKind, str]]:
 
 @pytest.mark.asyncio
 async def test_a_baseline_starts_at_the_present_and_each_ping_reads_on(
-    fake,
+    world,
 ):
-    fake.push(_records())
-    hook = _hook()
+    # The payload before the baseline changes the table's description,
+    # which no later payload touches, so a baseline that read from the
+    # webhook's first payload would name the table.json too.
+    await world.push(
+        {
+            "changedTablesById": {
+                FEATURES_ID: {
+                    "changedMetadata": {"current": {"description": "d"}}
+                }
+            }
+        }
+    )
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
     assert base.changes == ()
-    fake.push(_records())
-    fake.push(_records())
-    fake.push({"changedTablesById": {"tblF": {"changedViewsById": {"v": {}}}}})
+    await world.push(_records())
+    await world.push(_records())
+    await world.push(
+        {"changedTablesById": {FEATURES_ID: {"changedViewsById": {"v": {}}}}}
+    )
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta) == [
         (U, f"{FEATURES}/records.jsonl"),
@@ -130,33 +132,35 @@ async def test_a_baseline_starts_at_the_present_and_each_ping_reads_on(
 
 
 @pytest.mark.asyncio
-async def test_fields_and_tables_name_their_files(fake):
-    hook = _hook()
+async def test_fields_and_tables_name_their_files(world):
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    fake.push(
+    await world.push(
         {
             "changedTablesById": {
-                "tblF": {"changedFieldsById": {"fld1": {"current": {}}}}
+                FEATURES_ID: {
+                    "changedFieldsById": {"fldNew00000000001": {"current": {}}}
+                }
             },
             "createdTablesById": {
-                "tblN": {"metadata": {"name": "Notes"}, "fieldsById": {}}
+                NOTES: {"metadata": {"name": "Notes"}, "fieldsById": {}}
             },
         }
     )
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta) == [
-        (C, f"{BASE}/Notes__tblN/table.json"),
-        (C, f"{BASE}/Notes__tblN/records.jsonl"),
-        (X, f"{BASE}/Notes__tblN/views"),
+        (C, f"{BASE}/Notes__{NOTES}/table.json"),
+        (C, f"{BASE}/Notes__{NOTES}/records.jsonl"),
+        (X, f"{BASE}/Notes__{NOTES}/views"),
         (U, f"{BASE}/base.json"),
         (U, f"{FEATURES}/table.json"),
         (U, f"{FEATURES}/records.jsonl"),
         (X, f"{FEATURES}/views"),
     ]
-    fake.push(
+    await world.push(
         {
             "changedTablesById": {
-                "tblN": {
+                NOTES: {
                     "changedMetadata": {
                         "current": {"name": "Ideas"},
                         "previous": {"name": "Notes"},
@@ -165,42 +169,42 @@ async def test_fields_and_tables_name_their_files(fake):
             }
         }
     )
-    fake.push({"destroyedTableIds": ["tblF"]})
-    fake.push(_records("tblN"))
+    await world.push({"destroyedTableIds": [FEATURES_ID]})
+    await world.push(_records(NOTES))
     delta = await hook.pull(_root(), delta.checkpoint)
     assert _pairs(delta) == [
-        (X, f"{BASE}/Notes__tblN"),
-        (X, f"{BASE}/Ideas__tblN"),
+        (X, f"{BASE}/Notes__{NOTES}"),
+        (X, f"{BASE}/Ideas__{NOTES}"),
         (U, f"{BASE}/base.json"),
         (D, FEATURES),
-        (U, f"{BASE}/Ideas__tblN/records.jsonl"),
-        (X, f"{BASE}/Ideas__tblN/views"),
+        (U, f"{BASE}/Ideas__{NOTES}/records.jsonl"),
+        (X, f"{BASE}/Ideas__{NOTES}/views"),
     ]
-    assert fake.calls.count("tables appA") == 1
+    assert (await world.calls()).count(f"tables {ROADMAP}") == 1
 
 
 @pytest.mark.asyncio
-async def test_lost_payloads_are_unknown_on_the_event_root(fake):
-    hook = _hook()
+async def test_lost_payloads_are_unknown_on_the_event_root(world):
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    fake.push(_records())
-    fake.push(_records())
-    fake.oldest = 2
+    await world.push(_records())
+    await world.push(_records())
+    await world.account.expire(world.hook, 2)
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta)[0] == (X, "/at")
-    fake.push({"error": True, "code": "INVALID_HOOK"})
+    await world.push({"error": True, "code": "INVALID_HOOK"})
     assert _pairs(await hook.pull(_root(), delta.checkpoint)) == [(X, "/at")]
 
 
 @pytest.mark.asyncio
 async def test_a_webhook_gone_is_lost_and_a_new_one_reads_from_its_start(
-    fake,
+    world,
 ):
-    hook = _hook()
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    del fake.hooks["appA"]["achH"]
-    fake.hooks["appA"]["achNew"] = []
-    fake.push(_records(), hook_id="achNew")
+    await world.account.drop_webhook(ROADMAP, world.hook)
+    made = await world.account.webhook(ROADMAP)
+    await world.push(_records(), made)
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta) == [
         (X, "/at"),
@@ -210,15 +214,15 @@ async def test_a_webhook_gone_is_lost_and_a_new_one_reads_from_its_start(
 
 
 @pytest.mark.asyncio
-async def test_a_new_webhook_whose_first_payloads_expired_is_lost(fake):
-    fake.push(_records())
-    fake.push(_records())
-    hook = _hook()
+async def test_a_new_webhook_whose_first_payloads_expired_is_lost(world):
+    await world.push(_records())
+    await world.push(_records())
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    fake.hooks["appA"]["achNew"] = []
-    fake.push(_records(), hook_id="achNew")
-    fake.push(_records(), hook_id="achNew")
-    fake.oldest = 2
+    made = await world.account.webhook(ROADMAP)
+    await world.push(_records(), made)
+    await world.push(_records(), made)
+    await world.account.expire(made, 2)
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta) == [
         (X, "/at"),
@@ -228,58 +232,82 @@ async def test_a_new_webhook_whose_first_payloads_expired_is_lost(fake):
 
 
 @pytest.mark.asyncio
-async def test_bases_come_and_go_and_a_base_root_lists_no_bases(fake):
-    hook = _hook()
+async def test_bases_come_and_go(world):
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    fake.bases = [
-        {"id": "appB", "name": "Ops"},
-    ]
-    fake.tables["appB"] = []
-    fake.hooks["appB"] = {}
+    await world.account.store(
+        "DELETE FROM AirtableBase WHERE tenant = 'default' AND id = ?", ROADMAP
+    )
+    await world.account.store(
+        "INSERT INTO AirtableBase (tenant, id, name, permissionLevel, seq) "
+        "VALUES ('default', ?, 'Ops', 'create', 2)",
+        OPS,
+    )
     delta = await hook.pull(_root(), base.checkpoint)
-    assert _pairs(delta) == [(X, "/at/bases/Ops__appB"), (D, BASE)]
-    root = _root("bases/Roadmap__appA/Features__tblF")
-    fake.calls.clear()
+    assert _pairs(delta) == [(X, f"/at/bases/Ops__{OPS}"), (D, BASE)]
+
+
+@pytest.mark.asyncio
+async def test_a_base_root_lists_no_bases(world):
+    root = _root(f"bases/Roadmap__{ROADMAP}/Features__{FEATURES_ID}")
+    hook = _hook(world)
     base = await hook.pull(root, None)
-    fake.push(_records())
-    fake.push(_records("tblOther"))
-    fake.tables["appA"].append({"id": "tblOther", "name": "Other"})
+    await world.push(_records())
+    await world.push(_records(OTHER))
+    await world.account.store(
+        "INSERT INTO AirtableTable "
+        "(tenant, id, baseId, name, primaryFieldId, seq) "
+        "VALUES ('default', ?, ?, 'Other', 'fldOther000000001', 2)",
+        OTHER,
+        ROADMAP,
+    )
+    await world.account.store(
+        "INSERT INTO AirtableField (tenant, id, tableId, name, type, seq) "
+        "VALUES ('default', 'fldOther000000001', ?, 'Name', "
+        "'singleLineText', 2)",
+        OTHER,
+    )
     delta = await hook.pull(root, base.checkpoint)
     assert _pairs(delta) == [
         (U, f"{FEATURES}/records.jsonl"),
         (X, f"{FEATURES}/views"),
     ]
-    assert "bases" not in fake.calls
+    assert "bases" not in await world.calls()
 
 
 @pytest.mark.asyncio
-async def test_a_base_the_mount_leaves_out_reads_nothing(fake):
-    config = AirtableConfig(token="t", base_ids=["appB"])
-    hook = AirtableDeltaHook(AirtableAccessor(config))
-    root = _root("bases/Roadmap__appA")
+async def test_a_base_the_mount_leaves_out_reads_nothing(world):
+    hook = _hook(world, base_ids=[OPS])
+    root = _root(f"bases/Roadmap__{ROADMAP}")
     base = await hook.pull(root, None)
-    fake.push(_records())
+    await world.push(_records())
     assert (await hook.pull(root, base.checkpoint)).changes == ()
-    assert fake.calls == []
+    assert await world.calls() == []
 
 
 @pytest.mark.asyncio
-async def test_a_base_that_lost_payloads_names_its_tables_again(fake):
-    hook = _hook()
+async def test_a_base_that_lost_payloads_names_its_tables_again(world):
+    hook = _hook(world)
     base = await hook.pull(_root(), None)
-    fake.push(
+    await world.push(
         {
             "changedTablesById": {
-                "tblF": {"changedMetadata": {"current": {"name": "Ideas"}}}
+                FEATURES_ID: {
+                    "changedMetadata": {"current": {"name": "Ideas"}}
+                }
             }
         }
     )
-    fake.oldest = 2
-    fake.tables["appA"] = [{"id": "tblF", "name": "Ideas"}]
+    await world.account.expire(world.hook, 2)
+    await world.account.store(
+        "UPDATE AirtableTable SET name = 'Ideas' "
+        "WHERE tenant = 'default' AND id = ?",
+        FEATURES_ID,
+    )
     delta = await hook.pull(_root(), base.checkpoint)
     assert _pairs(delta) == [(X, "/at")]
-    fake.push(_records())
+    await world.push(_records())
     assert _pairs(await hook.pull(_root(), delta.checkpoint)) == [
-        (U, f"{BASE}/Ideas__tblF/records.jsonl"),
-        (X, f"{BASE}/Ideas__tblF/views"),
+        (U, f"{BASE}/Ideas__{FEATURES_ID}/records.jsonl"),
+        (X, f"{BASE}/Ideas__{FEATURES_ID}/views"),
     ]

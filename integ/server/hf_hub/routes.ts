@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { load as yamlLoad } from 'js-yaml'
-import { rangeReply, route, stripSlash } from '../kit/typescript/index.ts'
+import { RUN_QUERY, TENANT_QUERY, rangeReply, route, stripSlash } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, KitRoute, Reply } from '../kit/typescript/index.ts'
 import {
   DEFAULT_LIMIT,
@@ -39,6 +39,7 @@ import {
   reposOfKind,
   repoOf,
   resolveRevision,
+  xetContent,
   type Change,
 } from './store.ts'
 import { cardTags, parseCard } from './card.ts'
@@ -585,11 +586,35 @@ async function pathsInfo(ctx: Ctx<C>): Promise<Reply> {
   return { status: 200, body: rows }
 }
 
+// The Xet bridge a Xet file's resolve redirects to. Like the vendor's
+// presigned bridge url it is fetched with no account of its own, so the run
+// and the account ride its query: a client may drop the Authorization header
+// on a redirect.
+function bridgeUrl(ctx: Ctx<C>, hash: string): string {
+  const q = new URLSearchParams({ [RUN_QUERY]: ctx.run, [TENANT_QUERY]: ctx.tenant })
+  return `${ctx.url.origin}/xet-bridge/${hash}?${q.toString()}`
+}
+
 async function resolve(ctx: Ctx<C>): Promise<Reply> {
   const found = await blobFor(ctx)
   if ('status' in found) return found
   const { sha, blob } = found
   const body = Buffer.from(blob.content)
+  // A Xet file 302s to the bridge. The first hop names the LFS sha, never the
+  // bytes' own ETag, so a client that took its token from the wrong hop reads
+  // the wrong one; the bridge's ETag is the Xet hash.
+  if (blob.xetHash !== '') {
+    return {
+      status: 302,
+      headers: {
+        Location: bridgeUrl(ctx, blob.xetHash),
+        'X-Repo-Commit': sha,
+        'X-Linked-Size': String(body.length),
+        'X-Linked-Etag': `"${blob.lfsOid}"`,
+        'X-Xet-Hash': blob.xetHash,
+      },
+    }
+  }
   const etag = blob.lfsOid !== '' ? blob.lfsOid : blob.oid
   const headers: Record<string, string> = {
     ETag: `"${etag}"`,
@@ -1013,6 +1038,16 @@ function repoRoute(
   ]
 }
 
+// The bytes a Xet file's resolve redirected to, whole or ranged, with the Xet
+// hash as their strong ETag.
+async function xetBridge(ctx: Ctx<C>): Promise<Reply> {
+  const hash = ctx.params.hash ?? ''
+  const content = await xetContent(ctx.sql, ctx.tenant, hash)
+  if (content === null) return entryNotFound()
+  const windowed = rangeReply(ctx.headers, Buffer.from(content))
+  return { ...windowed, headers: { ...windowed.headers, ETag: `"${hash}"` } }
+}
+
 function resolveRoutes(kind: string, prefix: string): KitRoute<C>[] {
   const bind = (ctx: Ctx<C>): Promise<Reply> => resolve({ ...ctx, params: { ...ctx.params, kind } })
   const bindRaw = (ctx: Ctx<C>): Promise<Reply> => raw({ ...ctx, params: { ...ctx.params, kind } })
@@ -1053,6 +1088,7 @@ export function hfHubRoutes(): KitRoute<C>[] {
     // A model resolves at the origin root and the other two under their plural
     // segment, so the model form is separate rather than an optional segment:
     // `:kind` would otherwise swallow the namespace.
+    route('GET', '/xet-bridge/:hash', xetBridge),
     ...resolveRoutes('datasets', '/datasets'),
     ...resolveRoutes('spaces', '/spaces'),
     ...resolveRoutes('models', ''),
