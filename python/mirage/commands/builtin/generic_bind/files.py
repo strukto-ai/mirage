@@ -242,7 +242,8 @@ class _Run:
     where the next batch starts, ``latest`` how many files the batch
     before it took, ``last`` where the latest read was, ``rows`` what
     a subtree answer holds at each name and ``reach`` how many of its
-    files a walk of it can read, -1 for all of them."""
+    files a walk of it can read, -1 for all of them, looked up for the
+    directory listed (``folder``) once a batch goes from the run."""
 
     names: list[str]
     sent: int = 0
@@ -251,6 +252,7 @@ class _Run:
     order: dict[str, int] | None = None
     warming: dict[str, asyncio.Future[ReadBatch]] = field(default_factory=dict)
     rows: Mapping[str, FileStat] | None = None
+    folder: str | None = None
     reach: int = -1
 
     def at(self, virtual: str) -> int | None:
@@ -395,12 +397,10 @@ class ReadAhead:
                 self.stats[path.virtual] = result
         elif name == "readdir" and isinstance(result, list):
             files = [n for n in result if not n.endswith("/")]
-            self._keep(folder, _Run(files, reach=self._reach(folder)))
+            self._keep(folder, _Run(files, folder=folder))
         elif name == "read_tree" and isinstance(result, Mapping):
             if options.get("level"):
-                listed = _listed(folder, result)
-                listed.reach = self._reach(folder)
-                self._keep(folder, listed)
+                self._keep(folder, _listed(folder, result))
             else:
                 self.trees.append(_Tree(folder, result))
         return result, io
@@ -435,17 +435,14 @@ class ReadAhead:
             run.sent, at if self.holding and pending is None else at + 1
         )
         ahead = min(width, run.latest or width) if self.holding else width
-        end = (
-            len(run.names) if run.reach < 0 else min(len(run.names), run.reach)
-        )
         if (
             self.kept
             and width
-            and start < end
             and start - at <= max(1, ahead // 2)
+            and start < self._end(run)
         ):
             rows = run.rows or {}
-            window = run.names[start : min(start + width, end)]
+            window = run.names[start : min(start + width, self._end(run))]
             found = {
                 n: row
                 for n in window
@@ -589,19 +586,27 @@ class ReadAhead:
                 tree.run = _Run(
                     [base + key for key in below],
                     rows={base + key: tree.rows[key] for key in below},
-                    reach=self._reach(tree.root),
+                    folder=tree.root,
                 )
             return tree.run
         return None
 
-    def _reach(self, folder: str) -> int:
-        """How many files of a listing or subtree answer at ``folder`` a
-        walk of it can read: no more than the entries it lists there.
+    def _end(self, run: _Run) -> int:
+        """Where batches from ``run`` stop: its last file, or as many as a
+        walk of its folder lists (``walk_limit``), looked up the first
+        time a batch would go from it, so a walk that reads nothing never
+        asks.
 
         Args:
-            folder (str): the directory listed.
+            run (_Run): the run.
         """
-        return -1 if self.walk_limit is None else self.walk_limit(folder)
+        if run.folder is not None:
+            folder, run.folder = run.folder, None
+            if self.walk_limit is not None:
+                run.reach = self.walk_limit(folder)
+        if run.reach < 0:
+            return len(run.names)
+        return min(len(run.names), run.reach)
 
 
 def _listed(folder: str, rows: Mapping[str, FileStat]) -> _Run:
@@ -620,6 +625,7 @@ def _listed(folder: str, rows: Mapping[str, FileStat]) -> _Run:
     return _Run(
         [base + name for name in names],
         rows={base + name: rows[name] for name in names},
+        folder=folder,
     )
 
 

@@ -190,19 +190,21 @@ const LISTINGS = 16
 // as a listing or subtree answer named them. `sent` is where the next batch
 // starts, `latest` how many files the batch before it took, `last` where the
 // latest read was, `rows` what a subtree answer holds at each name and `reach`
-// how many of its files a walk of it can read, -1 for all of them. Mirrors
+// how many of its files a walk of it can read, -1 for all of them, looked up
+// for the directory listed (`folder`) once a batch goes from the run. Mirrors
 // Python's `_Run`.
 class Run {
   sent = 0
   latest = 0
   last: number | null = null
   order: Map<string, number> | null = null
+  reach = -1
   readonly warming = new Map<string, Promise<ReadBatch>>()
 
   constructor(
     readonly names: string[],
     readonly rows: ReadonlyMap<string, FileStat> | null = null,
-    public reach = -1,
+    public folder: string | null = null,
   ) {}
 
   at(virtual: string): number | undefined {
@@ -339,13 +341,11 @@ export class ReadAhead {
       this.stats.set(path.virtual, answer[0])
     } else if (name === 'readdir' && Array.isArray(answer[0])) {
       const files = (answer[0] as string[]).filter((n) => !n.endsWith('/'))
-      this.keep(folder, new Run(files, null, this.reach(folder)))
+      this.keep(folder, new Run(files, null, folder))
     } else if (name === 'read_tree' && answer[0] instanceof Map) {
       const rows = answer[0] as Map<string, FileStat>
       if (asked.level === true) {
-        const run = listed(folder, rows)
-        run.reach = this.reach(folder)
-        this.keep(folder, run)
+        this.keep(folder, listed(folder, rows))
       } else {
         this.trees.push({ root: folder, rows, run: null })
         if (this.trees.length > LISTINGS) this.trees.shift()
@@ -380,11 +380,10 @@ export class ReadAhead {
         : this.paced(run, at, pending !== undefined)
     const start = Math.max(run.sent, this.holding && pending === undefined ? at : at + 1)
     const ahead = this.holding ? Math.min(width, run.latest || width) : width
-    const end = run.reach < 0 ? run.names.length : Math.min(run.names.length, run.reach)
-    if (this.kept && width > 0 && start < end && start - at <= Math.max(1, ahead >> 1)) {
+    if (this.kept && width > 0 && start - at <= Math.max(1, ahead >> 1) && start < this.end(run)) {
       const found = new Map<string, FileStat>()
       let names: string[] = []
-      for (const name of run.names.slice(start, Math.min(start + width, end))) {
+      for (const name of run.names.slice(start, Math.min(start + width, this.end(run)))) {
         if (run.warming.has(name)) break
         names.push(name)
         const row = this.stats.get(name) ?? run.rows?.get(name)
@@ -517,7 +516,7 @@ export class ReadAhead {
         tree.run = new Run(
           below.map((key) => base + key),
           rows,
-          this.reach(tree.root),
+          tree.root,
         )
       }
       return tree.run
@@ -525,10 +524,16 @@ export class ReadAhead {
     return undefined
   }
 
-  // How many files of a listing or subtree answer at `folder` a walk of it can
-  // read: no more than the entries it lists there. Mirrors Python's `_reach`.
-  private reach(folder: string): number {
-    return this.walkLimit === null ? -1 : this.walkLimit(folder)
+  // Where batches from `run` stop: its last file, or as many as a walk of its
+  // folder lists (`walkLimit`), looked up the first time a batch would go from
+  // it, so a walk that reads nothing never asks. Mirrors Python's `_end`.
+  private end(run: Run): number {
+    if (run.folder !== null) {
+      const folder = run.folder
+      run.folder = null
+      if (this.walkLimit !== null) run.reach = this.walkLimit(folder)
+    }
+    return run.reach < 0 ? run.names.length : Math.min(run.names.length, run.reach)
   }
 }
 
@@ -552,6 +557,7 @@ function listed(folder: string, rows: ReadonlyMap<string, FileStat>): Run {
   return new Run(
     names.map((name) => base + name),
     kept,
+    folder,
   )
 }
 
