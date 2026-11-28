@@ -1130,6 +1130,10 @@ it('reads each file of a batch read the VFS has none of', async () => {
 // files a batch reads must fit together, beside what the batch already holds,
 // in what the workspace has left, as one file must for its own read, so a read
 // of one left out meets the refusal; what a RAM store holds is already counted.
+// The store is not local, so the batch asks for f and g at once and their
+// chunks arrive in turn: once both are 12 bytes in, f's last would take the
+// bytes built past the 24 left, counting g's still arriving, so f is left out,
+// and its bytes go with it, which leaves room for g's last.
 it('leaves out of a batch read what its own read could not fit', async () => {
   class Built extends StubVFS {
     override read(): Promise<Uint8Array> {
@@ -1159,7 +1163,7 @@ it('leaves out of a batch read what its own read could not fit', async () => {
   )
   expect(await runWithMemory(both, () => built.readMany(['/b/f'], 64, 16))).toEqual(new Map())
   expect(await runWithMemory(both, () => streamed.readMany(['/s/f', '/s/g'], 64))).toEqual(
-    new Map([['/s/f', new Uint8Array(16)]]),
+    new Map([['/s/g', new Uint8Array(16)]]),
   )
   expect(await runWithMemory(one, () => stored.readMany(['/r/f', '/r/g'], 64))).toEqual(
     new Map([
@@ -1168,6 +1172,41 @@ it('leaves out of a batch read what its own read could not fit', async () => {
     ]),
   )
   expect(await streamed.readMany(['/s/f'], 64)).toEqual(new Map([['/s/f', new Uint8Array(16)]]))
+})
+
+// A store whose reads each wait a round trip; counts how many of them are out
+// at once.
+class Remote extends StubVFS {
+  override readonly concurrentReads: number = 3
+  out = 0
+  most = 0
+
+  override async read(): Promise<Uint8Array> {
+    this.out += 1
+    this.most = Math.max(this.most, this.out)
+    await Promise.resolve()
+    this.out -= 1
+    return new Uint8Array([1])
+  }
+}
+
+// The same store, holding its data locally.
+class Local extends Remote {
+  override readonly local: boolean = true
+}
+
+// Twin of test_a_batch_read_asks_a_store_for_as_many_as_it_reads_at_once: each
+// read of a store that is not local waits a round trip, so a batch with no
+// batch read of its own asks it for its concurrentReads files at once; a local
+// one is read a file after another.
+it('asks a store for as many of a batch as it reads at once', async () => {
+  const paths = Array.from({ length: 7 }, (_, i) => `/d/f${String(i)}`)
+  const remote = new Remote()
+  const local = new Local()
+  const all = new Map(paths.map((p) => [p, new Uint8Array([1])]))
+  expect(await new MountEntry({ prefix: '/d/', vfs: remote }).readMany(paths, 64)).toEqual(all)
+  expect(await new MountEntry({ prefix: '/d/', vfs: local }).readMany(paths, 64)).toEqual(all)
+  expect([remote.most, local.most]).toEqual([3, 1])
 })
 
 it('hands a VFS that reads a batch itself the room its files must fit', async () => {

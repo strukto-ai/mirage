@@ -31,6 +31,11 @@ export function normalizeDropboxRootPath(value: string | undefined): string {
 export class DropboxAccessor extends TokenAccessor {
   override readonly tokenManager: DropboxTokenManager
   readonly rootPath: string
+  /**
+   * The folders the latest command found spelled exactly, by its start stamp,
+   * which its later path checks do not ask about again (`checkPath`).
+   */
+  proven: { started: number; folders: Set<string> } | null = null
 
   constructor(opts: { tokenManager: DropboxTokenManager; rootPath?: string }) {
     super()

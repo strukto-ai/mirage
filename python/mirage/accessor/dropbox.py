@@ -41,3 +41,4 @@ class DropboxAccessor(TokenAccessor):
         self.config = config
         self.token_manager = token_manager
         self.root_path = normalize_dropbox_root_path(config.root_path)
+        self.proven: tuple[int, set[str]] | None = None

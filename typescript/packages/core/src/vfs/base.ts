@@ -142,6 +142,13 @@ export class BaseVFS<A extends Accessor = Accessor> {
    */
   readonly cachesReads: boolean = false
   /**
+   * How many of its files a read-ahead fetches at once, which is the most one
+   * batch warming the file cache names: a few for a service that limits its
+   * callers' rate, more for an object store, which serves many reads in
+   * parallel.
+   */
+  readonly concurrentReads: number = 8
+  /**
    * Whether this VFS carries enough version information for
    * snapshot+replay drift detection. When true, the driver's `stat` op
    * must populate {@link FileStat.fingerprint}

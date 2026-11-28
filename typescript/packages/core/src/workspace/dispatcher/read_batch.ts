@@ -65,6 +65,11 @@ export class ReadBatch {
    * changed; null while nothing is held.
    */
   readonly currentLinks: (() => ReadonlyMap<string, string>) | null
+  /**
+   * How many files the mounts it warmed read at once, the fewest any of them
+   * does (`BaseVFS.concurrentReads`); null when it warmed none.
+   */
+  readonly concurrentReads: number | null
 
   constructor(
     fields: {
@@ -75,6 +80,7 @@ export class ReadBatch {
       count?: number
       links?: ReadonlyMap<string, string> | null
       currentLinks?: (() => ReadonlyMap<string, string>) | null
+      concurrentReads?: number | null
     } = {},
   ) {
     this.kept = fields.kept ?? false
@@ -84,6 +90,7 @@ export class ReadBatch {
     this.count = fields.count ?? 0
     this.links = fields.links ?? null
     this.currentLinks = fields.currentLinks ?? null
+    this.concurrentReads = fields.concurrentReads ?? null
   }
 
   /**

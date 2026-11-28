@@ -320,12 +320,37 @@ it('warms the operands after a glob read', async () => {
 
 // Twin of test_a_glob_read_with_no_cache_reads_each_file_once: a mount that
 // caches reads, in a workspace with no cache to keep them, warms nothing,
-// since a warmed file would be read again.
+// since a warmed file would be read again. The files are held for the command
+// instead, as on a mount that holds its data locally: the first is read on its
+// own, before the command knows its mount holds, and the rest in one batch.
 it('reads each file of a glob once with no cache', async () => {
   const vfs = new BatchedRAM()
   const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
   for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
   const ws = new Workspace({ '/r': vfs })
+  open.push(ws)
+  const out = await ws.shell('cat /r/f*')
+  expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
+  expect(vfs.reads).toEqual(['/r/f00'])
+  expect(vfs.batches).toEqual([names.slice(1).map((name) => `/r${name}`)])
+})
+
+// A live source standing in for a remote one: its reads no cache keeps.
+class LiveRAM extends BatchedRAM {
+  override readonly cachesReads: boolean = false
+}
+
+// Twin of test_a_glob_read_on_a_live_source_reads_nothing_ahead: a live source
+// has each file read as the command reads it, so what it hands out is never
+// older than the read, in a workspace with a cache or with none.
+it.each([
+  ['none', {}],
+  ['kept', { cache: {} }],
+])('reads nothing ahead on a live source with %s cache', async (_name, options) => {
+  const vfs = new LiveRAM()
+  const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
+  for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs }, options)
   open.push(ws)
   const out = await ws.shell('cat /r/f*')
   expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
@@ -422,6 +447,47 @@ it('reads each file once on a walk back in a parent directory', async () => {
   const read = [...vfs.reads, ...vfs.batches.flat()]
   expect(new Set(read).size).toBe(read.length)
   expect(read).toHaveLength(11)
+})
+
+// Twin of test_a_walk_below_a_subtree_answer_reads_ahead_into_the_next_directory:
+// the mount answers the walk's subtree in one read, so its files are one run in
+// the order the walk reads them: a batch runs on from a/ into b/ and c/, and
+// the first file of b/ and of c/ is warmed with the files before it instead of
+// each directory starting over with a read of its own, which on a remote store
+// is a round trip a directory.
+it('reads ahead into the next directory below a subtree answer', async () => {
+  const vfs = new BatchedRAM()
+  for (const dir of ['/d', '/d/a', '/d/b', '/d/c']) vfs.store.dirs.add(dir)
+  const names = ['a', 'b', 'c'].flatMap((d) => [0, 1, 2, 3].map((i) => `/d/${d}/f${String(i)}`))
+  for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs }, { cache: {} })
+  open.push(ws)
+  const out = DEC.decode((await ws.shell('grep -rc x /r/d')).stdout)
+  expect(out.split(':1\n').length - 1).toBe(12)
+  const at = (from: number, to?: number): string[] => names.slice(from, to).map((n) => `/r${n}`)
+  expect(vfs.reads).toEqual(at(0, 2))
+  expect(vfs.batches).toEqual([at(2, 3), at(3, 5), at(5, 9), at(9)])
+})
+
+// A remote mount that reads sixteen of its files at once.
+class WideRAM extends BatchedRAM {
+  override readonly concurrentReads: number = 16
+}
+
+// Twin of test_a_glob_read_warms_as_many_as_its_mount_reads_at_once:
+// READ_AHEAD files go before the mount has said how many it reads at once;
+// every batch after takes the mount's concurrentReads.
+it('warms as many as its mount reads at once', async () => {
+  const vfs = new WideRAM()
+  const names = Array.from({ length: 40 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
+  for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs }, { cache: {} })
+  open.push(ws)
+  const out = await ws.shell('cat /r/f*')
+  expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(40))
+  const warmed = names.slice(1).map((name) => `/r${name}`)
+  expect(vfs.reads).toEqual(['/r/f00'])
+  expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8, 24), warmed.slice(24)])
 })
 
 // Twin of test_a_read_passing_a_report_is_left_to_the_dispatcher: the read of

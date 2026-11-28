@@ -17,7 +17,11 @@ import weakref
 from collections.abc import AsyncIterator, Awaitable
 from typing import cast
 
-from mirage.vfs.redis.constants import READ_FILES_SCRIPT, TRUNCATE_SCRIPT
+from mirage.vfs.redis.constants import (
+    READ_FILES_SCRIPT,
+    SCAN_COUNT,
+    TRUNCATE_SCRIPT,
+)
 
 try:
     from redis.asyncio import Redis
@@ -206,14 +210,14 @@ class RedisStore:
         """Yield descendant keys a page at a time, with their directory flag."""
         head = self._fk("")
         async for key in self._client.scan_iter(
-            match=escape_glob(head + prefix) + "*"
+            match=escape_glob(head + prefix) + "*", count=SCAN_COUNT
         ):
             yield (
                 (key.decode() if isinstance(key, bytes) else key)[len(head) :],
                 False,
             )
         async for key in self._client.sscan_iter(
-            self._dk(), match=escape_glob(prefix) + "*"
+            self._dk(), match=escape_glob(prefix) + "*", count=SCAN_COUNT
         ):
             yield key.decode() if isinstance(key, bytes) else key, True
 
@@ -221,7 +225,7 @@ class RedisStore:
         pattern = f"{escape_glob(f'{self._prefix}file:{prefix}')}*"
         strip = len(f"{self._prefix}file:")
         result: list[str] = []
-        async for key in self._client.scan_iter(pattern):
+        async for key in self._client.scan_iter(pattern, count=SCAN_COUNT):
             if isinstance(key, bytes):
                 key = key.decode()
             result.append(key[strip:])
@@ -327,6 +331,37 @@ class RedisStore:
             )
         return out
 
+    async def stat_at(
+        self, path: str
+    ) -> tuple[bool, bool, dict[str, str], int, str | None]:
+        """Whether a directory and a file are at ``path``, and the
+        attributes, length and modified time kept under its name, what
+        ``has_dir``, ``has_file`` and ``stat_many`` answer, in one
+        pipeline: one round trip on one connection.
+
+        Args:
+            path (str): the normalized path.
+        """
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.sismember(self._dk(), path)
+            pipe.exists(self._fk(path))
+            pipe.hgetall(self._ak(path))
+            pipe.strlen(self._fk(path))
+            pipe.get(self._mk(path))
+            is_dir, is_file, raw, size, modified = await pipe.execute()
+        return (
+            path == "/" or bool(is_dir),
+            bool(is_file),
+            {
+                (k.decode() if isinstance(k, bytes) else k): (
+                    v.decode() if isinstance(v, bytes) else v
+                )
+                for k, v in raw.items()
+            },
+            int(size),
+            modified.decode() if isinstance(modified, bytes) else modified,
+        )
+
     async def set_attrs(self, path: str, fields: dict[str, str]) -> None:
         await cast(
             "Awaitable[int]", self._client.hset(self._ak(path), mapping=fields)
@@ -345,7 +380,7 @@ class RedisStore:
         ]
         for pattern in prefixes:
             keys: list[str | bytes] = []
-            async for k in self._client.scan_iter(pattern):
+            async for k in self._client.scan_iter(pattern, count=SCAN_COUNT):
                 keys.append(k)
             if keys:
                 await self._client.delete(*keys)

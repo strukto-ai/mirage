@@ -16,6 +16,7 @@ import posixpath
 from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.index.scope import sole_command_started
 from mirage.core.dropbox.api import lookup
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
@@ -57,19 +58,39 @@ async def check_path(
 ) -> dict[str, Any] | None:
     """Validate each existing component without accepting service case aliases.
 
+    A folder the running command has found spelled exactly already is not
+    asked about again (``DropboxAccessor.proven``), so a walk's reads share
+    the folders above them instead of each asking for every one. Only such
+    a folder is remembered, and only for the command, which its start stamp
+    names: a streamed read runs as its output is pulled, after the
+    command's own scope has closed, and still carries the stamp. The final
+    name is always asked, since its entry is the answer.
+
     Args:
         accessor (DropboxAccessor): backend and configured root.
         path (PathSpec): operand whose virtual spelling a refusal names.
     """
     key = raw_path_of(path).strip("/")
+    parts = key.split("/") if key else []
+    started = sole_command_started()
+    proven: set[str] = set()
+    if started is not None:
+        if accessor.proven is None or accessor.proven[0] != started:
+            accessor.proven = (started, proven)
+        proven = accessor.proven[1]
     at = accessor.root_path
     entry = None
-    for part in key.split("/") if key else ():
+    for i, part in enumerate(parts):
         at = f"{at}/{part}"
+        folder = i < len(parts) - 1
+        if folder and at in proven:
+            continue
         entry = await lookup(accessor.token_manager, at)
         if entry is None:
             return None
         named = entry.get("name")
         if isinstance(named, str) and named != part:
             raise enoent(path)
+        if folder:
+            proven.add(at)
     return entry

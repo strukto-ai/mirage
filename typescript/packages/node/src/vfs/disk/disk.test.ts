@@ -27,6 +27,8 @@ import { exists as existsCore } from '../../core/disk/exists.ts'
 import { rmR as rmRCore } from '../../core/disk/rm.ts'
 import { readStream as streamCore } from '../../core/disk/stream.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { Workspace } from '../../workspace.ts'
 import { DiskVFS } from './disk.ts'
 
@@ -200,6 +202,58 @@ describe('DiskVFS — fs methods', () => {
     const chunks: Uint8Array[] = []
     for await (const c of streamCore(res.accessor, spec('/big'))) chunks.push(c)
     expect(new TextDecoder().decode(chunks[0])).toBe('chunk')
+  })
+})
+
+// A disk mount that counts its whole reads and its batches.
+class CountedDisk extends DiskVFS {
+  readonly reads: string[] = []
+  readonly batches: string[][] = []
+
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    this.reads.push(path.virtual)
+    return super.read(path, handed, offset, size)
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    handed?: readonly Handed[],
+    room: number | null = null,
+  ): Promise<Map<string, Uint8Array>> {
+    this.batches.push(paths.map((path) => path.virtual))
+    return super.readMany(paths, limit, handed, room)
+  }
+}
+
+describe('DiskVFS walked a directory at a time', () => {
+  // Twin of test_a_walk_listed_a_directory_at_a_time_reads_each_file_once:
+  // disk answers no subtree read, so the walk lists each directory on its
+  // own, one level at a time. d/'s files a0..a5 and c0..c2 are one run, so the
+  // batch a5's read sends holds c0 while the walk is down in b/, whose
+  // seventeen folders are more listings than a command keeps: each is a
+  // listing as a readdir's is, and the run with a batch out is the last to go,
+  // so c0 is served from it, and every file is read once.
+  it('reads each file once', async () => {
+    const parent = [0, 1, 2, 3, 4, 5].map((i) => `a${String(i)}`).concat(['c0', 'c1', 'c2'])
+    await mkdir(join(root, 'd'), { recursive: true })
+    for (const name of parent) await writeFile(join(root, 'd', name), 'x\n')
+    for (let i = 0; i < 17; i++) {
+      const folder = join(root, 'd', 'b', `s${String(i).padStart(2, '0')}`)
+      await mkdir(folder, { recursive: true })
+      for (const name of ['f0', 'f1']) await writeFile(join(folder, name), 'x\n')
+    }
+    const vfs = new CountedDisk({ root })
+    const [out] = await shell(vfs, 'grep -rc x /data/d')
+    expect((out ?? '').split(':1\n').length - 1).toBe(43)
+    const read = [...vfs.reads, ...vfs.batches.flat()]
+    expect(new Set(read).size).toBe(read.length)
+    expect(read).toHaveLength(43)
   })
 })
 

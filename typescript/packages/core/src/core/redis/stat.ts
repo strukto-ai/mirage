@@ -71,16 +71,9 @@ function fromFields(
 }
 
 /**
- * What `stat` answers for the normalized key `p` the store holds. Mirrors
- * Python's `key_stat`.
+ * What `stat` answers for each normalized key the store holds, in one
+ * pipeline. Mirrors Python's `key_stats`.
  */
-export async function keyStat(store: RedisStoreLike, p: string, isDir: boolean): Promise<FileStat> {
-  const raw = await store.getAttrs(p)
-  const size = isDir ? null : await store.fileLen(p)
-  return fromFields(p, isDir, raw, size, await store.getModified(p))
-}
-
-/** `keyStat` for many keys, in one pipeline. Mirrors Python's `key_stats`. */
 export async function keyStats(
   store: RedisStoreLike,
   keys: readonly [string, boolean][],
@@ -92,10 +85,17 @@ export async function keyStats(
   })
 }
 
+/**
+ * What is at a path, asked in one round trip: whether a directory or a file is
+ * there and the fields either keeps under its name go out in one pipeline
+ * (`statAt`), rather than each waiting for the one before, and on one
+ * connection. Mirrors Python's `stat`.
+ */
 export async function stat(accessor: RedisAccessor, path: PathSpec): Promise<FileStat> {
   const p = norm(path.mountPath)
   const store = accessor.store
-  if (await store.hasDir(p)) return keyStat(store, p, true)
-  if (await store.hasFile(p)) return keyStat(store, p, false)
+  const [isDir, isFile, raw, size, modified] = await store.statAt(p)
+  if (isDir) return fromFields(p, true, raw, null, modified)
+  if (isFile) return fromFields(p, false, raw, size, modified)
   throw await lookupError(store, path, p)
 }

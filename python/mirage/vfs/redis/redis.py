@@ -44,6 +44,7 @@ from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.capacity import Charge, charge, storage_usage
+from mirage.vfs.redis.constants import SCAN_COUNT
 from mirage.vfs.redis.store import RedisStore, escape_glob
 from mirage.vfs.secrets import REDACTED_SECRET
 
@@ -225,7 +226,7 @@ class RedisVFS(BaseVFS):
             files: dict[str, bytes] = {}
             file_pattern = f"{escape_glob(prefix)}file:*"
             strip = len(f"{prefix}file:")
-            for key in client.scan_iter(file_pattern):
+            for key in client.scan_iter(file_pattern, count=SCAN_COUNT):
                 if isinstance(key, bytes):
                     key = key.decode()
                 # redis-py's sync client is typed with an async-or-sync
@@ -241,7 +242,7 @@ class RedisVFS(BaseVFS):
             attrs: dict[str, dict[str, str]] = {}
             attrs_pattern = f"{escape_glob(prefix)}attrs:*"
             astrip = len(f"{prefix}attrs:")
-            for key in client.scan_iter(attrs_pattern):
+            for key in client.scan_iter(attrs_pattern, count=SCAN_COUNT):
                 if isinstance(key, bytes):
                     key = key.decode()
                 raw = cast("dict[bytes, bytes]", client.hgetall(key))
@@ -254,7 +255,7 @@ class RedisVFS(BaseVFS):
             modified: dict[str, str] = {}
             mod_pattern = f"{escape_glob(prefix)}modified:*"
             mstrip = len(f"{prefix}modified:")
-            for key in client.scan_iter(mod_pattern):
+            for key in client.scan_iter(mod_pattern, count=SCAN_COUNT):
                 if isinstance(key, bytes):
                     key = key.decode()
                 val = cast("bytes | None", client.get(key))

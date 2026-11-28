@@ -1823,12 +1823,14 @@ class Dispatcher:
         the answer's ``kept`` says it did, so a caller warms no more of a
         run that keeps none. Each read that follows still meets every
         check of its own and is served what this kept. On a mount that
-        holds its data locally (``local``) this reads them for the caller
-        instead, as ``_read_held`` says, and the answer holds the bytes;
-        unless ``hold`` is False, where it reads none and only answers
-        whether it would (``holds``), for a caller that does not know yet
-        whether its files are on such a mount and reads nothing ahead there
-        until it does.
+        holds its data locally (``local``), and on a store whose reads a
+        cache would keep (``caches_reads``) in a workspace that keeps none,
+        this reads them for the caller instead, as ``_read_held`` says, and
+        the answer holds the bytes; unless ``hold`` is False, where it
+        reads none and only answers whether it would (``holds``), for a
+        caller that does not know yet whether its files are on such a
+        mount and reads nothing ahead there until it does. A live source,
+        whose reads no cache keeps, is read ahead on neither.
 
         Nothing is fetched where a check could refuse a read before its
         backend is asked: nothing in a dry run or while a coded pre_vfs
@@ -1837,7 +1839,10 @@ class Dispatcher:
         reaches. A file already kept, one a renderer answers and one
         pinned to a revision is passed over, and so is one on a mount that
         holds its data locally and keeps reads too, whose read the read
-        cache answers. A store that reads a batch
+        cache answers. A mount whose writes are conditional keeps reads
+        (it is refused at load otherwise), so each read there publishes
+        the version it saw for the write that follows. A store that reads
+        a batch
         (``read_many``) is asked once for the rest of its files; any other
         is asked for each file its listing, or the stat the caller made of
         it, sizes within ``READ_AHEAD_BYTES``. A failure is logged and
@@ -1848,8 +1853,8 @@ class Dispatcher:
             caller (Caller): who makes the reads.
             stats (Mapping[str, FileStat]): the caller's stats of them, by
                 path.
-            hold (bool): whether to read the files on a mount that holds
-                its data locally.
+            hold (bool): whether to read the files on a mount whose reads
+                the read-ahead holds.
         """
         policies = self._namespace.registry.policies
         if caller.explaining is not None or await policies.wants_for(
@@ -1870,7 +1875,9 @@ class Dispatcher:
         batches: dict[
             str, tuple[MountEntry, CacheManager, list[PathSpec]]
         ] = {}
-        local: dict[str, tuple[MountEntry, list[tuple[PathSpec, _Call]]]] = {}
+        to_hold: dict[
+            str, tuple[MountEntry, list[tuple[PathSpec, _Call]]]
+        ] = {}
         for path in typed:
             try:
                 call = await self._walk("read", path, {}, None, None, caller)
@@ -1893,7 +1900,9 @@ class Dispatcher:
             ):
                 continue
             manager = self._filler(call, mount)
-            if mount.vfs.local:
+            if mount.vfs.local or (
+                mount.vfs.caches_reads and not mount.caches_reads
+            ):
                 if (
                     not judged
                     and manager is None
@@ -1905,9 +1914,9 @@ class Dispatcher:
                 ):
                     holdable = True
                     if hold:
-                        local.setdefault(mount.prefix, (mount, []))[1].append(
-                            (path, call)
-                        )
+                        to_hold.setdefault(mount.prefix, (mount, []))[
+                            1
+                        ].append((path, call))
                 continue
             if manager is None:
                 continue
@@ -1915,7 +1924,7 @@ class Dispatcher:
                 call.path
             )
         held: dict[str, HeldFile] = {}
-        for mount, pairs in local.values():
+        for mount, pairs in to_hold.values():
             held_bytes = sum(len(file.data) for file in held.values())
             held.update(await self._read_held(mount, pairs, stats, held_bytes))
         batch = ReadBatch(
@@ -1926,6 +1935,10 @@ class Dispatcher:
             count=count,
             links=links if held else None,
             current_links=self._namespace.symlink_targets if held else None,
+            concurrent_reads=min(
+                (m.vfs.concurrent_reads for m, _, _ in batches.values()),
+                default=None,
+            ),
         )
         if not batches:
             return batch
@@ -2003,8 +2016,8 @@ class Dispatcher:
         stats: Mapping[str, FileStat],
         held_bytes: int,
     ) -> dict[str, HeldFile]:
-        """Read files on a mount that holds its data locally for the
-        caller, each past the checks its own read meets: admitted as that
+        """Read files for the caller on a mount whose reads the read-ahead
+        holds, each past the checks its own read meets: admitted as that
         read is, its answer completed through the same boundary.
 
         A file the mount's index or the caller's stat does not size as a
@@ -2016,7 +2029,8 @@ class Dispatcher:
         of them.
 
         Args:
-            mount (MountEntry): the mount, which holds its data locally.
+            mount (MountEntry): the mount, which holds its data locally or
+                is a store in a workspace that keeps no reads.
             pairs (list[tuple[PathSpec, _Call]]): each file as the caller
                 named it, with its walked and followed read.
             stats (Mapping[str, FileStat]): the caller's stats of them, by

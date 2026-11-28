@@ -101,3 +101,53 @@ async def test_stat_image_file(accessor):
         PathSpec(vfs_path="img.png", virtual="/img.png", directory="/img.png"),
     )
     assert result.content == ContentType.IMAGE_PNG
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "virtual, kind, size",
+    [
+        ("/hello.txt", FileType.FILE, len(b"hello world")),
+        ("/sub", FileType.DIRECTORY, None),
+    ],
+)
+async def test_stat_asks_what_is_at_a_path_in_one_pipeline(
+    redis_prefix, monkeypatch, virtual, kind, size
+):
+    # Whether a directory or a file is at the path, and the fields kept
+    # under its name, go out in one pipeline and nothing on its own: one
+    # round trip on one of the pool's connections. A pool of one refuses
+    # a second connection rather than wait for it, so a stat that asked
+    # them at once, each on a connection of its own, would fail there.
+    joiner = "&" if "?" in REDIS_URL else "?"
+    store = RedisStore(
+        url=f"{REDIS_URL}{joiner}max_connections=1", key_prefix=redis_prefix
+    )
+    await store.clear()
+    await store.add_dir("/sub")
+    await store.set_file("/hello.txt", b"hello world")
+    client = store._client
+    sent = {"pipelines": 0, "commands": 0}
+    pipeline, command = client.pipeline, client.execute_command
+
+    def counted_pipeline(*args, **kwargs):
+        sent["pipelines"] += 1
+        return pipeline(*args, **kwargs)
+
+    async def counted_command(*args, **kwargs):
+        sent["commands"] += 1
+        return await command(*args, **kwargs)
+
+    monkeypatch.setattr(client, "pipeline", counted_pipeline)
+    monkeypatch.setattr(client, "execute_command", counted_command)
+    try:
+        path = PathSpec(
+            vfs_path=virtual[1:], virtual=virtual, directory=virtual
+        )
+        result = await stat(RedisAccessor(store), path)
+        assert (result.type, result.size) == (kind, size)
+        assert sent == {"pipelines": 1, "commands": 0}
+    finally:
+        monkeypatch.undo()
+        await store.clear()
+        await store.close()

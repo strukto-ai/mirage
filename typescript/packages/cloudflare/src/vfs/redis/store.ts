@@ -282,6 +282,26 @@ export class RedisStore implements RedisStoreLike {
     })
   }
 
+  /** Whether a directory and a file are at `path`, and its fields, in one round trip. */
+  async statAt(
+    path: string,
+  ): Promise<[boolean, boolean, Record<string, string>, number, string | null]> {
+    const [isDir, isFile, raw, size, modified] = await this.pipeline([
+      ['SISMEMBER', this.dk(), path],
+      ['EXISTS', this.fk(path)],
+      ['HGETALL', this.ak(path)],
+      ['STRLEN', this.fk(path)],
+      ['GET', this.mk(path)],
+    ])
+    return [
+      path === '/' || Number(isDir) === 1,
+      Number(isFile) > 0,
+      record(raw ?? null),
+      Number(size),
+      text(modified ?? null),
+    ]
+  }
+
   async infoMemory(): Promise<string> {
     return text(await this.call('INFO', 'memory')) ?? ''
   }

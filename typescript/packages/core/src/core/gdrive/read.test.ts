@@ -45,9 +45,10 @@ import { currentCaller, bindCaller } from '../../context/session_context.ts'
 import { recordingScope } from '../../observe/context.ts'
 import { GoogleApiError } from '../google/client.ts'
 import { md5Hex } from '../../utils/hash.ts'
+import type { OpRecord } from '../../observe/record.ts'
 import type { DriveApi } from './api.ts'
 import { driveFingerprint } from './fingerprint.ts'
-import { read, readFileVersioned } from './read.ts'
+import { read, readFileVersioned, readStream } from './read.ts'
 import { statFromItem } from './readdir.ts'
 import { stat } from './stat.ts'
 import { serve } from '../../../tests/fixtures/kit_fake.ts'
@@ -254,6 +255,104 @@ async function uploaded(data = CONTENT): Promise<[string, string]> {
   const made = await account.upload('report.pdf', data)
   return [made, (await account.item(made)).headRevisionId as string]
 }
+
+/**
+ * Hold the next capture of a file's metadata until its download has reached
+ * the fake too, then serve it, or answer it with `status`. The download's
+ * hold is armed first, so it is the one the download's request meets; the
+ * other catches the capture's. A read that asks for the metadata first and
+ * downloads after never sends the download while its capture waits, so it
+ * never finishes. Mirrors python's `hold_capture_for_download`.
+ */
+async function holdCaptureForDownload(status?: number): Promise<void> {
+  let downloading: () => void = () => undefined
+  const downloaded = new Promise<void>((resolve) => {
+    downloading = resolve
+  })
+  await account.run.beforeNext([['GET', FILE]], downloading, undefined, MEDIA_QUERY)
+  await account.run.beforeNext([['GET', FILE]], () => downloaded, status)
+}
+
+/**
+ * Stream `report.pdf` under a live recorder; answers what was handed on, the
+ * error that ended the stream if one did, and the records. Mirrors python's
+ * `stream_recording`.
+ */
+async function streamRecording(entry: FileStat): Promise<[Uint8Array[], unknown, OpRecord[]]> {
+  const got: Uint8Array[] = []
+  let error: unknown = null
+  const [, records] = await recordingScope(async () => {
+    try {
+      for await (const chunk of readStream(account.driveAccessor(), specFor(), entry)) {
+        got.push(chunk)
+      }
+    } catch (err) {
+      error = err
+    }
+  })
+  return [got, error, records]
+}
+
+describe('a recorded gdrive read', () => {
+  // Twin of test_a_recorded_read_asks_its_metadata_beside_the_download.
+  it('asks its metadata beside the download', async () => {
+    const [made, revision] = await uploaded()
+    await holdCaptureForDownload()
+    const [data, records] = await recordingScope(async () =>
+      read(account.driveAccessor(), specFor(), undefined, binaryRow(made, revision)),
+    )
+    expect(DEC.decode(data)).toBe(CONTENT)
+    expect([records[0]?.fingerprint, records[0]?.revision]).toEqual([DIGEST, revision])
+  }, 5000)
+
+  // Twin of test_a_recorded_stream_asks_its_metadata_beside_the_download.
+  it('streams with its metadata asked beside the download', async () => {
+    const [made, revision] = await uploaded()
+    await holdCaptureForDownload()
+    const [got, error, records] = await streamRecording(binaryRow(made, revision))
+    expect(error).toBeNull()
+    expect(DEC.decode(Buffer.concat(got))).toBe(CONTENT)
+    expect([records[0]?.fingerprint, records[0]?.revision]).toEqual([DIGEST, revision])
+  }, 5000)
+
+  // Twin of test_a_windowed_recorded_read_asks_its_capture_first: a window
+  // cannot be checked against the md5, so the revision a partial read keeps is
+  // the one the capture named before its bytes were fetched. The order shows
+  // only with the client handed in, answering from memory: over a network each
+  // step yields. Python also cancels a whole read's download when its capture
+  // fails; DriveApi here takes no signal, so there is nothing to cancel.
+  it('asks a windowed read its capture first', async () => {
+    const asked: string[] = []
+    const noted = {
+      captureFileMetadata: async () => {
+        await Promise.resolve()
+        asked.push('capture')
+        return [DIGEST, 'r1']
+      },
+      downloadFile: () => {
+        asked.push('download')
+        return Promise.resolve(ENC.encode(CONTENT).subarray(0, 4))
+      },
+    } as unknown as DriveApi
+    const [data, records] = await recordingScope(async () =>
+      readFileVersioned(noted, 'f1', '/report.pdf', binaryRow('f1', 'r1'), 0, 4),
+    )
+    expect(DEC.decode(data)).toBe(CONTENT.slice(0, 4))
+    expect(asked).toEqual(['capture', 'download'])
+    expect([records[0]?.fingerprint, records[0]?.revision]).toEqual([null, 'r1'])
+  })
+
+  // Twin of test_a_stream_whose_capture_fails_hands_on_no_byte: the download
+  // is out before the capture is answered, but its first chunk waits for the
+  // capture, so a capture that fails fails the read with nothing handed on.
+  it('hands on no byte when its capture fails', async () => {
+    const [made, revision] = await uploaded()
+    await holdCaptureForDownload(404)
+    const [got, error] = await streamRecording(binaryRow(made, revision))
+    expect(got).toEqual([])
+    expect(error).toBeInstanceOf(GoogleApiError)
+  }, 5000)
+})
 
 describe('the gdrive read record', () => {
   it('stamps the token stat stamps', async () => {

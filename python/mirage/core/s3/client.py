@@ -23,7 +23,11 @@ from typing import Any, cast
 import aioboto3
 from botocore.config import Config
 
-from mirage.core.s3.constants import CONDITION_LOST_CODES, DENIED_CODES
+from mirage.core.s3.constants import (
+    CONCURRENT_READS,
+    CONDITION_LOST_CODES,
+    DENIED_CODES,
+)
 from mirage.utils import key_prefix as kp
 from mirage.vfs.s3.config import S3Config
 from mirage.vfs.secrets import reveal_secret
@@ -112,6 +116,7 @@ def _client_kwargs(config: S3Config) -> dict[str, Any]:
     cfg_kwargs: dict[str, Any] = {
         "connect_timeout": config.timeout,
         "read_timeout": config.timeout,
+        "max_pool_connections": CONCURRENT_READS,
     }
     if proxy:
         cfg_kwargs["proxies"] = {"https": proxy, "http": proxy}

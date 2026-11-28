@@ -2528,12 +2528,17 @@ export class MountEntry {
 
   /**
    * Each file's whole bytes as its own whole read answers them, by virtual
-   * path. The bytes built for the batch must fit together, and beside what it
+   * path. A store whose data is not local is asked for up to its
+   * `concurrentReads` files at once, since each read waits a round trip; a
+   * local one reads one file after another. The bytes built for the batch,
+   * those still arriving among them, must fit together, and beside what it
    * already holds (`heldBytes`), in what the workspace's `max_memory` has left,
    * as one file's must for its own read (`collected`), what a RAM store holds
    * already counted; one longer than `limit` bytes, one that does not fit, or
-   * one whose read fails, is left out for its own read to meet. Mirrors
-   * Python's `_read_each`.
+   * one whose read fails, is left out for its own read to meet: its chunks are
+   * dropped and the room they took goes back at once, while its source is still
+   * closing, so a refusal never holds up the other reads. Mirrors Python's
+   * `_read_each`.
    */
   private async readEach(
     scopes: readonly PathSpec[],
@@ -2543,39 +2548,62 @@ export class MountEntry {
     const counted = this.vfs instanceof RAMVFS
     const read = new Map<string, Uint8Array>()
     let built = heldBytes
-    for (const scope of scopes) {
-      const parts: Uint8Array[] = []
-      let size = 0
-      let source: AsyncIterable<Uint8Array> | null = null
-      try {
-        const found = await this.answer(this.vfs, this.index, scope)
-        if (found instanceof Uint8Array) {
-          if (found.byteLength <= limit) {
-            if (!counted) {
-              checkMemory(built + found.byteLength)
-              built += found.byteLength
+    const pending = scopes[Symbol.iterator]()
+    const readRest = async (): Promise<void> => {
+      for (const scope of pending) {
+        const parts: Uint8Array[] = []
+        let size = 0
+        let whole = false
+        let source: AsyncIterable<Uint8Array> | null = null
+        // Leaving a for-await loop awaits the source's return() first, while
+        // the other reads run on, so a refused file gives its room back
+        // before it leaves.
+        const drop = (): void => {
+          parts.length = 0
+          built -= size
+          size = 0
+        }
+        try {
+          const found = await this.answer(this.vfs, this.index, scope)
+          if (found instanceof Uint8Array) {
+            if (found.byteLength <= limit) {
+              if (!counted) {
+                checkMemory(built + found.byteLength)
+                built += found.byteLength
+              }
+              read.set(scope.virtual, found)
             }
-            read.set(scope.virtual, found)
+            continue
           }
-          continue
+          source = asStream(found)
+          whole = true
+          for await (const chunk of source) {
+            if (size + chunk.byteLength > limit) {
+              whole = false
+              drop()
+              break
+            }
+            try {
+              checkMemory(built + chunk.byteLength)
+            } catch (err) {
+              drop()
+              throw err
+            }
+            built += chunk.byteLength
+            size += chunk.byteLength
+            parts.push(chunk)
+          }
+          if (whole) read.set(scope.virtual, concat(parts))
+        } catch (err) {
+          console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
+        } finally {
+          if (!read.has(scope.virtual)) drop()
+          if (source !== null) await closeQuietly(source)
         }
-        source = asStream(found)
-        for await (const chunk of source) {
-          size += chunk.byteLength
-          if (size > limit) break
-          checkMemory(built + size)
-          parts.push(chunk)
-        }
-        if (size <= limit) {
-          read.set(scope.virtual, concat(parts))
-          built += size
-        }
-      } catch (err) {
-        console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
-      } finally {
-        if (source !== null) await closeQuietly(source)
       }
     }
+    const width = this.vfs.local ? 1 : Math.max(1, this.vfs.concurrentReads)
+    await Promise.all(Array.from({ length: Math.min(width, scopes.length) }, readRest))
     return read
   }
 

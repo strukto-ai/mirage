@@ -40,6 +40,7 @@ from mirage.io.types import OpReport, materialize
 from mirage.mount.changes import RecentChanges
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.utils.clock import ManualClock
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.dispatcher.read_batch import HeldFile, ReadBatch
@@ -292,10 +293,30 @@ async def test_a_glob_read_warms_the_operands_after_it():
 async def test_a_glob_read_with_no_cache_reads_each_file_once():
     # A mount that caches reads, in a workspace with no cache to keep
     # them: nothing is warmed, since a warmed file would be read again.
+    # The files are held for the command instead, as on a mount that holds
+    # its data locally: the first is read on its own, before the command
+    # knows its mount holds, and the rest in one batch.
     vfs = BatchedRAM()
     names = [f"/f{i:02}" for i in range(12)]
     vfs._store.files.update({name: b"x\n" for name in names})
     with Workspace({"/r/": vfs}) as ws:
+        out = await ws.shell("cat /r/f*")
+        assert await out.stdout_str() == "x\n" * 12
+    assert vfs.reads == ["/r/f00"]
+    assert vfs.batches == [[f"/r{name}" for name in names[1:]]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cache", [None, CacheConfig()], ids=["none", "kept"])
+async def test_a_glob_read_on_a_live_source_reads_nothing_ahead(cache):
+    # A live source, whose reads no cache keeps, has each file read as the
+    # command reads it, so what it hands out is never older than the read,
+    # in a workspace with a cache or with none.
+    vfs = BatchedRAM()
+    vfs.caches_reads = False
+    names = [f"/f{i:02}" for i in range(12)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}, cache=cache) as ws:
         out = await ws.shell("cat /r/f*")
         assert await out.stdout_str() == "x\n" * 12
     assert vfs.reads == [f"/r{name}" for name in names]
@@ -393,6 +414,90 @@ async def test_a_walk_back_in_a_parent_directory_reads_each_file_once():
     read = vfs.reads + [p for batch in vfs.batches for p in batch]
     assert sorted(read) == sorted(set(read))
     assert len(read) == 11
+
+
+@pytest.mark.asyncio
+async def test_a_walk_below_a_subtree_answer_reads_ahead_into_the_next_directory():
+    # The mount answers the walk's subtree in one read, so its files are
+    # one run in the order the walk reads them: a batch runs on from a/
+    # into b/ and c/, and the first file of b/ and of c/ is warmed with the
+    # files before it instead of each directory starting over with a read
+    # of its own, which on a remote store is a round trip a directory.
+    vfs = BatchedRAM()
+    vfs._store.dirs.update({"/d", "/d/a", "/d/b", "/d/c"})
+    names = [f"/d/{d}/f{i}" for d in "abc" for i in range(4)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
+        out = await (await ws.shell("grep -rc x /r/d")).stdout_str()
+    assert out.count(":1\n") == 12
+    assert vfs.reads == ["/r/d/a/f0", "/r/d/a/f1"]
+    assert vfs.batches == [
+        [f"/r{name}" for name in names[2:3]],
+        [f"/r{name}" for name in names[3:5]],
+        [f"/r{name}" for name in names[5:9]],
+        [f"/r{name}" for name in names[9:]],
+    ]
+
+
+class CountedDisk(DiskVFS):
+    """A disk mount that counts its whole reads and its batches."""
+
+    def __init__(self, root: str) -> None:
+        super().__init__(root=root)
+        self.reads: list[str] = []
+        self.batches: list[list[str]] = []
+
+    async def read(self, path, offset=0, size=None):
+        self.reads.append(path.virtual)
+        return await super().read(path, offset, size)
+
+    async def read_many(self, paths, limit, room=None):
+        self.batches.append([path.virtual for path in paths])
+        return await super().read_many(paths, limit, room)
+
+
+@pytest.mark.asyncio
+async def test_a_walk_listed_a_directory_at_a_time_reads_each_file_once(
+    tmp_path,
+):
+    # Disk answers no subtree read, so the walk lists each directory on its
+    # own, one level at a time. d/'s files a0..a5 and c0..c2 are one run,
+    # so the batch a5's read sends holds c0 while the walk is down in b/,
+    # whose seventeen folders are more listings than a command keeps: each
+    # is a listing as a readdir's is, and the run with a batch out is the
+    # last to go, so c0 is served from it, and every file is read once.
+    root = tmp_path / "d"
+    for name in [f"a{i}" for i in range(6)] + [f"c{i}" for i in range(3)]:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(b"x\n")
+    for i in range(17):
+        for j in range(2):
+            leaf = root / "b" / f"s{i:02}" / f"f{j}"
+            leaf.parent.mkdir(parents=True, exist_ok=True)
+            leaf.write_bytes(b"x\n")
+    vfs = CountedDisk(str(tmp_path))
+    with Workspace({"/r/": vfs}) as ws:
+        out = await (await ws.shell("grep -rc x /r/d")).stdout_str()
+    assert out.count(":1\n") == 43
+    read = vfs.reads + [p for batch in vfs.batches for p in batch]
+    assert sorted(read) == sorted(set(read))
+    assert len(read) == 43
+
+
+@pytest.mark.asyncio
+async def test_a_glob_read_warms_as_many_as_its_mount_reads_at_once():
+    # READ_AHEAD files go before the mount has said how many it reads at
+    # once; every batch after takes the mount's concurrent_reads.
+    vfs = BatchedRAM()
+    vfs.concurrent_reads = 16
+    names = [f"/f{i:02}" for i in range(40)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
+        out = await ws.shell("cat /r/f*")
+        assert await out.stdout_str() == "x\n" * 40
+    warmed = [f"/r{name}" for name in names[1:]]
+    assert vfs.reads == ["/r/f00"]
+    assert vfs.batches == [warmed[:8], warmed[8:24], warmed[24:]]
 
 
 @pytest.mark.asyncio

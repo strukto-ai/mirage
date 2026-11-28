@@ -18,6 +18,7 @@ import { appendByStreamedRewrite } from '../../core/generic/rewrite.ts'
 import { checksum as s3Checksum } from '../../core/s3/checksum.ts'
 import {
   AWS_DOMAINS,
+  CONCURRENT_READS,
   CONDITION_SUPPORT,
   CUSTOM_CONDITION_SUPPORT,
   MD5_ETAG_STORES,
@@ -85,6 +86,7 @@ export class S3VFS extends BaseVFS<S3Accessor> {
   }
 
   override readonly readsRanges: boolean = true
+  override readonly concurrentReads: number = CONCURRENT_READS
 
   /**
    * The endpoint this mount's writes go to, for its write-condition row: the

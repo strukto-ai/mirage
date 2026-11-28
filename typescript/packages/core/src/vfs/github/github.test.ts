@@ -357,7 +357,9 @@ describe('grep and rg over code search', () => {
     expect(await repo.count('search')).toBe(0)
   })
 
-  // Twin of test_a_search_past_the_scope_cap_stops_there.
+  // Twin of test_a_search_past_the_scope_cap_stops_there: the walk reads the
+  // four files it reaches, by blob or in a batch the read-ahead sends, and
+  // none past them.
   it.each([
     ['grep -r import /gh', 'grep'],
     ['grep -rwv import /gh', 'grep'],
@@ -366,7 +368,7 @@ describe('grep and rg over code search', () => {
     const got = await onGithub(line, { walkLimit: 4 })
     expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`${name}: /gh: ${STOPPED_AT_4}`, 2])
-    expect(await repo.count('blob')).toBe(4)
+    expect(await read()).toEqual(Object.keys(REPO).sort().slice(0, 4))
   })
 
   // Twin of test_a_tree_diff_past_the_scope_cap_is_refused.

@@ -36,7 +36,7 @@ function wholeFile(offset: number, size: number | null): boolean {
 
 // Whether Drive's md5 names other bytes than the ones just read. The metadata
 // and the download are two requests, so a write between them leaves metadata
-// that predates the bytes.
+// that names other bytes than the ones read.
 async function staleMd5(md5: unknown, data: Uint8Array): Promise<boolean> {
   return typeof md5 === 'string' && md5 !== '' && (await md5HexAsync(data)) !== md5
 }
@@ -45,8 +45,13 @@ async function staleMd5(md5: unknown, data: Uint8Array): Promise<boolean> {
 // reads that revision's content. Otherwise the token comes from a capture when
 // a recorder is bound and from the listed row when none is, so it never
 // depends on the recorder; the row's revision is not pinned, since it can be a
-// TTL old. Either md5 is checked against the bytes, and a stale one drops the
-// token and the revision with it.
+// TTL old. A whole read's capture goes out beside the download, so it waits one
+// round trip: either md5 is checked against the bytes, so a write between the
+// two requests, in whichever order they are answered, drops the token and the
+// revision with it. A window cannot be checked against the md5, so a partial
+// read asks for the capture first and keeps the revision it named, as before.
+// Mirrors Python's `read_file_versioned`, which also cancels the other request
+// when one fails; DriveApi here takes no signal, so the other one finishes.
 export async function readFileVersioned(
   drive: DriveApi,
   fileId: string,
@@ -64,18 +69,24 @@ export async function readFileVersioned(
   let data: Uint8Array
   if (pinned !== null) {
     data = await drive.downloadRevision(fileId, pinned, window)
-  } else if (recordingActive()) {
-    const [md5, captured] = await drive.captureFileMetadata(fileId)
+  } else if (recordingActive() && whole) {
+    const [[md5, captured], downloaded] = await Promise.all([
+      drive.captureFileMetadata(fileId),
+      drive.downloadFile(fileId, window),
+    ])
     revision = captured
-    data = await drive.downloadFile(fileId, window)
-    if (whole && (await staleMd5(md5, data))) revision = null
-    else if (whole)
+    data = downloaded
+    if (await staleMd5(md5, data)) revision = null
+    else
       fingerprint = driveFingerprint(
         entry.extra.resource_type as string,
         md5,
         revision,
         entry.modified,
       )
+  } else if (recordingActive()) {
+    revision = (await drive.captureFileMetadata(fileId))[1]
+    data = await drive.downloadFile(fileId, window)
   } else {
     data = await drive.downloadFile(fileId, window)
     if (whole && !(await staleMd5(entry.extra.md5_checksum, data))) fingerprint = entry.fingerprint
@@ -140,7 +151,9 @@ export async function read(
  * rendered, so it comes in one chunk, as `read` gives it. A binary file is
  * stamped as `readFileVersioned` stamps a whole read, once the last chunk is
  * in and checked against the md5 Drive gave: a stream abandoned part-way
- * stamps nothing. Mirrors Python's `read_stream`.
+ * stamps nothing. The capture goes out beside the download, and the first chunk
+ * waits for it, so one that fails fails the read before any byte is handed on.
+ * Mirrors Python's `read_stream`.
  */
 export async function* readStream(
   accessor: GDriveAccessor,
@@ -158,23 +171,31 @@ export async function* readStream(
   const rec = recordStream('read', path.virtual, 'gdrive', { revision: pinned })
   let md5: string | null = null
   let revision: string | null = null
+  let capture: Promise<[string | null, string | null]> | null = null
   let chunks: AsyncGenerator<Uint8Array, void>
   if (pinned !== null) {
     chunks = drive.downloadRevisionStream(fileId, pinned)
   } else {
-    if (rec !== null) [md5, revision] = await drive.captureFileMetadata(fileId)
+    if (rec !== null) {
+      capture = drive.captureFileMetadata(fileId)
+      capture.catch((err: unknown) => {
+        console.debug(`drive metadata for ${path.virtual} not captured: ${String(err)}`)
+      })
+    }
     chunks = drive.downloadFileStream(fileId)
   }
-  const digest = md5 !== null && md5 !== '' ? new Digest('md5') : null
+  const digest = capture !== null ? new Digest('md5') : null
   try {
     for await (const chunk of chunks) {
+      if (capture !== null) [md5, revision] = await capture
       digest?.update(chunk)
       if (rec !== null) rec.bytes += chunk.byteLength
       yield chunk
     }
+    if (capture !== null) [md5, revision] = await capture
     if (rec !== null) rec.complete = true
     if (rec === null || pinned !== null) return
-    if (digest !== null && digest.digest() !== md5) return
+    if (md5 !== null && md5 !== '' && digest !== null && digest.digest() !== md5) return
     rec.revision = revision
     rec.fingerprint = driveFingerprint(
       found.extra.resource_type as string,

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import hashlib
 from http import HTTPStatus
 
@@ -20,7 +21,7 @@ import pytest
 import mirage.core.gdrive.read as gdrive_read
 from mirage.context import session_context as caller
 from mirage.core.gdrive.fingerprint import drive_fingerprint
-from mirage.core.gdrive.read import read, read_file_versioned
+from mirage.core.gdrive.read import read, read_file_versioned, read_stream
 from mirage.core.gdrive.readdir import readdir, stat_from_item
 from mirage.core.gdrive.stat import stat
 from mirage.core.google.client import GoogleApiError
@@ -407,6 +408,177 @@ async def test_a_capture_with_no_md5_is_stamped_unverified(google_account):
         google_account, spec_for(), binary_row(made, revision)
     )
     assert records[0].fingerprint == revision
+
+
+async def hold_capture_for_download(
+    google_account, status: int | None = None
+) -> None:
+    """Hold the next capture of a file's metadata until its download has
+    reached the fake too, then serve it, or answer it with ``status``.
+
+    The download's hold is armed first, so it is the one the download's
+    request meets; the other catches the capture's. A read that asks for
+    the metadata first and downloads after never sends the download
+    while its capture waits, so it never finishes.
+
+    Args:
+        google_account (GoogleAccount): the account the file is in.
+        status (int | None): what the capture is answered with instead
+            of being served.
+    """
+    downloading = asyncio.Event()
+    await google_account.run.before_next(
+        [("GET", FILE)], downloading.set, query=MEDIA_QUERY
+    )
+    await google_account.run.before_next(
+        [("GET", FILE)], downloading.wait, status=status
+    )
+
+
+async def stream_recording(google_account, entry):
+    """Stream ``report.pdf`` under a live recorder; answers what was handed
+    on, the error that ended the stream if one did, and the records.
+
+    Args:
+        google_account (GoogleAccount): the account the file is in.
+        entry (FileStat): what is at the path.
+    """
+    scope = RecordingScope()
+    got: list[bytes] = []
+    error: Exception | None = None
+    try:
+        try:
+            async for chunk in read_stream(
+                google_account.drive_accessor(), spec_for(), entry
+            ):
+                got.append(chunk)
+        except Exception as exc:
+            error = exc
+        return got, error, list(scope.records)
+    finally:
+        scope.close()
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_read_asks_its_metadata_beside_the_download(
+    google_account,
+):
+    made, revision = await uploaded(google_account)
+    await hold_capture_for_download(google_account)
+    data, records = await asyncio.wait_for(
+        read_recording(google_account, spec_for(), binary_row(made, revision)),
+        timeout=5,
+    )
+    assert data == CONTENT
+    assert (records[0].fingerprint, records[0].revision) == (DIGEST, revision)
+
+
+@pytest.mark.asyncio
+async def test_a_recorded_stream_asks_its_metadata_beside_the_download(
+    google_account,
+):
+    made, revision = await uploaded(google_account)
+    await hold_capture_for_download(google_account)
+    got, error, records = await asyncio.wait_for(
+        stream_recording(google_account, binary_row(made, revision)),
+        timeout=5,
+    )
+    assert (b"".join(got), error) == (CONTENT, None)
+    assert (records[0].fingerprint, records[0].revision) == (DIGEST, revision)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_whose_capture_fails_hands_on_no_byte(google_account):
+    # The download is out before the capture is answered, but its first
+    # chunk waits for the capture, so a capture that fails fails the read
+    # with nothing handed on, as when it went first.
+    made, revision = await uploaded(google_account)
+    await hold_capture_for_download(google_account, HTTPStatus.NOT_FOUND)
+    got, error, _ = await asyncio.wait_for(
+        stream_recording(google_account, binary_row(made, revision)),
+        timeout=5,
+    )
+    assert got == []
+    assert isinstance(error, GoogleApiError)
+
+
+class _Noted:
+    """A Drive client answering from memory that notes each request as it
+    finishes its turn. The order of a read's two requests shows only with
+    the client handed in: over a network each step yields."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def capture_file_metadata(self, file_id: str) -> tuple[str, str]:
+        await asyncio.sleep(0)
+        self.asked.append("capture")
+        return DIGEST, "r1"
+
+    async def download_file(self, file_id: str, window=None) -> bytes:
+        self.asked.append("download")
+        return CONTENT[:4]
+
+
+@pytest.mark.asyncio
+async def test_a_windowed_recorded_read_asks_its_capture_first():
+    # A window cannot be checked against the md5, so the revision a
+    # partial read keeps is the one the capture named before its bytes
+    # were fetched; a whole read sends both together.
+    drive = _Noted()
+    scope = RecordingScope()
+    try:
+        data = await read_file_versioned(
+            drive, "f1", "/report.pdf", binary_row("f1", "r1"), size=4
+        )
+        records = list(scope.records)
+    finally:
+        scope.close()
+    assert data == CONTENT[:4]
+    assert drive.asked == ["capture", "download"]
+    assert (records[0].fingerprint, records[0].revision) == (None, "r1")
+
+
+class _Refused:
+    """A Drive client answering from memory whose capture fails once the
+    download is out, and whose download never answers. Whether the read
+    cancels the download shows only with the client handed in."""
+
+    def __init__(self) -> None:
+        self.downloading = asyncio.Event()
+        self.cancelled = False
+
+    async def capture_file_metadata(self, file_id: str) -> tuple[str, str]:
+        await self.downloading.wait()
+        raise RuntimeError("metadata refused")
+
+    async def download_file(self, file_id: str, window=None) -> bytes:
+        self.downloading.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return b""
+
+
+@pytest.mark.asyncio
+async def test_a_whole_read_whose_capture_fails_cancels_its_download():
+    # The two go out together; the capture's failure fails the read, and
+    # the download still under way is cancelled rather than left running.
+    drive = _Refused()
+    scope = RecordingScope()
+    try:
+        with pytest.raises(RuntimeError, match="metadata refused"):
+            await asyncio.wait_for(
+                read_file_versioned(
+                    drive, "f1", "/report.pdf", binary_row("f1", "r1")
+                ),
+                timeout=5,
+            )
+    finally:
+        scope.close()
+    assert drive.cancelled
 
 
 BODY = b"quarterly numbers\n"

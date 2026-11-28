@@ -63,11 +63,15 @@ async def test_read_plain_file_falls_through(google_account):
         [("notes.txt", _row("notes.txt", made, "gdrive/file"))],
     )
     # A cold read through the dispatcher fills the cache, so it asks for the
-    # md5 its entry is stamped with, as a command's read does.
+    # md5 its entry is stamped with, as a command's read does. The two go
+    # out together, so the fake may meet them in either order.
     await google_account.run.record_requests()
     result = await ops.read("/gdrive/notes.txt")
     assert result == b"plain content"
-    assert await google_account.log() == [("get", made), ("media", made)]
+    assert sorted(await google_account.log()) == [
+        ("get", made),
+        ("media", made),
+    ]
 
 
 @pytest.mark.asyncio

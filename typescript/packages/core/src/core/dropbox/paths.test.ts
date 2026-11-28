@@ -24,6 +24,7 @@ import { unlink } from './unlink.ts'
 import { replace, write } from './write.ts'
 import { ABSENT_WRITE } from '../../cache/types.ts'
 import { checkPath } from './paths.ts'
+import { commandScope } from '../../cache/index/scope.ts'
 
 const OPERATIONS = [
   'stat',
@@ -137,3 +138,51 @@ it.each(['exact', 'missing', 'refused', 'root'])(
     expect(asked.every((path) => path.startsWith('/Configured/Root/vault'))).toBe(true)
   },
 )
+
+// Twin of test_a_command_asks_for_each_folder_above_its_files_once: within one
+// command, the folders above two files of one directory are asked about once;
+// each file is asked about every time, since its entry is the answer. "Docs"
+// only matches the folder "docs" without regard to case, so it is no folder
+// the command found and is asked about, and refused. A read the command
+// streams runs as its output is pulled, after the command's scope has closed,
+// and still shares them. A later command proves its folders again.
+it('asks a command for each folder above its files once', async () => {
+  const asked: string[] = []
+  vi.mocked(client.dropboxRpc).mockImplementation((_tm, _endpoint, body) => {
+    const path = (body as { path: string }).path
+    asked.push(path)
+    const name = path.slice(path.lastIndexOf('/') + 1)
+    return Promise.resolve({
+      '.tag': name.includes('.') ? 'file' : 'folder',
+      name: name.toLowerCase() === 'docs' ? 'docs' : name,
+    })
+  })
+  const accessor = new DropboxAccessor({ tokenManager: {} as Client.DropboxTokenManager })
+  let pull: () => void = () => undefined
+  const pulled = new Promise<void>((resolve) => {
+    pull = resolve
+  })
+  const late = await commandScope(async () => {
+    await checkPath(accessor, PathSpec.fromStrPath('/docs/sub/a.txt'))
+    await checkPath(accessor, PathSpec.fromStrPath('/docs/sub/b.txt'))
+    await expect(
+      checkPath(accessor, PathSpec.fromStrPath('/Docs/sub/c.txt')),
+    ).rejects.toMatchObject({ code: 'ENOENT' })
+    return {
+      streamed: pulled.then(() => checkPath(accessor, PathSpec.fromStrPath('/docs/sub/d.txt'))),
+    }
+  })
+  pull()
+  await late.streamed
+  expect(asked).toEqual([
+    '/docs',
+    '/docs/sub',
+    '/docs/sub/a.txt',
+    '/docs/sub/b.txt',
+    '/Docs',
+    '/docs/sub/d.txt',
+  ])
+  asked.length = 0
+  await commandScope(() => checkPath(accessor, PathSpec.fromStrPath('/docs/sub/a.txt')))
+  expect(asked).toEqual(['/docs', '/docs/sub', '/docs/sub/a.txt'])
+})
