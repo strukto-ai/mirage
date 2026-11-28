@@ -1,0 +1,945 @@
+{
+  "cases": [
+    {
+      "id": "tvly_help_head",
+      "seq": 572000,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --help | head -n 1",
+      "conformance_skip": "help: Mirage renders its argparse-layout page for every dialect but CLAP; commander's layout (and the setup verbs init, login, update) are not virtualized",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: tvly [--json] [-h] {auth,search,extract,crawl,map,research} ...\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_help_head",
+      "seq": 572001,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search --help | head -n 1",
+      "conformance_skip": "help: Mirage renders its argparse-layout page for every dialect but CLAP; commander's layout is not virtualized",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: tvly search [--depth value] [--max-results n] [--topic value] [--time-range value] [--start-date value] [--end-date value] [--include-domains list] [--exclude-domains list] [--country value] [--include-answer [value]] [--include-raw-content [value]] [--include-images] [--include-image-descriptions] [--chunks-per-source n] [--auto-parameters] [--cache-fallback] [--days n] [--exact-match] [--fetch-timeout n] [--filter-by-language] [--filter-by-published-date] [--include-domains-mode value] [--include-favicon] [--include-published-date] [--include-usage] [--language value] [--max-age-hours n] [--safe-search] [--max-chars n] [-o [file]] [--client-name name] [--json] [-h] [queries ...]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_auth",
+      "seq": 572002,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly auth",
+      "conformance_skip": "the key lives in the install's config, not TAVILY_API_KEY, so the source line names the install",
+      "expect": {
+        "exit": 0,
+        "stdout": "\n  > Authenticated via the tvly install's api_key\n    Key: ***\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_auth_json",
+      "seq": 572003,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly auth --json",
+      "conformance_skip": "the key lives in the install's config, not TAVILY_API_KEY, so the source field names the install",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"authenticated\":true,\"method\":\"api_key\",\"source\":\"the tvly install's api_key\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_plain",
+      "seq": 572004,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell'",
+      "expect": {
+        "exit": 0,
+        "stdout": "1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.\n\n2. Getting started\nhttps://docs.example.com/start\nInstall the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.\n\n3. Untitled\nhttps://blog.example.org/agents-and-shells\nWhy agents prefer a shell: one interface, every backend.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_max_results",
+      "seq": 572005,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --max-results 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_answer",
+      "seq": 572006,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --include-answer | head -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Answer: Mirage is a virtual terminal that gives AI agents one bash-compatible shell over every data source.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_images",
+      "seq": 572007,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --include-images | tail -n 1",
+      "expect": {
+        "exit": 0,
+        "stdout": "Image: https://docs.example.com/img/shell.png\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_image_descriptions_json",
+      "seq": 572008,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --include-images --include-image-descriptions --json | jq -c '.images'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[{\"url\":\"https://docs.example.com/img/shell.png\",\"description\":\"A terminal listing three mounts\"}]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_max_chars",
+      "seq": 572009,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --max-chars 30",
+      "expect": {
+        "exit": 0,
+        "stdout": "1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible sh...\n\n2. Getting started\nhttps://docs.example.com/start\nInstall the package, create a ...\n\n3. Untitled\nhttps://blog.example.org/agents-and-shells\nWhy agents prefer a shell: one...\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_whole_content",
+      "seq": 572010,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --max-chars 0 | sed -n 7,9p",
+      "expect": {
+        "exit": 0,
+        "stdout": "Install the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.\n\n3. Untitled\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_json_urls",
+      "seq": 572011,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --json | jq -r '.results[].url'",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://docs.example.com/\nhttps://docs.example.com/start\nhttps://blog.example.org/agents-and-shells\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_json_pretty_head",
+      "seq": 572012,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search --json 'mirage shell' | head -n 4",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"query\": \"mirage shell\",\n  \"follow_up_questions\": null,\n  \"answer\": null,\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_root_json",
+      "seq": 572013,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --json search 'filesystem mount' | jq -c '.results[0]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"url\":\"https://docs.example.com/guide/mounts\",\"title\":\"Mounts and prefixes\",\"content\":\"A mount binds one backend to a prefix. A listing costs one request.\",\"score\":0.88,\"raw_content\":null}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_raw_content_json",
+      "seq": 572014,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' --include-raw-content --json | jq -r '.results[0].raw_content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Mirage\n\nMirage is a bash-compatible shell over one virtual filesystem.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_two_queries",
+      "seq": 572015,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' 'filesystem mount'",
+      "expect": {
+        "exit": 0,
+        "stdout": "=== [1/2] mirage shell\n1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.\n\n2. Getting started\nhttps://docs.example.com/start\nInstall the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.\n\n3. Untitled\nhttps://blog.example.org/agents-and-shells\nWhy agents prefer a shell: one interface, every backend.\n\n=== [2/2] filesystem mount\n1. Mounts and prefixes\nhttps://docs.example.com/guide/mounts\nA mount binds one backend to a prefix. A listing costs one request.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_two_queries_json",
+      "seq": 572016,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' 'filesystem mount' --json | jq -c '[.[].query]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"mirage shell\",\"filesystem mount\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_no_results",
+      "seq": 572017,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'nothing matches here'",
+      "expect": {
+        "exit": 0,
+        "stdout": "No results found.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_stdin",
+      "seq": 572018,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "echo 'filesystem mount' | tvly search -",
+      "expect": {
+        "exit": 0,
+        "stdout": "1. Mounts and prefixes\nhttps://docs.example.com/guide/mounts\nA mount binds one backend to a prefix. A listing costs one request.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_usage_limit",
+      "seq": 572019,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'quota check'",
+      "expect": {
+        "exit": 3,
+        "stdout": "",
+        "stderr": "\n  > This request exceeds your plan's set usage limit. Please upgrade your plan or contact support@tavily.com\n\n  Upgrade your plan at tavily.com\n\n"
+      }
+    },
+    {
+      "id": "tvly_search_server_fault",
+      "seq": 572020,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'fault line'",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "  > Error: Internal Server Error\n"
+      }
+    },
+    {
+      "id": "tvly_search_server_fault_json",
+      "seq": 572021,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'fault line' --json",
+      "expect": {
+        "exit": 4,
+        "stdout": "{\"error\":\"Internal Server Error\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_multi_with_limit",
+      "seq": 572022,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' 'quota check'",
+      "expect": {
+        "exit": 0,
+        "stdout": "=== [1/2] mirage shell\n1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.\n\n2. Getting started\nhttps://docs.example.com/start\nInstall the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.\n\n3. Untitled\nhttps://blog.example.org/agents-and-shells\nWhy agents prefer a shell: one interface, every backend.\n\n=== [2/2] quota check\nerror: This request exceeds your plan's set usage limit. Please upgrade your plan or contact support@tavily.com\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_search_query_required",
+      "seq": 572023,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: QUERY is required. Pass a query string or use '-' to read from stdin.\n"
+      }
+    },
+    {
+      "id": "tvly_search_too_many_queries",
+      "seq": 572024,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search a b c d e f",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: At most 5 queries per command, got 6.\n"
+      }
+    },
+    {
+      "id": "tvly_search_bad_depth",
+      "seq": 572025,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --depth deep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--depth <value>' argument 'deep' is invalid. Allowed choices are basic, advanced, fast, ultra-fast.\n"
+      }
+    },
+    {
+      "id": "tvly_search_max_results_bound",
+      "seq": 572026,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --max-results 21",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--max-results <n>' argument '21' is invalid. 21 is above the maximum 20.\n"
+      }
+    },
+    {
+      "id": "tvly_search_not_a_number",
+      "seq": 572027,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --max-results lots",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--max-results <n>' argument 'lots' is invalid. Not a number.\n"
+      }
+    },
+    {
+      "id": "tvly_search_unknown_option",
+      "seq": 572028,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --foo",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--foo'\n"
+      }
+    },
+    {
+      "id": "tvly_search_did_you_mean",
+      "seq": 572029,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --dept basic",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--dept'\n(Did you mean --depth?)\n"
+      }
+    },
+    {
+      "id": "tvly_search_missing_value",
+      "seq": 572030,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --max-results",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--max-results <n>' argument missing\n"
+      }
+    },
+    {
+      "id": "tvly_search_no_abbreviation",
+      "seq": 572031,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search q --max-res 2",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--max-res'\n"
+      }
+    },
+    {
+      "id": "tvly_unknown_verb",
+      "seq": 572032,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly frob a",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments. Expected 0 arguments but got 2: frob, a.\n"
+      }
+    },
+    {
+      "id": "tvly_root_option_typo",
+      "seq": 572033,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --jso search q",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--jso'\n(Did you mean --json?)\n"
+      }
+    },
+    {
+      "id": "tvly_extract_one",
+      "seq": 572034,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly extract https://docs.example.com/start",
+      "expect": {
+        "exit": 0,
+        "stdout": "# https://docs.example.com/start\n\n# Getting started\n\nInstall the package, then create a workspace.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_extract_failed",
+      "seq": 572035,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly extract https://docs.example.com/start https://docs.example.com/missing",
+      "expect": {
+        "exit": 0,
+        "stdout": "# https://docs.example.com/start\n\n# Getting started\n\nInstall the package, then create a workspace.\n\nFailed: https://docs.example.com/missing: Failed to fetch url\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_extract_json",
+      "seq": 572036,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly extract https://docs.example.com/start --json | jq -r '.results[0].raw_content'",
+      "expect": {
+        "exit": 0,
+        "stdout": "# Getting started\n\nInstall the package, then create a workspace.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_extract_needs_urls",
+      "seq": 572037,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly extract",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: missing required argument 'urls'\n"
+      }
+    },
+    {
+      "id": "tvly_extract_bad_depth",
+      "seq": 572038,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly extract https://docs.example.com/start --extract-depth deep",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--extract-depth <depth>' argument 'deep' is invalid. Allowed choices are basic, advanced.\n"
+      }
+    },
+    {
+      "id": "tvly_map",
+      "seq": 572039,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly map https://docs.example.com",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://docs.example.com/\nhttps://docs.example.com/start\nhttps://docs.example.com/guide/mounts\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_map_limit_json",
+      "seq": 572040,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly map docs.example.com --limit 2 --json | jq -c '.results'",
+      "expect": {
+        "exit": 0,
+        "stdout": "[\"https://docs.example.com/\",\"https://docs.example.com/start\"]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_crawl",
+      "seq": 572041,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly crawl https://docs.example.com",
+      "expect": {
+        "exit": 0,
+        "stdout": "# https://docs.example.com/\n\n# Mirage\n\nMirage is a bash-compatible shell over one virtual filesystem.\n\n# https://docs.example.com/start\n\n# Getting started\n\nInstall the package, then create a workspace.\n\n# https://docs.example.com/guide/mounts\n\n# Mounts\n\nA mount binds one backend to a prefix.\n\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_crawl_limit_json",
+      "seq": 572042,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly crawl https://docs.example.com --limit 1 --json | jq -r '.results[0].url'",
+      "expect": {
+        "exit": 0,
+        "stdout": "https://docs.example.com/\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_crawl_output_dir",
+      "seq": 572043,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly crawl https://docs.example.com --output-dir /scratch/site && ls /scratch/site",
+      "expect": {
+        "exit": 0,
+        "stdout": "docs.example.com.md\ndocs.example.com_guide_mounts.md\ndocs.example.com_start.md\n",
+        "stderr": "Saved 3 pages to /scratch/site/\n"
+      }
+    },
+    {
+      "id": "tvly_crawl_too_many",
+      "seq": 572044,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly crawl a b",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments for 'crawl'. Expected 1 argument but got 2: a, b.\n"
+      }
+    },
+    {
+      "id": "tvly_map_needs_url",
+      "seq": 572045,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly map",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: missing required argument 'url'\n"
+      }
+    },
+    {
+      "id": "tvly_search_output_file",
+      "seq": 572046,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search 'mirage shell' -o /scratch/r.json && jq -r '.request_id' /scratch/r.json",
+      "expect": {
+        "exit": 0,
+        "stdout": "1. Mirage: a virtual terminal for AI agents\nhttps://docs.example.com/\nMirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.\n\n2. Getting started\nhttps://docs.example.com/start\nInstall the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.\n\n3. Untitled\nhttps://blog.example.org/agents-and-shells\nWhy agents prefer a shell: one interface, every backend.\n\nreq-search-shell\n",
+        "stderr": "Output saved to /scratch/r.json\n"
+      }
+    },
+    {
+      "id": "tvly_research_run",
+      "seq": 572047,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Mirage began as a virtual filesystem and grew a shell [1]. Its commands follow POSIX [2].\n\nSources:\n1. Mirage: a virtual terminal for AI agents https://docs.example.com/\n2. Mounts and prefixes https://docs.example.com/guide/mounts\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_run_json",
+      "seq": 572048,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --json | jq -r '.status'",
+      "expect": {
+        "exit": 0,
+        "stdout": "completed\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_no_wait",
+      "seq": 572049,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --no-wait",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"request_id\":\"res-0001-history\",\"status\":\"pending\"}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_stream",
+      "seq": 572050,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --stream",
+      "expect": {
+        "exit": 0,
+        "stdout": "Mirage began as a virtual filesystem and grew a shell [1]. Its commands follow POSIX [2].\n\nSources:\n1. Mirage: a virtual terminal for AI agents https://docs.example.com/\n2. Mounts and prefixes https://docs.example.com/guide/mounts\n",
+        "stderr": "  Planning\n  WebSearch: mirage history\n  Found 2 sources\n"
+      }
+    },
+    {
+      "id": "tvly_research_stream_json",
+      "seq": 572051,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --stream --json | head -n 2",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"choices\":[{\"delta\":{\"tool_calls\":{\"type\":\"tool_call\",\"tool_call\":[{\"name\":\"Planning\"}]}}}]}\n{\"choices\":[{\"delta\":{\"tool_calls\":{\"type\":\"tool_call\",\"tool_call\":[{\"name\":\"WebSearch\",\"arguments\":\"mirage history\"}]}}}]}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_failed",
+      "seq": 572052,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage broken'",
+      "expect": {
+        "exit": 0,
+        "stdout": "Status: failed\nError: The research task could not gather enough sources.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_timeout",
+      "seq": 572053,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --timeout 0",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Timed out after 0s. Resume with: tvly research poll res-0001-history\n"
+      }
+    },
+    {
+      "id": "tvly_research_unmatched",
+      "seq": 572054,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'unmatched topic'",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "  > Error: No research task matches: unmatched topic\n"
+      }
+    },
+    {
+      "id": "tvly_research_bad_model",
+      "seq": 572055,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research 'mirage history' --model mega",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: option '--model <model>' argument 'mega' is invalid. Allowed choices are mini, pro, auto.\n"
+      }
+    },
+    {
+      "id": "tvly_research_status",
+      "seq": 572056,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research status res-0001-history",
+      "expect": {
+        "exit": 0,
+        "stdout": "  Request:  res-0001-history\n  Status:   completed\n  Run 'tvly research poll res-0001-history' to view results.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_status_failed",
+      "seq": 572057,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research status res-0002-broken",
+      "expect": {
+        "exit": 0,
+        "stdout": "  Request:  res-0002-broken\n  Status:   failed\n  Error: The research task could not gather enough sources.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_status_json",
+      "seq": 572058,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research status res-0002-broken --json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\"request_id\":\"res-0002-broken\",\"created_at\":\"2026-11-01T09:05:00.000Z\",\"status\":\"failed\",\"error\":\"The research task could not gather enough sources.\",\"response_time\":0.42}\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_status_missing",
+      "seq": 572059,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research status missing-task",
+      "expect": {
+        "exit": 4,
+        "stdout": "",
+        "stderr": "  > Error: Research task not found\n"
+      }
+    },
+    {
+      "id": "tvly_research_poll",
+      "seq": 572060,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research poll res-0001-history",
+      "expect": {
+        "exit": 0,
+        "stdout": "Mirage began as a virtual filesystem and grew a shell [1]. Its commands follow POSIX [2].\n\nSources:\n1. Mirage: a virtual terminal for AI agents https://docs.example.com/\n2. Mounts and prefixes https://docs.example.com/guide/mounts\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_poll_failed",
+      "seq": 572061,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research poll res-0002-broken",
+      "expect": {
+        "exit": 0,
+        "stdout": "Status: failed\nError: The research task could not gather enough sources.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_research_status_refuses_model",
+      "seq": 572062,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research status r1 --model pro",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--model'\n"
+      }
+    },
+    {
+      "id": "tvly_research_bare",
+      "seq": 572063,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly research | head -n 1",
+      "conformance_skip": "help: Mirage renders its argparse-layout page; commander's research group page is not virtualized",
+      "expect": {
+        "exit": 0,
+        "stdout": "usage: tvly research [--model model] [--no-wait] [--stream] [--output-schema file] [--citation-format format] [-o [file]] [--poll-interval n] [--timeout n] [--client-name name] [--json] [-h] [query ...]\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_root_attached_value",
+      "seq": 572064,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --json=x search q",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--json=x'\n(Did you mean --json?)\n"
+      }
+    },
+    {
+      "id": "tvly_root_help_attached_value",
+      "seq": 572065,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --help=x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--help=x'\n(Did you mean --help?)\n"
+      }
+    },
+    {
+      "id": "tvly_root_dashed_operand",
+      "seq": 572066,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly -- -x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments. Expected 0 arguments but got 1: -x.\n"
+      }
+    },
+    {
+      "id": "tvly_root_operands_around_dashes",
+      "seq": 572067,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a b -- -x c",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments. Expected 0 arguments but got 4: a, b, -x, c.\n"
+      }
+    },
+    {
+      "id": "tvly_root_operand_then_unknown",
+      "seq": 572068,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a -x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '-x'\n"
+      }
+    },
+    {
+      "id": "tvly_root_operand_then_help",
+      "seq": 572069,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a --help > /dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_auth_operand",
+      "seq": 572070,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly auth extra",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments for 'auth'. Expected 0 arguments but got 1: extra.\n"
+      }
+    },
+    {
+      "id": "tvly_search_zero_results",
+      "seq": 572071,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search \"shell terminal\" --max-results 0 --json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"query\": \"shell terminal\",\n  \"follow_up_questions\": null,\n  \"answer\": null,\n  \"images\": [],\n  \"results\": [],\n  \"response_time\": 0.42,\n  \"request_id\": \"req-search-shell\"\n}\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

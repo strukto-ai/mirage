@@ -709,6 +709,7 @@ CLI_SAMPLES: dict[str, dict[str, JsonValue]] = {
     "ntn": {"api_key": "key"},
     "slack": {"token": "token"},
     "trello": {"api_key": "key", "api_token": "token"},
+    "tvly": {"api_key": "key"},
 }
 
 

@@ -178,6 +178,45 @@ def test_a_clap_group_refusal_uses_claps_words_and_exit():
     )
 
 
+@pytest.mark.parametrize(
+    ("argv", "stderr"),
+    [
+        (
+            ["--verbose=x"],
+            "error: unknown option '--verbose=x'\n(Did you mean --verbose?)\n",
+        ),
+        (["-C"], "error: option '-C, --cwd <cwd>' argument missing\n"),
+        (
+            ["extra", "--cwd"],
+            "error: option '-C, --cwd <cwd>' argument missing\n",
+        ),
+        (
+            ["extra", "-C", "x"],
+            "error: too many arguments. Expected 0 arguments but got 1: extra.\n",
+        ),
+        (
+            ["extra", "-Cx", "--cwd=y", "-v"],
+            "error: too many arguments. Expected 0 arguments but got 1: extra.\n",
+        ),
+        (["extra", "-Z"], "error: unknown option '-Z'\n"),
+        (
+            ["extra", "--", "-Z"],
+            "error: too many arguments. Expected 0 arguments but got 2: extra, -Z.\n",
+        ),
+    ],
+)
+def test_a_commander_group_reads_the_whole_line_as_commander_does(
+    argv, stderr
+):
+    # commander 15.1.0 parses a group's options before it counts the
+    # operands it takes none of: a value it declares is taken, one left
+    # off is its argument missing, and past `--` every word counts.
+    tree = replace(_tree(), usage_style=UsageStyle.COMMANDER)
+    result = walk("gws", tree, argv)
+    assert (result.stream, result.exit_code) == ("stderr", 2)
+    assert result.output.decode() == stderr
+
+
 def test_a_clap_group_refusal_names_a_short_token_the_same_way():
     # clap has one wording for long and short alike, unlike git's
     # option/switch split.

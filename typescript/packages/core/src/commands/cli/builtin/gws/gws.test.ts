@@ -36,6 +36,7 @@ import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { fillPath, runGwsMethod } from './api.ts'
 import { GWS, googleApiAccessor } from './index.ts'
+import '../../../../clis/gws.ts'
 import { GWS_METHODS } from './methods.ts'
 import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 

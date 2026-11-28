@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import '../src/clis/ast_grep.ts'
-import '../src/clis/gh.ts'
-import '../src/clis/office.ts'
-import '../src/clis/pdf.ts'
 import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { Limit } from '@struktoai/mirage-core/types'
 import { DurableObject } from 'cloudflare:workers'

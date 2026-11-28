@@ -12,8 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The test Worker with the `1password` source as well: everything this
-// package can put in one Worker, which bundle.test.ts sizes.
+// The test Worker with the `1password` source and every CLI that carries
+// an engine, which bundle.test.ts sizes. A Worker installs only the CLIs
+// it imports, and the engines weigh the most.
+import '../src/clis/ast_grep.ts'
+import '../src/clis/gh.ts'
+import '../src/clis/office.ts'
+import '../src/clis/pdf.ts'
 import '../src/onepassword.ts'
 
 export * from './worker.ts'

@@ -342,6 +342,13 @@
                   "home/setup/cli/airtable"
                 ]
               },
+              {
+                "group": "Web",
+                "icon": "globe",
+                "pages": [
+                  "home/setup/cli/tvly"
+                ]
+              },
               "home/setup/cli/new",
               "home/setup/cli/mcp",
               "home/setup/cli/skill-md"
@@ -692,6 +699,13 @@
                   "python/cli/airtable"
                 ]
               },
+              {
+                "group": "Web",
+                "icon": "globe",
+                "pages": [
+                  "python/cli/tvly"
+                ]
+              },
               "python/cli/new",
               "python/cli/new-reference",
               "python/cli/mcp"
@@ -962,6 +976,13 @@
                   "typescript/cli/linear",
                   "typescript/cli/trello",
                   "typescript/cli/airtable"
+                ]
+              },
+              {
+                "group": "Web",
+                "icon": "globe",
+                "pages": [
+                  "typescript/cli/tvly"
                 ]
               },
               "typescript/cli/new",

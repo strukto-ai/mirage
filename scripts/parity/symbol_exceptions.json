@@ -1908,6 +1908,32 @@
    "python_only": {
     "_STAMPING": "Python stores may be written from several threads, so a store's last stamp is read and advanced under a lock; TypeScript runs one thread and advances it in one step."
    }
+  },
+  "commands/cli/builtin/tvly/urls": {
+   "python_only": {
+    "DEFAULT_PORTS": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "DOT_SEGMENTS": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "EDGE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "PATH_SAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "QUERY_SAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "SCHEME": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "SLUG_UNSAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "TAB_OR_NEWLINE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "resolve_dots": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns."
+   },
+   "typescript_only": {
+    "SPECIAL": "The schemes WHATWG's URL treats as special, which tvly's host and slug read."
+   }
+  },
+  "commands/cli/builtin/tvly/options": {
+   "python_only": {
+    "FLOAT_OVERFLOW": "JavaScript's Number() reads a radix literal past the double range as Infinity; Python's float() raises on it, so the bound is spelled out."
+   }
+  },
+  "core/tavily/client": {
+   "typescript_only": {
+    "MAX_TIMER_MS": "Node's timers hold at most 2^31-1 ms and fire a longer delay at once; Python's asyncio.timeout takes any number of seconds."
+   }
   }
  }
 }

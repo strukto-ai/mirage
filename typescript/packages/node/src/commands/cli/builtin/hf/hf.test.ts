@@ -28,7 +28,7 @@ import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
 import { Absence } from '@struktoai/mirage-core/core/hf_hub/repo'
 import type * as RepoModule from '@struktoai/mirage-core/core/hf_hub/repo'
 import type * as TreeModule from '@struktoai/mirage-core/core/hf_hub/tree'
-import { HF } from '@struktoai/mirage-core/commands/cli/builtin/hf/index'
+import { HF } from '../../../../clis/index.ts'
 import {
   createCmd,
   tagCreateCmd,

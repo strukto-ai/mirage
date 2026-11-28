@@ -14,6 +14,11 @@
 
 from collections.abc import Mapping, Sequence
 
+from mirage.commands.cli.commander import (
+    COMMANDER_EXIT,
+    missing_value,
+    unknown_option,
+)
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
     GIT_LONG_OPTIONS,
@@ -367,6 +372,35 @@ def clap_leaf_refusal(
     return None
 
 
+def commander_leaf_refusal(
+    argparse_message: bytes,
+    parsed: ParsedCommand | ParsedArgs,
+    spec: CommandSpec,
+) -> tuple[bytes, int, bytes | None]:
+    """A leaf's option refusal in commander's words.
+
+    Args:
+        argparse_message (bytes): the default dialect's message, kept for
+            a refusal commander words the same.
+        parsed (ParsedCommand | ParsedArgs): parse result, read for the
+            offending token.
+        spec (CommandSpec): the leaf's grammar.
+    """
+    kinds = parsed.option_error_kinds
+    kind = kinds[0] if kinds else None
+    if kind in ("invalid", "unexpected_value") and parsed.invalid_options:
+        token = parsed.invalid_options[0]
+        word = token if token.startswith("-") else f"-{token}"
+        return encode_text(unknown_option(word, [spec])), COMMANDER_EXIT, None
+    if kind == "needs_value" and parsed.needs_value_options:
+        token = parsed.needs_value_options[0]
+        word = token if token.startswith("-") else f"-{token}"
+        worded = missing_value(word, spec)
+        if worded is not None:
+            return encode_text(worded), COMMANDER_EXIT, None
+    return argparse_message, COMMANDER_EXIT, None
+
+
 def leaf_refusal(
     style: UsageStyle,
     argparse_message: bytes,
@@ -414,6 +448,8 @@ def leaf_refusal(
         return worded or argparse_message, CLAP_EXIT, None
     if style is UsageStyle.POPPLER:
         return encode_text(argparse_help(prog, spec)), POPPLER_EXIT, None
+    if style is UsageStyle.COMMANDER:
+        return commander_leaf_refusal(argparse_message, parsed, spec)
     if style is not UsageStyle.GIT:
         return argparse_message, ARGPARSE_EXIT, None
     kinds = parsed.option_error_kinds

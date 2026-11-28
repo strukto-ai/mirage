@@ -15,9 +15,9 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { TRELLO } from '@struktoai/mirage-core'
 import {
   MountMode,
+  TRELLO,
   TrelloVFS,
   Workspace,
   type FileStat,

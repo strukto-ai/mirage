@@ -136,7 +136,12 @@ export function cliPage(
   let synopsis: string
   let operands: [string, string][]
   let options: [string, string][]
-  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA || style === UsageStyle.POPPLER) {
+  if (
+    style === UsageStyle.ARGPARSE ||
+    style === UsageStyle.COBRA ||
+    style === UsageStyle.POPPLER ||
+    style === UsageStyle.COMMANDER
+  ) {
     const [usage, parsedOperands, parsedOptions] = argparseParts(words, listed, rows)
     synopsis = usage.replace(/^usage: /, '')
     operands = parsedOperands

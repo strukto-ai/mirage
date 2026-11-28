@@ -22,6 +22,12 @@ from mirage.commands.cli.cobra import (
     group_message,
     unknown_command,
 )
+from mirage.commands.cli.commander import (
+    COMMANDER_EXIT,
+    excess_arguments,
+    missing_value,
+    unknown_option,
+)
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
     GIT_LONG_OPTIONS,
@@ -346,7 +352,7 @@ def parse_spec_for(
             False,
         )
     else:
-        if style is UsageStyle.COBRA:
+        if style in (UsageStyle.COBRA, UsageStyle.COMMANDER):
             grammar = replace(leaf, allow_abbrev=False)
         found = (
             (grammar, False)
@@ -384,7 +390,7 @@ def leaf_parse(
     return LeafParse(
         spec,
         mirage_help,
-        root.usage_style is not UsageStyle.COBRA,
+        root.usage_style not in (UsageStyle.COBRA, UsageStyle.COMMANDER),
         (
             GIT_LONG_OPTIONS.get(" ".join(path), ())
             if root.name == "git"
@@ -475,7 +481,12 @@ def node_help(
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
     """
-    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER):
+    if style in (
+        UsageStyle.ARGPARSE,
+        UsageStyle.COBRA,
+        UsageStyle.POPPLER,
+        UsageStyle.COMMANDER,
+    ):
         return argparse_help(
             name, listed_node(node, style), subcommand_rows(node)
         )
@@ -523,7 +534,13 @@ def listed_node(
         return node
     names = (
         ("-h", "--help")
-        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
+        if style
+        in (
+            UsageStyle.ARGPARSE,
+            UsageStyle.COBRA,
+            UsageStyle.POPPLER,
+            UsageStyle.COMMANDER,
+        )
         and not any("-h" in arg.names for arg in node.arguments)
         else ("--help",)
     )
@@ -533,12 +550,87 @@ def listed_node(
     return replace(node, arguments=(*node.arguments, help_argument))
 
 
+def _commander_excess(
+    name: str,
+    node: CommandSpec,
+    cs: CompiledSpec,
+    words: Sequence[str],
+    options_ended: bool,
+) -> WalkResult:
+    """Commander's answer to operands a group takes none of.
+
+    Commander reads the rest of the line before it counts them: an
+    option the group does not declare is refused as unknown, ``--help``
+    still prints the help, and past ``--`` every word is an operand.
+
+    Args:
+        name (str): display path walked so far, e.g. "tvly".
+        node (CommandSpec): the group node being parsed.
+        cs (CompiledSpec): the node's compiled grammar.
+        words (Sequence[str]): the line from the first operand on.
+        options_ended (bool): whether ``--`` came before it.
+    """
+    operands: list[str] = []
+    ended = options_ended
+    taking: str | None = None
+    for word in words:
+        if taking is not None:
+            taking = None
+            continue
+        if not ended and word == "--":
+            ended = True
+            continue
+        if ended or not word.startswith("-") or word == "-":
+            operands.append(word)
+            continue
+        spelling = (
+            word.partition("=")[0] if word.startswith("--") else word[:2]
+        )
+        if spelling in ("--help", "-h") and node.add_help and word == spelling:
+            return WalkResult(
+                output=encode_text(node_help(name, node, UsageStyle.COMMANDER))
+            )
+        if spelling in cs.long_optional_spellings:
+            continue
+        if word == spelling and (
+            spelling in cs.long_bool_spellings or spelling in cs.bool_spellings
+        ):
+            continue
+        if (
+            spelling in cs.long_value_spellings
+            or spelling in cs.value_spellings
+        ):
+            taking = spelling if word == spelling else None
+            continue
+        return _usage_error(
+            name,
+            node,
+            f"unknown option: {word}",
+            UsageStyle.COMMANDER,
+            token=word,
+        )
+    if taking is not None:
+        return _usage_error(
+            name,
+            node,
+            f"error: option '{taking}' requires a value",
+            UsageStyle.COMMANDER,
+            missing=taking,
+        )
+    return WalkResult(
+        output=encode_text(excess_arguments(operands)),
+        stream="stderr",
+        exit_code=COMMANDER_EXIT,
+    )
+
+
 def _usage_error(
     name: str,
     node: CommandSpec,
     message: str,
     style: UsageStyle,
     token: str | None = None,
+    missing: str | None = None,
 ) -> WalkResult:
     """Group-level option refusal, in the dialect the CLI declares.
 
@@ -561,6 +653,8 @@ def _usage_error(
         token (str | None): the offending token when the refusal is an
             unrecognized option, which clap and git word their own way.
             None for the refusals whose wording the dialects share.
+        missing (str | None): the option typed with no value after it,
+            which commander words as its argument missing.
     """
     if style is UsageStyle.COBRA:
         text = cobra_refusal(group_message(message, token), name, node)
@@ -572,6 +666,20 @@ def _usage_error(
             output=encode_text(node_help(name, node, style)),
             stream="stderr",
             exit_code=POPPLER_EXIT,
+        )
+    if style is UsageStyle.COMMANDER:
+        worded = None if missing is None else missing_value(missing, node)
+        text = (
+            unknown_option(token, [node])
+            if token is not None
+            else worded
+            if worded is not None
+            else f"{message}\n"
+            if message.startswith("error: ")
+            else f"error: {message}\n"
+        )
+        return WalkResult(
+            output=encode_text(text), stream="stderr", exit_code=COMMANDER_EXIT
         )
     if style is UsageStyle.CLAP:
         first = (
@@ -747,7 +855,11 @@ def _match_short(
             remaining = (arity if arity is not None else 1) - bool(attached)
             if len(following) < remaining:
                 return 0, _usage_error(
-                    name, node, f"error: option '{vf}' requires a value", style
+                    name,
+                    node,
+                    f"error: option '{vf}' requires a value",
+                    style,
+                    missing=vf,
                 )
             values = ([attached] if attached else []) + list(
                 following[:remaining]
@@ -1150,6 +1262,7 @@ def walk(
                     UsageStyle.CLAP,
                     UsageStyle.COBRA,
                     UsageStyle.POPPLER,
+                    UsageStyle.COMMANDER,
                 )
                 and "-h" not in cs.dest
             ):
@@ -1178,7 +1291,9 @@ def walk(
                 if spelling not in cs.dest and spelling != "--help":
                     candidates = (
                         _expand_group_long(node, cs, spelling)
-                        if node.allow_abbrev and style is not UsageStyle.COBRA
+                        if node.allow_abbrev
+                        and style
+                        not in (UsageStyle.COBRA, UsageStyle.COMMANDER)
                         else ()
                     )
                     if len(candidates) == 1:
@@ -1215,6 +1330,9 @@ def walk(
                             node,
                             f"error: option '{spelling}' takes no value",
                             style,
+                            token=token
+                            if style is UsageStyle.COMMANDER
+                            else None,
                         )
                     _record_bool(flags, cs, spelling)
                 elif spelling in cs.long_value_spellings:
@@ -1238,6 +1356,7 @@ def walk(
                                 node,
                                 f"error: option '{spelling}' requires a value",
                                 style,
+                                missing=spelling,
                             )
                         _record_values(
                             flags,
@@ -1259,6 +1378,7 @@ def walk(
                             node,
                             f"error: option '{spelling}' requires a value",
                             style,
+                            missing=spelling,
                         )
                 elif spelling == "--help" and node.add_help:
                     if eq:
@@ -1267,6 +1387,9 @@ def walk(
                             node,
                             f"error: option '{spelling}' takes no value",
                             style,
+                            token=token
+                            if style is UsageStyle.COMMANDER
+                            else None,
                         )
                     return WalkResult(
                         output=encode_text(
@@ -1311,6 +1434,7 @@ def walk(
                 j = 1
                 error = None
                 unknown = None
+                missing = None
                 while j < len(token):
                     spelling = f"-{token[j]}"
                     rest = token[j + 1 :]
@@ -1341,6 +1465,7 @@ def walk(
                             error = (
                                 f"error: option '{spelling}' requires a value"
                             )
+                            missing = spelling
                             break
                         values = ([rest] if rest else []) + list(
                             argv[i + 1 : i + remaining + 1]
@@ -1364,7 +1489,12 @@ def walk(
                         break
                 if error is not None:
                     return _usage_error(
-                        name, node, error, style, token=unknown
+                        name,
+                        node,
+                        error,
+                        style,
+                        token=unknown,
+                        missing=missing,
                     )
                 i += 1
                 continue
@@ -1397,6 +1527,10 @@ def walk(
                         output=encode_text(text),
                         stream="stderr",
                         exit_code=COBRA_EXIT,
+                    )
+                if style is UsageStyle.COMMANDER:
+                    return _commander_excess(
+                        name, node, cs, argv[i:], options_ended
                     )
                 return _unknown_verb(head, name, token, node, style)
             node = child

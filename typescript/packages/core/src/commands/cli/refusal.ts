@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec, argumentDest, optionSpellings, positionalRequired } from '../spec/compile.ts'
+import { COMMANDER_EXIT, missingValue, unknownOption } from './commander.ts'
 import {
   CLAP_EXIT,
   GIT_LONG_OPTIONS,
@@ -369,6 +370,26 @@ export function clapLeafRefusal(
  * @returns the stderr, the exit code and the stdout, null when the refusal
  *   writes nothing there
  */
+/** A leaf's option refusal in commander's words. */
+export function commanderLeafRefusal(
+  argparseMessage: Uint8Array,
+  parsed: Pick<ParsedCommand, 'invalidOptions' | 'optionErrorKinds' | 'needsValueOptions'>,
+  spec: CommandSpec,
+): [Uint8Array, number, Uint8Array | null] {
+  const kind = parsed.optionErrorKinds[0]
+  const token = parsed.invalidOptions[0]
+  if ((kind === 'invalid' || kind === 'unexpected_value') && token !== undefined) {
+    const word = token.startsWith('-') ? token : `-${token}`
+    return [encodeText(unknownOption(word, [spec])), COMMANDER_EXIT, null]
+  }
+  const needy = parsed.needsValueOptions[0]
+  if (kind === 'needs_value' && needy !== undefined) {
+    const worded = missingValue(needy.startsWith('-') ? needy : `-${needy}`, spec)
+    if (worded !== null) return [encodeText(worded), COMMANDER_EXIT, null]
+  }
+  return [argparseMessage, COMMANDER_EXIT, null]
+}
+
 export function leafRefusal(
   style: UsageStyle,
   argparseMessage: Uint8Array,
@@ -393,6 +414,7 @@ export function leafRefusal(
   if (style === UsageStyle.POPPLER) {
     return [encodeText(argparseHelp(prog, spec)), POPPLER_EXIT, null]
   }
+  if (style === UsageStyle.COMMANDER) return commanderLeafRefusal(argparseMessage, parsed, spec)
   if (style !== UsageStyle.GIT) return [argparseMessage, ARGPARSE_EXIT, null]
   const kind = parsed.optionErrorKinds[0]
   const ambiguous = parsed.ambiguousOptions[0]

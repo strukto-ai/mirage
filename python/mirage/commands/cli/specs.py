@@ -46,6 +46,7 @@ BUILTIN_CLI_SPECS: dict[str, str] = {
     "search": "mirage.commands.cli.builtin.search:SEARCH",
     "slack": "mirage.commands.cli.builtin.slack:SLACK",
     "trello": "mirage.commands.cli.builtin.trello:TRELLO",
+    "tvly": "mirage.commands.cli.builtin.tvly:TVLY",
 }
 
 # Any package can ship a CLI by declaring, in its own pyproject.toml::

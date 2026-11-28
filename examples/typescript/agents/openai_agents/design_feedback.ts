@@ -20,9 +20,9 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { run } from '@openai/agents'
 import { SandboxAgent } from '@openai/agents/sandbox'
-import { LINEAR } from '@struktoai/mirage-core'
 import {
   GitHubVFS,
+  LINEAR,
   LinearVFS,
   MountMode,
   RAMVFS,

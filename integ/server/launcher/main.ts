@@ -36,6 +36,7 @@ import { mem0Fake } from '../mem0/fake.ts'
 import { notionFake } from '../notion/fake.ts'
 import { onedriveFake } from '../onedrive/fake.ts'
 import { slackFake } from '../slack/fake.ts'
+import { tavilyFake } from '../tavily/fake.ts'
 import { trelloFake } from '../trello/fake.ts'
 import { startWandb } from '../wandb/fake.ts'
 
@@ -161,6 +162,7 @@ const REGISTRY: Record<string, Entry> = {
   notion: plain(notionFake),
   onedrive: plain(onedriveFake),
   slack: plain(slackFake),
+  tavily: plain(tavilyFake),
   trello: plain(trelloFake),
   wandb: async (o) => {
     const started = await startWandb(o.port, o.fixture, o.fixtureRoot)

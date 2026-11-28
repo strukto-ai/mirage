@@ -17,10 +17,6 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import * as Browser from '@struktoai/mirage-browser'
-import * as BrowserAstGrep from '@struktoai/mirage-browser/clis/ast_grep'
-import * as BrowserGh from '@struktoai/mirage-browser/clis/gh'
-import * as BrowserOffice from '@struktoai/mirage-browser/clis/office'
-import * as BrowserPdf from '@struktoai/mirage-browser/clis/pdf'
 import * as Node from '@struktoai/mirage-node'
 
 import {
@@ -111,6 +107,18 @@ async function coreCommandGroups(): Promise<ModuleBag> {
     for (const [key, value] of Object.entries(mod)) {
       if (key.endsWith('_COMMANDS')) bag[key] = value
     }
+  }
+  return bag
+}
+
+// A page installs each CLI through its `clis/` entry, so the browser's
+// programs are the ones its entries export, read from the directory.
+async function browserClis(): Promise<ModuleBag> {
+  const bag: ModuleBag = {}
+  const root = resolve(PACKAGES, 'browser', 'src', 'clis')
+  for (const name of readdirSync(root).sort(compareCodePoints)) {
+    const entry = name.replace(/\.ts$/, '')
+    Object.assign(bag, (await import(`@struktoai/mirage-browser/clis/${entry}`)) as ModuleBag)
   }
   return bag
 }
@@ -540,9 +548,7 @@ async function main(): Promise<void> {
   emitHttpRoutes()
   const core = await coreCommandGroups()
   emitVariant('node', ['core', 'node'], [core, Node as unknown as ModuleBag], Node.knownVfsNames())
-  // A page installs a CLI that carries an engine through its `clis/`
-  // entry, so the browser's programs are its entry point's and those.
-  const browser = { ...Browser, ...BrowserAstGrep, ...BrowserGh, ...BrowserOffice, ...BrowserPdf }
+  const browser = { ...Browser, ...(await browserClis()) }
   emitVariant(
     'browser',
     ['core', 'browser'],

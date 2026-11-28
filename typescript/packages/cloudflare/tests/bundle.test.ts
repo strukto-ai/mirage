@@ -93,14 +93,14 @@ it('loads the Rust modules as .wasm files, with no base64 copy in the script', (
   }
   // A base64 copy of a module would be one run of millions of base64
   // characters; the script's own longest run is tens of thousands.
-  const script = readFileSync(join(outdir, 'worker.js'), 'latin1')
+  const script = readFileSync(join(outdir, 'corpus.js'), 'latin1')
   let longest = 0
   for (const run of script.matchAll(/[A-Za-z0-9+/=]+/g)) longest = Math.max(longest, run[0].length)
   expect(longest).toBeLessThan(1024 * 1024)
 })
 
 it('carries the file server a machine mounts, with ssh2 in it', () => {
-  const script = readFileSync(join(outdir, 'worker.js'), 'latin1')
+  const script = readFileSync(join(outdir, 'corpus.js'), 'latin1')
   expect(script).toContain('__name(this, "PipeServer")')
   expect(script).toContain('ssh2/lib/protocol/SFTP.js')
 })

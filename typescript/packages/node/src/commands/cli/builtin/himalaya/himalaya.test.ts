@@ -22,7 +22,7 @@ import { fetchHeaders, listMessageUids } from '@struktoai/mirage-core/core/email
 import type { EmailConfig } from '@struktoai/mirage-core/core/email/config'
 import { EmailVFS } from '@struktoai/mirage-core/vfs/email/email'
 import { Workspace } from '../../../../workspace.ts'
-import { HIMALAYA } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/index'
+import { HIMALAYA } from '../../../../clis/index.ts'
 import {
   pageSlice,
   parseQuery,

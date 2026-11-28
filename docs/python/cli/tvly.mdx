@@ -1,0 +1,100 @@
+---
+title: tvly CLI in Python
+sidebarTitle: tvly
+description: "Supported Tavily commands for web search, extraction, crawls, maps and research."
+icon: /images/tavily-logo.svg
+---
+
+import Reference from '/snippets/cli/tvly.mdx'
+import License from '/snippets/cli/license/tvly.mdx'
+
+Search the web, extract pages, crawl and map sites, and run deep research. Mirage implements the command subset below using the [official `tvly` grammar](https://github.com/tavily-ai/cli) and prints what `tvly` prints when its output is piped.
+
+## Setup
+
+Create an API key in the [Tavily dashboard](https://app.tavily.com).
+
+```python
+from mirage import Workspace
+from mirage.commands.cli.builtin.tvly import TVLY
+from mirage.core.tavily.config import TavilyConfig
+
+config = TavilyConfig(api_key="tvly-...")
+ws = Workspace({})
+ws.register_cli("tvly", TVLY, config)
+```
+
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/python/cli/index#register-a-cli).
+
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `tvly` installed.
+
+{/* generated: skill-md tvly start */}
+<div className="rounded-xl border border-gray-200 dark:border-gray-800 px-5 my-4">
+<Tabs>
+  <Tab title="Rendered">
+    **Available commands**
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    **`tvly`**
+
+    ```text
+    usage: tvly [--json] [-h] {auth,search,extract,crawl,map,research} ...
+
+    Tavily CLI: search, extract, crawl, map, and research from the command line.
+
+    commands:
+      auth      Check authentication status.
+      search    Search the web using Tavily.
+      extract   Extract content from one or more URLs.
+      crawl     Crawl a website starting from URL.
+      map       Discover all URLs on a website (no content extraction).
+      research  Deep research: run a task, or check one with `research status <id>` or wait for it with `research poll <id>`.
+
+    options:
+      --json      Output as JSON (for agents and scripts)
+      -h, --help  Show this help and exit
+    ```
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-commands
+    description: The CLIs registered in this workspace and how to call them.
+    ---
+
+    # Available commands
+
+    These commands are registered with this shell; `--help` after a command or subcommand shows its usage.
+
+    ## `tvly`
+
+    ```text
+    usage: tvly [--json] [-h] {auth,search,extract,crawl,map,research} ...
+
+    Tavily CLI: search, extract, crawl, map, and research from the command line.
+
+    commands:
+      auth      Check authentication status.
+      search    Search the web using Tavily.
+      extract   Extract content from one or more URLs.
+      crawl     Crawl a website starting from URL.
+      map       Discover all URLs on a website (no content extraction).
+      research  Deep research: run a task, or check one with `research status <id>` or wait for it with `research poll <id>`.
+
+    options:
+      --json      Output as JSON (for agents and scripts)
+      -h, --help  Show this help and exit
+    ```
+    ````
+  </Tab>
+</Tabs>
+</div>
+{/* generated: skill-md tvly end */}
+
+<Reference />
+
+<License />

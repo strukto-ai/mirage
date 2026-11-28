@@ -65,6 +65,7 @@ const FAKES = {
   notion: { port: 5091 },
   dify: { port: 5102 },
   mem0: { port: 5103 },
+  tavily: { port: 5111 },
   gws: { port: 19999 },
 }
 // The mcp CLI's fake, a process of its own as CI runs it.
@@ -382,6 +383,17 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
       ...localClis(target),
     }
   },
+  // The Tavily fake answers from canned rows and writes nothing, so there is
+  // no world to reset; the key is the one it accepts.
+  tavily: async (target) => {
+    const config = { api_key: 'tvly-integ-key', base_url: env('TAVILY_URL') }
+    return {
+      mounts: mounts(target, () => ({})),
+      ...(target.clis?.includes('tvly') === true
+        ? { clis: { tvly: { cli: 'tvly', machine: 'in_process', config } } }
+        : {}),
+    }
+  },
   mem0: async (target) => {
     const base = env('MEM0_URL')
     await reset(`${base}/reset`)
@@ -628,6 +640,7 @@ async function startFakes(dir: string): Promise<ChildProcess> {
     'NOTION_URL',
     'DIFY_URL',
     'MEM0_URL',
+    'TAVILY_URL',
     'GWS_URL',
   ]
   // Only this child's announcements count: a URL already exported names
@@ -820,7 +833,7 @@ async function startCloudflare(): Promise<{ child: ChildProcess; base: string }>
     join(cloudflare, 'node_modules/.bin/wrangler'),
     [
       'dev',
-      'tests/worker.ts',
+      'tests/corpus.ts',
       '--config',
       'tests/wrangler.toml',
       '--port',

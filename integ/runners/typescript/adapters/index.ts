@@ -112,6 +112,7 @@ import {
   TiDBFilesystemVFS,
   TRELLO,
   TrelloVFS,
+  TVLY,
   WasabiVFS,
   Workspace,
   type BaseVFS,
@@ -344,6 +345,21 @@ async function installMcpClis(ws: Workspace, target: Target): Promise<void> {
   for (const name of target.clis ?? []) ws.registerCli(name, cli, config)
 }
 
+/**
+ * Install `tvly` against the Tavily kit fake, which this starts and the
+ * opener's cleanup stops, so a cli-tvly run needs no CI setup.
+ */
+async function installTavily(ws: Workspace): Promise<{ close: () => Promise<void> }> {
+  // Imported here rather than at the top of the file, because this module is
+  // loaded for every target and a kit fake's module reaches its generated
+  // Prisma client at import time. See the eslint rule in integ/eslint.config.js.
+  const { tavilyFake } = await import('../../../server/tavily/fake.ts')
+  const { API_KEY } = await import('../../../server/tavily/config.ts')
+  const server = await startKitFake(tavilyFake)
+  ws.registerCli('tvly', TVLY, { api_key: API_KEY, base_url: server.endpoint })
+  return server
+}
+
 // Where a target declares jobs: {type: 'redis'}, its job lists and
 // consoles ride REDIS_URL under this open's own key prefix and every
 // other plane stays in memory. Only the ram opener consults this
@@ -449,8 +465,10 @@ async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
   })
   installLocalClis(ws, target)
   if (target.service === 'mcp') await installMcpClis(ws, target)
+  const tavily = target.service === 'tavily' ? await installTavily(ws) : null
   const cleanup = async (): Promise<void> => {
     await ws.close()
+    await tavily?.close()
     // Battery keys must not accumulate in the shared redis db.
     await store?.execution(ws.workspaceId).clear()
     await store?.close()

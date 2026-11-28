@@ -1645,6 +1645,42 @@ class DifyService:
         await stop_kit_fake(self.process)
 
 
+class TavilyService:
+    """Points the tvly install at the Tavily kit fake.
+
+    The adapter owns the process, as the dify one does, so ``--facet cli``
+    runs ``cli-tvly`` with no CI setup. The fake answers from canned rows and
+    writes nothing, so nothing is reset between runs.
+
+    Args:
+        base (str): the fake's origin.
+        process (asyncio.subprocess.Process): the running fake.
+    """
+
+    # The one key the fake accepts (API_KEY in integ/server/tavily/config.ts).
+    API_KEY = "tvly-integ-key"
+
+    def __init__(self, base: str, process: asyncio.subprocess.Process) -> None:
+        self.base = base
+        self.process = process
+
+    @classmethod
+    async def create(cls) -> "TavilyService":
+        base, process = await start_kit_fake("tavily")
+        return cls(base, process)
+
+    def cli_installs(self) -> dict[str, tuple[CLI, dict[str, JsonValue]]]:
+        return {
+            "tvly": (
+                cli_spec_for("tvly"),
+                {"api_key": self.API_KEY, "base_url": self.base},
+            )
+        }
+
+    async def teardown(self) -> None:
+        await stop_kit_fake(self.process)
+
+
 class TrelloService:
     """Points trello mounts and the trello install at the shared fake
     Trello REST API server.
@@ -3308,6 +3344,8 @@ async def make_service(target: dict, run_id: str) -> "Service | None":
         return await LinearService.create()
     if target.get("service") == "dify":
         return await DifyService.create(target)
+    if target.get("service") == "tavily":
+        return await TavilyService.create()
     if target.get("service") == "langfuse":
         return await LangfuseService.create()
     if target.get("service") == "jaeger":
@@ -3386,6 +3424,7 @@ def cli_install(
             MCPService,
             NotionService,
             SlackService,
+            TavilyService,
             TrelloService,
         ),
     )

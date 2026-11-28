@@ -17,7 +17,7 @@ import { CLIHandler } from './types.ts'
 import { describe, expect, it } from 'vitest'
 
 import { IOResult } from '../../io/types.ts'
-import { cliSpecFor, registerCliSpec, unregisterCliSpec } from './specs.ts'
+import { cliSpecFor, knownCliNames, registerCliSpec, unregisterCliSpec } from './specs.ts'
 import { CLI } from './types.ts'
 
 // Mirrors python/tests/commands/cli/test_specs.py.
@@ -26,7 +26,26 @@ function noop(): [null, IOResult] {
   return [null, new IOResult()]
 }
 
-const BUNDLED = ['airtable', 'discord', 'git', 'gws', 'linear', 'ntn', 'slack']
+// Each built-in CLI and the `clis/` entry that installs it.
+const ENTRIES = [
+  ['airtable', 'airtable'],
+  ['ast-grep', 'ast_grep'],
+  ['discord', 'discord'],
+  ['gh', 'gh'],
+  ['git', 'git'],
+  ['gws', 'gws'],
+  ['hf', 'hf'],
+  ['himalaya', 'himalaya'],
+  ['linear', 'linear'],
+  ['ntn', 'ntn'],
+  ['office', 'office'],
+  ['pdfinfo', 'pdf'],
+  ['pdftotext', 'pdf'],
+  ['search', 'search'],
+  ['slack', 'slack'],
+  ['trello', 'trello'],
+  ['tvly', 'tvly'],
+] as const
 
 function tree(name: string): CLI {
   return new CLI({
@@ -36,12 +55,24 @@ function tree(name: string): CLI {
 }
 
 describe('cli spec registry', () => {
-  it('installs a CLI carrying an engine only once its clis entry is imported', async () => {
-    expect(() => cliSpecFor('gh')).toThrow(
-      "unknown cli 'gh'; import '@struktoai/mirage-core/clis/gh' to install it",
-    )
+  // This file imports the registry and nothing else, so no built-in
+  // resolves until a test imports its entry: a bundle holds only the CLIs
+  // its host installs.
+  it('installs no CLI until its clis entry is imported', () => {
+    expect(knownCliNames()).toEqual([])
+    for (const [name, entry] of ENTRIES) {
+      expect(() => cliSpecFor(name)).toThrow(
+        `unknown cli '${name}'; import '@struktoai/mirage-core/clis/${entry}' to install it`,
+      )
+    }
+  })
+
+  it('installs a CLI once its clis entry is imported', async () => {
     const { GH } = await import('../../clis/gh.ts')
+    const { SLACK } = await import('../../clis/slack.ts')
     expect(cliSpecFor('gh')).toBe(GH)
+    expect(cliSpecFor('slack')).toBe(SLACK)
+    expect(knownCliNames()).toEqual(['gh', 'slack'])
   })
 
   it('registers, resolves, and unregisters', () => {
@@ -74,16 +105,6 @@ describe('cli spec registry', () => {
 
   it('an unknown key names the known specs', () => {
     expect(() => cliSpecFor('spectest4')).toThrow(/known: /)
-  })
-
-  // This file imports the registry and nothing else, so the eight resolve
-  // only because specs.ts seeds them. Back when each builtin registered
-  // itself, a caller saw only the CLIs whose modules something had
-  // already imported -- which the old barrel hid by importing them all.
-  it('resolves the bundled CLIs without importing their modules', () => {
-    for (const name of BUNDLED) {
-      expect(cliSpecFor(name).spec.name).toBe(name)
-    }
   })
 })
 

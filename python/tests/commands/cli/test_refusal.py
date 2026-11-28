@@ -294,3 +294,13 @@ def test_clap_exits_two_like_argparse_but_for_its_own_reason():
     assert leaf_refusal(
         UsageStyle.CLAP, ARGPARSE_MESSAGE, _parsed([]), "rm", SPEC
     ) == (ARGPARSE_MESSAGE, 2, None)
+
+
+def test_commander_words_a_short_option_left_without_its_value():
+    spec = CommandSpec(arguments=(Argument("-d", "--depth", metavar="n"),))
+    parsed = _parsed_with(
+        needs_value_options=["d"], option_error_kinds=["needs_value"]
+    )
+    assert leaf_refusal(
+        UsageStyle.COMMANDER, ARGPARSE_MESSAGE, parsed, "crawl", spec
+    ) == (b"error: option '-d, --depth <n>' argument missing\n", 2, None)

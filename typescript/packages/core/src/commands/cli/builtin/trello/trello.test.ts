@@ -18,6 +18,7 @@ import { compileSpec } from '../../../spec/compile.ts'
 import type { CommandSpec } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { TRELLO } from './index.ts'
+import '../../../../clis/trello.ts'
 
 function leaf(...path: string[]): CommandSpec {
   let node = TRELLO.spec

@@ -177,7 +177,12 @@ def cli_page(
     words = " ".join((head, *path))
     rows = subcommand_rows(node)
     listed = listed_node(node, style)
-    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER):
+    if style in (
+        UsageStyle.ARGPARSE,
+        UsageStyle.COBRA,
+        UsageStyle.POPPLER,
+        UsageStyle.COMMANDER,
+    ):
         usage, operands, options = argparse_parts(words, listed, rows)
         synopsis = usage.removeprefix("usage: ")
     else:

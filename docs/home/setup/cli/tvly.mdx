@@ -1,0 +1,67 @@
+---
+title: tvly CLI
+sidebarTitle: tvly
+icon: /images/tavily-logo.svg
+description: Set up the Tavily CLI.
+---
+
+import License from '/snippets/cli/license/tvly.mdx'
+
+<div className="not-prose flex flex-wrap gap-2 my-4">
+  <span title="Python" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/python-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+  <span title="Node.js" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="node-js" size={14} /></span>
+  <span title="Browser" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><Icon icon="globe" size={14} /></span>
+  <span title="Cloudflare" className="inline-flex items-center justify-center rounded-full border border-gray-200 dark:border-gray-700 w-8 h-8"><img noZoom src="/images/cloudflare-logo.svg" alt="" className="w-4 h-4 m-0" /></span>
+</div>
+
+Mirage implements the [Tavily CLI](https://github.com/tavily-ai/cli) (`tvly`)
+over the [Tavily API](https://docs.tavily.com): web search, page extraction,
+site crawls and maps, and deep research, printed the way `tvly` prints to a
+pipe.
+
+Create an API key in the [Tavily dashboard](https://app.tavily.com), then
+register it on an existing `ws`. Without a key, `search` and `extract` run
+keyless within Tavily's rate-limit cap; `crawl`, `map` and `research` need one.
+
+<Tabs>
+  <Tab title="YAML" icon="file-code">
+    ```yaml workspace.yaml
+    clis:
+      tvly:
+        cli: tvly
+        machine: in_process
+        config:
+          api_key: ${TAVILY_API_KEY}
+    ```
+  </Tab>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage.commands.cli.builtin.tvly import TVLY
+    from mirage.core.tavily.config import TavilyConfig
+
+    config = TavilyConfig(api_key="tvly-...")
+    ws.register_cli("tvly", TVLY, config)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { TVLY } from '@struktoai/mirage-node'
+
+    const config = { apiKey: 'tvly-...' }
+    ws.registerCli('tvly', TVLY, config)
+    ```
+  </Tab>
+</Tabs>
+
+## SDK guides
+
+<CardGroup cols={2}>
+  <Card title="Python" icon="/images/python-logo.svg" href="/python/cli/tvly">
+    Every command, its flags and behavior.
+  </Card>
+  <Card title="TypeScript" icon="/images/typescript-logo.svg" href="/typescript/cli/tvly">
+    Every command, its flags and behavior.
+  </Card>
+</CardGroup>
+
+<License />

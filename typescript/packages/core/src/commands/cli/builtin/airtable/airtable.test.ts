@@ -28,6 +28,7 @@ import type { CommandSpec } from '../../../spec/types.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { AIRTABLE } from './index.ts'
+import '../../../../clis/airtable.ts'
 
 let origin = ''
 let account: AirtableAccount

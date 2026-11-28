@@ -49,6 +49,8 @@
     "slack:atlas": "tsx slack_atlas.ts",
     "slack:selftest": "tsx server/slack/selftest.ts",
     "slack:server": "tsx server/slack/main.ts",
+    "tavily:server": "tsx server/tavily/main.ts",
+    "tvly:conformance": "tsx tvly_conformance.ts",
     "trello:server": "tsx server/trello/main.ts",
     "typecheck": "node ../typescript/node_modules/typescript7/bin/tsc -p tsconfig.check.json",
     "wandb:server": "tsx server/wandb/main.ts",
