@@ -12,7 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export { AIRTABLE } from '@struktoai/mirage-core/clis/airtable'
 export { AST_GREP } from '@struktoai/mirage-core/clis/ast_grep'
+export { DISCORD } from '@struktoai/mirage-core/clis/discord'
 export { GH } from '@struktoai/mirage-core/clis/gh'
+export { GIT } from '@struktoai/mirage-core/clis/git'
+export { GWS } from '@struktoai/mirage-core/clis/gws'
+export { HF } from '@struktoai/mirage-core/clis/hf'
+export { HIMALAYA } from '@struktoai/mirage-core/clis/himalaya'
+export { LINEAR } from '@struktoai/mirage-core/clis/linear'
+export { NTN } from '@struktoai/mirage-core/clis/ntn'
 export { OFFICE } from '@struktoai/mirage-core/clis/office'
 export { PDFINFO, PDFTOTEXT } from '@struktoai/mirage-core/clis/pdf'
+export { SEARCH } from '@struktoai/mirage-core/clis/search'
+export { SLACK } from '@struktoai/mirage-core/clis/slack'
+export { TRELLO } from '@struktoai/mirage-core/clis/trello'
+export { TVLY } from '@struktoai/mirage-core/clis/tvly'

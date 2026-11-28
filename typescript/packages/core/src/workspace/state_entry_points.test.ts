@@ -17,6 +17,7 @@ import {
   stdoutStr,
   voicedStderr,
 } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import '../clis/git.ts'
 import { cliSpecFor } from '../commands/cli/specs.ts'
 import { Command, type Context } from '../commands/config.ts'
 import { Argument, CommandSpec } from '../commands/spec/types.ts'

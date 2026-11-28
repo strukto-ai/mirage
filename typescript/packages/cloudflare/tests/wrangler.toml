@@ -1,5 +1,5 @@
 name = "mirage-cloudflare-test"
-main = "worker.ts"
+main = "corpus.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 

@@ -833,7 +833,7 @@ async function startCloudflare(): Promise<{ child: ChildProcess; base: string }>
     join(cloudflare, 'node_modules/.bin/wrangler'),
     [
       'dev',
-      'tests/worker.ts',
+      'tests/corpus.ts',
       '--config',
       'tests/wrangler.toml',
       '--port',

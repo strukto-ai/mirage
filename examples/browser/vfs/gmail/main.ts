@@ -15,7 +15,8 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { GWS, GmailVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
+import { GWS } from '@struktoai/mirage-browser/clis/gws'
+import { GmailVFS, MountMode, Workspace } from '@struktoai/mirage-browser'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development') })

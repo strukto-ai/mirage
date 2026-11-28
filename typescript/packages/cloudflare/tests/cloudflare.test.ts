@@ -54,7 +54,7 @@ async function run(
 }
 
 beforeAll(async () => {
-  worker = await unstable_dev(fileURLToPath(new URL('./worker.ts', import.meta.url)), {
+  worker = await unstable_dev(fileURLToPath(new URL('./corpus.ts', import.meta.url)), {
     config: fileURLToPath(new URL('./wrangler.toml', import.meta.url)),
     experimental: { disableExperimentalWarning: true },
     logLevel: 'error',

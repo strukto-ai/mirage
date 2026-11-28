@@ -331,9 +331,8 @@ GROUPS = (
     ("Productivity", ("gws", "ntn", "linear", "trello", "airtable")),
     ("Web", ("tvly",)),
 )
-CORE_BARREL = ROOT / "typescript/packages/core/src/index.ts"
-CORE_SPECS = ROOT / "typescript/packages/core/src/commands/cli/specs.ts"
-CORE_CLIS = ROOT / "typescript/packages/core/src/clis"
+PACKAGES = ROOT / "typescript/packages"
+CORE_CLIS = PACKAGES / "core/src/clis"
 IMG_STYLE = (
     "{{ display: 'inline', width: '1em', height: '1em', "
     "margin: '0 0.4em 0 0', verticalAlign: '-0.125em' }}"
@@ -487,34 +486,21 @@ def exported(source: Path, pattern: str) -> frozenset[str]:
     )
 
 
-def installed_clis() -> frozenset[str]:
-    """Name the CLIs a host installs through core's ``clis/`` entries.
+def installed_clis(host: str) -> frozenset[str]:
+    """Name the CLIs a host package installs through its ``clis/`` entries.
 
-    The browser and Cloudflare packages re-export each entry, so a page or
-    a Worker that imports one carries that CLI.
+    Each entry re-exports core's of the same name, so a page or a Worker
+    that imports one carries that CLI.
+
+    Args:
+        host (str): The package, ``browser`` or ``cloudflare``.
     """
     return frozenset().union(
         *(
-            exported(entry, r"^export \{([^}]*)\}$")
-            for entry in sorted(CORE_CLIS.glob("*.ts"))
+            exported(CORE_CLIS / entry.name, r"^export \{([^}]*)\}$")
+            for entry in sorted((PACKAGES / host / "src/clis").glob("*.ts"))
         )
     )
-
-
-def browser_clis() -> frozenset[str]:
-    """Name the CLIs core's barrel exports, which the browser package re-exports."""
-    return (
-        exported(CORE_BARREL, r"^export \{([^}]*)\} from") | installed_clis()
-    )
-
-
-def cloudflare_clis() -> frozenset[str]:
-    """Name the CLIs in core's spec table, which a Workers app builds."""
-    seeded = exported(
-        CORE_SPECS,
-        r"^const CLI_SPECS = new Map<string, CLI>\(\s*\[([^\]]*)\]",
-    )
-    return seeded | installed_clis()
 
 
 def catalog(language: str) -> str:
@@ -530,7 +516,8 @@ def catalog(language: str) -> str:
             f"Group every listed CLI once: {listed ^ set(grouped)}"
         )
     if language == "home/setup":
-        browser, cloudflare = browser_clis(), cloudflare_clis()
+        browser = installed_clis("browser")
+        cloudflare = installed_clis("cloudflare")
         rows = [START]
         for title, names in GROUPS:
             rows += [

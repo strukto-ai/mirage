@@ -23,6 +23,7 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { apiFailure, formatSeconds, keylessCapHit, keylessCapText } from './failure.ts'
 import { TVLY } from './index.ts'
+import '../../../../clis/tvly.ts'
 import { Streams } from './output.ts'
 
 const DEC = new TextDecoder()

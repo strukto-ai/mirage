@@ -13,36 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CLI } from './types.ts'
-import { AIRTABLE } from './builtin/airtable/index.ts'
-import { DISCORD } from './builtin/discord/index.ts'
-import { GIT } from './builtin/git/index.ts'
-import { GWS } from './builtin/gws/index.ts'
-import { HF } from './builtin/hf/index.ts'
-import { HIMALAYA } from './builtin/himalaya/index.ts'
-import { LINEAR } from './builtin/linear/index.ts'
-import { NTN } from './builtin/ntn/index.ts'
-import { SEARCH } from './builtin/search/index.ts'
-import { SLACK } from './builtin/slack/index.ts'
-import { TRELLO } from './builtin/trello/index.ts'
-import { TVLY } from './builtin/tvly/index.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { NAME as MCP_CLI } from './mcp/constants.ts'
 
 // Named CLI trees the YAML `clis:` section resolves against
-// (`cli: slack` looks up "slack" here). The light programs are seeded
-// here rather than self-registering from their own modules: a side
-// effect only fires if something imported that module, so which CLIs
-// existed depended on what the caller happened to pull in. The ones
-// carrying an engine (ast-grep, gh, office, pdfinfo and pdftotext) are
-// not: a host installs each by importing its `clis/` entry, so a bundle
-// holds only the engines its host asked for. Runtime packages add theirs
-// through registerCliSpec from their entry point, and user programs do
-// the same before the workspace loads.
-const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, SEARCH, SLACK, TRELLO, TVLY].map(
-    (spec) => [spec.spec.name, spec],
-  ),
-)
+// (`cli: slack` looks up "slack" here). No built-in is seeded: a CLI is
+// a program a host adds to its terminal, so the host installs each by
+// importing its `clis/` entry, and a bundle holds only the CLIs its host
+// asked for. Node's entry points import every entry. Runtime packages
+// add theirs through registerCliSpec from their entry point, and user
+// programs do the same before the workspace loads.
+const CLI_SPECS = new Map<string, CLI>()
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */
 export function registerCliSpec(spec: CLI): void {
@@ -63,7 +44,7 @@ export function unregisterCliSpec(name: string): void {
   CLI_SPECS.delete(name)
 }
 
-/** Every name `cliSpecFor` resolves: bundled and registered. `mcp` is not one; it is built from its server. */
+/** Every name `cliSpecFor` resolves: installed and registered. `mcp` is not one; it is built from its server. */
 export function knownCliNames(): string[] {
   return [...CLI_SPECS.keys()].sort(compareCodePoints)
 }
@@ -76,14 +57,26 @@ export function cliSpecFor(name: string): CLI {
   const spec = CLI_SPECS.get(name)
   if (spec === undefined) {
     const known = [...CLI_SPECS.keys()].sort(compareCodePoints).join(', ') || 'none registered'
-    // The CLIs a host installs by importing their `clis/` entry, so a
-    // config naming one the host left out says which import it needs.
+    // A host installs every built-in CLI by importing its `clis/` entry,
+    // so a config naming one the host left out says which import it needs.
     const entries: Readonly<Record<string, string>> = {
+      airtable: 'airtable',
       'ast-grep': 'ast_grep',
+      discord: 'discord',
       gh: 'gh',
+      git: 'git',
+      gws: 'gws',
+      hf: 'hf',
+      himalaya: 'himalaya',
+      linear: 'linear',
+      ntn: 'ntn',
       office: 'office',
       pdfinfo: 'pdf',
       pdftotext: 'pdf',
+      search: 'search',
+      slack: 'slack',
+      trello: 'trello',
+      tvly: 'tvly',
     }
     const entry = entries[name]
     const hint =

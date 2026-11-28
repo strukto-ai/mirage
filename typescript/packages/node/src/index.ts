@@ -13,7 +13,25 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export * from '@struktoai/mirage-core'
-export { AST_GREP, GH, OFFICE, PDFINFO, PDFTOTEXT } from './clis/index.ts'
+export {
+  AIRTABLE,
+  AST_GREP,
+  DISCORD,
+  GH,
+  GIT,
+  GWS,
+  HF,
+  HIMALAYA,
+  LINEAR,
+  NTN,
+  OFFICE,
+  PDFINFO,
+  PDFTOTEXT,
+  SEARCH,
+  SLACK,
+  TRELLO,
+  TVLY,
+} from './clis/index.ts'
 export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { MountCore, type MountCoreOptions } from '@struktoai/mirage-core/mount/core'
 export { isMacosMetadata } from '@struktoai/mirage-core/mount/platform/macos'
@@ -181,8 +199,6 @@ export type { LangfuseConfig } from '@struktoai/mirage-core/vfs/langfuse/config'
 export { LangfuseVFS } from '@struktoai/mirage-core/vfs/langfuse/langfuse'
 export type { Mem0Config } from '@struktoai/mirage-core/vfs/mem0/config'
 export { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
-export { HF } from '@struktoai/mirage-core/commands/cli/builtin/hf/index'
-export { HIMALAYA } from '@struktoai/mirage-core/commands/cli/builtin/himalaya/index'
 export {
   absolutizeScripts,
   checkWorkspaceConfig,

@@ -28,7 +28,7 @@
    "io/web": "The network gateway for hosts whose only way out is fetch (the browser and edge runtimes, which share it): it judges and counts each request at fetch and routes it by URL. Python's gateway (io/gateway, io/network) watches sockets in its one host, as node's io/gateway does.",
    "vfs/direct": "The backends core wires for a host that holds their credential and reaches the service with fetch (node and cloudflare), apart from core's own table because the browser builds the same backends through a proxy that holds the token. Python has one host, which always holds the credential, so each python vfs/x/x.py is already this class and there is no second wiring to mirror.",
    "remote": "The HTTP client for a Mirage server's workspace API (shell, sessions, VFS calls) that the npm-only agent harnesses (dsh, Pi Durable) use to run where nothing is mounted, such as a Cloudflare Worker. No Python harness runs against a remote workspace, so there is nothing to mirror.",
-   "clis": "The entries a browser page or a Worker imports to install a CLI that carries an engine (ast-grep, gh, office, pdfinfo and pdftotext): each registers its CLI by name, so a bundle holds only the engines its host imported, under Workers' 64 MiB upload limit. Python bundles nothing, so its CLI table holds every built-in and has no entry to mirror."
+   "clis": "The entries a host imports to install a CLI, one per built-in: each registers its CLI by name, so a bundle holds only the CLIs its host imported (a browser page's or a Worker's, under Workers' 64 MiB upload limit), and node's entry points import them all. Python bundles nothing, so its CLI table holds every built-in and has no entry to mirror."
   }
  },
  "modules": {
