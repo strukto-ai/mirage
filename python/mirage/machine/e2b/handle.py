@@ -25,6 +25,7 @@ from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.machine.constants import (
+    PIPE_UNSENT_BYTES,
     PROCESS,
     decode_output,
     encode_output,
@@ -88,7 +89,8 @@ class PtyWriter:
     Writes queue, and one task sends what has queued in one E2B call, in
     order: each call is a round trip, so a reply split into many writes
     would otherwise cost one trip per write. A send that fails hands its
-    error to ``fail`` and sends nothing more.
+    error to ``fail`` and sends nothing more. ``drain`` waits while more
+    than PIPE_UNSENT_BYTES are queued or on their way.
 
     Args:
         pty (Any): the sandbox's ``pty`` API.
@@ -107,31 +109,45 @@ class PtyWriter:
         self._pid = pid
         self._fail = fail
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._unsent = 0
+        self._sent = asyncio.Event()
         self._task = asyncio.create_task(self._send())
 
     def write(self, data: bytes) -> None:
+        self._unsent += len(data)
         self._queue.put_nowait(bytes(data))
+
+    async def drain(self) -> None:
+        while self._unsent > PIPE_UNSENT_BYTES and not self._task.done():
+            self._sent.clear()
+            await self._sent.wait()
 
     def close(self) -> None:
         self._queue.put_nowait(None)
 
     async def _send(self) -> None:
-        while (data := await self._queue.get()) is not None:
-            chunks = [data]
-            ended = False
-            while not ended and not self._queue.empty():
-                more = self._queue.get_nowait()
-                if more is None:
-                    ended = True
-                else:
-                    chunks.append(more)
-            try:
-                await self._pty.send_stdin(self._pid, b"".join(chunks))
-            except Exception as exc:
-                await self._fail(exc)
-                return
-            if ended:
-                return
+        try:
+            while (data := await self._queue.get()) is not None:
+                chunks = [data]
+                ended = False
+                while not ended and not self._queue.empty():
+                    more = self._queue.get_nowait()
+                    if more is None:
+                        ended = True
+                    else:
+                        chunks.append(more)
+                batch = b"".join(chunks)
+                try:
+                    await self._pty.send_stdin(self._pid, batch)
+                except Exception as exc:
+                    await self._fail(exc)
+                    return
+                self._unsent -= len(batch)
+                self._sent.set()
+                if ended:
+                    return
+        finally:
+            self._sent.set()
 
 
 class E2BMachine(MachineHandle, PipeTransportMixin):

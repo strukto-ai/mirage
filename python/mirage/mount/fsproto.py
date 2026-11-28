@@ -380,6 +380,10 @@ class FsprotoServer:
             self._requests.put_nowait(frame)
 
     async def _work(self) -> None:
+        """Answer the requests in the order they came, each reply waiting
+        for the pipe once the writer holds more unsent than it lets wait:
+        a client that asks ahead never has the host hold every reply it
+        asked for."""
         while True:
             frame = await self._requests.get()
             if frame is None:
@@ -395,6 +399,8 @@ class FsprotoServer:
                 reply = encode_frame({"id": rid, "errno": condition(err)})
             try:
                 self._write(reply)
+                if self._writer is not None and not self._ended:
+                    await self._writer.drain()
             except Exception as err:
                 logger.debug("fsproto: answering %s failed: %r", rid, err)
 
@@ -529,7 +535,21 @@ class FsprotoServer:
                 binary=True,
             )
             fh = await core.open(path, mode)
-            return {"fh": fh, **await self._keep(path)}, EMPTY
+            keep = await self._keep(path)
+            first = min(whole(h.get("first"), 0), FSPROTO_WHOLE_BYTES)
+            if first > 0 and not mode.writable and not keep.get("w"):
+                # A read-only open's first bytes, read with it, so its
+                # first read costs no trip of its own. A read that fails
+                # leaves the open as it is, for that read to meet. They
+                # are at most what a whole read carries, so the reply
+                # fits a frame and the client gets its handle.
+                try:
+                    data = await core.read(path, first, 0, fh)
+                except Exception as err:
+                    logger.debug("fsproto: reading %s at open: %r", path, err)
+                else:
+                    return {"fh": fh, "first": True, **keep}, data
+            return {"fh": fh, **keep}, EMPTY
         if op == "create":
             mode = OpenMode(
                 readable=True,

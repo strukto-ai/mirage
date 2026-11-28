@@ -24,7 +24,12 @@ from mirage.machine.cloudflare_container.constants import (
     NO_CONTAINER,
     STOPPED,
 )
-from mirage.machine.constants import CHECK_LINE, EXEC_PRELUDE, PROCESS
+from mirage.machine.constants import (
+    CHECK_LINE,
+    EXEC_PRELUDE,
+    PIPE_UNSENT_BYTES,
+    PROCESS,
+)
 from mirage.machine.registry import build_machine
 from mirage.types import PathSpec
 from tests.fixtures.cloudflare_container import FakeContainer, FakeProcess
@@ -194,6 +199,25 @@ async def test_a_pipe_sends_its_writes_in_order_and_stops_with_term():
     assert await asyncio.wait_for(pipe.reader.readexactly(2), 5) == b"ab"
     await pipe.stop()
     assert box.ran("sftp -e").killed == [15]
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_holding_more_unsent_than_it_lets_wait_drains_as_it_sends():
+    box, machine = boxed(sftp=sleep)
+    pipe = await machine.open_pipe("sftp -e")
+    stdin = box.ran("sftp -e").stdin
+    stdin.room.clear()
+    pipe.writer.write(b"a")
+    await asyncio.wait_for(pipe.writer.drain(), 5)
+    pipe.writer.write(bytes(PIPE_UNSENT_BYTES))
+    draining = asyncio.create_task(pipe.writer.drain())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not draining.done()
+    stdin.room.set()
+    await asyncio.wait_for(draining, 5)
+    assert bytes(stdin.data[:1]) == b"a"
+    await pipe.stop()
 
 
 @pytest.mark.asyncio

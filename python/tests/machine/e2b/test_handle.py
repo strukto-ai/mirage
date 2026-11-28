@@ -38,6 +38,7 @@ from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.machine.constants import (
     MOUNT_GUARD,
+    PIPE_UNSENT_BYTES,
     PROCESS,
     RUN_PROGRAM_AT,
     encode_output,
@@ -194,7 +195,8 @@ class FakePtyHandle:
 
 
 class FakePty:
-    """E2B's pty API: the shell echoes its line, then the command speaks."""
+    """E2B's pty API: the shell echoes its line, then the command speaks.
+    A send returns once ``room`` is set, as a slow sandbox answers."""
 
     def __init__(self):
         self.sent: list[bytes] = []
@@ -202,6 +204,8 @@ class FakePty:
         self.on_data = None
         self.created = None
         self.refuse = False
+        self.room = asyncio.Event()
+        self.room.set()
 
     async def create(self, size, *, on_data, timeout):
         self.created = (size.rows, size.cols, timeout)
@@ -216,6 +220,7 @@ class FakePty:
         if len(self.sent) == 1:
             self.on_data(b"$ stty raw -echo\r\n" + PTY_MARK[:3])
             self.on_data(PTY_MARK[3:] + b"\x00sftp")
+        await self.room.wait()
 
     async def kill(self, pid):
         assert pid == self.handle.pid
@@ -938,6 +943,29 @@ async def test_a_pipe_is_a_raw_pty_past_the_shells_own_output():
     await pipe.stop()
     assert pty.handle.ended.is_set()
     assert pipe.reader.at_eof()
+
+
+@pytest.mark.asyncio
+async def test_a_pipe_holding_more_unsent_than_it_lets_wait_drains_as_it_sends():
+    runtime = E2BMachine("box", config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    pty = FakeMachine.last.pty
+    pipe = await runtime.open_pipe("exec sshfs x y")
+    assert await pipe.reader.readexactly(5) == b"\x00sftp"
+    pty.room.clear()
+    pipe.writer.write(b"a")
+    await asyncio.wait_for(pipe.writer.drain(), 1)
+    while len(pty.sent) < 2:
+        await asyncio.sleep(0)
+    pipe.writer.write(bytes(PIPE_UNSENT_BYTES))
+    draining = asyncio.create_task(pipe.writer.drain())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not draining.done()
+    assert pty.sent[1:] == [b"a"]
+    pty.room.set()
+    await asyncio.wait_for(draining, 1)
+    await pipe.stop()
 
 
 @pytest.mark.asyncio

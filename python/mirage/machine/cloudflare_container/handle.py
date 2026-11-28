@@ -39,6 +39,7 @@ from mirage.machine.constants import (
     EXEC_PRELUDE,
     PIPE_DIAGNOSTIC_BYTES,
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
+    PIPE_UNSENT_BYTES,
     PROCESS,
     STOP_GRACE_SECONDS,
     is_run,
@@ -90,7 +91,8 @@ async def drain(reader: asyncio.StreamReader, sink: OutputFn) -> None:
 class PipeInput:
     """A pipe command's stdin as a pipe writer. One write lands before
     the next is sent, and one that fails ends the command: bytes after a
-    gap mean nothing.
+    gap mean nothing. ``drain`` waits while more than PIPE_UNSENT_BYTES
+    are queued or on their way.
 
     Args:
         proc (ExecProcess): the command.
@@ -106,10 +108,18 @@ class PipeInput:
         self._proc = proc
         self._broken = broken
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._unsent = 0
+        self._sent = asyncio.Event()
         self._task = asyncio.create_task(self._send())
 
     def write(self, data: bytes) -> None:
+        self._unsent += len(data)
         self._queue.put_nowait(bytes(data))
+
+    async def drain(self) -> None:
+        while self._unsent > PIPE_UNSENT_BYTES and not self._task.done():
+            self._sent.clear()
+            await self._sent.wait()
 
     def close(self) -> None:
         self._queue.put_nowait(None)
@@ -118,9 +128,13 @@ class PipeInput:
         try:
             while (data := await self._queue.get()) is not None:
                 await self._proc.stdin.write(data)
+                self._unsent -= len(data)
+                self._sent.set()
             await self._proc.stdin.close()
         except Exception as exc:
             await self._broken(exc)
+        finally:
+            self._sent.set()
 
 
 class ContainerMachine(MachineHandle, PipeTransportMixin):

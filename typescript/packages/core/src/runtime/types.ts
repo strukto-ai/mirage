@@ -237,9 +237,13 @@ export interface Program {
   readonly scriptCli?: boolean
 }
 
-/** Where a pipe's bytes go: a Node `Writable`, or anything with its two calls. */
+/**
+ * Where a pipe's bytes go. `drain` resolves once the writer holds no more
+ * unsent than it lets wait; node's `pipeWriter` makes one of a `Writable`.
+ */
 export interface PipeWriter {
   write(data: Uint8Array): void
+  drain(): Promise<void>
   end(): void
 }
 

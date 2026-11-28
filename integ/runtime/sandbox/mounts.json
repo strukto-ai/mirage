@@ -215,6 +215,60 @@
       ]
     },
     {
+      "id": "mount_type_mirage_reads_a_file_past_what_it_asks_ahead",
+      "note": "mirage-fuse asks for what follows a file read in order before the program reads it, up to 4 MiB ahead, so a file far past that reads back whole; a change made through another open meanwhile drops what was asked, so the reading open's next read finds it.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 1 2000000 > /served/big.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'md5sum < /served/big.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "6736d7273b6d064962343221daf13702  -\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'exec 3< /served/big.txt; dd bs=1000000 count=1 iflag=fullblock of=/dev/null 2>/dev/null <&3; printf X | dd of=/served/big.txt bs=1 seek=2000000 conv=notrunc 2>/dev/null; dd bs=1000001 count=1 iflag=fullblock 2>/dev/null <&3 | tail -c 1; echo'",
+          "expect": {
+            "exit": 0,
+            "stdout": "X\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "/tmp is the box's own, as / and /dev are, and the workspace shows it as a machine mount: sshfs does not serve over it, a file a program writes there is the file Mirage reads, and a line runs from it.",

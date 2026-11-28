@@ -232,7 +232,7 @@ class MountingDockerMachine extends FakeDockerMachine {
     })
     return Promise.resolve({
       reader,
-      writer: { write: () => undefined, end: () => undefined },
+      writer: { write: () => undefined, drain: () => Promise.resolve(), end: () => undefined },
       stop: () => {
         end()
         return Promise.resolve()

@@ -28,6 +28,7 @@ import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { SshSdk } from './sdk.ts'
 import { SSHMachineConfig } from './config.ts'
+import { pipeWriter } from '../program.ts'
 import { isRun, stopSignal, wrapLine } from '@struktoai/mirage-core/machine/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { feed } from '@struktoai/mirage-core/io/stream'
@@ -244,7 +245,7 @@ export class SSHMachine extends MachineHandle<SSHMachineConfig> implements PipeT
         })
         resolve({
           reader: Readable.toWeb(stream) as ReadableStream<Uint8Array>,
-          writer: stream,
+          writer: pipeWriter(stream),
           stop: async () => {
             stream.close()
             await exited

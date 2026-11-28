@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -32,6 +32,12 @@ fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A request on its way to the host, whose reply `Link::answer` waits for.
+pub struct Sent {
+    id: u64,
+    reply: Receiver<Frame>,
 }
 
 /// One file handle's requests sent ahead: how many have no reply yet, the
@@ -218,11 +224,17 @@ impl Link {
         true
     }
 
-    /// Send `op` with `args` and `body`, and wait for its reply; a reply
-    /// later than the link's wait finds no one waiting and is dropped. A
-    /// timeout that loses the race to `serve`, which already took the
-    /// waiter, takes the reply it hands over, so exactly one side owns it.
+    /// Send `op` with `args` and `body`, and wait for its reply.
     pub fn call(&self, op: &str, args: Value, body: &[u8]) -> Result<Frame, Failure> {
+        let sent = self.ask(op, args, body)?;
+        self.answer(sent)
+    }
+
+    /// Send `op` with `args` and `body` now, for `answer` to take its reply
+    /// later: requests asked one after another are all on their way while
+    /// the first is answered. One dropped unanswered leaves its reply to
+    /// go nowhere when it comes.
+    pub fn ask(&self, op: &str, args: Value, body: &[u8]) -> Result<Sent, Failure> {
         let id = self.next.fetch_add(1, Ordering::Relaxed) + 1;
         let mut head = match args {
             Value::Object(head) => head,
@@ -241,6 +253,15 @@ impl Link {
             }
             return Err(Failure::Lost);
         }
+        Ok(Sent { id, reply: rx })
+    }
+
+    /// Wait for the reply to `sent`; a reply later than the link's wait
+    /// finds no one waiting and is dropped. A timeout that loses the race
+    /// to `serve`, which already took the waiter, takes the reply it hands
+    /// over, so exactly one side owns it.
+    pub fn answer(&self, sent: Sent) -> Result<Frame, Failure> {
+        let Sent { id, reply: rx } = sent;
         let reply = match rx.recv_timeout(self.wait) {
             Ok(reply) => reply,
             Err(RecvTimeoutError::Timeout) => {
@@ -548,6 +569,27 @@ mod tests {
         let input = frame(json!({"id": 1, "errno": "EIO"}), b"");
         link.serve(&mut input.as_slice(), |_| {}).unwrap();
         assert!(locked(&link.ahead).handles.is_empty());
+    }
+
+    #[test]
+    fn requests_asked_together_are_all_sent_before_one_is_answered() {
+        let (requests, mut sent) = std::os::unix::net::UnixStream::pair().unwrap();
+        sent.set_read_timeout(Some(BOUND)).unwrap();
+        let link = Arc::new(Link::new(Box::new(requests)));
+        let first = link.ask("read", json!({"offset": 0}), &[]).unwrap();
+        let second = link.ask("read", json!({"offset": 4}), &[]).unwrap();
+        let ids: Vec<u64> = (0..2)
+            .map(|_| read_frame(&mut sent).unwrap().unwrap().u64("id").unwrap())
+            .collect();
+        let mut replies = served(&link);
+        replies
+            .write_all(&frame(json!({"id": ids[1]}), b"efgh"))
+            .unwrap();
+        replies
+            .write_all(&frame(json!({"id": ids[0]}), b"abcd"))
+            .unwrap();
+        assert_eq!(link.answer(second).unwrap().body, b"efgh");
+        assert_eq!(link.answer(first).unwrap().body, b"abcd");
     }
 
     #[test]

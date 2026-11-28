@@ -72,6 +72,12 @@ export const UNMOUNT_WAIT_SECONDS = 5
 export const PIPE_DIAGNOSTIC_BYTES = 16384
 export const PIPE_DIAGNOSTIC_WAIT_SECONDS = 1
 
+// How many bytes a machine pipe's writer holds unsent before its `drain`
+// waits: replies written together still go in one call, and a host that
+// answers faster than the pipe carries waits for it rather than holding
+// every reply the machine asked for ahead.
+export const PIPE_UNSENT_BYTES = 4 * 1024 * 1024
+
 // sshfs keeps no copy of its own, and every read asks the host, so a file
 // whose size the backend does not know reads whole (direct_io), as the
 // workspace's own FUSE mounts do. The machine's kernel keeps what a name, its

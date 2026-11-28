@@ -20,7 +20,11 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.mount.changes import SERVED_BY, RecentChanges
-from mirage.mount.constants import FSPROTO_VERSION
+from mirage.mount.constants import (
+    FSPROTO_FRAME_BYTES,
+    FSPROTO_VERSION,
+    FSPROTO_WHOLE_BYTES,
+)
 from mirage.mount.fsproto import (
     Frame,
     FrameReader,
@@ -35,12 +39,15 @@ from mirage.utils.clock import ManualClock
 
 class Client:
     """A mirage-fuse end: requests go in, replies come back by id,
-    pushes queue apart."""
+    pushes queue apart. Its pipe takes what is written once ``room`` is
+    set, as a pipe a slow transport carries does."""
 
     def __init__(self) -> None:
         self.reader = asyncio.StreamReader()
         self.replies: dict[int, Frame] = {}
         self.pushes: list[Frame] = []
+        self.room = asyncio.Event()
+        self.room.set()
         self._got = asyncio.StreamReader()
         self._frames = FrameReader()
         self._next = 0
@@ -49,6 +56,9 @@ class Client:
 
     def write(self, data: bytes) -> None:
         self._got.feed_data(data)
+
+    async def drain(self) -> None:
+        await self.room.wait()
 
     def close(self) -> None:
         self._got.feed_eof()
@@ -172,6 +182,65 @@ async def test_a_file_reads_whole_and_a_write_lands_by_its_release():
 
 
 @pytest.mark.asyncio
+async def test_a_read_only_open_carries_the_first_bytes_it_asks_for():
+    ws, server, end, serving = await served()
+    path = "/notes/plan.txt"
+    some = await end.call({"op": "open", "path": path, "first": 3})
+    whole = await end.call({"op": "open", "path": path, "first": 100})
+    plain = await end.call({"op": "open", "path": path})
+    writes = await end.call(
+        {"op": "open", "path": path, "write": True, "first": 100}
+    )
+    assert [(r.head.get("first"), r.body) for r in (some, whole)] == [
+        (True, b"pla"),
+        (True, b"plan"),
+    ]
+    assert [(r.head.get("first"), r.body) for r in (plain, writes)] == [
+        (None, b""),
+        (None, b""),
+    ]
+    for r in (some, whole, plain, writes):
+        await end.call({"op": "release", "fh": r.head["fh"]})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_reply_the_pipe_has_not_taken_holds_back_the_next():
+    ws, server, end, serving = await served()
+    opened = await end.call({"op": "open", "path": "/notes/plan.txt"})
+    fh = opened.head["fh"]
+    end.room.clear()
+    end.send({"op": "read", "fh": fh, "offset": 0, "size": 2, "id": 101})
+    end.send({"op": "read", "fh": fh, "offset": 2, "size": 2, "id": 102})
+    await end.until(lambda: 101 in end.replies)
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert 102 not in end.replies
+    end.room.set()
+    await end.until(lambda: 102 in end.replies)
+    assert [end.replies[i].body for i in (101, 102)] == [b"pl", b"an"]
+    await end.call({"op": "release", "fh": fh})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_an_open_carries_no_more_first_bytes_than_a_whole_read():
+    ws, server, end, serving = await served()
+    path = "/notes/big.bin"
+    await ws.vfs.write(path, b"x" * (FSPROTO_WHOLE_BYTES + 1))
+    opened = await end.call(
+        {"op": "open", "path": path, "first": FSPROTO_FRAME_BYTES}
+    )
+    assert (opened.head.get("first"), len(opened.body)) == (
+        True,
+        FSPROTO_WHOLE_BYTES,
+    )
+    released = await end.call({"op": "release", "fh": opened.head["fh"]})
+    assert "errno" not in released.head
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
 async def test_a_rename_with_noreplace_refuses_an_existing_target():
     ws, server, end, serving = await served()
     made = await end.call(
@@ -275,6 +344,22 @@ async def test_while_a_policy_judges_file_calls_nothing_is_kept():
         (False, True)
     ] * 3
     assert watch.asked == ["agent"] * 3
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_while_a_policy_judges_file_calls_an_open_reads_nothing_with_it():
+    watch = Watch()
+    watch.on = True
+    server, end, serving = await watched(watch)
+    opened = await end.call(
+        {"op": "open", "path": "/notes/plan.txt", "first": 100}
+    )
+    assert (opened.head.get("first"), opened.head["w"], opened.body) == (
+        None,
+        True,
+        b"",
+    )
     await end.end(serving)
 
 

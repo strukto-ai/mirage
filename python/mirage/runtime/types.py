@@ -372,9 +372,12 @@ class ByteReader(Protocol):
 
 class PipeWriter(Protocol):
     """Where a pipe's bytes go: an ``asyncio.StreamWriter``, or anything
-    with its two calls."""
+    with its three calls. ``drain`` waits while the writer holds more
+    unsent than it lets wait."""
 
     def write(self, data: bytes) -> None: ...
+
+    async def drain(self) -> None: ...
 
     def close(self) -> None: ...
 

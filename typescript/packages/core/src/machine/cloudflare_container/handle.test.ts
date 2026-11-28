@@ -20,6 +20,7 @@ import {
   EXEC_PRELUDE,
   MOUNT_GUARD,
   PIPE_DIAGNOSTIC_BYTES,
+  PIPE_UNSENT_BYTES,
   PROCESS,
   isRun,
   RUN_PROGRAM_AT,
@@ -478,6 +479,18 @@ describe('ContainerMachine pipe', () => {
     pipe.writer.end()
     expect(await readAll(pipe.reader)).toEqual(concat([ODD, ENC.encode('second'), ODD]))
     expect(box.ran('cat').overlapped).toBe(false)
+  })
+
+  it('drains once what it holds unsent is within what it lets wait', async () => {
+    const { box, machine } = boxed({ sleep })
+    const pipe = await machine.openPipe('sleep 60')
+    pipe.writer.write(ODD)
+    await pipe.writer.drain()
+    expect(box.ran('sleep 60').input.byteLength).toBe(0)
+    pipe.writer.write(new Uint8Array(PIPE_UNSENT_BYTES))
+    await pipe.writer.drain()
+    expect(box.ran('sleep 60').input).toEqual(ODD)
+    await pipe.stop()
   })
 
   it('copies a write, which the caller may reuse', async () => {

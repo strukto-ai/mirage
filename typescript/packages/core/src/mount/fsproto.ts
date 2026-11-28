@@ -310,6 +310,11 @@ export class FsprotoServer {
     this.send({ push: 'inval', paths })
   }
 
+  /**
+   * Answer a request behind the ones before it, each reply waiting for the
+   * pipe once the writer holds more unsent than it lets wait: a client that
+   * asks ahead never has the host hold every reply it asked for.
+   */
   private take(frame: Frame): void {
     const hid = num(frame.head.hid)
     if (hid !== null) {
@@ -332,6 +337,7 @@ export class FsprotoServer {
       }
       try {
         this.write(reply)
+        if (this.writer !== null && !this.ended) await this.writer.drain()
       } catch (err) {
         console.debug(`fsproto: answering ${String(id)} failed`, err)
       }
@@ -448,7 +454,21 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode)
-        return [{ fh: fd, ...(await this.keep(path)) }, EMPTY]
+        const keep = await this.keep(path)
+        const first = Math.min(whole(h.first, 0), FSPROTO_WHOLE_BYTES)
+        if (first > 0 && !mode.writable && keep.w !== true) {
+          // A read-only open's first bytes, read with it, so its first read
+          // costs no trip of its own. A read that fails leaves the open as it
+          // is, for that read to meet. They are at most what a whole read
+          // carries, so the reply fits a frame and the client gets its handle.
+          try {
+            const data = await core.read(path, fd, 0, first)
+            return [{ fh: fd, first: true, ...keep }, data]
+          } catch (err) {
+            console.debug(`fsproto: reading ${path} at open`, err)
+          }
+        }
+        return [{ fh: fd, ...keep }, EMPTY]
       }
       case 'create': {
         const mode: OpenMode = {

@@ -23,7 +23,12 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { ConnectionLostError } from '@struktoai/mirage-core/machine/errors'
 import type { MachinePipe } from '@struktoai/mirage-core/machine/types'
-import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
+import type {
+  OutputFn,
+  PipeWriter,
+  RunAnswer,
+  RunResult,
+} from '@struktoai/mirage-core/runtime/types'
 import {
   EXEC_PRELUDE,
   HOST_START_SLACK_SECONDS,
@@ -935,6 +940,36 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
 }
 
 /**
+ * A `Writable` as a pipe writer: `drain` resolves once the stream holds no
+ * more than its high-water mark, or once it closes or fails, so a stream that
+ * went away holds no one waiting on it.
+ */
+export function pipeWriter(stream: Writable): PipeWriter {
+  return {
+    write: (data) => {
+      stream.write(data)
+    },
+    drain: () => {
+      if (!stream.writableNeedDrain || stream.destroyed) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const done = (): void => {
+          stream.off('drain', done)
+          stream.off('close', done)
+          stream.off('error', done)
+          resolve()
+        }
+        stream.on('drain', done)
+        stream.on('close', done)
+        stream.on('error', done)
+      })
+    },
+    end: () => {
+      stream.end()
+    },
+  }
+}
+
+/**
  * Hold a byte transport to a machine helper until stopped. The tail of what
  * the helper says on stderr is kept for `diagnostic`, so a mount that fails
  * can say why. Stopping ends the helper's input; one that has not closed
@@ -966,7 +1001,7 @@ export function openProgramPipe(executable: string, args: string[]): Promise<Mac
   )
   return Promise.resolve({
     reader: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
-    writer: child.stdin,
+    writer: pipeWriter(child.stdin),
     diagnostic: async () => {
       await Promise.race([
         exited,

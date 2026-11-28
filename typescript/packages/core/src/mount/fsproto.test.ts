@@ -19,13 +19,17 @@ import type { Action } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RecentChanges, SERVED_BY } from './changes.ts'
-import { FSPROTO_VERSION } from './constants.ts'
+import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './constants.ts'
 import { type Frame, FrameReader, FsprotoServer, bounded, encodeFrame } from './fsproto.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-/** A mirage-fuse end: requests go in, replies come back by id, pushes queue apart. */
+/**
+ * A mirage-fuse end: requests go in, replies come back by id, pushes queue apart.
+ * Between `hold` and `release` its pipe takes nothing more, as a pipe a slow
+ * transport carries does.
+ */
 function client() {
   let feed: ReadableStreamDefaultController<Uint8Array> | null = null
   const reader = new ReadableStream<Uint8Array>({
@@ -46,8 +50,11 @@ function client() {
       }
       for (const wake of waiting.splice(0)) wake()
     },
+    drain: () => room,
     end: () => undefined,
   }
+  let room: Promise<void> = Promise.resolve()
+  let release: () => void = () => undefined
   let next = 0
   async function until(test: () => boolean): Promise<void> {
     while (!test()) await new Promise<void>((resolve) => waiting.push(resolve))
@@ -55,8 +62,18 @@ function client() {
   return {
     reader,
     writer,
+    replies,
     pushes,
     until,
+    hold() {
+      room = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    },
+    release() {
+      release()
+      room = Promise.resolve()
+    },
     send(head: Record<string, unknown>, body?: Uint8Array) {
       feed?.enqueue(encodeFrame(head, body))
     },
@@ -201,6 +218,54 @@ describe('FsprotoServer', () => {
     await serving
   })
 
+  it('carries the first bytes a read-only open asks for', async () => {
+    const { end, serving } = await served()
+    const path = '/notes/plan.txt'
+    const some = await end.call({ op: 'open', path, first: 3 })
+    const whole = await end.call({ op: 'open', path, first: 100 })
+    const plain = await end.call({ op: 'open', path })
+    const writes = await end.call({ op: 'open', path, write: true, first: 100 })
+    expect([some, whole, plain, writes].map((r) => [r.head.first, DEC.decode(r.body)])).toEqual([
+      [true, 'pla'],
+      [true, 'plan'],
+      [undefined, ''],
+      [undefined, ''],
+    ])
+    for (const r of [some, whole, plain, writes]) await end.call({ op: 'release', fh: r.head.fh })
+    end.close()
+    await serving
+  })
+
+  it('holds back the next reply until the pipe takes the one before', async () => {
+    const { end, serving } = await served()
+    const opened = await end.call({ op: 'open', path: '/notes/plan.txt' })
+    const fh = opened.head.fh
+    end.hold()
+    end.send({ op: 'read', fh, offset: 0, size: 2, id: 101 })
+    end.send({ op: 'read', fh, offset: 2, size: 2, id: 102 })
+    await end.until(() => end.replies.has(101))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(end.replies.has(102)).toBe(false)
+    end.release()
+    await end.until(() => end.replies.has(102))
+    expect([101, 102].map((id) => DEC.decode(end.replies.get(id)?.body))).toEqual(['pl', 'an'])
+    await end.call({ op: 'release', fh })
+    end.close()
+    await serving
+  })
+
+  it('carries no more first bytes than a whole read', async () => {
+    const { ws, end, serving } = await served()
+    const path = '/notes/big.bin'
+    await ws.vfs.write(path, new Uint8Array(FSPROTO_WHOLE_BYTES + 1).fill(120))
+    const opened = await end.call({ op: 'open', path, first: FSPROTO_FRAME_BYTES })
+    expect([opened.head.first, opened.body.byteLength]).toEqual([true, FSPROTO_WHOLE_BYTES])
+    const released = await end.call({ op: 'release', fh: opened.head.fh })
+    expect(released.head.errno).toBeUndefined()
+    end.close()
+    await serving
+  })
+
   it('creates a file and refuses a rename over one with noreplace', async () => {
     const { ws, end, serving } = await served()
     const made = await end.call({ op: 'create', path: '/notes/new.txt', mode: 0o644 })
@@ -268,6 +333,14 @@ describe('FsprotoServer', () => {
       [false, true],
     ])
     expect(asked).toEqual(['agent', 'agent', 'agent'])
+    end.close()
+    await serving
+  })
+
+  it('reads nothing with an open while a policy judges file calls', async () => {
+    const { end, serving } = await watched(() => Promise.resolve(true))
+    const opened = await end.call({ op: 'open', path: '/notes/plan.txt', first: 100 })
+    expect([opened.head.first, opened.head.w, opened.body.byteLength]).toEqual([undefined, true, 0])
     end.close()
     await serving
   })

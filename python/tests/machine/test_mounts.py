@@ -83,6 +83,9 @@ class Sink:
     def write(self, data: bytes) -> None:
         return None
 
+    async def drain(self) -> None:
+        return None
+
     def close(self) -> None:
         return None
 
