@@ -156,6 +156,85 @@ describe('tvly research', () => {
     ])
   })
 
+  it('hands on each event of a JSON stream as it arrives', async () => {
+    const enc = new TextEncoder()
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(enc.encode('data: {"n": 1}\n\n'))
+        await held
+        controller.enqueue(enc.encode('data: {"n": 2}\n\ndata: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(body))),
+    )
+    const ws = new Workspace({})
+    ws.registerCli('tvly', TVLY, { api_key: 'tvly-k' })
+    try {
+      const execution = await ws.shell('tvly research topic --stream --json', { stream: true })
+      const events = execution.events[Symbol.asyncIterator]()
+      const first = await events.next()
+      release()
+      const rest: string[] = []
+      for (;;) {
+        const next = await events.next()
+        if (next.done === true) break
+        rest.push(DEC.decode(next.value.data))
+      }
+      const result = await execution.wait()
+      expect(first.done === true ? '' : DEC.decode(first.value.data)).toBe('{"n":1}\n')
+      expect(rest.join('')).toBe('{"n":2}\n')
+      expect(result.exitCode).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['--json', '{"n":1}\n', ''],
+    ['', '', '  Plan\n'],
+  ])('keeps what came before a stream cut short (%j)', async (flags, stdout, steps) => {
+    const enc = new TextEncoder()
+    const plan = {
+      choices: [{ delta: { tool_calls: { type: 'tool_call', tool_call: [{ name: 'Plan' }] } } }],
+    }
+    const event = flags === '' ? plan : { n: 1 }
+    // The first read hands the event over and the next one fails: an error
+    // in the same call would drop the queued chunk before it was read.
+    let reads = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          reads += 1
+          if (reads === 1) controller.enqueue(enc.encode(`data: ${JSON.stringify(event)}\n\n`))
+          else controller.error(new TypeError('terminated'))
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response(body))),
+    )
+    const [code, out, err] = await run(`tvly research topic --stream ${flags}`.trim())
+    if (flags === '') {
+      expect(out).toBe(stdout)
+      expect(
+        err.startsWith(`${steps}  > Error: An unexpected error occurred while making the request.`),
+      ).toBe(true)
+    } else {
+      expect(out.startsWith(stdout)).toBe(true)
+      expect(out).toContain('{"error":"An unexpected error occurred')
+    }
+    expect(code).toBe(4)
+  })
+
   it('refuses the options only run takes', async () => {
     expect(await run('tvly research status r1 --model pro')).toEqual([
       2,

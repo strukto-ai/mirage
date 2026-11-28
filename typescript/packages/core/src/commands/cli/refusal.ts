@@ -384,7 +384,7 @@ export function commanderLeafRefusal(
   }
   const needy = parsed.needsValueOptions[0]
   if (kind === 'needs_value' && needy !== undefined) {
-    const worded = missingValue(needy, spec)
+    const worded = missingValue(needy.startsWith('-') ? needy : `-${needy}`, spec)
     if (worded !== null) return [encodeText(worded), COMMANDER_EXIT, null]
   }
   return [argparseMessage, COMMANDER_EXIT, null]

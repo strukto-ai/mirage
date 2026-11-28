@@ -19,13 +19,16 @@
 import asyncio
 import errno
 import json
+import math
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 import aiohttp
 import orjson
 
 from mirage.accessor.tavily import TavilyAccessor
-from mirage.core.api.client import ReadMode, api_request
+from mirage.core.api.client import ReadMode, api_request, api_stream
 from mirage.core.api.errors import ApiError
 from mirage.core.render.json import ecma_numbers, number_text
 from mirage.core.tavily.constants import CLIENT_SOURCE, KEYLESS_CLIENT_SOURCE
@@ -169,7 +172,9 @@ async def tavily_request(
         endpoint (str): the path under the API root, without a slash.
         body (JsonValue): the JSON body; a GET sends none.
         timeout (float | None): seconds the whole call may take; None
-            waits as long as the answer keeps flowing.
+            waits as long as the answer keeps flowing. A budget past the
+            install's stall limit sends the call on a session of its own
+            that waits that long, so the pool's limit never cuts it short.
         client_name (str | None): sent as ``X-Client-Name``.
         read (ReadMode): "json" for an answer, "text" for a stream read
             whole.
@@ -179,6 +184,10 @@ async def tavily_request(
         TavilyUnanswered: it took longer than ``timeout`` or never
             connected.
     """
+    stall = accessor.config.timeout
+    if timeout is not None and math.isfinite(timeout):
+        stall = max(stall, timeout)
+    budget_fits = stall == accessor.config.timeout
     try:
         async with asyncio.timeout(timeout):
             return await api_request(
@@ -188,15 +197,56 @@ async def tavily_request(
                 headers=_headers(accessor, client_name),
                 json_body=body if method != "GET" else None,
                 read=read,
+                session=accessor.pool if budget_fits else None,
+                timeout=stall,
+            )
+    except (TimeoutError, aiohttp.ClientError) as exc:
+        raise _unanswered(exc, timeout) from exc
+
+
+async def tavily_stream(
+    accessor: TavilyAccessor,
+    endpoint: str,
+    body: JsonValue,
+    *,
+    client_name: str | None = None,
+) -> AsyncGenerator[bytes, None]:
+    """One streamed Tavily POST, its answer chunk by chunk as it arrives.
+
+    Args:
+        accessor (TavilyAccessor): the account's config and pool.
+        endpoint (str): the path under the API root, without a slash.
+        body (JsonValue): the JSON body.
+        client_name (str | None): sent as ``X-Client-Name``.
+
+    Raises:
+        TavilyAPIError: the API refused the call.
+        TavilyUnanswered: it stalled or never connected.
+    """
+    try:
+        async with aclosing(
+            api_stream(
+                f"{accessor.config.base_url.rstrip('/')}/{endpoint}",
+                error_of=_error_of,
+                method="POST",
+                json_body=body,
+                headers=_headers(accessor, client_name),
                 session=accessor.pool,
             )
-    except TimeoutError as exc:
+        ) as chunks:
+            async for chunk in chunks:
+                yield chunk
+    except (TimeoutError, aiohttp.ClientError) as exc:
+        raise _unanswered(exc, None) from exc
+
+
+def _unanswered(
+    exc: TimeoutError | aiohttp.ClientError, timeout: float | None
+) -> TavilyUnanswered:
+    if isinstance(exc, TimeoutError):
         seconds = number_text(timeout) if timeout is not None else "0"
-        raise TavilyUnanswered(
-            f"Request timed out after {seconds} seconds."
-        ) from exc
-    except aiohttp.ClientError as exc:
-        raise TavilyUnanswered(
-            "An unexpected error occurred while making the request. "
-            f"Error: {_unanswered_text(exc)}"
-        ) from exc
+        return TavilyUnanswered(f"Request timed out after {seconds} seconds.")
+    return TavilyUnanswered(
+        "An unexpected error occurred while making the request. "
+        f"Error: {_unanswered_text(exc)}"
+    )

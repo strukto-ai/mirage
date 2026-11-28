@@ -93,7 +93,7 @@ describe('tvly search', () => {
     const bodies = stubApi({ body: { results: [] } })
     const [code, out] = await run(
       'tvly search q --time-range week --max-results 2 --depth fast ' +
-        '--include-answer --include-domains a.com,,b.com',
+        '--include-answer --include-domains a.com,,\ufeffb.com',
     )
     expect([code, out]).toEqual([0, 'No results found.\n'])
     const body = bodies[0] ?? {}

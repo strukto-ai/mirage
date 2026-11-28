@@ -20,6 +20,7 @@ from aioresponses import aioresponses
 from yarl import URL
 
 from mirage.accessor.tavily import TavilyAccessor
+from mirage.core.tavily import client
 from mirage.core.tavily.client import (
     TavilyAPIError,
     TavilyKeylessLimit,
@@ -139,3 +140,25 @@ def test_a_timeout_the_line_gave_is_kept_where_it_is():
     body, seconds = timed_body({"timeout": 5, "urls": ["u"]}, 30.0)
     assert body == {"timeout": 5, "urls": ["u"]}
     assert seconds == 5.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("budget", "pooled", "stall"),
+    [(None, True, 150.0), (60.0, True, 150.0), (180.0, False, 180.0)],
+)
+async def test_a_budget_past_the_stall_limit_waits_on_a_session_of_its_own(
+    monkeypatch, budget, pooled, stall
+):
+    accessor = TavilyAccessor(TavilyConfig(api_key="tvly-k"))
+    seen: dict = {}
+
+    async def answer(*_args, **kwargs):
+        seen.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(client, "api_request", answer)
+    await client.tavily_request(accessor, "POST", "crawl", {}, timeout=budget)
+    assert (seen["session"] is accessor.pool) is pooled
+    assert seen["timeout"] == stall
+    await accessor.close()

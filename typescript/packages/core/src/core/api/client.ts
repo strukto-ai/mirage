@@ -117,7 +117,9 @@ export function stallTimeout(
 }
 
 /**
- * Pull a GET response in bounded chunks, cancelling its body on early exit.
+ * Pull a response in bounded chunks, cancelling its body on early exit. A
+ * streamed answer to a POST, such as server-sent events, reads the same way
+ * as a download (`method` and `json`, absent for a GET).
  * `retry` applies to opening the response only: once a chunk has reached the
  * caller a failure propagates, since a second attempt would hand it the same
  * bytes twice.
@@ -129,6 +131,8 @@ export async function* apiStream(
     'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep' | 'timeout'
   > & {
     signal?: AbortSignal
+    method?: string
+    json?: unknown
     /** Told the answering response's headers, lower-cased, once and before
      * the first chunk, so an empty body reports them too. */
     onResponse?: (headers: Record<string, string>) => void
@@ -146,7 +150,8 @@ export async function* apiStream(
     let response: Response
     try {
       response = await doFetch(url, {
-        method: 'GET',
+        method: options.method ?? 'GET',
+        ...(options.json === undefined ? {} : { body: JSON.stringify(options.json) }),
         ...(options.headers === undefined ? {} : { headers: options.headers }),
         ...(signal === undefined ? {} : { signal }),
       })

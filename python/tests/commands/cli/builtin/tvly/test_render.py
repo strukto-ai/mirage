@@ -89,3 +89,9 @@ def test_each_page_echoes_under_its_url():
     assert pages_text(pages) == (
         "# https://a\n\nbody\n\n# https://b\n\n(no content)\n\n"
     )
+
+
+def test_trim_is_linear_over_a_long_inner_run():
+    assert (
+        js_trim(" a" + " " * 200_000 + "b\ufeff") == "a" + " " * 200_000 + "b"
+    )

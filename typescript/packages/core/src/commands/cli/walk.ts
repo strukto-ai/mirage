@@ -26,7 +26,7 @@ import { CommandSpec, type CommandSpecInit, UsageStyle, Argument, WordKind } fro
 import { PathSpec } from '../../types.ts'
 
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
-import { COMMANDER_EXIT, excessArguments, unknownOption } from './commander.ts'
+import { COMMANDER_EXIT, excessArguments, missingValue, unknownOption } from './commander.ts'
 import {
   DefaultCommandRoot,
   WalkResult,
@@ -460,6 +460,54 @@ export function listedNode(
 }
 
 /**
+ * Commander's answer to operands a group takes none of. Commander reads the
+ * rest of the line before it counts them: an option the group does not
+ * declare is refused as unknown, `--help` still prints the help, and past
+ * `--` every word is an operand.
+ */
+function commanderExcess(
+  name: string,
+  node: CommandSpec,
+  cs: CompiledSpec,
+  words: readonly string[],
+  optionsEnded: boolean,
+): WalkResult {
+  const operands: string[] = []
+  let ended = optionsEnded
+  let taking = false
+  for (const word of words) {
+    if (taking) {
+      taking = false
+      continue
+    }
+    if (!ended && word === '--') {
+      ended = true
+      continue
+    }
+    if (ended || !word.startsWith('-') || word === '-') {
+      operands.push(word)
+      continue
+    }
+    const eq = word.indexOf('=')
+    const spelling = eq < 0 ? word : word.slice(0, eq)
+    if ((spelling === '--help' || spelling === '-h') && node.addHelp && eq < 0) {
+      return new WalkResult({ output: encodeText(nodeHelp(name, node, UsageStyle.COMMANDER)) })
+    }
+    if (eq < 0 && (cs.longBoolSpellings.has(spelling) || cs.boolSpellings.has(spelling))) continue
+    if (cs.longValueSpellings.has(spelling)) {
+      taking = eq < 0
+      continue
+    }
+    return usageError(name, node, `unknown option: ${word}`, UsageStyle.COMMANDER, word)
+  }
+  return new WalkResult({
+    output: encodeText(excessArguments(operands)),
+    stream: 'stderr',
+    exitCode: COMMANDER_EXIT,
+  })
+}
+
+/**
  * Group-level option refusal, in the dialect the CLI declares. git answers an
  * unknown option in parse-options' words and its usage block (on stdout for
  * `-h`), and the bare `git` with its one synopsis; both exit 129. The bare
@@ -471,7 +519,8 @@ export function listedNode(
  *
  * `token` is the offending token when the refusal is an unrecognized option,
  * which clap and git word their own way; it is absent for the refusals whose
- * wording the dialects share.
+ * wording the dialects share. `missing` is the option typed with no value
+ * after it, which commander words as its argument missing.
  */
 function usageError(
   name: string,
@@ -479,6 +528,7 @@ function usageError(
   message: string,
   style: UsageStyle,
   token?: string,
+  missing?: string,
 ): WalkResult {
   if (style === UsageStyle.COBRA) {
     return new WalkResult({
@@ -495,7 +545,11 @@ function usageError(
     })
   }
   if (style === UsageStyle.COMMANDER) {
-    const text = token === undefined ? `error: ${message}\n` : unknownOption(token, [node])
+    const worded = missing === undefined ? null : missingValue(missing, node)
+    const text =
+      token !== undefined
+        ? unknownOption(token, [node])
+        : (worded ?? (message.startsWith('error: ') ? `${message}\n` : `error: ${message}\n`))
     return new WalkResult({ output: encodeText(text), stream: 'stderr', exitCode: COMMANDER_EXIT })
   }
   if (style === UsageStyle.CLAP) {
@@ -659,7 +713,10 @@ function matchShort(
     const attached = token.slice(vf.length)
     const remaining = (arity ?? 1) - (attached === '' ? 0 : 1)
     if (following.length < remaining)
-      return [0, usageError(name, node, `error: option '${vf}' requires a value`, style)]
+      return [
+        0,
+        usageError(name, node, `error: option '${vf}' requires a value`, style, undefined, vf),
+      ]
     const values = [...(attached === '' ? [] : [attached]), ...following.slice(0, remaining)]
     const where = [
       ...(attached === '' ? [] : [at]),
@@ -1050,7 +1107,13 @@ export function walk(
           }
         } else if (cs.longBoolSpellings.has(spelling)) {
           if (attached !== null) {
-            return usageError(name, node, `error: option '${spelling}' takes no value`, style)
+            return usageError(
+              name,
+              node,
+              `error: option '${spelling}' takes no value`,
+              style,
+              style === UsageStyle.COMMANDER ? token : undefined,
+            )
           }
           recordBool(flags, cs, spelling)
         } else if (cs.longValueSpellings.has(spelling)) {
@@ -1062,7 +1125,14 @@ export function walk(
             if (attached !== null)
               return usageError(name, node, `unknown option: ${token}`, style, token)
             if (argv.length - i - 1 < width)
-              return usageError(name, node, `error: option '${spelling}' requires a value`, style)
+              return usageError(
+                name,
+                node,
+                `error: option '${spelling}' requires a value`,
+                style,
+                undefined,
+                spelling,
+              )
             recordValues(
               flags,
               cs,
@@ -1078,11 +1148,24 @@ export function walk(
             i += 1
             recordValue(flags, cs, spelling, next, taken, i)
           } else {
-            return usageError(name, node, `error: option '${spelling}' requires a value`, style)
+            return usageError(
+              name,
+              node,
+              `error: option '${spelling}' requires a value`,
+              style,
+              undefined,
+              spelling,
+            )
           }
         } else if (spelling === '--help' && node.addHelp) {
           if (attached !== null) {
-            return usageError(name, node, `error: option '${spelling}' takes no value`, style)
+            return usageError(
+              name,
+              node,
+              `error: option '${spelling}' takes no value`,
+              style,
+              style === UsageStyle.COMMANDER ? token : undefined,
+            )
           }
           return new WalkResult({
             output: encodeText(nodeHelp(name, node, style)),
@@ -1183,12 +1266,7 @@ export function walk(
           })
         }
         if (style === UsageStyle.COMMANDER) {
-          const words = argv.slice(i).filter((word) => !word.startsWith('-'))
-          return new WalkResult({
-            output: encodeText(excessArguments(words)),
-            stream: 'stderr',
-            exitCode: COMMANDER_EXIT,
-          })
+          return commanderExcess(name, node, cs, argv.slice(i), optionsEnded)
         }
         return unknownVerb(head, name, token, node, style)
       }

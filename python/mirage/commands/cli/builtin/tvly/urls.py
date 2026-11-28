@@ -34,6 +34,8 @@ DEFAULT_PORTS = {
 PATH_SAFE = "/!$%&'()*+,-.:;=@[]^_|~"
 QUERY_SAFE = "!$%&'()*+,-./:;=?@[\\]^_`{|}~"
 SLUG_UNSAFE = re.compile(r"[^\w\-.]")
+# WHATWG's dot segments, lower-cased: how many levels each one climbs.
+DOT_SEGMENTS = {".": 0, "%2e": 0, "..": 1, ".%2e": 1, "%2e.": 1, "%2e%2e": 1}
 
 
 class ParsedURL(NamedTuple):
@@ -50,6 +52,28 @@ class ParsedURL(NamedTuple):
     host: str
     pathname: str
     search: str
+
+
+def resolve_dots(path: str) -> str:
+    """The path as WHATWG's path state leaves it on a special URL: a
+    ``.`` segment dropped, a ``..`` one taking the segment before it,
+    and either one last leaving the path's trailing slash.
+
+    Args:
+        path (str): the path, starting with ``/``.
+    """
+    parts = path.split("/")[1:]
+    kept: list[str] = []
+    for n, part in enumerate(parts):
+        climb = DOT_SEGMENTS.get(part.lower())
+        if climb is None:
+            kept.append(part)
+            continue
+        if climb and kept:
+            kept.pop()
+        if n == len(parts) - 1:
+            kept.append("")
+    return "/" + "/".join(kept)
 
 
 def parse_url(url: str) -> ParsedURL | None:
@@ -100,7 +124,7 @@ def parse_url(url: str) -> ParsedURL | None:
         else f"{hostname}:{port}"
     )
     path, _, query = tail.partition("?")
-    pathname = quote(path or "/", safe=PATH_SAFE)
+    pathname = quote(resolve_dots(path or "/"), safe=PATH_SAFE)
     search = f"?{quote(query, safe=QUERY_SAFE)}" if query else ""
     return ParsedURL(hostname, host, pathname, search)
 

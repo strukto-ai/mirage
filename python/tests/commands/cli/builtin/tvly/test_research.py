@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 from aioresponses import aioresponses
 from yarl import URL
 
@@ -157,6 +161,104 @@ async def test_a_stream_shows_its_steps_then_the_report():
     assert code == 0
     assert err == "  Plan\n  Found 2 sources\n"
     assert out == "Report\n\nSources:\n1. T u\n"
+
+
+PLAN = {
+    "choices": [
+        {
+            "delta": {
+                "tool_calls": {
+                    "type": "tool_call",
+                    "tool_call": [{"name": "Plan"}],
+                }
+            }
+        }
+    ]
+}
+
+
+async def serve_stream(
+    send: Callable[[web.Request, web.StreamResponse], Awaitable[None]],
+) -> AsyncIterator[TestServer]:
+    """A local research endpoint whose stream ``send`` writes."""
+
+    async def research(request: web.Request) -> web.StreamResponse:
+        response = web.StreamResponse(
+            headers={"Content-Type": "text/event-stream"}
+        )
+        await response.prepare(request)
+        await send(request, response)
+        return response
+
+    app = web.Application()
+    app.router.add_post("/research", research)
+    async with TestServer(app) as server:
+        yield server
+
+
+@pytest.mark.asyncio
+async def test_a_json_stream_hands_on_each_event_as_it_arrives():
+    held = asyncio.Event()
+
+    async def send(_: web.Request, response: web.StreamResponse) -> None:
+        await response.write(b'data: {"n": 1}\n\n')
+        await held.wait()
+        await response.write(b'data: {"n": 2}\n\ndata: [DONE]\n\n')
+        await response.write_eof()
+
+    async for server in serve_stream(send):
+        ws = Workspace({})
+        ws.register_cli(
+            "tvly",
+            TVLY,
+            {"api_key": "tvly-k", "base_url": str(server.make_url(""))},
+        )
+        execution = await ws.shell(
+            "tvly research topic --stream --json", stream=True
+        )
+        async with execution:
+            events = aiter(execution.events)
+            first = await asyncio.wait_for(anext(events), 5)
+            held.set()
+            rest = [event.data async for event in events]
+            result = await execution.wait()
+        await ws.close()
+    assert first.data == b'{"n":1}\n'
+    assert b"".join(rest) == b'{"n":2}\n'
+    assert result.exit_code == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("flags", "stdout", "steps"),
+    [
+        ("--json", '{"n":1}\n', ""),
+        ("", "", "  Plan\n"),
+    ],
+)
+async def test_a_stream_cut_short_keeps_what_came_before(flags, stdout, steps):
+    event = {"n": 1} if flags else PLAN
+
+    async def send(request: web.Request, response: web.StreamResponse) -> None:
+        await response.write(f"data: {json.dumps(event)}\n\n".encode())
+        assert request.transport is not None
+        request.transport.abort()
+
+    async for server in serve_stream(send):
+        code, out, err = await run(
+            f"tvly research topic --stream {flags}".strip(),
+            config={"api_key": "tvly-k", "base_url": str(server.make_url(""))},
+        )
+    if flags:
+        assert out.startswith(stdout)
+        assert '{"error":"An unexpected error occurred' in out
+    else:
+        assert out == stdout
+        assert err.startswith(
+            steps
+            + "  > Error: An unexpected error occurred while making the request."
+        )
+    assert code == 4
 
 
 @pytest.mark.asyncio

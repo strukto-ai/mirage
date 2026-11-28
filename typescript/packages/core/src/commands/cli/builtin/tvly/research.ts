@@ -18,7 +18,12 @@
 
 import type { TavilyAccessor } from '../../../../accessor/tavily.ts'
 import { callerSignal } from '../../../../context/session_context.ts'
-import { TavilyUnanswered, tavilyRequest } from '../../../../core/tavily/client.ts'
+import {
+  TavilyAPIError,
+  TavilyUnanswered,
+  tavilyRequest,
+  tavilyStream,
+} from '../../../../core/tavily/client.ts'
 import { RESEARCH_GET_TIMEOUT } from '../../../../core/tavily/constants.ts'
 import { isMissingPath } from '../../../../errors/fs.ts'
 import { IOResult, materialize, type CommandOutput } from '../../../../io/types.ts'
@@ -29,7 +34,7 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { nodeHelp } from '../../walk.ts'
-import { requireKey, usage } from './failure.ts'
+import { apiFailure, requireKey, usage } from './failure.ts'
 import { InvalidOption, clientNameOf, typedChoice, typedNumber } from './options.ts'
 import { Streams, emit, resolveOutput } from './output.ts'
 import {
@@ -196,13 +201,8 @@ export function streamEvents(text: string): unknown[] {
   return events
 }
 
-/** Show each tool step on stderr as it changes, then the joined content as the report. */
-export async function streamed(
-  streams: Streams,
-  ctx: Context,
-  events: readonly unknown[],
-  output: PathSpec | undefined,
-): Promise<void> {
+/** Show each tool step on stderr as it changes; the report the events' joined content makes. */
+export function streamSteps(streams: Streams, events: readonly unknown[]): Record<string, unknown> {
   const parts: string[] = []
   let sources: unknown[] = []
   let current: string | undefined
@@ -235,8 +235,66 @@ export async function streamed(
     const found = items(field(delta, 'sources'))
     if (found.length > 0) sources = found
   }
-  const report = { status: 'completed', content: parts.join(''), sources }
+  return { status: 'completed', content: parts.join(''), sources }
+}
+
+/** Show each tool step on stderr as it changes, then the joined content as the report. */
+export async function streamed(
+  streams: Streams,
+  ctx: Context,
+  events: readonly unknown[],
+  output: PathSpec | undefined,
+): Promise<void> {
+  const report = streamSteps(streams, events)
   await resultText(streams, ctx, false, report, output)
+}
+
+/** Each event of a stream as soon as its line is whole. */
+export async function* arrivingEvents(
+  chunks: AsyncGenerator<Uint8Array, void>,
+): AsyncGenerator<unknown, void> {
+  const decoder = new TextDecoder()
+  let pending = ''
+  for await (const chunk of chunks) {
+    const text = pending + decoder.decode(chunk, { stream: true })
+    const cut = text.lastIndexOf('\n')
+    pending = text.slice(cut + 1)
+    yield* streamEvents(text.slice(0, Math.max(cut, 0)))
+  }
+  yield* streamEvents(pending + decoder.decode())
+}
+
+/**
+ * `research --stream` as its events arrive: under `--json` each event's line
+ * as soon as it parses, else the steps and the report once the stream ends. A
+ * failure keeps what came before it, then settles `io` with tvly's answer.
+ */
+export async function* liveResearch(
+  chunks: AsyncGenerator<Uint8Array, void>,
+  io: IOResult,
+  ctx: Context,
+  json: boolean,
+  output: PathSpec | undefined,
+): AsyncGenerator<Uint8Array, void> {
+  const streams = new Streams()
+  const events: unknown[] = []
+  let settled: CommandOutput
+  try {
+    for await (const event of arrivingEvents(chunks)) {
+      if (json) yield ENC.encode(`${jsonText(event, false)}\n`)
+      else events.push(event)
+    }
+    if (!json) await streamed(streams, ctx, events, output)
+    settled = streams.result()
+  } catch (err) {
+    if (!(err instanceof TavilyAPIError) && !(err instanceof TavilyUnanswered)) throw err
+    if (!json) streamSteps(streams, events)
+    settled = apiFailure(streams, err, json)
+  }
+  const [out, result] = settled
+  io.exitCode = result.exitCode
+  io.stderr = result.stderr
+  if (out instanceof Uint8Array && out.length > 0) yield out
 }
 
 export async function run(
@@ -289,20 +347,14 @@ export async function run(
   const clientName = clientNameOf(fl)
   const streams = new Streams()
   if (fl.asBool('stream')) {
-    const text = (await tavilyRequest(
+    const chunks = tavilyStream(
       accessor,
-      'POST',
       'research',
       { citation_format: 'numbered', ...body, stream: true },
-      { clientName, read: 'text' },
-    )) as string
-    const events = streamEvents(text)
-    if (fl.asBool('json')) {
-      for (const event of events) streams.out(jsonText(event, false))
-      return streams.result()
-    }
-    await streamed(streams, ctx, events, output)
-    return streams.result()
+      { clientName },
+    )
+    const settled = new IOResult()
+    return [liveResearch(chunks, settled, ctx, fl.asBool('json'), output), settled]
   }
   const result = await tavilyRequest(
     accessor,

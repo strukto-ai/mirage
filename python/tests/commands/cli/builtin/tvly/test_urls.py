@@ -52,6 +52,10 @@ def test_text_that_is_no_url_keeps_its_fallbacks():
         ("https://example.com/", "example.com"),
         ("https://example.com/a?x=1", "example.com_a_x_1"),
         ("///", "index"),
+        ("https://example.com/a/../b", "example.com_b"),
+        ("https://example.com/a/./b/%2E", "example.com_a_b"),
+        ("https://example.com/a/b/..", "example.com_a"),
+        ("https://example.com/../..", "example.com"),
     ],
 )
 def test_a_page_slug_is_its_location_with_unsafe_characters_folded(url, slug):

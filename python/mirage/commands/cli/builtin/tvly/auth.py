@@ -19,9 +19,10 @@
 # even in part.
 
 from mirage.accessor.tavily import TavilyAccessor
-from mirage.commands.cli.builtin.tvly.failure import NO_KEY
+from mirage.commands.cli.builtin.tvly.failure import NO_KEY, usage
 from mirage.commands.cli.builtin.tvly.output import Streams
 from mirage.commands.cli.builtin.tvly.render import json_text
+from mirage.commands.cli.commander import excess_arguments
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
@@ -42,9 +43,11 @@ async def auth(
     Args:
         accessor (TavilyAccessor): the install's account.
         paths (list[PathSpec]): unused.
-        texts (list[str]): unused.
+        texts (list[str]): operands, which ``auth`` takes none of.
         ctx (Context): the invocation context.
     """
+    if texts:
+        return usage(excess_arguments(texts, "auth").rstrip("\n"))
     keyed = accessor.config.api_key is not None
     streams = Streams()
     if FlagView(ctx.flags, ctx.spec).as_bool("json"):

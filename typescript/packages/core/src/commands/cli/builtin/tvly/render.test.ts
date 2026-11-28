@@ -49,6 +49,7 @@ describe('tvly rendering', () => {
   it("trims JavaScript's whitespace set", () => {
     expect(jsTrim('﻿  a 　')).toBe('a')
     expect(jsTrim('\x1c a')).toBe('\x1c a')
+    expect(jsTrim(` a${' '.repeat(200_000)}b\ufeff`)).toBe(`a${' '.repeat(200_000)}b`)
   })
 
   it('counts and cuts in UTF-16 units', () => {

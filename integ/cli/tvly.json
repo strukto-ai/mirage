@@ -836,6 +836,110 @@
         "stdout": "usage: tvly research [--model model] [--no-wait] [--stream] [--output-schema file] [--citation-format format] [-o [file]] [--poll-interval n] [--timeout n] [--client-name name] [--json] [-h] [query ...]\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tvly_root_attached_value",
+      "seq": 572064,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --json=x search q",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--json=x'\n(Did you mean --json?)\n"
+      }
+    },
+    {
+      "id": "tvly_root_help_attached_value",
+      "seq": 572065,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly --help=x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '--help=x'\n(Did you mean --help?)\n"
+      }
+    },
+    {
+      "id": "tvly_root_dashed_operand",
+      "seq": 572066,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly -- -x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments. Expected 0 arguments but got 1: -x.\n"
+      }
+    },
+    {
+      "id": "tvly_root_operands_around_dashes",
+      "seq": 572067,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a b -- -x c",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments. Expected 0 arguments but got 4: a, b, -x, c.\n"
+      }
+    },
+    {
+      "id": "tvly_root_operand_then_unknown",
+      "seq": 572068,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a -x",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: unknown option '-x'\n"
+      }
+    },
+    {
+      "id": "tvly_root_operand_then_help",
+      "seq": 572069,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly a --help > /dev/null; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "tvly_auth_operand",
+      "seq": 572070,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly auth extra",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "error: too many arguments for 'auth'. Expected 0 arguments but got 1: extra.\n"
+      }
+    },
+    {
+      "id": "tvly_search_zero_results",
+      "seq": 572071,
+      "targets": [
+        "cli-tvly"
+      ],
+      "command": "tvly search \"shell terminal\" --max-results 0 --json",
+      "expect": {
+        "exit": 0,
+        "stdout": "{\n  \"query\": \"shell terminal\",\n  \"follow_up_questions\": null,\n  \"answer\": null,\n  \"images\": [],\n  \"results\": [],\n  \"response_time\": 0.42,\n  \"request_id\": \"req-search-shell\"\n}\n",
+        "stderr": ""
+      }
     }
   ]
 }

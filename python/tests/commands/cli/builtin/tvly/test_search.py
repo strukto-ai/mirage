@@ -68,7 +68,7 @@ async def test_the_options_fill_the_body_in_the_sdk_catalogs_order():
         m.post(SEARCH, payload={"results": []})
         code, out, _ = await run(
             "tvly search q --time-range week --max-results 2 --depth fast "
-            "--include-answer --include-domains a.com,,b.com"
+            "--include-answer --include-domains a.com,,\ufeffb.com"
         )
         body = m.requests[("POST", URL(SEARCH))][0].kwargs["json"]
     assert code == 0 and out == "No results found.\n"

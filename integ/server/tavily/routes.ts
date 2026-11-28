@@ -45,8 +45,10 @@ function textOf(value: JsonValue | undefined): string {
   return typeof value === 'string' ? value : ''
 }
 
-function countOf(value: JsonValue | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback
+// The count a body asks for; `least` is the smallest the API takes (search's
+// max_results takes 0, a crawl's limit at least 1).
+function countOf(value: JsonValue | undefined, fallback: number, least = 1): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= least ? value : fallback
 }
 
 // A keyed request must carry the one key the fixture accepts; a keyless one
@@ -106,7 +108,7 @@ function search(ctx: Ctx<C>): Reply {
       answer: asked(body.include_answer) ? (rule?.answer ?? null) : null,
       images: images.map((image) => imageJson(image, described)),
       results: hits
-        .slice(0, countOf(body.max_results, DEFAULT_MAX_RESULTS))
+        .slice(0, countOf(body.max_results, DEFAULT_MAX_RESULTS, 0))
         .map((hit) => hitJson(hit, raw)),
       response_time: RESPONSE_TIME,
       request_id: `req-search-${rule?.id ?? 'none'}`,

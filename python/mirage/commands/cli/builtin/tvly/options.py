@@ -27,6 +27,8 @@ from mirage.types import JsonValue
 
 DECIMAL = re.compile(r"[+-]?(?:(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|Infinity)")
 RADIX = re.compile(r"0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)")
+# The least integer a double rounds up to Infinity.
+FLOAT_OVERFLOW = 2**1024 - 2**970
 
 
 class InvalidOption(Exception):
@@ -57,7 +59,8 @@ def js_number(raw: str) -> float:
     if DECIMAL.fullmatch(text):
         return float(text.replace("Infinity", "inf"))
     if RADIX.fullmatch(text):
-        return float(int(text, 0))
+        whole = int(text, 0)
+        return math.inf if whole >= FLOAT_OVERFLOW else float(whole)
     return math.nan
 
 

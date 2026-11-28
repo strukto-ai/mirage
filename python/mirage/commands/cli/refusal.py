@@ -393,7 +393,9 @@ def commander_leaf_refusal(
         word = token if token.startswith("-") else f"-{token}"
         return encode_text(unknown_option(word, [spec])), COMMANDER_EXIT, None
     if kind == "needs_value" and parsed.needs_value_options:
-        worded = missing_value(parsed.needs_value_options[0], spec)
+        token = parsed.needs_value_options[0]
+        word = token if token.startswith("-") else f"-{token}"
+        worded = missing_value(word, spec)
         if worded is not None:
             return encode_text(worded), COMMANDER_EXIT, None
     return argparse_message, COMMANDER_EXIT, None

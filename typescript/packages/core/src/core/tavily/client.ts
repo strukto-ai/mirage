@@ -18,11 +18,19 @@
 import type { TavilyAccessor } from '../../accessor/tavily.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import type { JsonValue } from '../../types.ts'
-import { apiRequest, type ReadMode } from '../api/client.ts'
+import { apiRequest, apiStream, type ReadMode } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 import { numberText } from '../render/json.ts'
 import { isRecord } from '../../utils/records.ts'
-import { CLIENT_SOURCE, DEFAULT_API_BASE_URL, KEYLESS_CLIENT_SOURCE } from './constants.ts'
+import {
+  CLIENT_SOURCE,
+  DEFAULT_API_BASE_URL,
+  DEFAULT_TIMEOUT,
+  KEYLESS_CLIENT_SOURCE,
+} from './constants.ts'
+
+/** The longest delay Node's timers hold; one past it fires at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1
 
 /** A call the Tavily API refused. */
 export class TavilyAPIError extends ApiError {
@@ -122,8 +130,12 @@ export async function tavilyRequest(
   options: { timeout?: number; clientName?: string | undefined; read?: ReadMode } = {},
 ): Promise<unknown> {
   const base = (accessor.config.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+  const budget = options.timeout === undefined ? undefined : Math.trunc(options.timeout * 1000)
   const deadline =
-    options.timeout === undefined ? undefined : AbortSignal.timeout(options.timeout * 1000)
+    budget === undefined || budget > MAX_TIMER_MS
+      ? undefined
+      : AbortSignal.timeout(Math.max(0, budget))
+  const stall = accessor.config.timeout ?? DEFAULT_TIMEOUT
   const caller = callerSignal()
   const signal =
     deadline === undefined
@@ -137,19 +149,57 @@ export async function tavilyRequest(
       headers: headers(accessor, options.clientName),
       ...(method !== 'GET' && body !== undefined ? { json: body } : {}),
       read: options.read ?? 'json',
-      timeout: accessor.config.timeout,
+      timeout:
+        options.timeout !== undefined && Number.isFinite(options.timeout)
+          ? Math.max(stall, options.timeout)
+          : stall,
       signal,
     })
   } catch (err) {
-    if (deadline?.aborted === true || (err instanceof Error && err.name === 'TimeoutError')) {
-      const seconds = options.timeout === undefined ? '0' : numberText(options.timeout)
-      throw new TavilyUnanswered(`Request timed out after ${seconds} seconds.`)
-    }
-    if (err instanceof TypeError && caller?.aborted !== true) {
-      throw new TavilyUnanswered(
-        `An unexpected error occurred while making the request. Error: ${unansweredText(err)}`,
-      )
-    }
-    throw err
+    throw unanswered(err, deadline?.aborted === true, options.timeout, caller)
   }
+}
+
+/** One streamed Tavily POST, its answer chunk by chunk as it arrives. */
+export async function* tavilyStream(
+  accessor: TavilyAccessor,
+  endpoint: string,
+  body: JsonValue,
+  options: { clientName?: string | undefined } = {},
+): AsyncGenerator<Uint8Array, void> {
+  const base = (accessor.config.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+  const caller = callerSignal()
+  try {
+    yield* apiStream(`${base}/${endpoint}`, {
+      errorOf,
+      method: 'POST',
+      json: body,
+      headers: headers(accessor, options.clientName),
+      timeout: accessor.config.timeout ?? DEFAULT_TIMEOUT,
+    })
+  } catch (err) {
+    throw unanswered(err, false, undefined, caller)
+  }
+}
+
+/**
+ * The failure of a call Tavily never answered, in tvly's words; any other
+ * failure (the API's refusal, the caller's stop) is handed back as it came.
+ */
+function unanswered(
+  err: unknown,
+  timedOut: boolean,
+  timeout: number | undefined,
+  caller: AbortSignal | undefined,
+): unknown {
+  if (timedOut || (err instanceof Error && err.name === 'TimeoutError')) {
+    const seconds = timeout === undefined ? '0' : numberText(timeout)
+    return new TavilyUnanswered(`Request timed out after ${seconds} seconds.`)
+  }
+  if (err instanceof TypeError && caller?.aborted !== true) {
+    return new TavilyUnanswered(
+      `An unexpected error occurred while making the request. Error: ${unansweredText(err)}`,
+    )
+  }
+  return err
 }

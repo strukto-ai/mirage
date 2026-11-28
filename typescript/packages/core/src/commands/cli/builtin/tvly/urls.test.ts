@@ -42,6 +42,10 @@ describe('tvly urls', () => {
     ['https://example.com/', 'example.com'],
     ['https://example.com/a?x=1', 'example.com_a_x_1'],
     ['///', 'index'],
+    ['https://example.com/a/../b', 'example.com_b'],
+    ['https://example.com/a/./b/%2E', 'example.com_a_b'],
+    ['https://example.com/a/b/..', 'example.com_a'],
+    ['https://example.com/../..', 'example.com'],
   ])('slugs %s as %s', (url, slug) => {
     expect(pageSlug(url)).toBe(slug)
   })

@@ -21,7 +21,6 @@ const CONTROL_CHARS = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g
 const BLANK_RUNS = /\n(?:[ \t]*\n){2,}/g
 const JS_SPACE = '\\s'
 const SPACE_RUN = new RegExp(`[${JS_SPACE}]+`)
-const EDGE_SPACE = new RegExp(`^[${JS_SPACE}]+|[${JS_SPACE}]+$`, 'g')
 
 /** `String(value)`: the python twin spells it out. */
 export function jsText(value: unknown): string {
@@ -35,7 +34,7 @@ export function truthy(value: unknown): boolean {
 
 /** `String.prototype.trim`. */
 export function jsTrim(text: string): string {
-  return text.replace(EDGE_SPACE, '')
+  return text.trim()
 }
 
 /** `text.slice(0, units)`, counted in UTF-16 code units as JavaScript counts. */

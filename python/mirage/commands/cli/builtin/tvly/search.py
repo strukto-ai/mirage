@@ -339,7 +339,7 @@ def flag_value(flag: SearchFlag, raw: str | bool) -> JsonValue:
         return {"true": True, "false": False}.get(value, value)
     text = str(raw)
     if flag.kind == "list":
-        return [part for part in (p.strip() for p in text.split(",")) if part]
+        return [part for part in map(js_trim, text.split(",")) if part]
     if flag.kind in ("integer", "number"):
         return parse_number(
             text,

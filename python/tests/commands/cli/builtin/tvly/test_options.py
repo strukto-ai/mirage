@@ -71,3 +71,10 @@ def test_a_comma_list_keeps_empty_parts_trimmed():
     assert split_csv(" /a , /b,") == ["/a", "/b", ""]
     assert split_csv("") is None
     assert split_csv(None) is None
+
+
+def test_a_radix_past_the_double_range_reads_as_infinity():
+    assert js_number("0x" + "f" * 256) == math.inf
+    assert js_number(hex(2**1024 - 2**970 - 1)) == 2**1024 - 2**971
+    with pytest.raises(InvalidOption, match="Not an integer."):
+        parse_number("0x" + "f" * 256, "--max-results <n>", integer=True)

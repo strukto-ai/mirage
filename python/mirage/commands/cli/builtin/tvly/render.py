@@ -27,11 +27,15 @@ from mirage.types import JsonValue
 
 CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 BLANK_RUNS = re.compile(r"\n(?:[ \t]*\n){2,}")
-JS_SPACE = (
-    r"\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+JS_SPACE = "".join(
+    map(
+        chr,
+        (0x9, 0xA, 0xB, 0xC, 0xD, 0x20, 0xA0, 0x1680)
+        + tuple(range(0x2000, 0x200B))
+        + (0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF),
+    )
 )
-SPACE_RUN = re.compile(f"[{JS_SPACE}]+")
-EDGE_SPACE = re.compile(f"^[{JS_SPACE}]+|[{JS_SPACE}]+$")
+SPACE_RUN = re.compile(f"[{re.escape(JS_SPACE)}]+")
 
 
 def js_text(value: JsonValue) -> str:
@@ -78,7 +82,7 @@ def js_trim(text: str) -> str:
     Args:
         text (str): the text.
     """
-    return EDGE_SPACE.sub("", text)
+    return text.strip(JS_SPACE)
 
 
 def utf16_slice(text: str, units: int) -> str:

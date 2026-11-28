@@ -24,7 +24,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { start } from './server/kit/typescript/index.ts'
@@ -60,7 +60,9 @@ function isConformable(one: Case): boolean {
 
 function resolveTvly(): string | null {
   const pinned = process.env.TVLY_BIN
-  if (pinned !== undefined && pinned !== '') return pinned
+  // Absolute: each case runs from a temporary home, where a relative PATH
+  // entry would name another directory.
+  if (pinned !== undefined && pinned !== '') return resolve(pinned)
   const found = spawnSync('which', ['tvly'], { encoding: 'utf8' })
   if (found.status === 0) return found.stdout.trim()
   return null

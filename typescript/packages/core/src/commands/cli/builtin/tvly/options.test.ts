@@ -57,6 +57,13 @@ describe('tvly option values', () => {
     )
   })
 
+  it('reads a radix past the double range as Infinity', () => {
+    expect(jsNumber(`0x${'f'.repeat(256)}`)).toBe(Infinity)
+    expect(
+      refusal(() => parseNumber(`0x${'f'.repeat(256)}`, '--max-results <n>', { integer: true })),
+    ).toContain('Not an integer.')
+  })
+
   it('names every allowed value of a choice', () => {
     expect(checkChoice('pro', '--model <model>', ['mini', 'pro'])).toBe('pro')
     expect(refusal(() => checkChoice('max', '--model <model>', ['mini', 'pro']))).toContain(

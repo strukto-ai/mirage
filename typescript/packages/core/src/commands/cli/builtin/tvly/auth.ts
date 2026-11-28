@@ -21,7 +21,8 @@ import type { TavilyAccessor } from '../../../../accessor/tavily.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
-import { NO_KEY } from './failure.ts'
+import { excessArguments } from '../../commander.ts'
+import { NO_KEY, usage } from './failure.ts'
 import { Streams } from './output.ts'
 import { jsonText } from './render.ts'
 
@@ -32,9 +33,10 @@ const SOURCE = "the tvly install's api_key"
 export function auth(
   accessor: TavilyAccessor,
   _paths: PathSpec[],
-  _texts: string[],
+  texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
+  if (texts.length > 0) return Promise.resolve(usage(excessArguments(texts, 'auth').trimEnd()))
   const keyed = accessor.config.apiKey !== undefined
   const streams = new Streams()
   if (new FlagView(ctx.flags, ctx.spec).asBool('json')) {

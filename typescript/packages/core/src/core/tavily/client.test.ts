@@ -142,6 +142,20 @@ describe('tavily client', () => {
     )
   })
 
+  it.each([1.0625, 1e10, Infinity])('sends a call whose budget is %s seconds', async (budget) => {
+    const sent = stubApi(200, {})
+    await tavilyRequest(
+      new TavilyAccessor({ apiKey: 'tvly-k' }),
+      'POST',
+      'crawl',
+      {},
+      {
+        timeout: budget,
+      },
+    )
+    expect(sent).toHaveLength(1)
+  })
+
   it("gives a body without a timeout the verb's default", () => {
     expect(timedBody({ urls: ['u'] }, 30)).toEqual([{ urls: ['u'], timeout: 30 }, 30])
   })

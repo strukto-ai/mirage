@@ -253,4 +253,22 @@ describe('clap refusals', () => {
     const [msg, code, shown] = leafRefusal(UsageStyle.CLAP, ARGPARSE_MESSAGE, refused(), 'rm', SPEC)
     expect([msg, code, shown]).toEqual([ARGPARSE_MESSAGE, 2, null])
   })
+
+  it('words a short option left without its value as commander does', () => {
+    const spec = new CommandSpec({
+      arguments: [new Argument(['-d', '--depth'], { metavar: 'n' })],
+    })
+    const [msg, code, shown] = leafRefusal(
+      UsageStyle.COMMANDER,
+      ARGPARSE_MESSAGE,
+      refused({ needsValueOptions: ['d'], optionErrorKinds: ['needs_value'] }),
+      'crawl',
+      spec,
+    )
+    expect([new TextDecoder().decode(msg), code, shown]).toEqual([
+      "error: option '-d, --depth <n>' argument missing\n",
+      2,
+      null,
+    ])
+  })
 })

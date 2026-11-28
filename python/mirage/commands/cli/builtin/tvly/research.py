@@ -17,11 +17,18 @@
 # licenses/third_party/tavily-cli.txt).
 
 import asyncio
+import codecs
 import json
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import aclosing
 from urllib.parse import quote
 
 from mirage.accessor.tavily import TavilyAccessor
-from mirage.commands.cli.builtin.tvly.failure import require_key, usage
+from mirage.commands.cli.builtin.tvly.failure import (
+    api_failure,
+    require_key,
+    usage,
+)
 from mirage.commands.cli.builtin.tvly.options import (
     InvalidOption,
     client_name_of,
@@ -48,7 +55,12 @@ from mirage.commands.cli.walk import node_help
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import UsageStyle
-from mirage.core.tavily.client import TavilyUnanswered, tavily_request
+from mirage.core.tavily.client import (
+    TavilyAPIError,
+    TavilyUnanswered,
+    tavily_request,
+    tavily_stream,
+)
 from mirage.core.tavily.constants import RESEARCH_GET_TIMEOUT
 from mirage.errors.constants import MISS_ERRORS
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -237,20 +249,15 @@ def stream_events(text: str) -> list[JsonValue]:
     return events
 
 
-async def streamed(
-    streams: Streams,
-    ctx: Context,
-    events: list[JsonValue],
-    output: PathSpec | None,
-) -> None:
-    """Show each tool step on stderr as it changes, then the joined
-    content as the report.
+def stream_steps(
+    streams: Streams, events: list[JsonValue]
+) -> dict[str, JsonValue]:
+    """Show each tool step on stderr as it changes; the report the
+    events' joined content makes.
 
     Args:
         streams (Streams): where the verb's output gathers.
-        ctx (Context): the invocation context.
-        events (list[JsonValue]): the stream's events.
-        output (PathSpec | None): the ``-o`` file.
+        events (list[JsonValue]): the stream's events so far.
     """
     parts: list[str] = []
     sources: JsonValue = []
@@ -283,12 +290,92 @@ async def streamed(
         found = items(field(delta, "sources"))
         if found:
             sources = found
-    report: dict[str, JsonValue] = {
+    return {
         "status": "completed",
         "content": "".join(parts),
         "sources": sources,
     }
+
+
+async def streamed(
+    streams: Streams,
+    ctx: Context,
+    events: list[JsonValue],
+    output: PathSpec | None,
+) -> None:
+    """Show each tool step on stderr as it changes, then the joined
+    content as the report.
+
+    Args:
+        streams (Streams): where the verb's output gathers.
+        ctx (Context): the invocation context.
+        events (list[JsonValue]): the stream's events.
+        output (PathSpec | None): the ``-o`` file.
+    """
+    report = stream_steps(streams, events)
     await result_text(streams, ctx, False, report, output)
+
+
+async def arriving_events(
+    chunks: AsyncGenerator[bytes, None],
+) -> AsyncGenerator[JsonValue, None]:
+    """Each event of a stream as soon as its line is whole.
+
+    Args:
+        chunks (AsyncGenerator[bytes, None]): the stream as it arrives.
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    pending = ""
+    async with aclosing(chunks) as source:
+        async for chunk in source:
+            whole, _, pending = (pending + decoder.decode(chunk)).rpartition(
+                "\n"
+            )
+            for event in stream_events(whole):
+                yield event
+    for event in stream_events(pending + decoder.decode(b"", final=True)):
+        yield event
+
+
+async def live_research(
+    chunks: AsyncGenerator[bytes, None],
+    io: IOResult,
+    ctx: Context,
+    json: bool,
+    output: PathSpec | None,
+) -> AsyncIterator[bytes]:
+    """``research --stream`` as its events arrive: under ``--json`` each
+    event's line as soon as it parses, else the steps and the report once
+    the stream ends. A failure keeps what came before it, then settles
+    ``io`` with tvly's answer to it.
+
+    Args:
+        chunks (AsyncGenerator[bytes, None]): the stream as it arrives.
+        io (IOResult): the result the stream settles once drained.
+        ctx (Context): the invocation context.
+        json (bool): whether the line asked for JSON.
+        output (PathSpec | None): the ``-o`` file.
+    """
+    streams = Streams()
+    events: list[JsonValue] = []
+    try:
+        async with aclosing(arriving_events(chunks)) as arriving:
+            async for event in arriving:
+                if json:
+                    yield (json_text(event, False) + "\n").encode()
+                else:
+                    events.append(event)
+        if not json:
+            await streamed(streams, ctx, events, output)
+        out, settled = streams.result()
+    except (TavilyAPIError, TavilyUnanswered) as failed:
+        if not json:
+            stream_steps(streams, events)
+        out, settled = api_failure(streams, failed, json)
+    io.exit_code = settled.exit_code
+    io.stderr = settled.stderr
+    if out:
+        yield out
 
 
 async def run(
@@ -339,21 +426,15 @@ async def run(
     client_name = client_name_of(fl)
     streams = Streams()
     if fl.as_bool("stream"):
-        text = await tavily_request(
+        chunks = tavily_stream(
             accessor,
-            "POST",
             "research",
             {"citation_format": "numbered", **body, "stream": True},
             client_name=client_name,
-            read="text",
         )
-        events = stream_events(text)
-        if fl.as_bool("json"):
-            for event in events:
-                streams.out(json_text(event, False))
-            return streams.result()
-        await streamed(streams, ctx, events, output)
-        return streams.result()
+        settled = IOResult()
+        live = live_research(chunks, settled, ctx, fl.as_bool("json"), output)
+        return live, settled
     result = await tavily_request(
         accessor,
         "POST",

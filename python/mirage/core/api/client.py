@@ -216,6 +216,8 @@ async def api_stream(
     url: str,
     *,
     error_of: ErrorOf,
+    method: str = "GET",
+    json_body: JsonValue = None,
     headers: Mapping[str, str] | None = None,
     session: SessionArg = None,
     retry: RetryPolicy = NO_RETRY,
@@ -224,11 +226,14 @@ async def api_stream(
     on_response: Callable[[Mapping[str, str]], None] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> AsyncGenerator[bytes, None]:
-    """Pull a GET response in bounded chunks, closing it on early exit.
+    """Pull a response in bounded chunks, closing it on early exit.
 
     Args:
         url (str): full download URL.
         error_of (ErrorOf): maps an HTTP failure to the backend's error.
+        method (str): the HTTP method; a streamed answer to a POST, such
+            as server-sent events, reads the same way as a download.
+        json_body (JsonValue): the JSON request body; None sends none.
         headers (Mapping[str, str] | None): request headers.
         session (SessionArg): pool or live session to borrow, else owned here.
         retry (RetryPolicy): applied to opening the response only. Once a
@@ -250,7 +255,14 @@ async def api_stream(
         for attempt in range(retry.max_retries + 1):
             last = attempt == retry.max_retries
             try:
-                async with sess.get(url, headers=headers) as response:
+                opened = (
+                    sess.get(url, headers=headers)
+                    if method == "GET"
+                    else sess.request(
+                        method, url, headers=headers, json=json_body
+                    )
+                )
+                async with opened as response:
                     if response.status >= 400:
                         text = await _read_prefix(response, ERROR_BODY_BYTES)
                         if last or not _worth_retrying(
