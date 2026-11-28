@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
-import { BYTES, all, bytes, exec, one } from '../kit/typescript/index.ts'
+import { BYTES, all, bytes, exec, one, transaction } from '../kit/typescript/index.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
 
 // The run's file over node:sqlite (kit sql.ts), on the tables
@@ -335,13 +335,23 @@ export async function deleteMessage(
   channelId: string,
   ts: string,
 ): Promise<void> {
-  changeOne(
-    db,
-    'DELETE FROM Message WHERE tenant = ? AND channelId = ? AND ts = ?',
-    tenant,
-    channelId,
-    ts,
-  )
+  // A file shared by the message is no longer shared there.
+  transaction(db, () => {
+    changeOne(
+      db,
+      'DELETE FROM Message WHERE tenant = ? AND channelId = ? AND ts = ?',
+      tenant,
+      channelId,
+      ts,
+    )
+    exec(
+      db,
+      'DELETE FROM SlackShare WHERE tenant = ? AND channelId = ? AND messageTs = ?',
+      tenant,
+      channelId,
+      ts,
+    )
+  })
 }
 
 export async function pinAt(

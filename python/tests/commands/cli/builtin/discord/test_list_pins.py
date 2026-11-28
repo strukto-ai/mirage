@@ -20,10 +20,11 @@ from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.cli.builtin.discord.list_pins import list_pins
 from mirage.commands.config import Context
 from mirage.io.types import materialize
+from mirage.types import JsonValue
 from tests.fixtures.discord_guild import DAY, GENERAL
 
 
-async def _out(result) -> object:
+async def _out(result) -> JsonValue:
     out, _ = result
     return json.loads(await materialize(out))
 

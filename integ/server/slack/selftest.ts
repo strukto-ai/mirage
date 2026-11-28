@@ -505,6 +505,42 @@ async function main(): Promise<void> {
       ((await unit(`xoxp-${UNIT}.U2`, 'search.files', { query })).files as Json).total!
     eq('a holder finds no file in a channel they do not see', await scoped('Launch in:#random'), 0)
     eq('a holder finds a file in a channel they see', await scoped('Launch in:#general'), 1)
+    const db = fake.runtime.pool.sql(UNIT)
+    const people = async (form: Record<string, string>): Promise<Json> =>
+      await unit(`xoxb-${UNIT}`, 'users.list', form)
+    const seeded = ((await people({})).members as Json[]).length
+    const add = db.prepare(
+      'INSERT INTO User (tenant, id, name, realName, email, seq) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    for (let n = 0; n < 1000; n++)
+      add.run(UNIT, `UMANY${String(n)}`, `many${String(n)}`, '', '', 100 + n)
+    const everyone = await people({})
+    eq(
+      'users.list with no limit answers everyone, past a page',
+      [(everyone.members as Json[]).length, (everyone.response_metadata as Json).next_cursor!],
+      [seeded + 1000, ''],
+    )
+    eq(
+      'users.list caps an asked limit at 1000',
+      ((await people({ limit: '5000' })).members as Json[]).length,
+      1000,
+    )
+    const shareTs = '1762473660.000001'
+    db.prepare("UPDATE Message SET userId = 'UBOT' WHERE tenant = ? AND ts = ?").run(UNIT, shareTs)
+    const deleted = await fetch(`${fake.endpoint}/_run/${UNIT}/api/chat.delete`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer xoxb-${UNIT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'C2', ts: shareTs }),
+    })
+    eq('a bot deletes a sharing message it posted', ((await deleted.json()) as Json).ok, true)
+    eq(
+      'a deleted message no longer shares its file',
+      (
+        ((await unit(`xoxp-${UNIT}`, 'search.files', { query: 'Launch' })).files as Json)
+          .matches as Json[]
+      ).map((f) => f.shares!),
+      [{ public: { C1: [{ ts: '1762300860.000001', channel_name: 'general' }] } }],
+    )
     process.stdout.write(`slack selftest: ${String(checks)} checks passed\n`)
   } finally {
     await fake.close()

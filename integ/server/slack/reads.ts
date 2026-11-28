@@ -59,15 +59,12 @@ export function fileBytes(f: {
     : Buffer.from(f.content, 'utf8')
 }
 
-function intQuery(ctx: Ctx<C>, name: string, fallback: number): number {
-  const raw = argsOf(ctx).get(name)
-  return raw === null ? fallback : Number.parseInt(raw, 10)
-}
-
 // A page size as Slack reads one: unset or not a positive number means the
-// method's default, and anything past the ceiling is the ceiling.
+// method's default, which no ceiling cuts, and an asked size past the
+// ceiling is the ceiling.
 function pageSize(ctx: Ctx<C>, fallback: number, ceiling: number): number {
-  const asked = intQuery(ctx, 'limit', fallback)
+  const raw = argsOf(ctx).get('limit')
+  const asked = raw === null ? Number.NaN : Number.parseInt(raw, 10)
   return Number.isNaN(asked) || asked <= 0 ? fallback : Math.min(asked, ceiling)
 }
 
