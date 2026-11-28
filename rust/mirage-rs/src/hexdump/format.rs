@@ -5,7 +5,7 @@
 
 use std::collections::VecDeque;
 
-use crate::printf::number::{Rendered, render_float, render_integer};
+use crate::printf::number::{Rendered, render_float, render_integer_into};
 
 /// The format strings each one-letter display option adds, in order: the
 /// offset where the input ends, then each line.
@@ -421,12 +421,14 @@ pub(super) enum Piece {
 
 /// Where output goes in one `drain`: bytes and runs of one byte are
 /// written up to `limit` and the rest, and all that follows, held for the
-/// next; `prints` counts down the prints the call may still run.
+/// next; `prints` counts down the prints the call may still run, and
+/// `number` holds each integer while it is laid out.
 pub(super) struct Sink<'a> {
     out: &'a mut Vec<u8>,
     limit: usize,
     pub(super) held: VecDeque<Piece>,
     pub(super) prints: usize,
+    number: Rendered,
 }
 
 impl<'a> Sink<'a> {
@@ -442,6 +444,7 @@ impl<'a> Sink<'a> {
             limit,
             held,
             prints,
+            number: Rendered::default(),
         }
     }
 
@@ -519,13 +522,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, sink: &mut Sink) 
     match print.kind {
         Kind::Text => {}
         Kind::Address { radix, .. } => {
-            let rendered = render_integer(
-                i128::from(address),
-                radix,
-                &print.flags,
-                as_u64(print.precision),
-            );
-            pad(&rendered, &print.flags, print.width, sink);
+            integer(print, i128::from(address), radix, sink);
         }
         Kind::Integer(conversion) => {
             let raw = take(print.size);
@@ -536,8 +533,7 @@ pub(super) fn render(print: &Print, data: &[u8], address: u64, sink: &mut Sink) 
                 }
                 _ => i128::from(raw),
             };
-            let rendered = render_integer(value, conversion, &print.flags, as_u64(print.precision));
-            pad(&rendered, &print.flags, print.width, sink);
+            integer(print, value, conversion, sink);
         }
         Kind::Float(conversion) => {
             let raw = take(print.size);
@@ -605,6 +601,21 @@ pub(super) fn blank(print: &Print, sink: &mut Sink) {
 
 fn as_u64(precision: Option<usize>) -> Option<u64> {
     precision.map(|p| p as u64)
+}
+
+/// `value` under `conversion`, laid out in the print's width through the
+/// sink's own buffers.
+fn integer(print: &Print, value: i128, conversion: u8, sink: &mut Sink) {
+    let mut number = std::mem::take(&mut sink.number);
+    render_integer_into(
+        value,
+        conversion,
+        &print.flags,
+        as_u64(print.precision),
+        &mut number,
+    );
+    pad(&number, &print.flags, print.width, sink);
+    sink.number = number;
 }
 
 /// Lay a string out in the print's width, on the left under `-`.

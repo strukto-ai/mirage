@@ -159,9 +159,11 @@ fn pad(out: &mut Vec<u8>, col: i64, target: i64, tabs: bool) {
     out.extend(std::iter::repeat_n(b' ', (target - col).max(0) as usize));
 }
 
-/// One word of a paragraph and how lines may break around it.
+/// One word of a paragraph, its bytes at `start..end` of the paragraph's
+/// text, and how lines may break around it.
 struct Term {
-    chars: Vec<u8>,
+    start: usize,
+    end: usize,
     /// Columns to the next word when both share a line.
     gap: i64,
     ends_sentence: bool,
@@ -175,7 +177,7 @@ struct Term {
 
 impl Term {
     fn len(&self) -> i64 {
-        self.chars.len() as i64
+        (self.end - self.start) as i64
     }
 }
 
@@ -296,7 +298,8 @@ struct Paragraph {
     rest_col: i64,
     lines: usize,
     terms: Vec<Term>,
-    size: usize,
+    /// The bytes of `terms`, one after another.
+    text: Vec<u8>,
     /// Length of the last line printed, for the next piece's first line.
     last: Option<i64>,
     /// Whether the word before the next one ended a sentence.
@@ -506,7 +509,7 @@ impl Layout {
                 rest_col: self.hang(col),
                 lines: 1,
                 terms: Vec::new(),
-                size: 0,
+                text: Vec::new(),
                 last: None,
                 after_stop: false,
             });
@@ -617,7 +620,7 @@ impl Layout {
         self.col += chars.len() as i64;
         let mut para = self.para.take().expect("a paragraph");
         let mut printed = 0;
-        while para.size + self.word.len() - printed > PIECE_BYTES {
+        while para.text.len() + self.word.len() - printed > PIECE_BYTES {
             if !para.terms.is_empty() {
                 self.flush(&mut para, self.start, out);
                 continue;
@@ -657,18 +660,23 @@ impl Layout {
             self.tabs |= self.tab;
             self.flush(&mut para, self.col, out);
         }
-        para.size += chars.len();
+        let start = para.text.len();
+        para.text.extend_from_slice(&chars);
         para.terms.push(Term {
+            start,
+            end: para.text.len(),
             gap,
             ends_sentence: ends,
             false_stop: stop && !ends,
             marked: chars.last().is_some_and(u8::is_ascii_punctuation),
             opener: OPENERS.contains(&chars[0]),
             after_stop: para.after_stop,
-            chars,
         });
         para.after_stop = ends;
         self.para = Some(para);
+        self.word = chars;
+        self.word.clear();
+        crate::release_capacity(&mut self.word);
         self.tabs |= self.tab;
         self.tab = false;
         self.after = None;
@@ -736,7 +744,15 @@ impl Layout {
         }
         para.terms
             .drain(..if keep > 0 { keep } else { para.terms.len() });
-        para.size = para.terms.iter().map(|term| term.chars.len()).sum();
+        let cut = para
+            .terms
+            .first()
+            .map_or(para.text.len(), |term| term.start);
+        para.text.drain(..cut);
+        for term in &mut para.terms {
+            term.start -= cut;
+            term.end -= cut;
+        }
     }
 
     /// Print one line of `para` and return its length as laid out. A -t
@@ -767,7 +783,7 @@ impl Layout {
                 here += gap;
                 length += gap;
             }
-            out.extend_from_slice(&term.chars);
+            out.extend_from_slice(&para.text[term.start..term.end]);
             here += term.len();
             length += term.len();
         }

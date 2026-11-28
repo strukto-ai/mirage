@@ -2,7 +2,6 @@
 // https://github.com/huggingface/nfsserve/tree/af4f1176dd709847f3dda4f1a7cd093edaadde63/src
 // Licensed under BSD-3-Clause. See licenses/third_party/nfsserve.txt.
 #![allow(clippy::upper_case_acronyms)]
-#![allow(dead_code)]
 use std::io::{Read, Write};
 
 use num_derive::{FromPrimitive, ToPrimitive};
@@ -465,9 +464,6 @@ pub async fn nfsproc3_fsinfo(
 
 const ACCESS3_READ: u32 = 0x0001;
 const ACCESS3_LOOKUP: u32 = 0x0002;
-const ACCESS3_MODIFY: u32 = 0x0004;
-const ACCESS3_EXTEND: u32 = 0x0008;
-const ACCESS3_DELETE: u32 = 0x0010;
 const ACCESS3_EXECUTE: u32 = 0x0020;
 /*
 

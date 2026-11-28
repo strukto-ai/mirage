@@ -1,8 +1,6 @@
 // Adapted from nfsserve 0.11.0.
 // https://github.com/huggingface/nfsserve/tree/af4f1176dd709847f3dda4f1a7cd093edaadde63/src
 // Licensed under BSD-3-Clause. See licenses/third_party/nfsserve.txt.
-// this is just a complete enumeration of everything in the RFC
-#![allow(dead_code)]
 // And its nice to keep the original RFC names and case
 #![allow(non_camel_case_types)]
 
@@ -25,20 +23,9 @@ pub const VERSION: u32 = 3;
 
 // Section 2.4 Sizes
 //
-/// The maximum size in bytes of the opaque file handle.
-pub const NFS3_FHSIZE: u32 = 64;
-
 /// The size in bytes of the opaque cookie verifier passed by
 /// READDIR and READDIRPLUS.
 pub const NFS3_COOKIEVERFSIZE: u32 = 8;
-
-/// The size in bytes of the opaque verifier used for
-/// exclusive CREATE.
-pub const NFS3_CREATEVERFSIZE: u32 = 8;
-
-/// The size in bytes of the opaque verifier used for
-/// asynchronous WRITE.
-pub const NFS3_WRITEVERFSIZE: u32 = 8;
 
 // Section 2.5 Basic Data Types
 #[allow(non_camel_case_types)]
@@ -47,9 +34,6 @@ pub struct nfsstring(pub Vec<u8>);
 impl nfsstring {
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 }
 impl From<Vec<u8>> for nfsstring {
@@ -91,8 +75,6 @@ pub type nfspath3 = nfsstring;
 pub type fileid3 = u64;
 pub type cookie3 = u64;
 pub type cookieverf3 = [opaque; NFS3_COOKIEVERFSIZE as usize];
-pub type createverf3 = [opaque; NFS3_CREATEVERFSIZE as usize];
-pub type writeverf3 = [opaque; NFS3_WRITEVERFSIZE as usize];
 pub type uid3 = u32;
 pub type gid3 = u32;
 pub type size3 = u64;
@@ -281,9 +263,6 @@ xdr_struct!(
 // The following constants are used in fsinfo to construct the bitmask 'properties',
 // which represents the file system properties.
 
-/// If this bit is 1 (TRUE), the file system supports hard links.
-pub const FSF_LINK: u32 = 0x0001;
-
 /// If this bit is 1 (TRUE), the file system supports symbolic links.
 pub const FSF_SYMLINK: u32 = 0x0002;
 
@@ -384,11 +363,6 @@ pub struct diropargs3 {
     pub name: filename3,
 }
 xdr_struct!(diropargs3, dir, name);
-
-/// We define the root handle here
-pub fn get_root_mount_handle() -> Vec<u8> {
-    vec![0]
-}
 
 impl XDR for nfsstring {
     fn serialize<R: Write>(&self, dest: &mut R) -> std::io::Result<()> {

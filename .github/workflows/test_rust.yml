@@ -73,6 +73,11 @@ jobs:
           CC_wasm32_unknown_unknown=clang AR_wasm32_unknown_unknown=llvm-ar python3 ../scripts/gen_ast_grep.py --output "$RUNNER_TEMP/ast-grep.wasm.gz"
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # mirage-rs alone, with no feature on: the workspace build turns on
+      # what the Python module carries, so code only a feature uses is
+      # dead here and nowhere else.
+      - name: Clippy (mirage-rs, no features)
+        run: cargo clippy -p mirage-rs --all-targets --locked -- -D warnings
       # The browser's target. Every TypeScript job also builds the release
       # wasm through embed-rs.mjs.
       - name: Clippy (wasm)

@@ -76,14 +76,25 @@ export async function beforeFullWalk(
 export class WalkBudget {
   readonly spent = new Map<string, number>()
   readonly stopped: string[] = []
+  private last: [string, number, string] | null = null
 
   constructor(
     readonly operand: PathSpec,
     readonly mounts: MountView | null,
   ) {}
 
-  private limitAt(directory: string): number {
-    return this.mounts?.walkLimit?.(directory) ?? -1
+  /**
+   * The `walkLimit` of `directory` and the folder its entries count under.
+   * The last directory asked is kept: a listing charges each of its entries
+   * to the same one.
+   */
+  private counted(directory: string): [number, string] {
+    const last = this.last
+    if (last !== null && last[0] === directory) return [last[1], last[2]]
+    const limit = this.mounts?.walkLimit?.(directory) ?? -1
+    const folder = limit >= 0 ? this.folderOf(directory) : ''
+    this.last = [directory, limit, folder]
+    return [limit, folder]
   }
 
   private folderOf(directory: string): string {
@@ -106,9 +117,8 @@ export class WalkBudget {
    * folder's count is out, which records the stop.
    */
   spend(directory: string): boolean {
-    const limit = this.limitAt(directory)
+    const [limit, folder] = this.counted(directory)
     if (limit < 0) return true
-    const folder = this.folderOf(directory)
     const used = this.spent.get(folder) ?? 0
     if (used < limit) {
       this.spent.set(folder, used + 1)
@@ -123,9 +133,8 @@ export class WalkBudget {
    * records the stop and is not listed at all.
    */
   opens(directory: string): boolean {
-    const limit = this.limitAt(directory)
+    const [limit, folder] = this.counted(directory)
     if (limit < 0) return true
-    const folder = this.folderOf(directory)
     if ((this.spent.get(folder) ?? 0) < limit) return true
     this.stop(folder, limit)
     return false
@@ -138,9 +147,9 @@ export class WalkBudget {
    * the walk.
    */
   listingLimit(directory: string): number | null {
-    const limit = this.limitAt(directory)
+    const [limit, folder] = this.counted(directory)
     if (limit < 0) return null
-    const used = this.spent.get(this.folderOf(directory)) ?? 0
+    const used = this.spent.get(folder) ?? 0
     return Math.max(limit - used, 0) + 1
   }
 

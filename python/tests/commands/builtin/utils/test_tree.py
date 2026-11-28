@@ -353,6 +353,10 @@ def _limits(limits: dict[str, int]) -> MountView:
 STOP = "stopped after {} files (walk_limit); narrow the path"
 
 
+async def _forty_names(path: PathSpec, limit: int | None = None) -> list[str]:
+    return [f"{path.virtual}/{i}" for i in range(40)]
+
+
 def test_a_walk_budget_stops_once_spent_and_opens_nothing_more():
     budget = WalkBudget(PathSpec.from_str_path("/m/d"), _limits({"/m/": 2}))
     assert [budget.spend("/m/d") for _ in range(3)] == [True, True, False]
@@ -392,3 +396,26 @@ async def test_a_walk_budget_listing_cuts_one_and_skips_the_next():
     assert await budget.listing(readdir, PathSpec.from_str_path("/m/0")) == []
     assert asked == [("/m", 3)]
     assert budget.stopped == [f"/m: {STOP.format(2)}"]
+
+
+@pytest.mark.asyncio
+async def test_a_walk_budget_asks_the_mount_table_once_a_listing():
+    asked: list[str] = []
+    mounts = _limits({"/m/": 100})
+    limit_of = mounts.walk_limit
+    assert limit_of is not None
+
+    def walk_limit(path: str) -> int:
+        asked.append(path)
+        return limit_of(path)
+
+    budget = WalkBudget(
+        PathSpec.from_str_path("/m"), replace(mounts, walk_limit=walk_limit)
+    )
+    for directory in ("/m", "/m/a"):
+        listed = await budget.listing(
+            _forty_names, PathSpec.from_str_path(directory)
+        )
+        assert len(listed) == 40
+    assert asked == ["/m", "/m/a"]
+    assert budget.spent == {"/m": 80}
