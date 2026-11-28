@@ -102,6 +102,20 @@ model SlackFile {
   @@id([tenant, id])
 }
 
+// A later post of a file. Slack lets a file be shared into more messages, in
+// its channel or another, after the one it was uploaded with, which SlackFile
+// keeps (its `timestamp` stays that upload); each share shows the file on its
+// message and in the file's `shares`.
+model SlackShare {
+  tenant    String
+  fileId    String
+  channelId String
+  messageTs String
+  seq       Int
+
+  @@id([tenant, fileId, channelId, messageTs])
+}
+
 // A file between files.getUploadURLExternal and files.completeUploadExternal:
 // its name and declared length, then the bytes POSTed to its upload URL. It
 // becomes a SlackFile, in a channel, only once completed.

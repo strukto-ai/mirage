@@ -1,0 +1,187 @@
+{
+  "users": [
+    {
+      "id": "U1",
+      "name": "ana",
+      "realName": "Ana Lima",
+      "email": "ana@example.com"
+    },
+    {
+      "id": "U2",
+      "name": "ben",
+      "realName": "Ben Ito",
+      "email": "ben@example.com"
+    },
+    {
+      "id": "U3",
+      "name": "bot-helper",
+      "realName": "Bot Helper",
+      "email": "",
+      "isBot": true
+    },
+    {
+      "id": "U4",
+      "name": "gone",
+      "realName": "Gone User",
+      "email": "gone@example.com",
+      "deleted": true
+    },
+    {
+      "id": "USLACKBOT",
+      "name": "slackbot",
+      "realName": "Slackbot",
+      "email": ""
+    }
+  ],
+  "channels": [
+    {
+      "id": "C1",
+      "name": "general",
+      "kind": "channel",
+      "created": 1762128000,
+      "membersJson": [
+        "U1",
+        "U2"
+      ]
+    },
+    {
+      "id": "C2",
+      "name": "random",
+      "kind": "channel",
+      "created": 1762128000,
+      "isPrivate": true,
+      "membersJson": [
+        "U1"
+      ]
+    }
+  ],
+  "dms": [
+    {
+      "id": "D1",
+      "name": "",
+      "kind": "im",
+      "dmUserId": "U1",
+      "created": 1762128000
+    }
+  ],
+  "messages": [
+    {
+      "channelId": "C1",
+      "ts": "1762128060.000001",
+      "userId": "U1",
+      "text": "the deploy is done at acme"
+    },
+    {
+      "channelId": "C1",
+      "ts": "1762131600.000001",
+      "userId": "U2",
+      "text": "coffee is ready"
+    },
+    {
+      "channelId": "C1",
+      "ts": "1762214460.000001",
+      "userId": "U1",
+      "text": "lunch at noon",
+      "reactionsJson": [
+        {
+          "name": "rocket",
+          "users": [
+            "U1"
+          ],
+          "count": 1
+        }
+      ]
+    },
+    {
+      "channelId": "C1",
+      "ts": "1762300860.000001",
+      "userId": "U1",
+      "text": ""
+    },
+    {
+      "channelId": "C1",
+      "ts": "1762387260.000001",
+      "userId": "U1",
+      "text": "deploy again"
+    },
+    {
+      "channelId": "C1",
+      "ts": "1762560060.000001",
+      "userId": "U1",
+      "text": "the files for review"
+    },
+    {
+      "channelId": "C2",
+      "ts": "1762214460.000001",
+      "userId": "U1",
+      "text": "a random deploy in Lima"
+    },
+    {
+      "channelId": "C2",
+      "ts": "1762473660.000001",
+      "userId": "U1",
+      "text": ""
+    },
+    {
+      "channelId": "D1",
+      "ts": "1762128060.000001",
+      "userId": "U1",
+      "text": "deploy in a dm"
+    },
+    {
+      "channelId": "D1",
+      "ts": "1762387260.000001",
+      "userId": "U1",
+      "text": "see you friday"
+    }
+  ],
+  "files": [
+    {
+      "id": "F1",
+      "name": "plan.txt",
+      "title": "Launch plan",
+      "mimetype": "text/plain",
+      "filetype": "text",
+      "content": "plan\n",
+      "channelId": "C1",
+      "messageTs": "1762300860.000001"
+    },
+    {
+      "id": "F2",
+      "name": "report.pdf",
+      "title": "report.pdf",
+      "mimetype": "application/pdf",
+      "filetype": "pdf",
+      "content": "%PDF-1.4 the report\n",
+      "channelId": "C1",
+      "messageTs": "1762560060.000001"
+    },
+    {
+      "id": "F3",
+      "name": "notes.txt",
+      "title": "notes.txt",
+      "mimetype": "text/plain",
+      "filetype": "text",
+      "content": "the notes\n",
+      "channelId": "C1",
+      "messageTs": "1762560060.000001"
+    },
+    {
+      "id": "F4",
+      "name": "data.bin",
+      "title": "data.bin",
+      "mimetype": "application/octet-stream",
+      "filetype": "binary",
+      "content": "0101",
+      "channelId": "C1",
+      "messageTs": "1762560060.000001"
+    }
+  ],
+  "shares": [
+    {
+      "fileId": "F1",
+      "channelId": "C2",
+      "messageTs": "1762473660.000001"
+    }
+  ]
+}

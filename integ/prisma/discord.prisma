@@ -59,6 +59,10 @@ model DiscordChannel {
   topic         String?
   position      Int
   lastMessageId String?
+  // The channel a thread hangs off, null for a guild channel. A thread is a
+  // channel of its own (type 11 or 12), and one started from a message
+  // shares that message's id.
+  parentId      String?
   // A channel whose permission overwrites deny the bot VIEW_CHANNEL. Discord
   // still lists it among the guild's channels, and answers 403 Missing Access
   // to reading or posting there.

@@ -62,6 +62,13 @@ const MESSAGE =
 const FILE =
   'SELECT tenant, id, channelId, messageTs, name, title, mimetype, filetype, size, timestamp, ' +
   'content, contentPath, blob, seq FROM SlackFile'
+// A shared file as the message that shares it shows it: the file's own row
+// under the share's channel and ts.
+const SHARED_FILE =
+  'SELECT f.tenant, f.id, s.channelId, s.messageTs, f.name, f.title, f.mimetype, f.filetype, ' +
+  'f.size, f.timestamp, f.content, f.contentPath, f.blob, f.seq ' +
+  'FROM SlackShare s JOIN SlackFile f ON f.tenant = s.tenant AND f.id = s.fileId'
+const SHARE = 'SELECT tenant, fileId, channelId, messageTs, seq FROM SlackShare'
 const UPLOAD = 'SELECT tenant, id, name, length, body, seq FROM Upload'
 const PIN = 'SELECT tenant, channelId, ts, createdBy, created, seq FROM Pin'
 
@@ -392,13 +399,34 @@ export async function deletePin(
   )
 }
 
+// The files a channel's messages show: those uploaded there, then those
+// shared into it later, each under the message that shares it.
 export async function filesIn(db: Db, tenant: string, channelId: string): Promise<FileRow[]> {
-  return all<FileRow>(
-    db,
-    `${FILE} WHERE tenant = ? AND channelId = ? ORDER BY id`,
-    tenant,
-    channelId,
-  )
+  return [
+    ...all<FileRow>(
+      db,
+      `${FILE} WHERE tenant = ? AND channelId = ? ORDER BY id`,
+      tenant,
+      channelId,
+    ),
+    ...all<FileRow>(
+      db,
+      `${SHARED_FILE} WHERE s.tenant = ? AND s.channelId = ? ORDER BY s.seq`,
+      tenant,
+      channelId,
+    ),
+  ]
+}
+
+export interface ShareRow {
+  fileId: string
+  channelId: string
+  messageTs: string
+}
+
+// Every later post of the tenant's files, in the order they were shared.
+export async function sharesOf(db: Db, tenant: string): Promise<ShareRow[]> {
+  return all<ShareRow>(db, `${SHARE} WHERE tenant = ? ORDER BY seq`, tenant)
 }
 
 export async function fileById(db: Db, tenant: string, id: string): Promise<FileRow | null> {
@@ -416,8 +444,10 @@ export async function filesContaining(
   const params: SQLInputValue[] = [tenant, like, like, like]
   let scope = ''
   if (channelId !== undefined) {
-    scope = ' AND channelId = ?'
-    params.push(channelId)
+    scope =
+      ' AND (channelId = ? OR id IN ' +
+      '(SELECT fileId FROM SlackShare WHERE tenant = ? AND channelId = ?))'
+    params.push(channelId, tenant, channelId)
   }
   return all<FileRow>(
     db,

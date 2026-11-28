@@ -39,8 +39,10 @@ import {
   argsOf,
   channelJson,
   fail,
+  holderOf,
   messageJson,
   reactionsOf,
+  seenBy,
   userJson,
 } from './wire.ts'
 
@@ -97,12 +99,10 @@ export async function conversationsList(ctx: Ctx<C>): Promise<Reply> {
   if (requested.includes('private_channel')) filters.push({ kind: 'channel', isPrivate: true })
   if (requested.includes('im')) filters.push({ kind: 'im' })
   if (requested.includes('mpim')) filters.push({ kind: 'mpim' })
-  const rows = await channelsMatching(
-    ctx.sql,
-    ctx.tenant,
-    filters,
-    args.get('exclude_archived') === 'true',
-  )
+  const holder = holderOf(ctx)
+  const rows = (
+    await channelsMatching(ctx.sql, ctx.tenant, filters, args.get('exclude_archived') === 'true')
+  ).filter((row) => seenBy(holder, row))
   const start = cursorStart(
     ctx,
     'team',
@@ -119,6 +119,14 @@ export async function conversationsList(ctx: Ctx<C>): Promise<Reply> {
       response_metadata: { next_cursor: next === undefined ? '' : cursorFor('team', next.id) },
     },
   }
+}
+
+// The one conversation `channel` names, as conversations.list renders it. One
+// the token's holder is not in is not found, as on Slack.
+export async function conversationsInfo(ctx: Ctx<C>): Promise<Reply> {
+  const row = await channelById(ctx.sql, ctx.tenant, argsOf(ctx).get('channel') ?? '')
+  if (row === null || !seenBy(holderOf(ctx), row)) return fail('channel_not_found')
+  return { status: 200, body: { ok: true, channel: channelJson(row) } }
 }
 
 // A thread oldest first: the parent, then its replies. `ts` may name the
@@ -160,7 +168,7 @@ export async function conversationsReplies(ctx: Ctx<C>): Promise<Reply> {
     const out = messageJson(
       m,
       files.filter((f) => f.messageTs === m.ts),
-      ctx.url.origin,
+      `${ctx.url.origin}${ctx.runPrefix}`,
     ) as Record<string, JsonValue>
     if (m.ts !== root) return { ...out, parent_user_id: parent?.userId ?? '' }
     if (replies.length === 0) return out
@@ -250,7 +258,8 @@ export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
   const args = argsOf(ctx)
   const channel = args.get('channel') ?? ''
   const row = await channelById(ctx.sql, ctx.tenant, channel)
-  if (row === null) return fail('channel_not_found')
+  // A private conversation is not found by someone outside it, as on Slack.
+  if (row === null || !seenBy(holderOf(ctx), row)) return fail('channel_not_found')
   if (!row.isMember) return fail('not_in_channel')
   const oldest = args.get('oldest')
   const latest = args.get('latest')
@@ -270,7 +279,7 @@ export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
     messageJson(
       m,
       files.filter((f) => f.messageTs === m.ts),
-      ctx.url.origin,
+      `${ctx.url.origin}${ctx.runPrefix}`,
     ),
   )
   return {
@@ -286,11 +295,25 @@ export async function conversationsHistory(ctx: Ctx<C>): Promise<Reply> {
   }
 }
 
+// Pages by `limit` (at most 1000) and a cursor naming the next user, as
+// conversations.list does; without a limit Slack answers every user at once.
 export async function usersList(ctx: Ctx<C>): Promise<Reply> {
   const rows = await users(ctx.sql, ctx.tenant)
+  const start = cursorStart(
+    ctx,
+    'user',
+    rows.map((row) => row.id),
+  )
+  if (start === null) return fail('invalid_cursor')
+  const size = pageSize(ctx, rows.length, 1000)
+  const next = rows[start + size]
   return {
     status: 200,
-    body: { ok: true, members: rows.map(userJson), response_metadata: { next_cursor: '' } },
+    body: {
+      ok: true,
+      members: rows.slice(start, start + size).map(userJson),
+      response_metadata: { next_cursor: next === undefined ? '' : cursorFor('user', next.id) },
+    },
   }
 }
 

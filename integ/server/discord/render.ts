@@ -36,7 +36,7 @@ export function renderChannel(row: DiscordChannel): JsonValue {
     name: row.name,
     position: row.position,
     topic: row.topic,
-    parent_id: null,
+    parent_id: row.parentId,
     last_message_id: row.lastMessageId,
   }
 }

@@ -16,10 +16,10 @@ import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import type { C } from './config.ts'
 import { parseQuery, withinDates } from './query.ts'
 import type { ParsedQuery } from './query.ts'
-import { channels, filesContaining, messagesContaining, users } from './store.ts'
+import { channels, filesContaining, messagesContaining, sharesOf, users } from './store.ts'
 import type { MessageRow } from './store.ts'
 import type { ChannelRow, FileRow, UserRow } from './wire.ts'
-import { argsOf, fail, reactionsOf, requestToken } from './wire.ts'
+import { argsOf, fail, holderOf, reactionsOf, requestToken, seenBy } from './wire.ts'
 
 interface Scope {
   parsed: ParsedQuery
@@ -30,6 +30,8 @@ interface Scope {
   count: number
   display: (id: string) => string
   isPrivate: (id: string) => boolean
+  // Whether the token's holder sees the conversation, so search may name it.
+  seen: (id: string) => boolean
   userName: Map<string, string>
   realName: Map<string, string>
 }
@@ -60,6 +62,7 @@ function searchPage(ctx: Ctx<C>, matches: JsonValue[], count: number): JsonValue
 
 async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
   const parsed = parseQuery(argsOf(ctx).get('query') ?? '')
+  const holder = holderOf(ctx)
   const chans: ChannelRow[] = await channels(ctx.sql, ctx.tenant)
   const people: UserRow[] = await users(ctx.sql, ctx.tenant)
   const userName = new Map(people.map((u) => [u.id, u.name]))
@@ -98,6 +101,10 @@ async function scopeOf(ctx: Ctx<C>): Promise<Scope> {
       const ch = byId.get(id)
       return ch === undefined || ch.isPrivate || ch.kind !== 'channel'
     },
+    seen: (id) => {
+      const ch = byId.get(id)
+      return ch !== undefined && seenBy(holder, ch)
+    },
     userName,
     realName: new Map(people.map((u) => [u.id, u.realName || u.name])),
   }
@@ -127,6 +134,7 @@ export async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
   const matches = rows
     .filter(
       (m) =>
+        s.seen(m.channelId) &&
         m.text !== '' &&
         m.subtype !== 'channel_join' &&
         m.subtype !== 'channel_leave' &&
@@ -167,9 +175,28 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
     s.parsed.reaction !== undefined
       ? []
       : await filesContaining(ctx.sql, ctx.tenant, s.parsed.literal, s.channelId)
-  const matches = rows
-    .filter((f) => withinDates(f.timestamp, s.parsed))
-    .map((f) => ({
+  const later = await sharesOf(ctx.sql, ctx.tenant)
+  const matches: JsonValue[] = []
+  for (const f of rows.filter((row) => withinDates(row.timestamp, s.parsed))) {
+    // Every message that shares the file and the holder sees: its upload,
+    // then each later share, grouped by channel under public or private.
+    const posts = [
+      { channelId: f.channelId, ts: f.messageTs },
+      ...later
+        .filter((x) => x.fileId === f.id)
+        .map((x) => ({ channelId: x.channelId, ts: x.messageTs })),
+    ].filter((post) => s.seen(post.channelId))
+    if (posts.length === 0) continue
+    const shares: Record<string, Record<string, JsonValue[]>> = {}
+    for (const post of posts) {
+      const kind = s.isPrivate(post.channelId) ? 'private' : 'public'
+      const byChannel = (shares[kind] ??= {})
+      ;(byChannel[post.channelId] ??= []).push({
+        ts: post.ts,
+        channel_name: s.display(post.channelId),
+      })
+    }
+    matches.push({
       id: f.id,
       name: f.name,
       title: f.title,
@@ -177,13 +204,10 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
       filetype: f.filetype,
       size: f.size,
       timestamp: f.timestamp,
-      channels: [f.channelId],
-      shares: {
-        [s.isPrivate(f.channelId) ? 'private' : 'public']: {
-          [f.channelId]: [{ ts: f.messageTs, channel_name: s.display(f.channelId) }],
-        },
-      },
-    }))
+      channels: [...new Set(posts.map((post) => post.channelId))],
+      shares,
+    })
+  }
   return {
     status: 200,
     body: {

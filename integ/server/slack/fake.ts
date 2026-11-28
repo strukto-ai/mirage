@@ -26,7 +26,7 @@ export const slackFake: Fake<C> = {
   requestToken,
   client: PrismaClient,
   dmmf: Prisma.dmmf as unknown as Dmmf,
-  seedRoots: { dms: 'Channel', files: 'SlackFile' },
+  seedRoots: { dms: 'Channel', files: 'SlackFile', shares: 'SlackShare' },
   // size and timestamp are DERIVED, so the fixture does not state them and
   // cannot go stale: timestamp is the message ts floored, and size is the byte
   // length of the content, which for a contentPath row lives on disk and would
