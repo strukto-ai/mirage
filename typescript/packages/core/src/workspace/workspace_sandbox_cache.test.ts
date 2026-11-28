@@ -33,6 +33,7 @@ function makeCachingWorkspace(): { ws: Workspace; ram: RAMVFS } {
   const ws = new Workspace(
     { '/r': ram },
     {
+      cache: {},
       mode: MountMode.EXEC,
       machines: [buildRuntime('quickjs')],
     },

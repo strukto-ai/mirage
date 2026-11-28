@@ -2643,6 +2643,7 @@ class Workspace:
             max_env=args.max_env,
             network=args.network,
             system_time=args.system_time,
+            cache=args.cache,
             mode=MountMode.READ,
             write=args.write_default,
             session_id=args.default_session_id,

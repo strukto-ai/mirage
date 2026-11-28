@@ -59,7 +59,7 @@ function makeConfig(): S3Config {
 function makeWorkspace(read: ReadSpec, mode: MountMode = MountMode.WRITE): Workspace {
   return new Workspace(
     { '/s3': new S3VFS(makeConfig()) },
-    { mode, read, machines: [buildRuntime('quickjs')] },
+    { cache: {}, mode, read, machines: [buildRuntime('quickjs')] },
   )
 }
 

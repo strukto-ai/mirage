@@ -16,6 +16,7 @@ import asyncio
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
@@ -71,6 +72,7 @@ def _ws():
             "/ram/": (ram, MountMode.EXEC),
         },
         machines=[MontyRuntime()],
+        cache=CacheConfig(),
     )
     ws.get_session(ws.default_session_id).cwd = "/s3"
     return ws

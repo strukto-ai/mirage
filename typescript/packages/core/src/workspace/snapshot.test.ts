@@ -193,7 +193,7 @@ describe('toStateDict / applyStateDict', () => {
   it('restores cache entries even when every mount has redacted config', async () => {
     const ram = new RAMVFS()
     ;(ram as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': ram }, { cache: {}, mode: MountMode.WRITE })
     await ws.shell('echo "cached" | tee /data/x.txt > /dev/null')
     await ws.shell('cat /data/x.txt > /dev/null')
     const state = await toStateDict(ws)
@@ -1228,10 +1228,10 @@ describe('the read policy survives a snapshot round trip', () => {
   it.each([3, 4])(
     'refuses a v%i snapshot at the applyStateDict entry point too',
     async (version) => {
-      const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+      const ws = new Workspace({ '/d': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE })
       const state = await toStateDict(ws)
       await ws.close()
-      const target = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+      const target = new Workspace({ '/d': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE })
       try {
         await target.cache.set('/d/live.txt', new TextEncoder().encode('live'))
         await target.vfsMd('/d/VFS.md')
@@ -1389,7 +1389,7 @@ describe('the workspace clock across a snapshot', () => {
   it('ages a restored cache entry on the clock the restoring workspace was given', async () => {
     const src = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, clock: new ManualClock(1000) },
+      { cache: {}, mode: MountMode.WRITE, clock: new ManualClock(1000) },
     )
     const clock = new ManualClock(1000)
     try {
@@ -1414,7 +1414,7 @@ describe('the workspace clock across a snapshot', () => {
 
   it('a copy keeps the workspace clock', async () => {
     const clock = new ManualClock(1000)
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+    const ws = new Workspace({ '/data': new RAMVFS() }, { cache: {}, mode: MountMode.WRITE, clock })
     const copied = await ws.copy()
     try {
       await copied.cache.set('/data/c.txt', new TextEncoder().encode('cached'), { ttl: 10 })

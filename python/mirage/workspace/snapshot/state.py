@@ -22,6 +22,7 @@ from typing import Any, Protocol, cast, get_args
 
 from pydantic import BaseModel
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.file.entry import CacheEntry
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.file.ram import RAMFileCacheStore
@@ -678,6 +679,7 @@ def build_mount_args(
                 e[CLIKey.CONFIG],
             )
 
+    saved_cache = state.get(StateKey.CACHE) or {}
     saved_default = state.get(StateKey.WRITE)
     if saved_default is None or saved_default == "":
         raise WritePolicyError(
@@ -710,6 +712,14 @@ def build_mount_args(
         max_body_bytes=state.get(StateKey.MAX_BODY_BYTES, MAX_BODY_BYTES),
         network=state.get(StateKey.NETWORK, True),
         system_time=state.get(StateKey.SYSTEM_TIME),
+        cache=(
+            CacheConfig(
+                limit=saved_cache[CacheKey.LIMIT],
+                max_drain_bytes=saved_cache.get(CacheKey.MAX_DRAIN_BYTES),
+            )
+            if saved_cache.get(CacheKey.LIMIT)
+            else None
+        ),
     )
 
 
@@ -976,27 +986,29 @@ async def _restore_sessions(
 
 
 def _restore_cache(ws: WorkspaceLike, state: dict[str, Any]) -> None:
-    cache_state = state.get(StateKey.CACHE) or {}
-    ws.cache.max_drain_bytes = cache_state.get(CacheKey.MAX_DRAIN_BYTES)
     cache = ws.cache
     if not isinstance(cache, RAMFileCacheStore):
         # Non-RAM cache backend (e.g. Redis) — skip; its content lives
         # outside the workspace and isn't part of the snapshot anyway.
         return
+    # The target keeps its own limit and drain, so it holds only the saved
+    # entries that fit them: none when it has no cache.
+    cache_state = state.get(StateKey.CACHE) or {}
     # A snapshot is a third entry point into the entry table, and a document is
     # not obliged to spell "no token" the way this version does, so each
     # token is folded the way the live write entry points fold it.
     for entry in cache_state.get(CacheKey.ENTRIES, []):
-        key = entry[CacheKey.KEY]
         data = entry[CacheKey.DATA]
-        cache._store.files[key] = data
-        cache._entries[key] = CacheEntry(
-            size=entry.get(CacheKey.SIZE, len(data)),
-            cached_at=entry.get(CacheKey.CACHED_AT, 0),
-            fingerprint=token_or_none(entry.get(CacheKey.FINGERPRINT)),
-            ttl=entry.get(CacheKey.TTL),
+        cache.load_entry(
+            entry[CacheKey.KEY],
+            data,
+            CacheEntry(
+                size=entry.get(CacheKey.SIZE, len(data)),
+                cached_at=entry.get(CacheKey.CACHED_AT, 0),
+                fingerprint=token_or_none(entry.get(CacheKey.FINGERPRINT)),
+                ttl=entry.get(CacheKey.TTL),
+            ),
         )
-        cache._cache_size += entry.get(CacheKey.SIZE, len(data))
 
 
 async def _restore_history(ws: WorkspaceLike, state: dict[str, Any]) -> None:

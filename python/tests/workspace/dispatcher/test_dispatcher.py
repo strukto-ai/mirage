@@ -25,6 +25,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.commands.cli.types import CLI, CLIHandler
@@ -1550,7 +1551,7 @@ async def test_a_stat_with_no_size_takes_the_cached_length():
     vfs = _UnsizedRAM()
     vfs._store.dirs.add("/")
     vfs._store.files["/f"] = b"hello\n"
-    ws = Workspace({"/api": vfs}, mode=MountMode.WRITE)
+    ws = Workspace({"/api": vfs}, mode=MountMode.WRITE, cache=CacheConfig())
     try:
         assert (await ws.vfs.stat("/api/f")).size is None
         await ws.vfs.read("/api/f")
@@ -1807,7 +1808,7 @@ async def test_a_stand_in_gives_way_to_the_read_for_a_cached_file():
     vfs = _StandInRAM()
     vfs._store.dirs.add("/")
     vfs._store.files.update({"/cold": b"a\n", "/warm": b"b\n"})
-    ws = Workspace({"/m": vfs})
+    ws = Workspace({"/m": vfs}, cache=CacheConfig())
     try:
         await ws.vfs.read("/m/warm")
         for name, kwargs in (("first_lines", {"n": 1}), ("line_count", {})):
@@ -1830,7 +1831,7 @@ async def test_a_warm_read_answers_whether_a_copy_is_held():
     vfs = _StandInRAM()
     vfs._store.dirs.add("/")
     vfs._store.files.update({"/cold": b"a\n", "/warm": b"b\n"})
-    ws = Workspace({"/m": vfs})
+    ws = Workspace({"/m": vfs}, cache=CacheConfig())
     try:
         await ws.vfs.read("/m/warm")
         vfs._store.files["/warm"] = b"changed\n"
@@ -1865,7 +1866,9 @@ def _counted_workspace(
         filetype (str | None): the extension the counted read renders.
     """
     fetched: list[str] = []
-    ws = Workspace({"/data/": _CachingRAM()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": _CachingRAM()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
 
     async def counted(accessor, path: PathSpec, **kwargs) -> bytes:
         fetched.append(path.virtual)
@@ -2381,7 +2384,9 @@ TAPE = PathSpec.from_str_path("/tape/a.txt")
 @pytest.mark.asyncio
 async def test_a_streamed_read_arrives_as_pulled_and_fills_the_cache():
     tape = Tape()
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+    with Workspace(
+        {"/tape/": tape}, mode=MountMode.WRITE, cache=CacheConfig()
+    ) as ws:
         report = OpReport()
         stream, _ = await ws.dispatch("read", TAPE, stream=True, report=report)
         assert tape.pulled == 1
@@ -2509,7 +2514,9 @@ async def test_a_stream_closed_before_its_first_pull_closes_and_keeps_nothing():
 @pytest.mark.asyncio
 async def test_a_write_during_a_stream_keeps_none_of_it():
     tape = Tape()
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+    with Workspace(
+        {"/tape/": tape}, mode=MountMode.WRITE, cache=CacheConfig()
+    ) as ws:
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
         await ws.dispatch("write", TAPE, data=b"new")
         assert [chunk async for chunk in stream][0] == b"0123456789"
@@ -2667,7 +2674,9 @@ async def test_a_path_the_line_retracted_is_not_served_from_the_cache():
 @pytest.mark.asyncio
 async def test_a_stream_past_the_drain_budget_keeps_nothing():
     tape = Tape()
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
+    with Workspace(
+        {"/tape/": tape}, mode=MountMode.WRITE, cache=CacheConfig()
+    ) as ws:
         manager = ws.namespace.mount_for("/tape/a.txt").cache_manager
         manager._file_cache.max_drain_bytes = 20
         stream, _ = await ws.dispatch("read", TAPE, stream=True)
@@ -2852,7 +2861,7 @@ async def test_a_read_ahead_keeps_what_one_batch_answers():
     )
     token = set_current_session(session)
     try:
-        with Workspace({"/r/": vfs}) as ws:
+        with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
             await ws.dispatch(
                 "read_many",
                 _path("/r/a"),
@@ -2869,7 +2878,7 @@ async def test_a_read_ahead_keeps_what_one_batch_answers():
 async def test_a_read_ahead_reads_only_the_files_listed_small():
     vfs = BatchedRAM(batched=False)
     vfs._store.files["/big"] = b"x" * (READ_AHEAD_BYTES + 1)
-    ws = Workspace({"/r/": vfs})
+    ws = Workspace({"/r/": vfs}, cache=CacheConfig())
     try:
         await ws.mount("/r/").index.set_dir(
             "/r",
@@ -2892,7 +2901,7 @@ async def test_a_read_ahead_reads_only_the_files_listed_small():
 async def test_a_read_ahead_skips_cache_probes_for_known_directories():
     vfs = BatchedRAM()
     vfs._store.dirs.add("/empty")
-    ws = Workspace({"/r": vfs})
+    ws = Workspace({"/r": vfs}, cache=CacheConfig())
     try:
         await ws.mount("/r").index.set_dir(
             "/r",
@@ -2918,7 +2927,7 @@ async def test_a_read_ahead_skips_cache_probes_for_known_directories():
 @pytest.mark.asyncio
 async def test_warm_read_ahead_batches_metadata_lookups():
     vfs = BatchedRAM()
-    ws = Workspace({"/r": vfs})
+    ws = Workspace({"/r": vfs}, cache=CacheConfig())
     try:
         await ws.dispatch("read_many", _path("/r/a"), paths=[_path("/r/b")])
         index = ws.mount("/r").index
@@ -3165,7 +3174,7 @@ async def test_a_read_ahead_holds_no_file_the_read_cache_answers():
     # cache, which may hold a copy older than the store.
     vfs = HeldRAM(batched=False)
     vfs.caches_reads = True
-    with Workspace({"/r/": vfs}) as ws:
+    with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
         batch, _ = await ws.dispatch(
             "read_many",
             _path("/r/a"),
@@ -3883,7 +3892,9 @@ async def test_a_streamed_write_keeps_what_fits_the_drain_budget(
     budget, kept, monkeypatch
 ):
     destination = StreamWritingRAM()
-    ws = Workspace({"/dst": destination}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/dst": destination}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     ws.cache.max_drain_bytes = budget
     tokens = []
     original = destination.write

@@ -543,7 +543,7 @@ describe('the cross-mount entry point', () => {
     const right = new CachedRAM()
     left.loadState({ type: 'ram', files: { '/f': enc.encode('a1\n') } })
     right.loadState({ type: 'ram', files: { '/g': enc.encode('a2\n') } })
-    const ws = new Workspace({ '/a': left, '/b': right }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/a': left, '/b': right }, { cache: {}, mode: MountMode.WRITE })
     try {
       const result = await ws.shell('sed -i s/a/b/ /a/f /b/g')
       expect(result.exitCode).toBe(0)

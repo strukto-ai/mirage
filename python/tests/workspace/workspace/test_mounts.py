@@ -220,12 +220,23 @@ def _gridfs() -> GridFSVFS:
 @pytest.mark.parametrize(
     "options, vfs, write, expected",
     [
-        ({}, _s3, "conditional", WritePolicy.CONDITIONAL),
+        (
+            {"cache": CacheConfig()},
+            _s3,
+            "conditional",
+            WritePolicy.CONDITIONAL,
+        ),
         ({}, _gridfs, "conditional", "gridfs does not"),
-        ({"write": "conditional"}, _s3, None, WritePolicy.CONDITIONAL),
+        (
+            {"write": "conditional", "cache": CacheConfig()},
+            _s3,
+            None,
+            WritePolicy.CONDITIONAL,
+        ),
         ({"cache": CacheConfig(limit=0)}, _s3, "conditional", "caches reads"),
+        ({}, _s3, "conditional", "caches reads"),
     ],
-    ids=["names", "cannot-honour", "inherits", "keeps-nothing"],
+    ids=["names", "cannot-honour", "inherits", "keeps-nothing", "no-cache"],
 )
 async def test_an_added_mount_is_judged_on_its_write_policy(
     options, vfs, write, expected
@@ -246,7 +257,12 @@ async def test_an_added_mount_is_judged_on_its_write_policy(
 
 @pytest.mark.asyncio
 async def test_host_built_mounts_stay_unconditional_under_a_conditional_default():
-    ws = Workspace({"/s3": _s3()}, mode=MountMode.WRITE, write="conditional")
+    ws = Workspace(
+        {"/s3": _s3()},
+        mode=MountMode.WRITE,
+        write="conditional",
+        cache=CacheConfig(),
+    )
     try:
         assert ws.mount("/s3/").write is WritePolicy.CONDITIONAL
         for prefix in ("/dev/", "/", HISTORY_PREFIX + "/", BIN_PREFIX + "/"):

@@ -510,7 +510,7 @@ describe('Notion streaming rows', () => {
     async (command) => {
       const transport = streamTransport([STREAM.responses[0] ?? {}, ...STREAM.responses])
       const vfs = new StreamingVFS(transport)
-      const ws = new Workspace({ '/notion': vfs })
+      const ws = new Workspace({ '/notion': vfs }, { cache: {} })
       const mount = ws.mounts().find((mount) => mount.vfs === vfs)
       if (mount === undefined) throw new Error('missing Notion mount')
       await indexFor(spec(VIRTUAL, '/notion'), mount.index)

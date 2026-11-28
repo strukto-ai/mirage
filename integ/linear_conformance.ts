@@ -156,7 +156,9 @@ async function main(): Promise<void> {
   try {
     for (const host of ['reference', 'mirage']) {
       await fake.runtime.reset({})
-      const ws = new Workspace({ '/issues': new LinearVFS(config) })
+      // The cached issue.json reads check that a CLI write drops what the
+      // cache kept, so the workspace keeps one.
+      const ws = new Workspace({ '/issues': new LinearVFS(config) }, { cache: {} })
       ws.registerCli('linear', LINEAR, config)
       const run = async (args: string[]): Promise<Run> => {
         calls.length = 0

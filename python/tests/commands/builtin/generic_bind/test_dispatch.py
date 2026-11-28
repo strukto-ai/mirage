@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope, command_started
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -61,7 +62,9 @@ async def test_relay_sort_caches_inputs_and_replacements(overwrite):
     left.caches_reads = right.caches_reads = True
     left.load_state({"files": {"/input": b"z\na\n"}})
     right.load_state({"files": {"/input": b"m\n"}})
-    ws = Workspace({"/a": left, "/b": right}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/a": left, "/b": right}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     command = "sort /a/input /b/input"
     try:
         result = await ws.shell(
@@ -223,7 +226,7 @@ async def test_a_cached_file_is_read_from_the_cache_instead():
     vfs = _Lines()
     vfs.caches_reads = True
     vfs.load_state({"files": {"/f": b"a\nb\nc\n"}})
-    ws = Workspace({"/m/": vfs})
+    ws = Workspace({"/m/": vfs}, cache=CacheConfig())
     try:
         await ws.shell("cat /m/f")
         head = await ws.shell("head -n 2 /m/f")

@@ -30,8 +30,9 @@ def build_file_cache(
     """Build the workspace's file cache from its config.
 
     Args:
-        cache (CacheConfig | None): the cache config; None keeps the
-            default RAM store.
+        cache (CacheConfig | None): the cache config; None builds a RAM
+            store that keeps nothing, so a workspace caches reads only
+            where its config asks for a cache.
         clock (Clock | None): the workspace's clock, handed to the RAM
             store, which ages its entries itself. The redis store expires
             keys server-side and reads no time.
@@ -60,9 +61,10 @@ def build_file_cache(
             ),
             max_drain_bytes=cache.max_drain_bytes,
         )
-    config = cache if cache is not None else CacheConfig()
+    if cache is None:
+        return RAMFileCacheStore(cache_limit=0, clock=clock)
     return RAMFileCacheStore(
-        cache_limit=config.limit,
-        max_drain_bytes=config.max_drain_bytes,
+        cache_limit=cache.limit,
+        max_drain_bytes=cache.max_drain_bytes,
         clock=clock,
     )

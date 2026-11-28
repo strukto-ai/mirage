@@ -90,6 +90,9 @@ interface Case {
     processes?: WorkspaceOptions['processes']
     machines?: Record<string, Record<string, unknown>>
     clis?: Record<string, { cli: string; config?: Record<string, unknown> }>
+    // The workspace's file cache, as `cache:` in a config; a case whose steps
+    // read what a cache kept names one, as a workspace keeps none unasked.
+    cache?: { type: 'ram'; limit?: string | number }
   }
   steps: Step[]
 }
@@ -273,19 +276,23 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const STALL_DEADLINE_MS = 10_000
 
-class CachedRAMVFS extends RAMVFS {
-  override readonly cachesReads = true
-}
-
-/** A local fixture keeping listings, changed behind them like a shared backend. */
-class ListedRAMVFS extends RAMVFS {
-  override readonly indexTtl: number = 600
-
+/** A local fixture whose files change behind every workspace, like a shared backend. */
+class ChangedRAMVFS extends RAMVFS {
   /** Replace or remove a file without telling any workspace; no data removes it. */
   change(key: string, data: string | undefined): void {
     if (data === undefined) this.store.files.delete(key)
     else this.store.files.set(key, ENC.encode(data))
   }
+}
+
+/** A local fixture exercising the same read cache as remote mounts. */
+class CachedRAMVFS extends ChangedRAMVFS {
+  override readonly cachesReads = true
+}
+
+/** A local fixture keeping listings, changed behind them like a shared backend. */
+class ListedRAMVFS extends ChangedRAMVFS {
+  override readonly indexTtl: number = 600
 }
 
 /** A local fixture holding `files`, its walks held by its mount's `walkLimit`. */
@@ -560,7 +567,9 @@ async function action(
     }
     case 'change': {
       const vfs = ws.mount(step.mount).vfs
-      if (!(vfs instanceof ListedRAMVFS)) throw new Error('change requires a listed-ram mount')
+      if (!(vfs instanceof ChangedRAMVFS)) {
+        throw new Error('change requires a listed-ram or cached-ram mount')
+      }
       vfs.change(step.path, step.data)
       return null
     }
@@ -895,6 +904,7 @@ async function run(host: Host, testCase: Case): Promise<number> {
       ? { processes: testCase.settings.processes }
       : {}),
     ...(testCase.settings.machines !== undefined ? { machines: testCase.settings.machines } : {}),
+    ...(testCase.settings.cache !== undefined ? { cache: testCase.settings.cache } : {}),
   })
   for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {
     const config = block.config === undefined ? null : normalizeFields(block.config)

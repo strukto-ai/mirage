@@ -182,8 +182,13 @@ type MountMap = ConstructorParameters<typeof Workspace>[0]
 // print, and they run under no workspace cap, so max_memory is lifted; the
 // cap has its own cases in runtime/policy/limits. Its python3 cases run on
 // Monty, named since no machine runs it by default.
+// A workspace keeps no file content unless its options ask for a cache,
+// and the corpus pins what a cache serves (bounded staleness, conditional
+// writes), so every target workspace keeps one in memory; a target that
+// declares Redis replaces it (cacheFor).
 const WORKSPACE_OPTIONS = {
   mode: MountMode.WRITE,
+  cache: {},
   maxMemory: null,
   machines: { monty: { provider: 'in_process', runtime: 'monty' } },
 }

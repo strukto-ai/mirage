@@ -420,7 +420,7 @@ async function source(vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
   put(repo, 'sub/b.txt', 'two\n')
   execFileSync('git', ['-C', repo, 'add', '-A'], { env })
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'first'], { env })
-  const ws = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+  const ws = new Workspace({ '/w': vfs }, { cache: {}, mode: MountMode.WRITE })
   for (const rel of walk(repo)) {
     const target = `/w/work/${rel}`
     await ensureDir(ws.vfs, PathSpec.fromStrPath(target).parent)

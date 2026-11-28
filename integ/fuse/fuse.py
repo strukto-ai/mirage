@@ -28,6 +28,7 @@ from dataclasses import replace
 from typing import IO
 
 from mirage import Mount, MountBackend, MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.fuse.mount import mount_background, resolve_fusermount_binary
 from mirage.io.types import ByteSource
 from mirage.policy import Policy
@@ -371,7 +372,9 @@ def run_sizeless_probe(result: dict[str, ProbeValue]) -> None:
     api = SizelessRAM()
     api._store.dirs.add("/")
     api._store.files["/api.json"] = API_CONTENT
-    ws = Workspace({"/api": Mount(api, mode=MountMode.READ)})
+    ws = Workspace(
+        {"/api": Mount(api, mode=MountMode.READ)}, cache=CacheConfig()
+    )
     mountpoint = tempfile.mkdtemp(prefix="mirage-fuse-api-")
     mount_background(ws.vfs, mountpoint)
     api_file = f"{mountpoint}/api/api.json"

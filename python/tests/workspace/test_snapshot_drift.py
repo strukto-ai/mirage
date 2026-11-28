@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
@@ -358,7 +359,7 @@ async def test_snapshot_prepares_new_mount_before_capturing_cache(capture):
     with patch_s3_multi({"old": old, "new": new}):
         ancestor = S3VFS(_config().model_copy(update={"bucket": "old"}))
         replacement = S3VFS(_config().model_copy(update={"bucket": "new"}))
-        ws = Workspace({"/": ancestor})
+        ws = Workspace({"/": ancestor}, cache=CacheConfig())
         clone = None
         try:
             assert (

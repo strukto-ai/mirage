@@ -967,8 +967,11 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
       seeds.push([prefix, name, content])
     }
   }
+  // A `<backend>+cache` variant serves repeat reads from the file cache,
+  // which a workspace keeps only when its options ask for one.
   const options: Record<string, unknown> = {
     mode: MountMode.EXEC,
+    cache: {},
     commandLimits: parseCommandLimits(world.command_limits),
   }
   if (world.session_id !== undefined) options.sessionId = world.session_id

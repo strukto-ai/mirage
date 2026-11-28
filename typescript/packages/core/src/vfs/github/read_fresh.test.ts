@@ -74,7 +74,7 @@ function ws(
       [prefix]: new Mount(vfs, { mode: MountMode.READ, read: { policy, ttl: DEFAULT_READ_TTL } }),
       '/r': [new RAMVFS(), MountMode.WRITE],
     },
-    { ...(clock === undefined ? {} : { clock }) },
+    { cache: {}, ...(clock === undefined ? {} : { clock }) },
   )
 }
 

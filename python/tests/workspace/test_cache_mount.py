@@ -17,6 +17,7 @@ from functools import partial
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.core.disk.read import read
@@ -96,6 +97,7 @@ async def test_cross_mount_read_serves_cache(tmp_path):
         {"/d/": disk, "/r/": RAMVFS()},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        cache=CacheConfig(),
     )
     await ws.shell("echo hi > /r/b.txt")
     await (await ws.shell("cat /d/a.txt")).stdout_str()
@@ -191,6 +193,7 @@ async def test_a_guarded_cp_copies_what_cat_serves(tmp_path):
         {"/": disk},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.BOUNDED),
+        cache=CacheConfig(),
     )
     ws.create_session("agent", profile={"paths": {"hide": ["/dir/.secret"]}})
 
@@ -233,7 +236,7 @@ async def test_a_line_touching_a_file_twice_caches_only_a_whole_file(
     after a read is kept."""
     ram = RAMVFS()
     ram.caches_reads = True
-    ws = Workspace({"/d": ram}, mode=MountMode.WRITE)
+    ws = Workspace({"/d": ram}, mode=MountMode.WRITE, cache=CacheConfig())
     await ws.shell("printf 'b\\na\\n' > /d/f")
     await (await ws.shell("cat /d/f")).materialize_stdout()
     await (await ws.shell(line)).materialize_stdout()
@@ -271,7 +274,7 @@ async def test_mv_of_a_file_keeps_every_other_cached_read():
     # subtree under the old name.
     ram = RAMVFS()
     ram.caches_reads = True
-    ws = Workspace({"/m/": ram}, mode=MountMode.WRITE)
+    ws = Workspace({"/m/": ram}, mode=MountMode.WRITE, cache=CacheConfig())
     await ws.shell("echo f > /m/f && mkdir /m/dir && echo x > /m/dir/x")
     await (await ws.shell("cat /m/dir/x")).stdout_str()
     assert await ws.cache.exists("/m/dir/x")

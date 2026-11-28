@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.types import PathSpec
 from mirage.vfs.supabase import SupabaseConfig, SupabaseVFS
 
@@ -35,7 +36,9 @@ config = SupabaseConfig(
 )
 
 backend = SupabaseVFS(config)
-ws = Workspace({"/supabase/": backend}, mode=MountMode.READ)
+ws = Workspace(
+    {"/supabase/": backend}, mode=MountMode.READ, cache=CacheConfig()
+)
 
 
 def ops_summary() -> str:

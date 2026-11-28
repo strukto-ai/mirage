@@ -49,7 +49,7 @@ from mirage.accessor.github import GitHubAccessor
 from mirage.accessor.hf_hub import HfHubAccessor
 from mirage.accessor.onedrive import OneDriveConfig
 from mirage.accessor.sharepoint import SharePointConfig
-from mirage.cache.file.config import RedisCacheConfig
+from mirage.cache.file.config import CacheConfig, RedisCacheConfig
 from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.cli.types import CLI
@@ -3602,18 +3602,22 @@ def _drop_jobs(
     return drop
 
 
-def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
-    """Build the target's file cache config, or None for in-memory.
+def cache_config(target: dict, run_id: str) -> CacheConfig:
+    """Build the target's file cache config: in memory unless it says
+    Redis.
 
-    A target opts in with ``"cache": {"type": "redis"}``; the entries
-    ride REDIS_URL under a per-run key prefix.
+    A workspace keeps no file content unless its config asks for a
+    cache, and the corpus pins what a cache serves (bounded staleness,
+    conditional writes), so every target asks for one. A target puts it
+    on Redis with ``"cache": {"type": "redis"}``; the entries ride
+    REDIS_URL under a per-run key prefix.
 
     Args:
         target (dict): the target manifest entry.
         run_id (str): this open's unique id.
     """
     if (target.get("cache") or {}).get("type") != "redis":
-        return None
+        return CacheConfig()
     return RedisCacheConfig(
         url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
         key_prefix=f"mirage-integ-cache-{run_id}:",
@@ -3823,6 +3827,7 @@ async def open_consistency(
             mode=MountMode.WRITE,
             read=read,
             write=write,
+            cache=CacheConfig(),
             max_memory=None,
             machines=dict(TARGET_MACHINES),
         )
@@ -3833,6 +3838,7 @@ async def open_consistency(
         shadow_mounts,
         mode=MountMode.WRITE,
         write=write,
+        cache=CacheConfig(),
         max_memory=None,
         machines=dict(TARGET_MACHINES),
     )

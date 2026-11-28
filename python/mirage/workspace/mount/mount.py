@@ -747,6 +747,15 @@ class MountEntry:
         return bool(self._callers(name, None))
 
     @property
+    def caches_reads(self) -> bool:
+        """Whether the workspace's file cache keeps this mount's reads:
+        its backend caches them and the workspace has a cache that keeps
+        anything, which it has only where its config asks for one."""
+        return (
+            self.cache_manager is not None and self.cache_manager.caches_reads
+        )
+
+    @property
     def index(self) -> IndexCacheStore:
         return (
             self.cache_manager.scope_index()

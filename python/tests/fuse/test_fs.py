@@ -31,6 +31,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.bridge.sync import blocking
+from mirage.cache.file.config import CacheConfig
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.fs import MirageFS
 from mirage.types import FileType, HiddenPaths, MountMode, Visibility
@@ -408,7 +409,9 @@ class _UnsizedRAM(RAMVFS):
 @pytest.mark.asyncio
 async def test_a_released_files_size_comes_from_the_workspace_cache():
     vfs = _UnsizedRAM()
-    fs = MirageFS(Workspace({"/": vfs}, mode=MountMode.WRITE).vfs)
+    fs = MirageFS(
+        Workspace({"/": vfs}, mode=MountMode.WRITE, cache=CacheConfig()).vfs
+    )
     assert fs.getattr("/u.json")["st_size"] == 0
     fh = fs.open("/u.json", os.O_RDONLY)
     assert fs.read("/u.json", 1024, 0, fh) == _PAYLOAD
@@ -424,7 +427,9 @@ async def test_unknown_size_truncate_through_a_link_leaves_no_stale_size():
     # The target was opened and released as /u.json, leaving its bytes in
     # the workspace cache; an O_TRUNC open through a link to it must not
     # leave the old length for the next stat of /u.json.
-    ws = Workspace({"/": _UnsizedRAM()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/": _UnsizedRAM()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await ws.shell("ln -s u.json /lk")
     fs = MirageFS(ws.vfs)
     fh = fs.open("/u.json", os.O_RDONLY)

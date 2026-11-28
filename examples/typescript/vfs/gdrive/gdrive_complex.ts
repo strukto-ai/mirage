@@ -31,7 +31,7 @@ function buildConfig(): GoogleDriveConfig {
 }
 
 const backend = new GoogleDriveVFS(buildConfig())
-const ws = new Workspace({ '/gdrive/': backend }, { mode: MountMode.READ })
+const ws = new Workspace({ '/gdrive/': backend }, { mode: MountMode.READ, cache: {} })
 
 function opsSummary(): string {
   const records = ws.records

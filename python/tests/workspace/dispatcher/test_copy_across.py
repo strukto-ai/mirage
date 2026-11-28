@@ -15,6 +15,7 @@
 import pytest
 
 from mirage import Mount, MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.errors.fs import exdev
 from mirage.types import PathSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
@@ -45,7 +46,9 @@ class StoreRAM(RAMVFS):
 
 async def _seeded(a: StoreRAM, b: RAMVFS, mode: MountMode = MountMode.WRITE):
     ws = Workspace(
-        {"/a/": a, "/b/": Mount(b, mode=mode)}, mode=MountMode.WRITE
+        {"/a/": a, "/b/": Mount(b, mode=mode)},
+        mode=MountMode.WRITE,
+        cache=CacheConfig(),
     )
     io = await ws.shell("printf 'payload\\n' > /a/f")
     assert io.exit_code == 0, io.stderr

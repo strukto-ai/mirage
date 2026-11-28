@@ -20,6 +20,7 @@ import shlex
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 
 load_dotenv(".env.development")
@@ -31,7 +32,7 @@ config = GoogleDriveConfig(
 )
 
 backend = GoogleDriveVFS(config=config)
-ws = Workspace({"/gdrive/": backend}, mode=MountMode.READ)
+ws = Workspace({"/gdrive/": backend}, mode=MountMode.READ, cache=CacheConfig())
 
 
 def ops_summary() -> str:

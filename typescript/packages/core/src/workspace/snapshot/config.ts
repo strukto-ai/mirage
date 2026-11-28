@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { CacheConfig } from '../../cache/file/config.ts'
 import { IndexType, type IndexConfig, type RedisIndexConfig } from '../../cache/index/config.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { IOConfig } from '../../io/config.ts'
@@ -45,6 +46,8 @@ export interface MountArgs {
   network: NetworkSetting
   // The workspace's system_time, as written; null for the host's time.
   systemTime: string | null
+  // The file cache to rebuild in memory; null for none.
+  cache: CacheConfig | null
 }
 
 export interface IndexConfigSnapshot {

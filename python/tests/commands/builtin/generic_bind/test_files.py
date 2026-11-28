@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.builtin.generic_bind.files import (
     CommandFiles,
     ReadAhead,
@@ -279,12 +280,26 @@ async def test_a_glob_read_warms_the_operands_after_it():
     vfs = BatchedRAM()
     names = [f"/f{i:02}" for i in range(12)]
     vfs._store.files.update({name: b"x\n" for name in names})
-    with Workspace({"/r/": vfs}) as ws:
+    with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
         out = await ws.shell("cat /r/f*")
         assert await out.stdout_str() == "x\n" * 12
     warmed = [f"/r{name}" for name in names[1:]]
     assert vfs.reads == ["/r/f00"]
     assert vfs.batches == [warmed[:8], warmed[8:]]
+
+
+@pytest.mark.asyncio
+async def test_a_glob_read_with_no_cache_reads_each_file_once():
+    # A mount that caches reads, in a workspace with no cache to keep
+    # them: nothing is warmed, since a warmed file would be read again.
+    vfs = BatchedRAM()
+    names = [f"/f{i:02}" for i in range(12)]
+    vfs._store.files.update({name: b"x\n" for name in names})
+    with Workspace({"/r/": vfs}) as ws:
+        out = await ws.shell("cat /r/f*")
+        assert await out.stdout_str() == "x\n" * 12
+    assert vfs.reads == [f"/r{name}" for name in names]
+    assert vfs.batches == []
 
 
 @pytest.mark.asyncio
@@ -311,7 +326,7 @@ async def test_a_walk_warms_ahead_only_while_it_reads_what_it_lists(
     vfs = BatchedRAM()
     vfs._store.dirs.add("/d")
     vfs._store.files.update({f"/d/f{i:02}": b"x\n" for i in range(12)})
-    with Workspace({"/r/": vfs}) as ws:
+    with Workspace({"/r/": vfs}, cache=CacheConfig()) as ws:
         await (await ws.shell(line)).stdout_str()
     assert vfs.reads == [f"/r/d/f{n}" for n in reads]
     assert vfs.batches == [[f"/r/d/f{n}" for n in b] for b in batches]

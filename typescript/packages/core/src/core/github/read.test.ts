@@ -216,7 +216,7 @@ describe('a read against the wire', () => {
       ref: 'main',
       baseUrl: repo.run.url,
     })
-    const ws = new Workspace({ '/gh': vfs })
+    const ws = new Workspace({ '/gh': vfs }, { cache: {} })
     try {
       const result = await ws.shell('cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt')
       expect(result.stdoutText).toBe('a\nb\nc\nd\n')

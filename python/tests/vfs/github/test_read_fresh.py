@@ -16,6 +16,7 @@ from urllib.parse import unquote
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.api.errors import ApiError
 from mirage.core.github.tree import fetch_tree
@@ -87,6 +88,7 @@ def _ws(
             "/r": (RAMVFS(), MountMode.WRITE),
         },
         clock=clock,
+        cache=CacheConfig(),
     )
 
 

@@ -312,7 +312,7 @@ function sessionId(): string {
 
 /** The cache facts of the mount that owns a path, uncacheable without one. */
 function factsOf(mount: MountEntry | null): CacheFacts {
-  if (mount === null || mount.retiring || !mount.vfs.cachesReads) {
+  if (mount === null || mount.retiring || !mount.cachesReads) {
     return { cacheable: false, ttl: DEFAULT_READ_TTL }
   }
   return {
@@ -1149,7 +1149,7 @@ export class Dispatcher {
     if (
       prune &&
       (!owner?.vfs.searchCoversTree ||
-        owner.vfs.cachesReads ||
+        owner.cachesReads ||
         owner.vfs.searchable !== null ||
         owner.revisions.size > 0 ||
         this.namespace.registry.descendantMounts(call.path.virtual).length > 0 ||
@@ -1273,7 +1273,7 @@ export class Dispatcher {
       call.caller === undefined
     )
       throw enotsup('workspace', 'conditional read (overlapping sessions)', call.path)
-    const cached = await this.serveCached(call, mount, vfs, boundary, mark)
+    const cached = await this.serveCached(call, mount, boundary, mark)
     if (cached !== null) {
       return [cached, new IOResult()]
     }
@@ -1673,7 +1673,7 @@ export class Dispatcher {
       ) {
         continue
       }
-      const manager = this.filler(call, mount, mount.vfs)
+      const manager = this.filler(call, mount)
       if (mount.vfs.local) {
         if (
           !judged &&
@@ -2443,11 +2443,10 @@ export class Dispatcher {
   private async serveCached(
     call: Call,
     mount: MountEntry,
-    vfs: BaseVFS,
     boundary: Boundary,
     mark: VfsCall,
   ): Promise<ByteSource | null> {
-    if (call.direct || !vfs.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
+    if (call.direct || !mount.cachesReads || !DISPATCH_READ_OPS.has(call.name)) return null
     const held = await this.cache.getVersioned(call.path.virtual)
     const cached = held?.[0] ?? null
     if (
@@ -2504,10 +2503,10 @@ export class Dispatcher {
    * ready, so a renderer can land after this check; the fill asks again
    * before it keeps anything. Mirrors Python's Dispatcher._filler.
    */
-  private filler(call: Call, mount: MountEntry, vfs: BaseVFS): CacheManager | null {
+  private filler(call: Call, mount: MountEntry): CacheManager | null {
     const [offset, size] = readWindow(call.kwargs)
     const whole = offset === 0 && size === null
-    return vfs.cachesReads &&
+    return mount.cachesReads &&
       !call.direct &&
       DISPATCH_READ_OPS.has(call.name) &&
       size !== 0 &&
@@ -2678,7 +2677,7 @@ export class Dispatcher {
   ): Promise<[unknown, PathSpec | null, readonly unknown[]]> {
     const { name, path: p, kwargs, report } = call
     const mountPrefix = mount.prefix
-    const filler = this.filler(call, mount, vfs)
+    const filler = this.filler(call, mount)
     const filetype = getExtension(p.virtual)
     const [readOffset, readSize] = readWindow(kwargs)
     const whole = readOffset === 0 && readSize === null

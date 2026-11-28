@@ -211,7 +211,9 @@ mounts:
 ## Read and write behavior
 
 `read` and `write` go on a mount, or at the top of `workspace.yaml` for every
-mount.
+mount. A cached copy exists only in a workspace with a
+[file cache](/home/infrastructure/file-cache); without one, every read asks the
+VFS.
 
 | `read` | A cached copy is served |
 | --- | --- |
@@ -225,7 +227,9 @@ mount.
 
 `write: conditional` works on [S3 and the VFSes built on it](/home/setup/s3#s3-compatible-vfses),
 [Box](/home/setup/box) and [Dropbox](/home/setup/dropbox), on a writable mount
-that caches reads. Any other mount refuses it. Under it:
+that caches reads, in a workspace with a
+[file cache](/home/infrastructure/file-cache). Any other mount refuses it.
+Under it:
 
 - A refused write stays refused until the session reads the file again.
 - Where the session last saw no file, a write only creates one, and fails if

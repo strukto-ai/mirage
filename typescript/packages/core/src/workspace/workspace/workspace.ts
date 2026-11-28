@@ -3081,6 +3081,7 @@ export class Workspace {
       maxBodyBytes: args.maxBodyBytes,
       network: args.network,
       systemTime: args.systemTime,
+      ...(args.cache !== null ? { cache: args.cache } : {}),
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
       ...(args.clis !== undefined ? { clis: args.clis } : {}),
       commandLimits: args.commandLimits,

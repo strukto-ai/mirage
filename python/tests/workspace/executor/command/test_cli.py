@@ -20,6 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.cli.builtin.ast_grep import AST_GREP
 from mirage.commands.cli.types import CLI, CLIHandler
@@ -996,7 +997,9 @@ def _disk_workspace(root):
     (root / "a.txt").write_bytes(b"v1\n")
     disk = DiskVFS(root=str(root))
     disk.caches_reads = True
-    return Workspace({"/data/": disk}, mode=MountMode.WRITE)
+    return Workspace(
+        {"/data/": disk}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
 
 
 async def _warm_then_run(ws: Workspace, root, line: str) -> tuple[str, str]:
@@ -1050,7 +1053,9 @@ async def test_an_account_cli_write_refreshes_only_the_mounts_it_reaches(
     served, other = DiskVFS(root=str(root)), DiskVFS(root=str(apart))
     served.caches_reads = other.caches_reads = True
     with Workspace(
-        {"/data/": served, "/apart/": other}, mode=MountMode.WRITE
+        {"/data/": served, "/apart/": other},
+        mode=MountMode.WRITE,
+        cache=CacheConfig(),
     ) as ws:
 
         class Client(Accessor):

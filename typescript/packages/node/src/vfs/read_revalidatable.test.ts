@@ -1187,13 +1187,16 @@ function specFor(virtual: string, key: string): PathSpec {
 }
 
 function freshWorkspace(vfs: BaseVFS): Workspace {
-  const ws = new Workspace({
-    '/m': new Mount(vfs, {
-      mode: MountMode.WRITE,
-      read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
-    }),
-    '/r': [new RAMVFS(), MountMode.WRITE],
-  })
+  const ws = new Workspace(
+    {
+      '/m': new Mount(vfs, {
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
+      }),
+      '/r': [new RAMVFS(), MountMode.WRITE],
+    },
+    { cache: {} },
+  )
   OWN_INDEX.set(vfs, ws.mount('/m').indexStore)
   return ws
 }

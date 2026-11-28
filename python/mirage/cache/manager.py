@@ -83,8 +83,9 @@ class CacheManager:
             listings are keyed by mount-absolute path, which every
             backend agrees on.
         prefix (str): Mount prefix (e.g. "/data/").
-        caches_reads (bool): Whether the VFS caches reads; the
-            file cache only holds paths for read-caching backends.
+        caches_reads (bool): Whether the file cache keeps this
+            mount's reads: its VFS caches reads and the cache keeps
+            anything. The file cache only holds paths for such mounts.
         owns_path (Callable[[str], bool]): whether this mount still
             owns a virtual cache key.
         read_ttl (int): lifetime of complete backend renders, and the
@@ -379,6 +380,11 @@ class CacheManager:
         self._checking[key] = flight
         task.add_done_callback(finished)
         return flight
+
+    @property
+    def caches_reads(self) -> bool:
+        """Whether the file cache keeps this mount's reads."""
+        return self._caches_reads
 
     @property
     def generation(self) -> int:

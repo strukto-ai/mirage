@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.core.github.config import GitHubConfig
 from mirage.core.github.readdir import readdir
 from mirage.core.github.tree import ensure_tree
@@ -143,7 +144,11 @@ async def test_reconcile_private_index_can_resolve_github_ids(
     # The subject is the reconciler's github-id resolution: the private
     # index it stats through holds nothing, and the id still resolves.
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
+    ws = Workspace(
+        {"/gh": vfs},
+        read=ReadSpec(policy=ReadPolicy.FRESH),
+        cache=CacheConfig(),
+    )
     try:
         path = "/gh/src/main.py"
         await ws.namespace.ensure_loaded()
@@ -191,7 +196,11 @@ async def test_always_reads_current_github_blob_after_probe(
     monkeypatch.setattr("mirage.core.github.read.fetch_blob", fetch_blob)
     monkeypatch.setattr("mirage.core.github.read.stream_blob", _blob_stream)
     vfs = GitHubVFS(CONFIG, "o", "r", "main")
-    ws = Workspace({"/gh": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
+    ws = Workspace(
+        {"/gh": vfs},
+        read=ReadSpec(policy=ReadPolicy.FRESH),
+        cache=CacheConfig(),
+    )
     try:
         assert (await ws.shell("cat /gh/f.txt")).stdout == b"v1"
         sha = "v2"

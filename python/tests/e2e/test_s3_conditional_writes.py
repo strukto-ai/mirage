@@ -25,6 +25,7 @@ import pytest
 import pytest_asyncio
 
 from mirage import Mount, MountMode, Workspace, WritePolicy
+from mirage.cache.file.config import CacheConfig
 from mirage.context.session_context import current_caller
 from mirage.errors.types import StaleWriteError
 from mirage.mount.core import MountCore
@@ -76,7 +77,9 @@ def _workspace(
         "/ram": (RAMVFS(), MountMode.WRITE),
     }
     table.update(mounts)
-    return Workspace(table, mode=mode, machines=[MontyRuntime()])
+    return Workspace(
+        table, mode=mode, machines=[MontyRuntime()], cache=CacheConfig()
+    )
 
 
 @pytest_asyncio.fixture

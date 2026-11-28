@@ -73,7 +73,24 @@ SUITE = Path(__file__).with_name("cases.json")
 STALL_DEADLINE = 10.0
 
 
-class CachedRAMVFS(RAMVFS):
+class ChangedRAMVFS(RAMVFS):
+    """A local fixture whose files change behind every workspace, like a
+    shared backend."""
+
+    def change(self, key: str, data: bytes | None) -> None:
+        """Replace or remove a file without telling any workspace.
+
+        Args:
+            key (str): the mount-relative path.
+            data (bytes | None): the new bytes, None to remove the file.
+        """
+        if data is None:
+            self._store.files.pop(key, None)
+        else:
+            self._store.files[key] = data
+
+
+class CachedRAMVFS(ChangedRAMVFS):
     """A local fixture exercising the same read cache as remote mounts."""
 
     caches_reads = True
@@ -92,22 +109,10 @@ class CachedRAMVFS(RAMVFS):
 register_vfs("cached-ram", CachedRAMVFS)
 
 
-class ListedRAMVFS(RAMVFS):
+class ListedRAMVFS(ChangedRAMVFS):
     """A local fixture keeping listings, changed behind them like a shared backend."""
 
     index_ttl = 600
-
-    def change(self, key: str, data: bytes | None) -> None:
-        """Replace or remove a file without telling any workspace.
-
-        Args:
-            key (str): the mount-relative path.
-            data (bytes | None): the new bytes, None to remove the file.
-        """
-        if data is None:
-            self._store.files.pop(key, None)
-        else:
-            self._store.files[key] = data
 
 
 register_vfs("listed-ram", ListedRAMVFS)
@@ -416,7 +421,7 @@ async def action(
         return {"pulls": vfs.pulls, "closed": vfs.closed}
     if op == "change":
         vfs = ws.mount(step["mount"]).vfs
-        assert isinstance(vfs, ListedRAMVFS)
+        assert isinstance(vfs, ChangedRAMVFS)
         data = step.get("data")
         vfs.change(step["path"], None if data is None else data.encode())
         return None

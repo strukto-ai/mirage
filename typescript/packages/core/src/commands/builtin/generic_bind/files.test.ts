@@ -309,13 +309,28 @@ it('warms the operands after a glob read', async () => {
   const vfs = new BatchedRAM()
   const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
   for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
-  const ws = new Workspace({ '/r': vfs })
+  const ws = new Workspace({ '/r': vfs }, { cache: {} })
   open.push(ws)
   const out = await ws.shell('cat /r/f*')
   expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
   const warmed = names.slice(1).map((name) => `/r${name}`)
   expect(vfs.reads).toEqual(['/r/f00'])
   expect(vfs.batches).toEqual([warmed.slice(0, 8), warmed.slice(8)])
+})
+
+// Twin of test_a_glob_read_with_no_cache_reads_each_file_once: a mount that
+// caches reads, in a workspace with no cache to keep them, warms nothing,
+// since a warmed file would be read again.
+it('reads each file of a glob once with no cache', async () => {
+  const vfs = new BatchedRAM()
+  const names = Array.from({ length: 12 }, (_, i) => `/f${String(i).padStart(2, '0')}`)
+  for (const name of names) vfs.store.files.set(name, ENC.encode('x\n'))
+  const ws = new Workspace({ '/r': vfs })
+  open.push(ws)
+  const out = await ws.shell('cat /r/f*')
+  expect(DEC.decode(out.stdout)).toBe('x\n'.repeat(12))
+  expect(vfs.reads).toEqual(names.map((name) => `/r${name}`))
+  expect(vfs.batches).toEqual([])
 })
 
 // Twin of test_a_glob_read_on_a_local_mount_is_answered_from_held_batches: the
@@ -347,7 +362,7 @@ it.each([
   for (let i = 0; i < 12; i++) {
     vfs.store.files.set(`/d/f${String(i).padStart(2, '0')}`, ENC.encode('x\n'))
   }
-  const ws = new Workspace({ '/r': vfs })
+  const ws = new Workspace({ '/r': vfs }, { cache: {} })
   open.push(ws)
   await ws.shell(line)
   expect(vfs.reads).toEqual(reads.map((n) => `/r/d/f${n}`))

@@ -49,7 +49,10 @@ export class CacheManager {
   private readonly index: IndexCacheStore | null
   private readonly clock: Clock
   private readonly prefix: string
-  private readonly cachesReads: boolean
+  /** Whether the file cache keeps this mount's reads: its VFS caches reads
+   * and the cache keeps anything. The file cache only holds paths for such
+   * mounts. */
+  readonly cachesReads: boolean
   private readonly ownsPath: (path: string) => boolean
   private readGeneration = 0
   private view: IndexView | null = null

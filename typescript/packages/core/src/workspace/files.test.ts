@@ -293,7 +293,7 @@ describe('fresh stat', () => {
   it('drops a cached copy it cannot vouch for', async () => {
     const vfs = new RAMVFS()
     ;(vfs as unknown as { cachesReads: boolean }).cachesReads = true
-    const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': vfs }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/data/f.txt', 'old')
       expect(new TextDecoder().decode(await ws.vfs.read('/data/f.txt'))).toBe('old')
@@ -362,7 +362,7 @@ describe('fresh stat', () => {
   })
 
   it('keeps the version a conditional write sends', async () => {
-    const ws = new Workspace({ '/data': cachingRam() }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/data': cachingRam() }, { cache: {}, mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/data/f.txt', 'old')
       await ws.cache.remove('/data/f.txt')
@@ -455,7 +455,7 @@ describe('fresh stat', () => {
     Object.assign(outer, { cachesReads: true })
     const ws = new Workspace(
       { '/data': outer, '/data/d/inner': new RAMVFS() },
-      { mode: MountMode.WRITE },
+      { cache: {}, mode: MountMode.WRITE },
     )
     try {
       await ws.vfs.mkdir('/data/d')
@@ -676,7 +676,7 @@ function cachingRam(): RAMVFS {
 function rendererOnMount(): Workspace {
   const vfs = cachingRam()
   renderTally(vfs)
-  return new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  return new Workspace({ '/m': vfs }, { cache: {}, mode: MountMode.WRITE })
 }
 
 function rendererInVfs(): Workspace {
@@ -785,7 +785,7 @@ describe('Files goes through the dispatcher', () => {
     // Python's tests/workspace/dispatcher/test_raw_read.py.
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/m': vfs }, { cache: {}, mode: MountMode.WRITE })
     await ws.vfs.write('/m/doc.gdoc.json', 'stored')
     await ws.cache.set('/m/doc.gdoc.json', new TextEncoder().encode('cached'), { ttl: 600 })
     expect(DEC.decode(await ws.vfs.read('/m/doc.gdoc.json'))).toBe('cached')
@@ -831,11 +831,15 @@ describe('Files goes through the dispatcher', () => {
     renderTally(vfs)
     const ws = new Workspace(
       { '/m': vfs },
-      { mode: MountMode.WRITE, read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL } },
+      {
+        cache: {},
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
+      },
     )
     await ws.vfs.write('/m/books.tally', 'stored')
     await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
-    const other = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+    const other = new Workspace({ '/m': vfs }, { cache: {}, mode: MountMode.WRITE })
     await other.vfs.unlink('/m/books.tally')
     await expect(ws.vfs.read('/m/books.tally')).rejects.toThrow()
   })
@@ -845,7 +849,7 @@ describe('Files goes through the dispatcher', () => {
   it('never serves a renderer registered mid-read from the file cache', async () => {
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/m': vfs }, { cache: {}, mode: MountMode.WRITE })
     await ws.vfs.write('/m/books.tally', 'stored')
     await ws.cache.set('/m/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
     const original = ws.cache.getVersioned.bind(ws.cache)
@@ -895,7 +899,7 @@ describe('Files goes through the dispatcher', () => {
     Object.assign(shipping, { cachesReads: true })
     Object.assign(plain, { cachesReads: true })
     renderTally(shipping)
-    const ws = new Workspace({ '/a': shipping, '/b': plain }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/a': shipping, '/b': plain }, { cache: {}, mode: MountMode.WRITE })
     await ws.vfs.write('/b/books.tally', 'stored')
     await ws.cache.set('/b/books.tally', new TextEncoder().encode('cached'), { ttl: 600 })
     expect(DEC.decode(await ws.vfs.read('/b/books.tally'))).toBe('cached')
@@ -959,7 +963,7 @@ describe('Files accounting survives the delegation', () => {
     Object.assign(vfs, { cachesReads: true, kind: 's3' })
     const ws = new Workspace(
       { '/m': vfs },
-      { mode: MountMode.WRITE, policies: [new DenyBigReads()] },
+      { cache: {}, mode: MountMode.WRITE, policies: [new DenyBigReads()] },
     )
     await ws.cache.set('/m/a.txt', new TextEncoder().encode('0123456789'), { ttl: 600 })
     ws.records.length = 0
@@ -998,7 +1002,7 @@ describe('a warm cache still answers a ranged read with the window', () => {
   function mkCaching(): Workspace {
     const vfs = new RAMVFS()
     Object.assign(vfs, { cachesReads: true })
-    return new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+    return new Workspace({ '/m': vfs }, { cache: {}, mode: MountMode.WRITE })
   }
 
   async function readAt(ws: Workspace, offset: number, size: number | null): Promise<string> {

@@ -137,7 +137,7 @@ class FakeRemoteVFS extends BaseVFS {
 
 function build(accessor: FakeRemoteAccessor): Workspace {
   const res = new FakeRemoteVFS(accessor)
-  return new Workspace({ '/remote': res }, { mode: MountMode.WRITE })
+  return new Workspace({ '/remote': res }, { cache: {}, mode: MountMode.WRITE })
 }
 
 // Wrap a dispatch call in recordingScope so the captured OpRecord

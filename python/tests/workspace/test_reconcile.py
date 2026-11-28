@@ -24,6 +24,7 @@ from uuid import uuid4
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.cache.index.config import Evicted, IndexConfig, RedisIndexConfig
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import ListingCheckStore
@@ -50,7 +51,9 @@ from tests.fixtures.versioned_vfs import (
 
 
 async def _ws_with_overlay():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await ws.namespace.ensure_loaded()
     await ws.namespace.set_attrs("/data/f.txt", mode=0o600)
     return ws
@@ -88,7 +91,9 @@ async def test_on_gone_for_a_file_evicts_its_bytes_and_overlay():
 
 @pytest.mark.asyncio
 async def test_on_gone_for_a_folder_takes_its_subtree_but_not_links():
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await ws.namespace.ensure_loaded()
     await ws.namespace.set_attrs("/data/sub", mode=0o700)
     await ws.namespace.set_attrs("/data/sub/x", mode=0o600)
@@ -220,7 +225,9 @@ async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
     """
     resource = RAMVFS()
     resource._store.files["/f.txt"] = b"v1"
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")
@@ -345,7 +352,10 @@ async def test_always_probes_live_s3_with_warm_index(
     )
     with patch_s3_multi({"test-bucket": objects}):
         ws = Workspace(
-            {"/s3": vfs}, index=index, read=ReadSpec(policy=ReadPolicy.FRESH)
+            {"/s3": vfs},
+            index=index,
+            read=ReadSpec(policy=ReadPolicy.FRESH),
+            cache=CacheConfig(),
         )
         store = ws.mount("/s3").index_store
         try:
@@ -381,7 +391,7 @@ async def test_unverified_probe_cannot_serve_cached_bytes(
 ):
     resource = RAMVFS()
     resource.caches_reads = True
-    ws = Workspace({"/data": resource})
+    ws = Workspace({"/data": resource}, cache=CacheConfig())
     try:
         mount = ws.namespace.mount_for("/data/f.txt")
         mount.read = ReadSpec(policy=ReadPolicy.FRESH)
@@ -472,7 +482,9 @@ async def test_bounded_removes_a_bound_less_entry_and_the_refill_stamps():
     resource = RAMVFS()
     resource.caches_reads = True
     resource._store.files["/f.txt"] = b"v1"
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         # An entry as a pre-D1 deployment left it: bytes, no bound.
@@ -500,7 +512,9 @@ async def test_bounded_serves_an_entry_that_carries_a_bound():
     """The other half: a properly stamped entry is served untouched."""
     resource = RAMVFS()
     resource.caches_reads = True
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         await ws.cache.set("/data/f.txt", b"v1", ttl=600)
@@ -524,7 +538,11 @@ async def test_fresh_s3_relist_keeps_deletion_baseline_after_stat():
         )
     )
     with patch_s3_multi({"test-bucket": objects}):
-        ws = Workspace({"/s3": vfs}, read=ReadSpec(policy=ReadPolicy.FRESH))
+        ws = Workspace(
+            {"/s3": vfs},
+            read=ReadSpec(policy=ReadPolicy.FRESH),
+            cache=CacheConfig(),
+        )
         try:
             for command in ("ls /s3/sub", "cat /s3/sub/a", "ls /s3"):
                 assert (await ws.shell(command)).exit_code == 0
@@ -550,7 +568,9 @@ async def test_relist_preserves_nested_mount_subtree(redis, replacement):
             pytest.skip("REDIS_URL not set")
         config = RedisIndexConfig(url=url, key_prefix=f"nested:{uuid4()}:")
     ws = Workspace(
-        {"/data": RAMVFS(), "/data/sub/nested": RAMVFS()}, index=config
+        {"/data": RAMVFS(), "/data/sub/nested": RAMVFS()},
+        index=config,
+        cache=CacheConfig(),
     )
     try:
         await ws.namespace.ensure_loaded()
@@ -619,7 +639,9 @@ class _CountedNodes(dict[str, NodeMeta]):
 
 @pytest.mark.asyncio
 async def test_relist_batches_a_thousand_vanished_children():
-    ws = Workspace({"/data": RAMVFS()}, index=IndexConfig(ttl=600))
+    ws = Workspace(
+        {"/data": RAMVFS()}, index=IndexConfig(ttl=600), cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         mount = ws.mount("/data")
@@ -659,6 +681,7 @@ async def test_cleanup_batches_overlapping_folders_and_protects_nested_mounts():
     ws = Workspace(
         {"/data": RAMVFS(), "/data/tree/nested": RAMVFS()},
         index=IndexConfig(ttl=600),
+        cache=CacheConfig(),
     )
     try:
         await ws.namespace.ensure_loaded()
@@ -706,7 +729,9 @@ async def test_a_write_in_the_command_sends_the_next_probe_to_the_backend():
     # deletion the remembered stat would have hidden.
     resource = RAMVFS()
     resource._store.files["/f.txt"] = b"v1"
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")
@@ -748,7 +773,9 @@ async def _gated(fingerprint: str = "fp1"):
     resource = RAMVFS()
     resource.caches_reads = True
     resource._store.files["/f.txt"] = b"v1"
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     await ws.namespace.ensure_loaded()
     mount = ws.namespace.mount_for("/data/f.txt")
     mount.read = ReadSpec(policy=ReadPolicy.FRESH)
@@ -1144,7 +1171,9 @@ async def test_the_probe_hints_the_mount_index_row():
     # that id once, and must confirm what comes back.
     resource = RAMVFS()
     resource._store.files["/f.txt"] = b"v1"
-    ws = Workspace({"/data/": resource}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {"/data/": resource}, mode=MountMode.WRITE, cache=CacheConfig()
+    )
     try:
         await ws.namespace.ensure_loaded()
         mount = ws.namespace.mount_for("/data/f.txt")

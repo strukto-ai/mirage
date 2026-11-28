@@ -17,6 +17,7 @@ from contextlib import ExitStack
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.observe.context import RecordingScope
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -207,6 +208,7 @@ async def _run_records(
             "/r": (RAMVFS(), MountMode.WRITE),
         },
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
     )
     await _prepare(ws, state)
     for line in seed:

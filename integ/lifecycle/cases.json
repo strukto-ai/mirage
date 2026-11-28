@@ -2287,6 +2287,9 @@
               }
             }
           }
+        },
+        "cache": {
+          "type": "ram"
         }
       },
       "steps": [
@@ -2431,6 +2434,9 @@
               }
             }
           }
+        },
+        "cache": {
+          "type": "ram"
         }
       },
       "steps": [
@@ -4752,7 +4758,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {
@@ -5877,7 +5886,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {
@@ -6084,7 +6096,10 @@
             }
           }
         },
-        "mode": "read"
+        "mode": "read",
+        "cache": {
+          "type": "ram"
+        }
       },
       "steps": [
         {
@@ -7642,6 +7657,115 @@
               "exit_code": 1,
               "stdout": "",
               "stderr": "stamp: ambiguous, registered on 2 writable mounts:\n  /longer\n  /b\ncd into the target mount to disambiguate.\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_workspace_with_no_cache_reads_a_change_behind_it",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "cached-ram",
+            "config": {
+              "files": {
+                "/f.txt": "old\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/f.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "old\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/f.txt",
+          "expect": {
+            "value": null
+          }
+        },
+        {
+          "op": "change",
+          "mount": "/data",
+          "path": "/f.txt",
+          "data": "new\n"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/f.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "new\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_workspace_with_a_cache_serves_its_copy_over_a_change",
+      "settings": {
+        "mode": "write",
+        "mounts": {
+          "/data": {
+            "vfs": "cached-ram",
+            "config": {
+              "files": {
+                "/f.txt": "old\n"
+              }
+            }
+          }
+        },
+        "cache": {
+          "type": "ram"
+        }
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "cat /data/f.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "old\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "cached",
+          "path": "/data/f.txt",
+          "expect": {
+            "value": "old\n"
+          }
+        },
+        {
+          "op": "change",
+          "mount": "/data",
+          "path": "/f.txt",
+          "data": "new\n"
+        },
+        {
+          "op": "exec",
+          "command": "cat /data/f.txt",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "old\n",
+              "stderr": ""
             }
           }
         }

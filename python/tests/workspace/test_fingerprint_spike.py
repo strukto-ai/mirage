@@ -18,6 +18,7 @@ import time
 
 import pytest
 
+from mirage.cache.file.config import CacheConfig
 from mirage.types import (
     DEFAULT_READ_TTL,
     HiddenPaths,
@@ -129,6 +130,7 @@ def test_s3_always_warm_read_serves_cache_for_non_md5_fingerprint():
             {"/s3": (S3VFS(config), MountMode.WRITE)},
             mode=MountMode.WRITE,
             read=ReadSpec(policy=ReadPolicy.FRESH),
+            cache=CacheConfig(),
         )
 
         async def run() -> tuple[bytes, bytes]:
@@ -167,6 +169,7 @@ def test_s3_fresh_warm_read_hits_cache_for_a_key_named_like_its_mount():
             {"/m": (S3VFS(config), MountMode.WRITE)},
             mode=MountMode.WRITE,
             read=ReadSpec(policy=ReadPolicy.FRESH),
+            cache=CacheConfig(),
         )
 
         async def run() -> tuple[bytes, bytes]:
@@ -211,6 +214,7 @@ def test_a_tokenless_entry_costs_one_extra_get_then_carries_the_etag():
             {"/s3": (S3VFS(config), MountMode.WRITE)},
             mode=MountMode.WRITE,
             read=ReadSpec(policy=ReadPolicy.FRESH),
+            cache=CacheConfig(),
         )
 
         async def run() -> tuple[int, int]:
@@ -253,6 +257,7 @@ def _always_mount(objects):
         {"/s3": (S3VFS(config), MountMode.WRITE)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.FRESH),
+        cache=CacheConfig(),
     )
 
 
@@ -420,6 +425,7 @@ def test_snapshot_false_mount_still_serves_a_verified_cache():
         {"/s3": (_SnapshotFalseS3(config), MountMode.WRITE)},
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.FRESH),
+        cache=CacheConfig(),
     )
 
     async def run() -> bytes:
@@ -637,6 +643,7 @@ def _bounded_mount(objects, ttl=600, clock: ManualClock | None = None):
         mode=MountMode.WRITE,
         read=ReadSpec(policy=ReadPolicy.BOUNDED, ttl=ttl),
         clock=clock,
+        cache=CacheConfig(),
     )
 
 
@@ -786,6 +793,7 @@ def test_two_mounts_carry_two_different_bounds():
             ),
         },
         mode=MountMode.WRITE,
+        cache=CacheConfig(),
     )
 
     async def run() -> tuple[int | None, int | None]:
@@ -876,6 +884,7 @@ def test_one_line_serves_each_mount_under_its_own_policy(
         },
         mode=MountMode.WRITE,
         read=ReadSpec(policy=default),
+        cache=CacheConfig(),
     )
 
     async def run() -> tuple[

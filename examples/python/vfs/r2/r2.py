@@ -19,6 +19,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.cache.file.config import CacheConfig
 from mirage.types import PathSpec
 from mirage.vfs.r2 import R2VFS, R2Config
 
@@ -34,7 +35,7 @@ config = R2Config(
 )
 
 backend = R2VFS(config)
-ws = Workspace({"/r2/": backend}, mode=MountMode.READ)
+ws = Workspace({"/r2/": backend}, mode=MountMode.READ, cache=CacheConfig())
 
 
 def ops_summary() -> str:

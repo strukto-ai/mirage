@@ -21,6 +21,7 @@ import tarfile
 import pytest
 from pydantic import BaseModel, SecretStr
 
+from mirage.cache.file.config import CacheConfig
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.specs import register_cli_spec, unregister_cli_spec
@@ -370,7 +371,11 @@ def test_workspace_copy_independence_ram():
 
 
 def test_workspace_copy_preserves_max_drain_bytes():
-    src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    src = Workspace(
+        {"/m": (RAMVFS(), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        cache=CacheConfig(),
+    )
     src.max_drain_bytes = 1234
     cp = asyncio.run(src.copy())
     assert cp.max_drain_bytes == 1234

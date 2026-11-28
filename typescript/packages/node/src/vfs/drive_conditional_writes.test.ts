@@ -154,13 +154,16 @@ async function workspace(
   read?: ReadSpec,
 ): Promise<Workspace> {
   const vfs = await buildVfs(drive.kind, drive.config())
-  const ws = new Workspace({
-    [drive.root]: new Mount(vfs, {
-      mode: MountMode.WRITE,
-      write,
-      ...(read === undefined ? {} : { read }),
-    }),
-  })
+  const ws = new Workspace(
+    {
+      [drive.root]: new Mount(vfs, {
+        mode: MountMode.WRITE,
+        write,
+        ...(read === undefined ? {} : { read }),
+      }),
+    },
+    { cache: {} },
+  )
   built.push(ws)
   return ws
 }

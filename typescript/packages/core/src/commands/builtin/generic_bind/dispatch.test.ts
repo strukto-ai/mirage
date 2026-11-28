@@ -68,7 +68,7 @@ it.each([false, true])(
     const right = new CachedRAM()
     left.loadState({ type: 'ram', files: { '/input': enc.encode('z\na\n') } })
     right.loadState({ type: 'ram', files: { '/input': enc.encode('m\n') } })
-    const ws = new Workspace({ '/a': left, '/b': right }, { mode: MountMode.WRITE })
+    const ws = new Workspace({ '/a': left, '/b': right }, { cache: {}, mode: MountMode.WRITE })
     const command = 'sort /a/input /b/input'
     try {
       const result = await ws.shell(command + (overwrite ? ' -o /a/input' : ''))
@@ -217,7 +217,7 @@ it('refuses the stand-ins through a link to a sealed file', async () => {
 
 it('reads a cached file from the cache instead', async () => {
   const vfs = lines(new CachedLines())
-  const ws = new Workspace({ '/m': vfs })
+  const ws = new Workspace({ '/m': vfs }, { cache: {} })
   const dec = new TextDecoder()
   try {
     await ws.shell('cat /m/f')

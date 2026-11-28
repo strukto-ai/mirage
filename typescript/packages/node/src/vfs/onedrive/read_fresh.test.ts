@@ -65,13 +65,16 @@ function vfsOf(graph: FakeGraph): Promise<BaseVFS> {
 }
 
 function ws(vfs: BaseVFS): Workspace {
-  return new Workspace({
-    '/m': new Mount(vfs, {
-      mode: MountMode.WRITE,
-      read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
-    }),
-    '/r': [new RAMVFS(), MountMode.WRITE],
-  })
+  return new Workspace(
+    {
+      '/m': new Mount(vfs, {
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.FRESH, ttl: DEFAULT_READ_TTL },
+      }),
+      '/r': [new RAMVFS(), MountMode.WRITE],
+    },
+    { cache: {} },
+  )
 }
 
 async function out(workspace: Workspace, command: string): Promise<string> {
@@ -275,12 +278,15 @@ describe('onedrive warm read cost', () => {
 it('cleans up the bytes and overlay of a file a re-list drops', async () => {
   const graph = await graphOf(OLD)
   graph.write(ME, 'b.txt', ENC.encode('bravo\n'))
-  const w = new Workspace({
-    '/m': new Mount(await vfsOf(graph), {
-      mode: MountMode.WRITE,
-      read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
-    }),
-  })
+  const w = new Workspace(
+    {
+      '/m': new Mount(await vfsOf(graph), {
+        mode: MountMode.WRITE,
+        read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
+      }),
+    },
+    { cache: {} },
+  )
   try {
     expect(await out(w, 'ls /m')).toBe('a.txt\nb.txt\n')
     expect(await out(w, 'cat /m/a.txt')).toBe('version one\n')

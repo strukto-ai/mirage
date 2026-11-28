@@ -5,7 +5,8 @@ icon: database
 ---
 
 The file cache keeps file content Mirage has read, so a second read is served
-without asking the backend again.
+without asking the backend again. A workspace has none until it sets `cache`:
+without the key, every read asks the backend.
 
 | `type` | Keeps it | Keys |
 | --- | --- | --- |

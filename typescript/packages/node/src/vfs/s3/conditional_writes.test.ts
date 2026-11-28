@@ -74,7 +74,7 @@ function buildWorkspace(
       '/ram': ramMount(),
       ...extra,
     },
-    { mode: MountMode.WRITE },
+    { cache: {}, mode: MountMode.WRITE },
   )
 }
 
@@ -1012,7 +1012,7 @@ describe('conditional writes on an S3 mount', () => {
       // The runtime's truncating open carries the version the agent read.
       const ws = new Workspace(
         { '/s3': new Mount(s3Vfs(), { mode: MountMode.WRITE, write }) },
-        { mode: MountMode.EXEC, machines: [buildRuntime('quickjs')] },
+        { cache: {}, mode: MountMode.EXEC, machines: [buildRuntime('quickjs')] },
       )
       built.push(ws)
       await run(ws, 'cat /s3/f')

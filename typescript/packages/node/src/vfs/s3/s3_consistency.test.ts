@@ -95,11 +95,7 @@ describe('S3 cache consistency (mocked)', () => {
           : { type }
       const ws = new Workspace(
         { '/s3/': new S3VFS(makeConfig()) },
-        {
-          mode: MountMode.WRITE,
-          read: FRESH,
-          index,
-        },
+        { cache: {}, mode: MountMode.WRITE, read: FRESH, index },
       )
       const store = ws.mount('/s3/').indexStore
       try {
@@ -273,7 +269,7 @@ describe('S3 cache consistency (mocked)', () => {
   it('fresh re-list keeps the deletion baseline after stat', async () => {
     mock.store.set(BUCKET, 'sub/a', ENC.encode('a'))
     mock.store.set(BUCKET, 'sub/b', ENC.encode('b'))
-    const ws = new Workspace({ '/s3': new S3VFS(makeConfig()) }, { read: FRESH })
+    const ws = new Workspace({ '/s3': new S3VFS(makeConfig()) }, { cache: {}, read: FRESH })
     try {
       for (const command of ['ls /s3/sub', 'cat /s3/sub/a', 'ls /s3']) {
         expect((await ws.shell(command)).exitCode).toBe(0)
@@ -327,7 +323,7 @@ describe('S3 cache consistency (mocked)', () => {
     mock.store.set(BUCKET, 'cost/b.txt', ENC.encode('v1\n'))
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       await ws.shell('cat /s3/cost/a.txt')
@@ -400,7 +396,7 @@ describe('S3 cache consistency (mocked)', () => {
           [`${fresh}/`]: mount(freshVfs, FRESH),
           [`${bounded}/`]: mount(boundedVfs, { policy: ReadPolicy.BOUNDED, ttl: 900 }),
         },
-        { mode: MountMode.WRITE, read: { policy: fallback, ttl: DEFAULT_READ_TTL } },
+        { cache: {}, mode: MountMode.WRITE, read: { policy: fallback, ttl: DEFAULT_READ_TTL } },
       )
       try {
         await ws.shell(`ls ${first}/ ${second}/`)
@@ -455,7 +451,7 @@ describe('S3 cache consistency (mocked)', () => {
     }
     const ws = new Workspace(
       { '/s3/': new SnapshotFalseS3(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       await ws.shell('cat /s3/c.txt')
@@ -477,7 +473,7 @@ describe('S3 cache consistency (mocked)', () => {
     // served from cache. The python twin is in test_fingerprint_spike.py.
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       // The bytes land in the cache carrying no token, which is exactly
@@ -505,7 +501,7 @@ describe('S3 cache consistency (mocked)', () => {
     mock.store.set(BUCKET, 'm/a.txt', ENC.encode('v1'))
     const ws = new Workspace(
       { '/m': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       mock.resetCalls()
@@ -526,7 +522,7 @@ describe('S3 cache consistency (mocked)', () => {
     // because a cold+warm total is the same either way.
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       await ws.shell('cat /s3/c.txt')
@@ -570,7 +566,7 @@ describe('S3 cache consistency (mocked)', () => {
   it('bounded keeps serving the cached bytes after an out-of-band change', async () => {
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: BOUNDED },
+      { cache: {}, mode: MountMode.WRITE, read: BOUNDED },
     )
     const first = await ws.shell('cat /s3/c.txt')
     expect(DEC.decode(first.stdout)).toBe('v1')
@@ -597,7 +593,7 @@ describe('S3 cache consistency (mocked)', () => {
     mock.store.set(BUCKET, 'bcost/b.txt', ENC.encode('v1\n'))
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: BOUNDED },
+      { cache: {}, mode: MountMode.WRITE, read: BOUNDED },
     )
     try {
       await ws.shell('cat /s3/bcost/a.txt')
@@ -633,7 +629,7 @@ describe('S3 cache consistency (mocked)', () => {
     // after the `;` still runs.
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     try {
@@ -666,7 +662,7 @@ describe('S3 cache consistency (mocked)', () => {
     // pins.
     const ws = new Workspace(
       { '/s3/': new S3VFS(makeConfig()) },
-      { mode: MountMode.WRITE, read: FRESH },
+      { cache: {}, mode: MountMode.WRITE, read: FRESH },
     )
     try {
       await ws.shell('cat /s3/c.txt')
@@ -712,7 +708,7 @@ describe('S3 listing lifetime: workspace index ttl meets the mount ttl', () => {
           read: { policy: ReadPolicy.BOUNDED, ttl: mountTtl },
         }),
       },
-      { index: { type: IndexType.RAM, ttl: indexTtl }, clock },
+      { cache: {}, index: { type: IndexType.RAM, ttl: indexTtl }, clock },
     )
   }
 

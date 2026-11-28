@@ -99,7 +99,7 @@ async function capture(ws: Workspace, cmd: string): Promise<Fingerprint> {
 async function main(): Promise<void> {
   const ws = new Workspace(
     { '/s3': s3, '/gdrive': gdrive, '/gmail': gmail, '/slack': slack, '/discord': discord },
-    { mode: MountMode.WRITE },
+    { mode: MountMode.WRITE, cache: {} },
   )
   try {
     // gdrive needs `ls` of the parent folder first so the index has

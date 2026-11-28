@@ -643,7 +643,7 @@ def _facts_of(mount: MountEntry | None) -> CacheFacts:
         mount (MountEntry | None): the owning mount, None when there is
             none (or it is no longer the one the command started with).
     """
-    if mount is None or mount.retiring or not mount.vfs.caches_reads:
+    if mount is None or mount.retiring or not mount.caches_reads:
         return CacheFacts(cacheable=False, ttl=DEFAULT_READ_TTL)
     return CacheFacts(
         cacheable=True,
@@ -1495,7 +1495,7 @@ class Dispatcher:
         if prune and (
             mount is None
             or not mount.vfs.search_covers_tree
-            or mount.vfs.caches_reads
+            or mount.caches_reads
             or mount.vfs.searchable is not None
             or mount.revisions
             or self._namespace.registry.descendant_mounts(call.path.virtual)
@@ -2647,7 +2647,7 @@ class Dispatcher:
         """
         if (
             call.direct
-            or not mount.vfs.caches_reads
+            or not mount.caches_reads
             or call.name not in DISPATCH_READ_OPS
         ):
             return None
@@ -2715,7 +2715,7 @@ class Dispatcher:
         """
         offset, size = call.window
         if (
-            mount.vfs.caches_reads
+            mount.caches_reads
             and not call.direct
             and call.name in DISPATCH_READ_OPS
             and size != 0
