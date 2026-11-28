@@ -139,6 +139,9 @@ async function sftpRead(): Promise<Response> {
       got = next
       wake()
     },
+    drain() {
+      return Promise.resolve()
+    },
     end() {
       return undefined
     },
