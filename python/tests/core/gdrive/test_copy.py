@@ -149,7 +149,7 @@ async def test_copy_refused_keeps_the_destination(google_account):
     await google_account.refuse(
         "POST", COPY, 403, "This file cannot be copied by the user.", REASON
     )
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError) as refused:
         await call(
             copy,
             readdir,
@@ -157,6 +157,7 @@ async def test_copy_refused_keeps_the_destination(google_account):
             spec("/src.txt"),
             dst=spec("/dst.txt"),
         )
+    assert refused.value.filename == spec("/src.txt").virtual
     assert await google_account.content(dst_id) == b"old"
     assert len(await google_account.items()) == 2
 
@@ -173,7 +174,7 @@ async def test_copy_refused_delete_drops_the_copy(google_account):
         REASON,
         path=f"/drive/v3/files/{dst_id}",
     )
-    with pytest.raises(PermissionError):
+    with pytest.raises(PermissionError) as refused:
         await call(
             copy,
             readdir,
@@ -181,6 +182,7 @@ async def test_copy_refused_delete_drops_the_copy(google_account):
             spec("/src.txt"),
             dst=spec("/dst.txt"),
         )
+    assert refused.value.filename == spec("/dst.txt").virtual
     assert await google_account.content(dst_id) == b"old"
     assert len(await google_account.items()) == 2
 

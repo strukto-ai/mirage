@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { eacces, eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
+import { GoogleApiError } from '../google/client.ts'
 import { FOLDER_MIME } from '../google/drive.ts'
 import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
@@ -41,7 +42,8 @@ async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string
  * missing one, mirroring the msgraph copy_tree. A file it replaces is deleted
  * only once the copy has landed beside it, which Drive's two items of one name
  * in a folder allow, so a refused copy leaves it as it was, and a refused
- * delete drops the copy again. Both paths naming one item (Drive lists a
+ * delete drops the copy again and names the destination, as cp's refused
+ * create does. Both paths naming one item (Drive lists a
  * legacy item under each of its parents) leaves nothing to copy; GNU cp
  * refuses it by inode, which a Drive row lacks. Answers the stat of what the
  * copy made, null when it merged into a folder already there or found the
@@ -93,6 +95,7 @@ export const copy = eaccesOnDenied(async function (
       } catch (undo) {
         console.debug(`could not drop the copy at ${dst.virtual}: ${String(undo)}`)
       }
+      if (err instanceof GoogleApiError && err.status === 403) throw eacces(dst)
       throw err
     }
   }

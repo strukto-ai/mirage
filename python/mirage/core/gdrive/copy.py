@@ -26,7 +26,8 @@ from mirage.core.gdrive.resolve import (
     node_of,
     parent_folder,
 )
-from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.core.google.client import GoogleApiError
+from mirage.errors.fs import eacces, eisdir, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ async def copy(
     mirroring the msgraph copy_tree. A file it replaces is deleted only
     once the copy has landed beside it, which Drive's two items of one
     name in a folder allow, so a refused copy leaves it as it was, and a
-    refused delete drops the copy again. Both paths naming one item
+    refused delete drops the copy again and names the destination, as
+    cp's refused create does. Both paths naming one item
     (Drive lists a legacy item under each of its parents) leaves nothing
     to copy; GNU cp refuses it by inode, which a Drive row lacks.
 
@@ -115,12 +117,14 @@ async def copy(
     if dst_entry is not None:
         try:
             await drive.delete_file(dst_entry.extra["file_id"])
-        except Exception:
+        except Exception as err:
             try:
                 await drive.delete_file(item["id"])
             except Exception as exc:
                 logger.debug(
                     "could not drop the copy at %s: %s", dst.virtual, exc
                 )
+            if isinstance(err, GoogleApiError) and err.status == 403:
+                raise eacces(dst.virtual) from err
             raise
     return stat_from_item(item) if isinstance(item, dict) else None

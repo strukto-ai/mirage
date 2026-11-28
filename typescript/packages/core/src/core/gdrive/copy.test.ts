@@ -120,7 +120,10 @@ describe('gdrive copy', () => {
     await account.refuse('POST', COPY, 403, 'This file cannot be copied by the user.', {
       reason: REASON,
     })
-    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({
+      code: 'EACCES',
+      virtualPath: spec('/src.txt').virtual,
+    })
     expect(await account.content(dst)).toBe('old')
     expect(await account.items()).toHaveLength(2)
   })
@@ -132,7 +135,10 @@ describe('gdrive copy', () => {
       reason: REASON,
       path: `/drive/v3/files/${dst}`,
     })
-    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({
+      code: 'EACCES',
+      virtualPath: spec('/dst.txt').virtual,
+    })
     expect(await account.content(dst)).toBe('old')
     expect(await account.items()).toHaveLength(2)
   })
