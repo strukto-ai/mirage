@@ -8,10 +8,12 @@
   "python/mirage/agents/openai_agents/sandbox.py": {
     "reason": "Hooks and class flags of the OpenAI Agents SDK's BaseSandboxSession and BaseSandboxClient, which the SDK calls and reads.",
     "names": [
+      "_can_skip_snapshot_restore_on_resume",
       "_ensure_backend_started",
       "_exec_internal",
       "_prepare_backend_workspace",
       "_prepare_exec_command",
+      "_should_compute_snapshot_fingerprint_on_persist",
       "backend_id",
       "deserialize_session_state",
       "supports_default_options",
