@@ -106,7 +106,11 @@ export function optionFlags(argument: Argument): string {
   if (argument.action === 'store_true' || argument.action === 'count') return names
   const value =
     argument.metavar ?? (argument.names[argument.names.length - 1] ?? '').replace(/^-+/, '')
-  const bare = value.replace(/^[<[]+|[>\]]+$/g, '')
+  let start = 0
+  let end = value.length
+  while (start < end && '<>[]'.includes(value.charAt(start))) start += 1
+  while (end > start && '<>[]'.includes(value.charAt(end - 1))) end -= 1
+  const bare = value.slice(start, end)
   return `${names} ${argument.nargs === '?' ? `[${bare}]` : `<${bare}>`}`
 }
 

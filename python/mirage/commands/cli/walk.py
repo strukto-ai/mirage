@@ -572,10 +572,10 @@ def _commander_excess(
     """
     operands: list[str] = []
     ended = options_ended
-    taking = False
+    taking: str | None = None
     for word in words:
-        if taking:
-            taking = False
+        if taking is not None:
+            taking = None
             continue
         if not ended and word == "--":
             ended = True
@@ -583,17 +583,24 @@ def _commander_excess(
         if ended or not word.startswith("-") or word == "-":
             operands.append(word)
             continue
-        spelling, eq, _ = word.partition("=")
-        if spelling in ("--help", "-h") and node.add_help and not eq:
+        spelling = (
+            word.partition("=")[0] if word.startswith("--") else word[:2]
+        )
+        if spelling in ("--help", "-h") and node.add_help and word == spelling:
             return WalkResult(
                 output=encode_text(node_help(name, node, UsageStyle.COMMANDER))
             )
-        if not eq and (
+        if spelling in cs.long_optional_spellings:
+            continue
+        if word == spelling and (
             spelling in cs.long_bool_spellings or spelling in cs.bool_spellings
         ):
             continue
-        if spelling in cs.long_value_spellings:
-            taking = not eq
+        if (
+            spelling in cs.long_value_spellings
+            or spelling in cs.value_spellings
+        ):
+            taking = spelling if word == spelling else None
             continue
         return _usage_error(
             name,
@@ -601,6 +608,14 @@ def _commander_excess(
             f"unknown option: {word}",
             UsageStyle.COMMANDER,
             token=word,
+        )
+    if taking is not None:
+        return _usage_error(
+            name,
+            node,
+            f"error: option '{taking}' requires a value",
+            UsageStyle.COMMANDER,
+            missing=taking,
         )
     return WalkResult(
         output=encode_text(excess_arguments(operands)),

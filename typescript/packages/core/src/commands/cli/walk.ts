@@ -474,10 +474,10 @@ function commanderExcess(
 ): WalkResult {
   const operands: string[] = []
   let ended = optionsEnded
-  let taking = false
+  let taking: string | null = null
   for (const word of words) {
-    if (taking) {
-      taking = false
+    if (taking !== null) {
+      taking = null
       continue
     }
     if (!ended && word === '--') {
@@ -489,16 +489,32 @@ function commanderExcess(
       continue
     }
     const eq = word.indexOf('=')
-    const spelling = eq < 0 ? word : word.slice(0, eq)
-    if ((spelling === '--help' || spelling === '-h') && node.addHelp && eq < 0) {
+    const spelling = !word.startsWith('--') ? word.slice(0, 2) : eq < 0 ? word : word.slice(0, eq)
+    if ((spelling === '--help' || spelling === '-h') && node.addHelp && word === spelling) {
       return new WalkResult({ output: encodeText(nodeHelp(name, node, UsageStyle.COMMANDER)) })
     }
-    if (eq < 0 && (cs.longBoolSpellings.has(spelling) || cs.boolSpellings.has(spelling))) continue
-    if (cs.longValueSpellings.has(spelling)) {
-      taking = eq < 0
+    if (cs.longOptionalSpellings.has(spelling)) continue
+    if (
+      word === spelling &&
+      (cs.longBoolSpellings.has(spelling) || cs.boolSpellings.has(spelling))
+    ) {
+      continue
+    }
+    if (cs.longValueSpellings.has(spelling) || cs.valueSpellings.includes(spelling)) {
+      taking = word === spelling ? spelling : null
       continue
     }
     return usageError(name, node, `unknown option: ${word}`, UsageStyle.COMMANDER, word)
+  }
+  if (taking !== null) {
+    return usageError(
+      name,
+      node,
+      `error: option '${taking}' requires a value`,
+      UsageStyle.COMMANDER,
+      undefined,
+      taking,
+    )
   }
   return new WalkResult({
     output: encodeText(excessArguments(operands)),

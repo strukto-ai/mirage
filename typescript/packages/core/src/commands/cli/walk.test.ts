@@ -174,6 +174,31 @@ describe('walk', () => {
     )
   })
 
+  it.each([
+    [['--verbose=x'], "error: unknown option '--verbose=x'\n(Did you mean --verbose?)\n"],
+    [['-C'], "error: option '-C, --cwd <cwd>' argument missing\n"],
+    [['extra', '--cwd'], "error: option '-C, --cwd <cwd>' argument missing\n"],
+    [['extra', '-C', 'x'], 'error: too many arguments. Expected 0 arguments but got 1: extra.\n'],
+    [
+      ['extra', '-Cx', '--cwd=y', '-v'],
+      'error: too many arguments. Expected 0 arguments but got 1: extra.\n',
+    ],
+    [['extra', '-Z'], "error: unknown option '-Z'\n"],
+    [
+      ['extra', '--', '-Z'],
+      'error: too many arguments. Expected 0 arguments but got 2: extra, -Z.\n',
+    ],
+  ])('reads a commander group line %j whole, as commander does', (argv, stderr) => {
+    // commander 15.1.0 parses a group's options before it counts the
+    // operands it takes none of: a value it declares is taken, one left
+    // off is its argument missing, and past `--` every word counts.
+    // eslint-disable-next-line @typescript-eslint/no-misused-spread -- init wants a plain field bag
+    const commander = new CommandSpec({ ...tree(), usageStyle: UsageStyle.COMMANDER })
+    const result = walk('gws', commander, argv)
+    expect([result.stream, result.exitCode]).toEqual(['stderr', 2])
+    expect(text(result.output)).toBe(stderr)
+  })
+
   it('names a short token the same way under clap', () => {
     // clap has one wording for long and short alike, unlike git's
     // option/switch split.

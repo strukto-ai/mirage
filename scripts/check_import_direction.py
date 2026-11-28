@@ -71,6 +71,7 @@ CLI_SERVICES: dict[str, tuple[str, ...]] = {
     "search": (),
     "slack": ("slack",),
     "trello": ("trello",),
+    "tvly": ("tavily",),
 }
 # The modules under accessor/ and core/ that serve no one service.
 SHARED_CLIENTS = (
