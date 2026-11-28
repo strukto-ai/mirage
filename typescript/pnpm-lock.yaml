@@ -379,6 +379,9 @@ importers:
       '@struktoai/mirage-node':
         specifier: workspace:*
         version: link:../typescript/packages/node
+      '@struktoai/mirage-openai-agents':
+        specifier: workspace:*
+        version: link:../typescript/packages/openai-agents
       '@struktoai/mirage-server':
         specifier: workspace:*
         version: link:../typescript/packages/server

@@ -663,6 +663,12 @@ local to execution. The existing Redis/S3 state-store handoff also checks
 functions and readonly metadata in both default and named sessions across
 languages. This does not resume a running job on another worker.
 
+The same smoke test passes an OpenAI Agents sandbox archive from Python to
+TypeScript and back. It keeps the manifest root at `/workspace` and changes
+a sibling `/data` mount between restores. Python exercises SDK stop and
+resume with a local snapshot store. TypeScript exercises the adapter's
+`hydrateWorkspace()` and `persistWorkspace()` methods.
+
 `integ-hosting` runs `hosting/cases.json` against real FastAPI and Fastify
 listeners in child processes. It checks parallel foreground HTTP requests,
 same-session queueing, independent sessions and workspaces, health responses,

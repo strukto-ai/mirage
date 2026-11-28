@@ -30,6 +30,7 @@ from agents.sandbox.entries import File
 from agents.sandbox.errors import ExecTimeoutError
 from agents.sandbox.manifest import Environment
 from agents.sandbox.session.sandbox_session_state import SandboxSessionState
+from agents.sandbox.snapshot import LocalSnapshotSpec
 
 from mirage.agents.openai_agents.constants import INTERRUPT, NO_STDIN
 from mirage.agents.openai_agents.sandbox import (
@@ -267,6 +268,50 @@ def test_resume_after_delete_keeps_the_agents_edits():
         resumed = await client.resume(state)
         await resumed.start()
         assert (await resumed.exec("cat notes.md")).stdout == b"v2\n"
+
+    asyncio.run(_run())
+
+
+def test_snapshot_restores_mounts_outside_the_manifest(tmp_path):
+    async def _run():
+        ws = Workspace(
+            {
+                p: (RAMVFS(), MountMode.WRITE)
+                for p in ("/", "/workspace", "/data")
+            },
+            mode=MountMode.WRITE,
+        )
+        try:
+            client = MirageSandboxClient(ws)
+            session = await client.create(
+                manifest=Manifest(root="/workspace"),
+                snapshot=LocalSnapshotSpec(base_path=tmp_path),
+            )
+            await session.start()
+            await ws.vfs.write("/workspace/task", b"task")
+            await ws.vfs.write("/data/value", b"saved")
+            await session.stop()
+            assert all(
+                "workspace-fingerprint" not in event.get("command", "")
+                for event in await ws.observer.events()
+            )
+            state = session.state
+            assert state.snapshot_fingerprint is None
+            await client.delete(session)
+            await ws.vfs.write("/data/value", b"changed")
+            # Simulate state persisted by an older adapter.
+            state.snapshot_fingerprint = "old-tree-fingerprint"
+            state.snapshot_fingerprint_version = "workspace_tar_sha256_v2"
+            resumed = await client.resume(state)
+            await resumed.start()
+            assert await ws.vfs.read("/workspace/task") == b"task"
+            assert await ws.vfs.read("/data/value") == b"saved"
+            assert all(
+                "workspace-fingerprint" not in event.get("command", "")
+                for event in await ws.observer.events()
+            )
+        finally:
+            await ws.close()
 
     asyncio.run(_run())
 
