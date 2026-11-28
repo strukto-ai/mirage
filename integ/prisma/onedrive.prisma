@@ -68,11 +68,16 @@ model GraphFile {
   @@id([tenant, drive, path])
 }
 
+// A folder's createdDateTime and lastModifiedDateTime are its own, set when it
+// is made and moved by a rename or move of it, never by what lands inside it:
+// a delta reader tells a new folder from a changed one by the two agreeing.
 model GraphDir {
-  tenant String
-  drive  String
-  path   String
-  seq    Int
+  tenant   String
+  drive    String
+  path     String
+  created  String
+  modified String
+  seq      Int
 
   @@id([tenant, drive, path])
 }

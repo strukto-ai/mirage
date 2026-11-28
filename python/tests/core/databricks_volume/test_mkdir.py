@@ -12,59 +12,52 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
-
 import pytest
 
 from mirage.core.databricks_volume.mkdir import mkdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.databricks_volume import DIRS
 
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
-def _seed_directory(files, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.directories.setdefault(path, [])
-
-
 @pytest.mark.asyncio
-async def test_mkdir_creates_directory(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_mkdir_creates_directory(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
+    await volume.run.record_requests()
 
     await mkdir(accessor, _path("/dbx/newdir"))
 
-    assert f"{remote_root}/newdir" in files.create_directory_calls
-    assert f"{remote_root}/newdir" in files.directory_metadata
+    assert f"{remote_root}/newdir" in await volume.asked("PUT", DIRS)
+    assert await volume.has(f"{remote_root}/newdir")
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parent_missing_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_mkdir_parent_missing_fails(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
+    await volume.run.record_requests()
 
     with pytest.raises(FileNotFoundError) as raised:
         await mkdir(accessor, _path("/dbx/a/b"))
     assert raised.value.filename == "/dbx/a/b"
-    assert files.create_directory_calls == []
+    assert await volume.asked("PUT", DIRS) == []
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parents_creates_chain(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_mkdir_parents_creates_chain(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     await mkdir(accessor, _path("/dbx/a/b/c"), parents=True)
 
-    assert f"{remote_root}/a/b/c" in files.directory_metadata
+    assert await volume.has(f"{remote_root}/a/b/c")
 
 
 @pytest.mark.asyncio
-async def test_mkdir_parent_is_file_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    files.metadata[f"{remote_root}/file.txt"] = SimpleNamespace(
-        is_directory=False, file_size=3
-    )
+async def test_mkdir_parent_is_file_fails(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/file.txt", b"abc")
 
     with pytest.raises(NotADirectoryError):
         await mkdir(accessor, _path("/dbx/file.txt/sub"))

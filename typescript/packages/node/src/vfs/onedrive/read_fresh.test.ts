@@ -27,15 +27,9 @@ import {
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  DRIVE_ID,
-  DRIVE_NAME,
-  SITE_NAME,
-  FakeGraph,
-  ME,
-  serveGraph,
-} from '../../../tests/core/msgraph/_test_util.ts'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { DRIVE_NAME, GraphDrive } from '../../../../core/tests/fixtures/graph_drive.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 
@@ -46,22 +40,30 @@ const NEW = ENC.encode('version two, longer\n')
 const CAT = 'cat /m/a.txt'
 const CP = 'cp /m/a.txt /r/x && cat /r/x'
 
-let graphs: FakeGraph[] = []
+let origin = ''
+let drives: GraphDrive[] = []
 
-afterEach(async () => {
-  await Promise.all(graphs.map((graph) => graph.close()))
-  graphs = []
+beforeAll(async () => {
+  origin = await serve('onedrive')
 })
 
-async function graphOf(data: Uint8Array, childrenAllowed = 0): Promise<FakeGraph> {
-  const graph = new FakeGraph({ [ME]: { 'a.txt': data } })
-  graph.childrenAllowed = childrenAllowed
-  graphs.push(graph)
-  return serveGraph(graph)
+afterEach(async () => {
+  await Promise.all(drives.map((drive) => drive.run.close()))
+  drives = []
+})
+
+// A drive of its own holding `files`, its requests recorded from after them.
+async function driveOf(files: Record<string, Uint8Array>, id?: string): Promise<GraphDrive> {
+  const drive = new GraphDrive(origin, id)
+  drives.push(drive)
+  await drive.reset()
+  for (const [path, data] of Object.entries(files)) await drive.write(path, data)
+  await drive.run.recordRequests()
+  return drive
 }
 
-function vfsOf(graph: FakeGraph): Promise<BaseVFS> {
-  return buildVfs('onedrive', { access_token: 't', graph_base_url: graph.url })
+function vfsOf(drive: GraphDrive): Promise<BaseVFS> {
+  return buildVfs('onedrive', drive.config('onedrive'))
 }
 
 function ws(vfs: BaseVFS): Workspace {
@@ -90,29 +92,28 @@ describe('onedrive under read: fresh', () => {
     ['stream', CAT],
     ['bytes', CP],
   ])('refetches a write between the token and the bytes (%s)', async (_row, command) => {
-    const graph = await graphOf(OLD)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf({ 'a.txt': OLD })
+    const first = await drive.ctag('a.txt')
+    const w = ws(await vfsOf(drive))
     try {
       // The file changes after the bytes are taken and before they are sent,
       // so the read holds OLD while Graph already holds NEW. A token read
       // after the bytes would label OLD with NEW's cTag.
-      graph.onBytes(() => {
-        graph.write(ME, 'a.txt', NEW)
-      })
+      await drive.writeAfterTheBytes('a.txt', NEW)
       expect(await out(w, command)).toBe(DEC.decode(OLD))
-      expect(graph.hookFired).toBe(1)
-      const before = graph.fetches()
+      expect(await drive.ctag('a.txt')).not.toBe(first)
+      const before = await drive.fetches()
       expect(await out(w, command)).toBe(DEC.decode(NEW))
-      expect(graph.fetches() - before).toBe(1)
-      expect(graph.reach).toEqual([])
+      expect((await drive.fetches()) - before).toBe(1)
+      expect(await drive.reach()).toEqual([])
     } finally {
       await w.close()
     }
   })
 
   it('an unrecorded read fetches the bare item, then its bytes', async () => {
-    const graph = await graphOf(OLD)
-    const vfs = await vfsOf(graph)
+    const drive = await driveOf({ 'a.txt': OLD })
+    const vfs = await vfsOf(drive)
     let data: Uint8Array
     try {
       data = await read(vfs.accessor as OneDriveAccessor, SPEC)
@@ -122,7 +123,7 @@ describe('onedrive under read: fresh', () => {
     expect(DEC.decode(data)).toBe(DEC.decode(OLD))
     // No version history: the revision only matters to a snapshot, and only a
     // recorded read can land in one.
-    expect(graph.log).toEqual([
+    expect(await drive.log()).toEqual([
       ['item', 'a.txt', ''],
       ['download', 'a.txt', ''],
     ])
@@ -131,9 +132,10 @@ describe('onedrive under read: fresh', () => {
   it.each(['bytes', 'stream'])(
     'a recorded %s read keeps the revision snapshots pin',
     async (slot) => {
-      const graph = await graphOf(OLD)
-      graph.write(ME, 'a.txt', NEW)
-      const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
+      const drive = await driveOf({ 'a.txt': OLD })
+      await drive.write('a.txt', NEW)
+      await drive.run.recordRequests()
+      const accessor = (await vfsOf(drive)).accessor as OneDriveAccessor
       const [data, records] = await recordingScope(async () => {
         if (slot === 'bytes') return read(accessor, SPEC)
         const parts: Uint8Array[] = []
@@ -141,8 +143,10 @@ describe('onedrive under read: fresh', () => {
         return Buffer.concat(parts)
       })
       expect(DEC.decode(data)).toBe(DEC.decode(NEW))
-      expect(graph.queries('item')).toEqual(['$expand=versions'])
-      expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([['c2', '2.0']])
+      expect(await drive.queries('item')).toEqual(['$expand=versions'])
+      expect(records.map((r) => [r.fingerprint, r.revision])).toEqual([
+        [await drive.ctag('a.txt'), '2.0'],
+      ])
     },
   )
 
@@ -150,9 +154,10 @@ describe('onedrive under read: fresh', () => {
     ['1.0', OLD],
     ['9.0', null],
   ] as const)('a pinned read of %s gets that version bytes', async (pin, expected) => {
-    const graph = await graphOf(OLD)
-    graph.write(ME, 'a.txt', NEW)
-    const vfs = await vfsOf(graph)
+    const drive = await driveOf({ 'a.txt': OLD })
+    await drive.write('a.txt', NEW)
+    await drive.run.recordRequests()
+    const vfs = await vfsOf(drive)
     const pinned = (): Promise<Uint8Array> =>
       bindCaller({ ...currentCaller(), revisions: { map: new Map([['/a.txt', pin]]) } }, () =>
         read(vfs.accessor as OneDriveAccessor, SPEC),
@@ -168,49 +173,50 @@ describe('onedrive under read: fresh', () => {
     } finally {
       await vfs.close()
     }
-    expect(graph.log.map(([route]) => route)).toEqual(['item', 'version_content'])
+    expect((await drive.log()).map(([route]) => route)).toEqual(['item', 'version_content'])
   })
 
   it('a ranged read stamps the whole item cTag', async () => {
-    const graph = await graphOf(OLD)
-    const accessor = (await vfsOf(graph)).accessor as OneDriveAccessor
+    const drive = await driveOf({ 'a.txt': OLD })
+    const accessor = (await vfsOf(drive)).accessor as OneDriveAccessor
     const [data, records] = await recordingScope(() => read(accessor, SPEC, { offset: 2, size: 3 }))
     expect(DEC.decode(data)).toBe(DEC.decode(OLD.slice(2, 5)))
-    expect(records.map((r) => r.fingerprint)).toEqual(['c1'])
-    expect([graph.count('download'), graph.count('content')]).toEqual([1, 0])
+    expect(records.map((r) => r.fingerprint)).toEqual([await drive.ctag('a.txt')])
+    expect([await drive.count('download'), await drive.count('content')]).toEqual([1, 0])
   })
 
   it('a listed cTag never answers for a changed file', async () => {
-    const graph = await graphOf(OLD, 1)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf({ 'a.txt': OLD })
+    const first = await drive.ctag('a.txt')
+    const w = ws(await vfsOf(drive))
     try {
-      // The listing leaves c1 in the mount index. A probe that trusted it
-      // would match the c1 the cache holds and serve OLD.
+      // The listing leaves the first cTag in the mount index. A probe that
+      // trusted it would match the one the cache holds and serve OLD.
       await out(w, 'ls /m')
-      // The fixture held: the mount index answers a stat with c1 and no
-      // request of its own, so there is a stale row to trust.
+      // The fixture held: the mount index answers a stat with that cTag and
+      // no request of its own, so there is a stale row to trust.
       const mount = w.mount('/m')
       const index = mount.index
-      const items = graph.count('item')
+      const items = await drive.count('item')
       const listed = (await mount.callKeyed(
         'stat',
         new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
         [],
         { index },
       )) as FileStat
-      expect([listed.fingerprint, graph.count('item')]).toEqual(['c1', items])
+      expect([listed.fingerprint, await drive.count('item')]).toEqual([first, items])
       expect(await out(w, CAT)).toBe(DEC.decode(OLD))
-      graph.write(ME, 'a.txt', NEW)
+      await drive.write('a.txt', NEW)
       expect(await out(w, CAT)).toBe(DEC.decode(NEW))
-      expect([graph.count('children'), graph.reach]).toEqual([1, []])
+      expect([await drive.count('children'), await drive.reach(1)]).toEqual([1, []])
     } finally {
       await w.close()
     }
   })
 
   it.each([false, true])('a dispatcher read stamps its cTag (streamed: %s)', async (streamed) => {
-    const graph = await graphOf(OLD)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf({ 'a.txt': OLD })
+    const w = ws(await vfsOf(drive))
     try {
       let got = ''
       if (streamed) {
@@ -220,25 +226,24 @@ describe('onedrive under read: fresh', () => {
         got = DEC.decode(await w.vfs.read('/m/a.txt'))
       }
       expect(got).toBe(DEC.decode(OLD))
-      const before = graph.fetches()
+      const before = await drive.fetches()
       expect(await out(w, CAT)).toBe(DEC.decode(OLD))
-      expect(graph.fetches()).toBe(before)
+      expect(await drive.fetches()).toBe(before)
     } finally {
       await w.close()
     }
   })
 
   it('a metadata edit does not refetch', async () => {
-    const graph = await graphOf(OLD)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf({ 'a.txt': OLD })
+    const w = ws(await vfsOf(drive))
     try {
       await out(w, CAT)
       // A rename or a property edit moves the eTag and the stamp, never the
       // cTag, so the cached bytes are still current.
-      graph.touch(ME, 'a.txt')
-      const before = graph.fetches()
+      await drive.touch('a.txt')
       expect(await out(w, CAT)).toBe(DEC.decode(OLD))
-      expect(graph.fetches() - before).toBe(0)
+      expect(await drive.fetches()).toBe(0)
     } finally {
       await w.close()
     }
@@ -258,14 +263,18 @@ const WARM: [string, number][] = [
 
 describe('onedrive warm read cost', () => {
   it.each(WARM)('%s costs one item per probe', async (command, items) => {
-    const graph = await graphOf(OLD, 1)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf({ 'a.txt': OLD })
+    const w = ws(await vfsOf(drive))
     try {
       await out(w, 'ls /m')
       await out(w, CAT)
-      graph.log.length = 0
+      await drive.run.recordRequests()
       await out(w, command)
-      expect([graph.count('item'), graph.fetches(), graph.count('children')]).toEqual([items, 0, 0])
+      expect([
+        await drive.count('item'),
+        await drive.fetches(),
+        await drive.count('children'),
+      ]).toEqual([items, 0, 0])
     } finally {
       await w.close()
     }
@@ -276,11 +285,10 @@ describe('onedrive warm read cost', () => {
 // what mirage kept for it. Asserted right after the `ls`, before anything
 // reads the path, since a stat of it reaches the per-file cleanup anyway.
 it('cleans up the bytes and overlay of a file a re-list drops', async () => {
-  const graph = await graphOf(OLD)
-  graph.write(ME, 'b.txt', ENC.encode('bravo\n'))
+  const drive = await driveOf({ 'a.txt': OLD, 'b.txt': ENC.encode('bravo\n') })
   const w = new Workspace(
     {
-      '/m': new Mount(await vfsOf(graph), {
+      '/m': new Mount(await vfsOf(drive), {
         mode: MountMode.WRITE,
         read: { policy: ReadPolicy.BOUNDED, ttl: 600 },
       }),
@@ -292,7 +300,7 @@ it('cleans up the bytes and overlay of a file a re-list drops', async () => {
     expect(await out(w, 'cat /m/a.txt')).toBe('version one\n')
     await w.namespace.setAttrs('/m/a.txt', { mode: 0o600 })
     expect(await w.cache.exists('/m/a.txt')).toBe(true)
-    graph.remove(ME, 'a.txt')
+    await drive.remove('a.txt')
     await w.registry.mountFor('/m/a.txt').index.invalidate()
     expect(await out(w, 'ls /m')).toBe('b.txt\n')
     expect(w.namespace.metaFor('/m/a.txt')).toBeNull()
@@ -306,14 +314,13 @@ it('cleans up the bytes and overlay of a file a re-list drops', async () => {
 // No ttl to wait out: under fresh the next command re-lists, and that re-list
 // is what finds the file gone.
 it('re-lists on the next command under fresh and cleans up', async () => {
-  const graph = await graphOf(OLD)
-  graph.write(ME, 'b.txt', ENC.encode('bravo\n'))
-  const w = ws(await vfsOf(graph))
+  const drive = await driveOf({ 'a.txt': OLD, 'b.txt': ENC.encode('bravo\n') })
+  const w = ws(await vfsOf(drive))
   try {
     expect(await out(w, 'ls /m')).toBe('a.txt\nb.txt\n')
     expect(await out(w, 'cat /m/a.txt')).toBe('version one\n')
     await w.namespace.setAttrs('/m/a.txt', { mode: 0o600 })
-    graph.remove(ME, 'a.txt')
+    await drive.remove('a.txt')
     expect(await out(w, 'ls /m')).toBe('b.txt\n')
     expect(w.namespace.metaFor('/m/a.txt')).toBeNull()
     expect(await w.cache.exists('/m/a.txt')).toBe(false)
@@ -325,16 +332,13 @@ it('re-lists on the next command under fresh and cleans up', async () => {
 it.each(['onedrive', 'sharepoint'])(
   'refuses hidden %s aliases over a folding service',
   async (provider) => {
-    const drive = provider === 'onedrive' ? ME : DRIVE_ID
-    const graph = await serveGraph(
-      new FakeGraph({
-        [drive]: {
-          'secret.txt': ENC.encode('secret'),
-          'vault/private.txt': ENC.encode('private'),
-        },
-      }),
+    const drive = await driveOf(
+      { 'secret.txt': ENC.encode('secret'), 'vault/private.txt': ENC.encode('private') },
+      provider === 'onedrive' ? undefined : DRIVE_NAME,
     )
-    graphs.push(graph)
+    // Graph matches paths in any case; the fake matches them exactly, so the
+    // path an item URL names is lowercased on its way there, as the names
+    // the drive holds already are.
     const nativeFetch = globalThis.fetch
     vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input))
@@ -344,18 +348,13 @@ it.each(['onedrive', 'sharepoint'])(
           url.pathname.slice(0, index + 7) + url.pathname.slice(index + 7).toLowerCase()
       return nativeFetch(url, init)
     })
-    const config = {
-      access_token: 't',
-      graph_base_url: graph.url,
-      ...(provider === 'sharepoint' ? { site: SITE_NAME, drive: DRIVE_NAME } : {}),
-    }
-    const vfs = await buildVfs(provider, config)
+    const vfs = await buildVfs(provider, drive.config(provider))
     const w = new Workspace({ '/m': [vfs, MountMode.WRITE] })
     try {
       expect((await w.shell('cat /m/secret.txt /m/vault/private.txt')).exitCode).toBe(0)
       w.createSession('hidden', { profile: { paths: { hide: ['/m/secret.txt', '/m/vault'] } } })
-      const token = graph.ctag(drive, 'secret.txt')
-      graph.log.length = 0
+      const token = await drive.ctag('secret.txt')
+      await drive.run.recordRequests()
       for (const command of [
         'cat /m/SECRET.txt',
         'cat /m/Vault/private.txt',
@@ -367,9 +366,9 @@ it.each(['onedrive', 'sharepoint'])(
         expect(result.exitCode, command).not.toBe(0)
         expect(DEC.decode(result.stdout), command).not.toContain('secret')
       }
-      expect(graph.ctag(drive, 'secret.txt')).toBe(token)
+      expect(await drive.ctag('secret.txt')).toBe(token)
       expect(
-        graph.log.filter(([route]) =>
+        (await drive.log()).filter(([route]) =>
           ['upload', 'download', 'content', 'version_content'].includes(route),
         ),
       ).toEqual([])

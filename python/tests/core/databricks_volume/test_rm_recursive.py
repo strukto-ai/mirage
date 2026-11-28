@@ -13,96 +13,69 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from types import SimpleNamespace
 
 import pytest
 
 from mirage.core.databricks_volume.rm import rm_recursive
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.databricks_volume import DIRS, FILES
 
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
-def _seed_directory(files, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.directories.setdefault(path, [])
-    parent = path.rsplit("/", 1)[0]
-    if parent and parent != path:
-        files.directories.setdefault(parent, []).append(
-            SimpleNamespace(path=path, is_directory=True, file_size=None)
-        )
-
-
-def _seed_file(files, path: str, data: bytes = b"x") -> None:
-    parent = path.rsplit("/", 1)[0]
-    files.downloads[path] = data
-    files.metadata[path] = SimpleNamespace(
-        is_directory=False, file_size=len(data)
-    )
-    files.directories.setdefault(parent, []).append(
-        SimpleNamespace(path=path, is_directory=False, file_size=len(data))
-    )
-
-
 @pytest.mark.asyncio
-async def test_rm_recursive_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/a.txt")
+async def test_rm_recursive_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/a.txt", b"x")
 
     removed = await rm_recursive(accessor, _path("/dbx/a.txt"))
 
     assert removed == ["/a.txt"]
-    assert f"{remote_root}/a.txt" not in files.downloads
+    assert not await volume.has(f"{remote_root}/a.txt")
 
 
 @pytest.mark.asyncio
-async def test_rm_recursive_nested_tree(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt")
-    _seed_directory(files, f"{remote_root}/d/sub")
-    _seed_file(files, f"{remote_root}/d/sub/b.txt")
+async def test_rm_recursive_nested_tree(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/d/a.txt", b"x")
+    await volume.put(f"{remote_root}/d/sub/b.txt", b"x")
+    await volume.run.record_requests()
 
     removed = await rm_recursive(accessor, _path("/dbx/d"))
 
-    assert f"{remote_root}/d/a.txt" in files.delete_calls
-    assert f"{remote_root}/d/sub/b.txt" in files.delete_calls
-    assert f"{remote_root}/d/sub" in files.delete_directory_calls
-    assert f"{remote_root}/d" in files.delete_directory_calls
+    deleted_files = await volume.asked("DELETE", FILES)
+    deleted_dirs = await volume.asked("DELETE", DIRS)
+    assert f"{remote_root}/d/a.txt" in deleted_files
+    assert f"{remote_root}/d/sub/b.txt" in deleted_files
+    assert f"{remote_root}/d/sub" in deleted_dirs
+    assert f"{remote_root}/d" in deleted_dirs
     assert "/d" in removed
-    assert f"{remote_root}/d" not in files.directory_metadata
+    assert not await volume.has(f"{remote_root}/d")
 
 
 @pytest.mark.asyncio
 async def test_rm_recursive_keeps_a_file_written_during_the_walk(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
     # The Files API deletes only an empty directory: a file written after
-    # the listing refuses it, and the removal is ENOTEMPTY.
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt")
-    inner = files.delete
-
-    def racing(path: str) -> None:
-        files.delete = inner
-        _seed_file(files, f"{remote_root}/d/late.txt", b"late")
-        inner(path)
-
-    files.delete = racing
+    # the listing refuses it, and the removal is ENOTEMPTY. Another client
+    # writes it while the walk's first delete waits.
+    await volume.put(f"{remote_root}/d/a.txt", b"x")
+    await volume.run.before_next(
+        [("DELETE", FILES)],
+        lambda: volume.put(f"{remote_root}/d/late.txt", b"late"),
+    )
     with pytest.raises(OSError) as refused:
         await rm_recursive(accessor, _path("/dbx/d"))
     assert refused.value.errno == errno.ENOTEMPTY
-    assert files.downloads[f"{remote_root}/d/late.txt"] == b"late"
-    assert f"{remote_root}/d" in files.directory_metadata
+    assert await volume.content(f"{remote_root}/d/late.txt") == b"late"
+    assert await volume.has(f"{remote_root}/d")
 
 
 @pytest.mark.asyncio
-async def test_rm_recursive_missing_raises(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_rm_recursive_missing_raises(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await rm_recursive(accessor, _path("/dbx/missing"))

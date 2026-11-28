@@ -13,90 +13,68 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from types import SimpleNamespace
 
 import pytest
 
 from mirage.core.databricks_volume.rmdir import rmdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.databricks_volume import DIRS
 
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
-def _seed_directory(files, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.directories.setdefault(path, [])
-
-
-def _seed_file(files, path: str, data: bytes = b"x") -> None:
-    parent = path.rsplit("/", 1)[0]
-    files.downloads[path] = data
-    files.metadata[path] = SimpleNamespace(
-        is_directory=False, file_size=len(data)
-    )
-    files.directories.setdefault(parent, [])
-    files.directories[parent].append(
-        SimpleNamespace(path=path, is_directory=False, file_size=len(data))
-    )
-
-
 @pytest.mark.asyncio
-async def test_rmdir_empty_succeeds(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/empty")
+async def test_rmdir_empty_succeeds(accessor, volume, remote_root):
+    await volume.mkdir(f"{remote_root}/empty")
+    await volume.run.record_requests()
 
     await rmdir(accessor, _path("/dbx/empty"))
 
-    assert files.delete_directory_calls == [f"{remote_root}/empty"]
-    assert f"{remote_root}/empty" not in files.directory_metadata
+    assert await volume.asked("DELETE", DIRS) == [f"{remote_root}/empty"]
+    assert not await volume.has(f"{remote_root}/empty")
 
 
 @pytest.mark.asyncio
-async def test_rmdir_non_empty_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/full")
-    _seed_file(files, f"{remote_root}/full/a.txt")
+async def test_rmdir_non_empty_fails(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/full/a.txt", b"x")
+    await volume.run.record_requests()
 
     with pytest.raises(OSError):
         await rmdir(accessor, _path("/dbx/full"))
-    assert files.delete_directory_calls == []
+    assert await volume.asked("DELETE", DIRS) == []
 
 
 @pytest.mark.asyncio
 async def test_rmdir_refuses_a_child_written_after_the_listing(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/empty")
-    inner = files.delete_directory
-
-    def racing(path: str) -> None:
-        files.delete_directory = inner
-        _seed_file(files, f"{remote_root}/empty/late.txt")
-        inner(path)
-
-    files.delete_directory = racing
+    # Another client writes a file into the directory between the listing
+    # that found it empty and the delete, which the Files API refuses.
+    await volume.mkdir(f"{remote_root}/empty")
+    await volume.run.before_next(
+        [("DELETE", DIRS)],
+        lambda: volume.put(f"{remote_root}/empty/late.txt", b"x"),
+    )
     with pytest.raises(OSError) as refused:
         await rmdir(accessor, _path("/dbx/empty"))
     assert refused.value.errno == errno.ENOTEMPTY
-    assert f"{remote_root}/empty" in files.directory_metadata
+    assert await volume.has(f"{remote_root}/empty/late.txt")
 
 
 @pytest.mark.asyncio
-async def test_rmdir_file_target_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/a.txt")
+async def test_rmdir_file_target_fails(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/a.txt", b"x")
 
     with pytest.raises(NotADirectoryError):
         await rmdir(accessor, _path("/dbx/a.txt"))
 
 
 @pytest.mark.asyncio
-async def test_rmdir_missing_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_rmdir_missing_fails(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await rmdir(accessor, _path("/dbx/missing"))

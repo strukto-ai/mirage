@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { serve } from '../../../../../tests/fixtures/kit_fake.ts'
 import {
-  FakeAirtable,
+  AirtableAccount,
   FEATURES,
   OPS,
   ROADMAP,
   TOKEN,
-} from '../../../../../tests/core/airtable/_test_util.ts'
+} from '../../../../../tests/fixtures/airtable_account.ts'
 import { AirtableConfig } from '../../../../core/airtable/config.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { compileSpec } from '../../../spec/compile.ts'
@@ -27,6 +28,23 @@ import type { CommandSpec } from '../../../spec/types.ts'
 import { UsageStyle } from '../../../spec/types.ts'
 import { cliSpecFor } from '../../specs.ts'
 import { AIRTABLE } from './index.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 // Mirrors python/tests/commands/cli/builtin/airtable/test_tree.py.
 
@@ -66,9 +84,12 @@ function leaf(...path: string[]): CommandSpec {
 }
 
 async function shell(line: string): Promise<[number, string, string]> {
-  vi.stubGlobal('fetch', new FakeAirtable().fetch)
   const ws = new Workspace({})
-  ws.registerCli('airtable', AIRTABLE, { token: TOKEN, requests_per_second: 10_000 })
+  ws.registerCli('airtable', AIRTABLE, {
+    token: TOKEN,
+    base_url: `${account.run.url}/v0`,
+    requests_per_second: 10_000,
+  })
   try {
     const io = await ws.shell(line)
     return [io.exitCode, DEC.decode(io.stdout), DEC.decode(io.stderr)]
@@ -118,10 +139,10 @@ describe('airtable tree', () => {
   })
 
   it('answers a second install under its own name', async () => {
-    vi.stubGlobal('fetch', new FakeAirtable().fetch)
     const ws = new Workspace({})
     ws.registerCli('work', AIRTABLE, {
       token: TOKEN,
+      base_url: `${account.run.url}/v0`,
       base_ids: [ROADMAP],
       requests_per_second: 10_000,
     })

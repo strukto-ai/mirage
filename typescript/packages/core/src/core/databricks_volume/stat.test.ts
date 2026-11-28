@@ -12,22 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import {
+  DatabricksVolume,
+  DIRS,
+  FILES,
+  ROOT,
+  spec,
+} from '../../../tests/fixtures/databricks_volume.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { type FileStat, FileType } from '../../types.ts'
 import { exists } from './exists.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
-import {
-  jsonResponse,
-  makeAccessor,
-  notFoundResponse,
-  routedFetch,
-  spec,
-  TEST_ROOT,
-} from '../../../tests/core/databricks_volume/_test_util.ts'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
+let origin = ''
+let volume: DatabricksVolume
+
+beforeAll(async () => {
+  origin = await serve('databricks')
+})
+
+beforeEach(async () => {
+  volume = new DatabricksVolume(origin)
+  await volume.reset()
+})
+
+afterEach(async () => {
+  await volume.run.close()
 })
 
 // The mount answers a stat from the row the listing names, so a row and the
@@ -35,106 +47,75 @@ afterEach(() => {
 // test_a_listed_*_row_matches_its_stat.
 describe('a listed row', () => {
   it('matches the stat of a file', async () => {
-    const { fetch } = routedFetch((call) => {
-      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-        return jsonResponse({
-          contents: [
-            { path: `${TEST_ROOT}/reports/a.txt`, file_size: 6, last_modified: 1_700_000_000_000 },
-          ],
-        })
-      }
-      return new Response(null, {
-        status: 200,
-        headers: { 'Content-Length': '6', 'Last-Modified': 'Tue, 14 Nov 2023 22:13:20 GMT' },
-      })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const [row] = (await readdir(makeAccessor(), spec('/volume/reports'))) as FileStat[]
-    expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/a.txt')))
+    await volume.put(`${ROOT}/reports/a.txt`, 'abcdef')
+    const [row] = (await readdir(volume.accessor(), spec('/volume/reports'))) as FileStat[]
+    expect(row).toEqual(await stat(volume.accessor(), spec('/volume/reports/a.txt')))
+  })
+
+  it('matches the stat of a file written between whole seconds', async () => {
+    await volume.put(`${ROOT}/reports/a.txt`, 'abcdef')
+    await volume.setModified(`${ROOT}/reports/a.txt`, 1_700_000_000_750)
+    // The listing names the write to the millisecond, HEAD only to the
+    // second, so a row that kept the milliseconds would differ from the
+    // stat of the same file.
+    const listed = await volume.listing(`${ROOT}/reports`)
+    expect(listed.contents.map((entry) => entry.last_modified)).toEqual([1_700_000_000_750])
+    const [row] = (await readdir(volume.accessor(), spec('/volume/reports'))) as FileStat[]
+    expect(row?.modified).toBe('2023-11-14T22:13:20Z')
+    expect(row).toEqual(await stat(volume.accessor(), spec('/volume/reports/a.txt')))
   })
 
   it('matches the stat of a directory', async () => {
-    const { fetch } = routedFetch((call) => {
-      if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-        return jsonResponse({
-          contents: [{ path: `${TEST_ROOT}/reports/sub`, is_directory: true }],
-        })
-      }
-      if (call.method === 'HEAD' && call.url.includes('/fs/files/')) {
-        return notFoundResponse()
-      }
-      return new Response(null, { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const [row] = (await readdir(makeAccessor(), spec('/volume/reports'))) as FileStat[]
+    await volume.mkdir(`${ROOT}/reports/sub`)
+    const [row] = (await readdir(volume.accessor(), spec('/volume/reports'))) as FileStat[]
     expect(row?.type).toBe(FileType.DIRECTORY)
-    expect(row).toEqual(await stat(makeAccessor(), spec('/volume/reports/sub')))
+    expect(row).toEqual(await stat(volume.accessor(), spec('/volume/reports/sub')))
   })
 })
 
 describe('stat', () => {
   it('returns file metadata from HEAD headers', async () => {
-    const { fetch, calls } = routedFetch(
-      () =>
-        new Response(null, {
-          status: 200,
-          headers: {
-            'Content-Length': '42',
-            'Last-Modified': 'Wed, 10 Jun 2026 01:02:03 GMT',
-          },
-        }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const st = await stat(makeAccessor(), spec('/volume/reports/a.txt'))
+    await volume.put(`${ROOT}/reports/a.txt`, 'x'.repeat(42))
+    await volume.setModified(`${ROOT}/reports/a.txt`, Date.parse('2026-06-10T01:02:03Z'))
+    await volume.run.recordRequests()
+    const st = await stat(volume.accessor(), spec('/volume/reports/a.txt'))
     expect(st.name).toBe('a.txt')
     expect(st.size).toBe(42)
     expect(st.modified).toBe('2026-06-10T01:02:03Z')
     expect(st.type).not.toBe(FileType.DIRECTORY)
-    expect(calls[0]?.method).toBe('HEAD')
-    expect(calls[0]?.url).toContain('/fs/files/')
+    expect(await volume.asked('HEAD', FILES)).toEqual([`${ROOT}/reports/a.txt`])
   })
 
   it('falls back to directory metadata on file 404', async () => {
-    const { fetch, calls } = routedFetch((call) => {
-      if (call.url.includes('/fs/files/')) return notFoundResponse()
-      return new Response(null, { status: 200 })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const st = await stat(makeAccessor(), spec('/volume/reports'))
+    await volume.mkdir(`${ROOT}/reports`)
+    await volume.run.recordRequests()
+    const st = await stat(volume.accessor(), spec('/volume/reports'))
     expect(st.name).toBe('reports')
     expect(st.type).toBe(FileType.DIRECTORY)
-    expect(calls.map((c) => c.method)).toEqual(['HEAD', 'HEAD'])
-    expect(calls[1]?.url).toContain('/fs/directories/')
+    expect((await volume.run.requests()).map((r) => r.split(' ')[0])).toEqual(['HEAD', 'HEAD'])
+    expect(await volume.asked('HEAD', DIRS)).toEqual([`${ROOT}/reports`])
   })
 
   it('raises ENOENT when neither file nor directory exists', async () => {
-    const { fetch } = routedFetch(() => notFoundResponse())
-    vi.stubGlobal('fetch', fetch)
-    const err = (await stat(makeAccessor(), spec('/volume/gone')).catch(
+    const err = (await stat(volume.accessor(), spec('/volume/gone')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
   })
 
   it('returns a directory stat for the mount root without any request', async () => {
-    const { fetch, calls } = routedFetch(() => notFoundResponse())
-    vi.stubGlobal('fetch', fetch)
-    const st = await stat(makeAccessor(), spec('/volume/'))
+    await volume.run.recordRequests()
+    const st = await stat(volume.accessor(), spec('/volume/'))
     expect(st.name).toBe('/')
     expect(st.type).toBe(FileType.DIRECTORY)
-    expect(calls).toHaveLength(0)
+    expect(await volume.run.requests()).toEqual([])
   })
 })
 
 describe('exists', () => {
   it('maps stat success and ENOENT to booleans', async () => {
-    const { fetch } = routedFetch((call) =>
-      call.url.includes('a.txt')
-        ? new Response(null, { status: 200, headers: { 'Content-Length': '1' } })
-        : notFoundResponse(),
-    )
-    vi.stubGlobal('fetch', fetch)
-    expect(await exists(makeAccessor(), spec('/volume/a.txt'))).toBe(true)
-    expect(await exists(makeAccessor(), spec('/volume/gone.txt'))).toBe(false)
+    await volume.put(`${ROOT}/a.txt`, 'x')
+    expect(await exists(volume.accessor(), spec('/volume/a.txt'))).toBe(true)
+    expect(await exists(volume.accessor(), spec('/volume/gone.txt'))).toBe(false)
   })
 })

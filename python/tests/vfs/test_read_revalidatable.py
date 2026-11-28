@@ -80,18 +80,11 @@ from tests.core.github.conftest import GitHubRepo, blob_sha
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
 from tests.fixtures.google_account import FILES, GoogleAccount
 from tests.fixtures.google_account import TOKEN as GOOGLE_TOKEN
+from tests.fixtures.graph_drive import DRIVE_NAME, ONEDRIVE, GraphDrive
 from tests.fixtures.handed import ListFn, entry_at
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
 from tests.fixtures.kit_fake import KitRun, LoopThread
-from tests.fixtures.msgraph_api import (
-    DRIVE_ID,
-    DRIVE_NAME,
-    ME,
-    SITE_NAME,
-    FakeGraph,
-)
-from tests.fixtures.msgraph_api import serve as serve_graph
 from tests.fixtures.vfs_io import vfs_over
 
 S3_FAMILY = (
@@ -138,8 +131,8 @@ HARNESSES = {
 # user's own, SharePoint one library of one site, mounted scoped so the keys
 # stay drive-relative (unscoped, `a.txt` would name a site).
 GRAPH = {
-    "onedrive": ME,
-    "sharepoint": DRIVE_ID,
+    "onedrive": ONEDRIVE,
+    "sharepoint": DRIVE_NAME,
 }
 
 ALL_SHAPES = ("root", "nested", "prefixed")
@@ -282,7 +275,9 @@ class Fake:
     key: str
     fetches: Callable[[], int]
     rewrite: Callable[[bytes], None]
-    reach: list[str]
+    # What the reads reached that they should not, asked when called: the
+    # in-process fakes keep a list, the kit fakes ask their request list.
+    reach: Callable[[], list[str]]
     read_mod: ModuleType
     # None when the backend answers a whole read with its bytes, which then
     # record through read_mod's record; the slot it lands in is "bytes".
@@ -303,6 +298,9 @@ class Fake:
     # How many Drive listings the mount has asked, for a Google app, whose
     # listing is a Drive search.
     searched: Callable[[], int] | None = None
+    # What Graph answers for the key's item now, for a Graph row: a test
+    # reads its cTag and eTag there.
+    item: Callable[[], dict[str, Any]] | None = None
 
     def slot(self) -> str:
         return "stream" if self.stream_mod is not None else "bytes"
@@ -442,7 +440,7 @@ def _s3_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
             key=key,
             fetches=lambda: session._client.calls["get_object"],
             rewrite=rewrite,
-            reach=[],
+            reach=list,
             read_mod=s3_read,
             stream_mod=s3_stream,
         )
@@ -491,7 +489,7 @@ def _gridfs_fake(
         key=key,
         fetches=lambda: len(bucket.opened),
         rewrite=rewrite,
-        reach=reach,
+        reach=reach.copy,
         read_mod=gridfs_read,
         stream_mod=gridfs_stream,
     )
@@ -551,49 +549,70 @@ def _hf_fake(
             key=key,
             fetches=lambda: hub.count("resolve"),
             rewrite=rewrite,
-            reach=reach,
+            reach=reach.copy,
             read_mod=hf_read,
             stream_mod=hf_stream,
             readdir=hf_readdir,
         )
 
 
+async def _graph_drive(drive: str, origin: str) -> GraphDrive:
+    """A drive made on the running loop, which its session belongs to."""
+    made = GraphDrive(origin, drive)
+    await made.reset()
+    return made
+
+
 @contextmanager
-def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
+def _graph_fake(
+    name: str, shape: str, data: bytes, origin: str
+) -> Iterator[Fake]:
+    # The drive runs on a loop of its own, as Dropbox's does: the harness
+    # counts and rewrites from inside its own loop and does not await.
     key = KEYS[shape]
     prefix = PREFIX if shape == "prefixed" else None
     stored = (prefix or "") + key
-    drive = GRAPH[name]
-    files = {stored: data}
-    config: dict[str, str] = {"access_token": "t"}
-    if name == "sharepoint":
-        config.update(site=SITE_NAME, drive=DRIVE_NAME)
-    if prefix is not None:
-        files[key] = DECOY
-        config["key_prefix"] = prefix
     # A children listing is a walk no read or stat should make; the listed
     # shape's own `ls` is the one allowed.
-    graph = FakeGraph(
-        drives={drive: files}, children_allowed=1 if shape == "listed" else 0
-    )
-    with serve_graph(graph):
-        vfs = build_vfs(name, {**config, "graph_base_url": graph.url})
-        assert (vfs.accessor.config.key_prefix or "").strip("/") == (
-            prefix or ""
-        ).strip("/")
+    allowed = 1 if shape == "listed" else 0
+    # The rows ask what was reached after the drive's loop has closed, so
+    # its last reading is kept.
+    reached: list[str] | None = None
 
-        def rewrite(new: bytes) -> None:
-            graph.write(drive, stored, new)
+    def reach() -> list[str]:
+        if reached is not None:
+            return reached
+        return thread.run(drive.reach(allowed))
 
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=graph.fetches,
-            rewrite=rewrite,
-            reach=graph.reach,
-            read_mod=drive_ops,
-            stream_mod=drive_ops,
-        )
+    thread = LoopThread()
+    try:
+        drive = thread.run(_graph_drive(GRAPH[name], origin))
+        try:
+            thread.run(drive.write(stored, data))
+            config = drive.config(name)
+            if prefix is not None:
+                thread.run(drive.write(key, DECOY))
+                config["key_prefix"] = prefix
+            thread.run(drive.run.record_requests())
+            vfs = build_vfs(name, config)
+            assert (vfs.accessor.config.key_prefix or "").strip("/") == (
+                prefix or ""
+            ).strip("/")
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(drive.fetches()),
+                rewrite=lambda new: thread.run(drive.write(stored, new)),
+                reach=reach,
+                read_mod=drive_ops,
+                stream_mod=drive_ops,
+                item=lambda: thread.run(drive.item(stored)),
+            )
+            reached = reach()
+        finally:
+            thread.run(drive.run.close())
+    finally:
+        thread.close()
 
 
 def _google_config(drive: GoogleAccount) -> dict[str, str]:
@@ -622,7 +641,7 @@ def _gdrive_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
                 key=key,
                 fetches=lambda: thread.run(_downloads(drive)),
                 rewrite=lambda new: thread.run(drive.put(key, new)),
-                reach=[],
+                reach=list,
                 read_mod=gdrive_read,
                 stream_mod=gdrive_read,
                 readdir=gdrive_readdir,
@@ -746,7 +765,7 @@ def _gapps_fake(name: str, data: bytes, origin: str) -> Iterator[Fake]:
                 rewrite=lambda new: thread.run(
                     _app_write(drive, name, file_id, new.decode())
                 ),
-                reach=[],
+                reach=list,
                 read_mod=read_mod,
                 stream_mod=None,
                 index=RAMIndexCacheStore(),
@@ -791,7 +810,7 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
             key=key,
             fetches=lambda: hub.count("bucket_resolve"),
             rewrite=rewrite,
-            reach=reach,
+            reach=reach.copy,
             read_mod=hf_buckets_read,
             stream_mod=hf_buckets_stream,
         )
@@ -826,7 +845,7 @@ def _github_fake(
                 key=key,
                 fetches=lambda: thread.run(repo.count("blob")),
                 rewrite=lambda new: thread.run(repo.commit({key: new})),
-                reach=_watch_walks(vfs, monkeypatch),
+                reach=_watch_walks(vfs, monkeypatch).copy,
                 read_mod=github_read,
                 stream_mod=github_read,
                 readdir=github_readdir,
@@ -907,7 +926,7 @@ def _dropbox_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
                 rewrite=lambda new: thread.run(
                     _dropbox_rewrite(dropbox, stored, new)
                 ),
-                reach=[],
+                reach=list,
                 read_mod=dropbox_read,
                 stream_mod=dropbox_read,
                 readdir=dropbox_readdir,
@@ -943,7 +962,7 @@ def _box_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
                     _requests_to(box.run, BOX_DOWNLOAD)
                 ),
                 rewrite=lambda new: thread.run(_box_rewrite(box, stored, new)),
-                reach=[],
+                reach=list,
                 read_mod=box_read,
                 stream_mod=box_read,
                 readdir=box_readdir,
@@ -980,7 +999,9 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] in GRAPH:
-        with _graph_fake(name, shape, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("graph_origin")
+        with _graph_fake(name, shape, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "gdrive":
@@ -1253,7 +1274,7 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     assert fresh is not renders
     assert refetched == (1 if renders else 0)
     assert second == want
-    assert fake.reach == []
+    assert fake.reach() == []
 
 
 @pytest.mark.parametrize(("name", "shape", "row"), _cases(("partial",)))
@@ -1437,7 +1458,7 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch, request):
     assert refreshed
     assert third_fetched == 0
     assert third == want
-    assert fake.reach == []
+    assert fake.reach() == []
 
 
 def _wires_write(name: str) -> bool:
@@ -1490,7 +1511,7 @@ def test_a_written_file_is_served_without_a_download(
             ws = _fresh_workspace(fake.vfs)
             try:
                 await _line(ws, f"echo new | tee {virtual}")
-                written = list(fake.reach)
+                written = fake.reach()
                 before = fake.fetches()
                 out = await _line(ws, f"cat {virtual}")
                 return out, fake.fetches() - before, written
@@ -1502,11 +1523,17 @@ def test_a_written_file_is_served_without_a_download(
     assert out == b"new\n"
     assert downloads == WRITE_EXCEPTIONS.get(family, 0)
     # A new gridfs key's stat miss asks files_coll whether the key names a
-    # folder, a dispatcher the read rows refuse; the read itself reaches
+    # folder, a dispatcher the read rows refuse; a Graph write is the one
+    # upload the fake's request list shows. The read itself reaches
     # nothing.
-    stat_miss = family == "gridfs" and target == "new"
-    assert written == (["files_coll"] if stat_miss else [])
-    assert fake.reach == written
+    if family in GRAPH:
+        wrote = [f"upload {WRITE_TARGETS[target]}"]
+    elif family == "gridfs" and target == "new":
+        wrote = ["files_coll"]
+    else:
+        wrote = []
+    assert written == wrote
+    assert fake.reach() == written
 
 
 def _dropbox_routes(requests: list[str]) -> list[str]:
@@ -1759,7 +1786,9 @@ def test_the_contract_goes_red_on_hf_stamping_another_kind(monkeypatch):
     assert not fresh
 
 
-def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
+def test_the_contract_goes_red_on_msgraph_stamping_another_kind(
+    monkeypatch, request
+):
     # onedrive forced to stamp the item's eTag on the read while stat
     # reports its cTag: both tokens exist and differ as strings on every
     # write, so the contract must call the entry stale.
@@ -1770,7 +1799,9 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
         item = await drive_ops.graph_get(accessor, loc.item())
         return item["eTag"], revision, url
 
-    with _fake("onedrive", "root", SEED, monkeypatch) as fake:
+    with _fake("onedrive", "root", SEED, monkeypatch, request) as fake:
+        assert fake.item is not None
+        item = fake.item()
         monkeypatch.setitem(
             vars(drive_ops), "capture_item_metadata", etag_instead
         )
@@ -1781,7 +1812,9 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
             ws = _fresh_workspace(fake.vfs)
             try:
                 await _line(ws, f"cat {virtual}")
-                holds_read_token = await ws.cache.is_fresh(virtual, "e1")
+                holds_read_token = await ws.cache.is_fresh(
+                    virtual, item["eTag"]
+                )
                 stat = await _reconcile_stat(ws, virtual)
                 fresh = await ws.cache.is_fresh(virtual, stat.fingerprint)
                 return holds_read_token, stat.fingerprint, fresh
@@ -1790,8 +1823,9 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(monkeypatch):
 
         holds_read_token, fingerprint, fresh = asyncio.run(run())
 
+    assert item["cTag"] != item["eTag"]
     assert holds_read_token
-    assert fingerprint == "c1"
+    assert fingerprint == item["cTag"]
     assert not fresh
 
 

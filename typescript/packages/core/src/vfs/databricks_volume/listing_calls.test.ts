@@ -12,85 +12,49 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import {
-  jsonResponse,
-  makeAccessor,
-  notFoundResponse,
-  routedFetch,
-  TEST_ROOT,
-  type FetchCall,
-} from '../../../tests/core/databricks_volume/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DatabricksVolume, DIRS, FILES, ROOT } from '../../../tests/fixtures/databricks_volume.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DatabricksVolumeVFS } from './databricks_volume.ts'
 
-const MS = 1_700_000_000_000
 const FROZEN_NOW_S = 1_700_000_000
 const DAY_S = 86_400
 const AGES_DAYS = [1, 2, 3, 10, 20]
-function flatContents(count: number): { contents: unknown[] } {
-  return {
-    contents: Array.from({ length: count }, (_, i) => ({
-      path: `${TEST_ROOT}/sub/f${String(i)}.txt`,
-      file_size: i + 1,
-      last_modified: MS + i * 1000,
-    })),
+
+let origin = ''
+let volume: DatabricksVolume
+
+beforeAll(async () => {
+  origin = await serve('databricks')
+})
+
+beforeEach(async () => {
+  volume = new DatabricksVolume(origin)
+  await volume.reset()
+})
+
+afterEach(async () => {
+  vi.useRealTimers()
+  await volume.run.close()
+})
+
+async function seedFlat(count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await volume.put(`${ROOT}/sub/f${String(i)}.txt`, 'x'.repeat(i + 1))
   }
 }
 
-function nestedRoute(call: FetchCall): Response {
-  if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-    if (call.url.includes('/sub/inner')) {
-      return jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/sub/inner/b.txt`, file_size: 2, last_modified: MS }],
-      })
-    }
-    return jsonResponse({
-      contents: [
-        { path: `${TEST_ROOT}/sub/a.txt`, file_size: 1, last_modified: MS },
-        { path: `${TEST_ROOT}/sub/inner`, is_directory: true },
-      ],
-    })
-  }
-  if (call.method === 'HEAD' && call.url.includes('/fs/directories/')) {
-    return new Response(null, { status: 200 })
-  }
-  return notFoundResponse()
-}
-
-function flatRoute(count: number): (call: FetchCall) => Response {
-  return (call) => {
-    if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-      return jsonResponse(flatContents(count))
-    }
-    if (call.method === 'HEAD' && call.url.includes('/fs/directories/')) {
-      return new Response(null, { status: 200 })
-    }
-    return notFoundResponse()
-  }
-}
-
-function agedRoute(call: FetchCall): Response {
-  if (call.method === 'GET' && call.url.includes('/fs/directories/')) {
-    return jsonResponse({
-      contents: AGES_DAYS.map((age, i) => ({
-        path: `${TEST_ROOT}/sub/f${String(i)}.txt`,
-        file_size: i + 1,
-        last_modified: (FROZEN_NOW_S - age * DAY_S) * 1000,
-      })),
-    })
-  }
-  if (call.method === 'HEAD' && call.url.includes('/fs/directories/')) {
-    return new Response(null, { status: 200 })
-  }
-  return notFoundResponse()
+async function seedNested(): Promise<void> {
+  await volume.put(`${ROOT}/sub/a.txt`, 'a')
+  await volume.put(`${ROOT}/sub/inner/b.txt`, 'bb')
 }
 
 // Runs one line over a fresh mount, the way the agent's shell does.
 async function run(line: string): Promise<string[]> {
   const ws = new Workspace(
-    { '/volume': new DatabricksVolumeVFS({ accessor: makeAccessor() }) },
+    { '/volume': new DatabricksVolumeVFS({ accessor: volume.accessor() }) },
     { mode: MountMode.READ },
   )
   try {
@@ -102,57 +66,57 @@ async function run(line: string): Promise<string[]> {
   }
 }
 
-const listDirCalls = (calls: FetchCall[]): FetchCall[] =>
-  calls.filter((c) => c.method === 'GET' && c.url.includes('/fs/directories/'))
+const listings = (): Promise<string[]> => volume.asked('GET', DIRS)
 
 // The operand's own stat may ask; a child's never does.
-const childStats = (calls: FetchCall[]): FetchCall[] =>
-  calls.filter((c) => c.method === 'HEAD' && c.url.includes('/sub/'))
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
-})
+async function childStats(): Promise<string[]> {
+  const asked = [...(await volume.asked('HEAD', FILES)), ...(await volume.asked('HEAD', DIRS))]
+  return asked.filter((path) => path.includes('/sub/'))
+}
 
 describe('databricks_volume listing API-call counts', () => {
   it.each(['', '-l', '-t', '-S'])('ls %s lists once and never stats entries', async (flags) => {
-    const { fetch, calls } = routedFetch(flatRoute(5))
-    vi.stubGlobal('fetch', fetch)
+    await seedFlat(5)
+    await volume.run.recordRequests()
     await run(`ls ${flags} /volume/sub`)
-    expect(listDirCalls(calls)).toHaveLength(1)
-    expect(childStats(calls)).toHaveLength(0)
+    expect(await listings()).toHaveLength(1)
+    expect(await childStats()).toHaveLength(0)
   })
 
   it('tree lists one directory per level and never stats entries', async () => {
-    const { fetch, calls } = routedFetch(nestedRoute)
-    vi.stubGlobal('fetch', fetch)
+    await seedNested()
+    await volume.run.recordRequests()
     await run('tree /volume/sub')
-    expect(listDirCalls(calls)).toHaveLength(2)
-    expect(childStats(calls)).toHaveLength(0)
+    expect(await listings()).toHaveLength(2)
+    expect(await childStats()).toHaveLength(0)
   })
 
   it.each(['-type f', '-size +3c', '-mtime -100000'])(
     'find %s lists once and never stats children',
     async (texts) => {
-      const { fetch, calls } = routedFetch(flatRoute(5))
-      vi.stubGlobal('fetch', fetch)
+      await seedFlat(5)
+      await volume.run.recordRequests()
       await run(`find /volume/sub ${texts}`)
-      expect(listDirCalls(calls)).toHaveLength(1)
-      expect(childStats(calls)).toHaveLength(0)
+      expect(await listings()).toHaveLength(1)
+      expect(await childStats()).toHaveLength(0)
     },
   )
 
   it('find -mtime filters on the modified time the listing names', async () => {
+    for (const [i, age] of AGES_DAYS.entries()) {
+      await volume.put(`${ROOT}/sub/f${String(i)}.txt`, 'x'.repeat(i + 1))
+      await volume.setModified(`${ROOT}/sub/f${String(i)}.txt`, (FROZEN_NOW_S - age * DAY_S) * 1000)
+    }
+    await volume.run.recordRequests()
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(FROZEN_NOW_S * 1000)
-    const { fetch, calls } = routedFetch(agedRoute)
-    vi.stubGlobal('fetch', fetch)
     const names = (await run('find /volume/sub -mtime -5'))
       .filter((line) => line.endsWith('.txt'))
       .map((line) => line.split('/').pop())
       .sort()
+    vi.useRealTimers()
     expect(names).toEqual(['f0.txt', 'f1.txt', 'f2.txt'])
-    expect(listDirCalls(calls)).toHaveLength(1)
-    expect(childStats(calls)).toHaveLength(0)
+    expect(await listings()).toHaveLength(1)
+    expect(await childStats()).toHaveLength(0)
   })
 })

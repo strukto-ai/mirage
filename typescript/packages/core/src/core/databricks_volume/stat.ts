@@ -28,8 +28,20 @@ function nameFromBackendPath(remotePath: string): string {
   return stripped.split('/').pop() ?? stripped
 }
 
-function modifiedToIso(value: string | null): string | null {
+/**
+ * A Databricks time as ISO UTC to the second.
+ *
+ * A listing names a file's time in milliseconds and its HEAD as an HTTP
+ * date to the second, so the listing's value drops its milliseconds and a
+ * listed row reports the instant a stat of the same file does.
+ *
+ * Args:
+ *   value: milliseconds since the epoch from a listing, or a
+ *     `Last-Modified` HTTP date.
+ */
+export function modifiedToIso(value: string | number | null): string | null {
   if (value === null || value === '') return null
+  if (typeof value === 'number') return toIsoZ(new Date(Math.floor(value / 1000) * 1000))
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return toIsoZ(parsed)

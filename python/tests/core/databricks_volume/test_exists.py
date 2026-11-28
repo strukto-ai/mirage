@@ -3,12 +3,11 @@ import pytest
 from mirage.core.databricks_volume.exists import exists
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.fixtures.databricks_api import file_metadata
 
 
 @pytest.mark.asyncio
-async def test_exists_true_for_file(accessor, files, remote_root):
-    files.metadata[f"{remote_root}/reports/latest.md"] = file_metadata(size=6)
+async def test_exists_true_for_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/reports/latest.md", b"abcdef")
     path = PathSpec.from_str_path(
         "/volume/reports/latest.md",
         mount_key("/volume/reports/latest.md", "/volume"),

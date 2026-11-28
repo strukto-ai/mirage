@@ -48,6 +48,18 @@ export type JsonValue =
 const INTEG = fileURLToPath(new URL('../../../../../integ/', import.meta.url))
 const START_MS = 20_000
 const SETUP_HEADER = 'X-Kit-Setup'
+// A bearer token that names its run and tenant, as integ/README.md's
+// credential routing reads one.
+const RUN_TOKENS = '^kitrun:(?<run>[^:]+):(?<tenant>[^:]+)$'
+
+/**
+ * The bearer token that reaches `tenant` in `run` on a fake `serve` started,
+ * for a client whose config takes a bare origin and so cannot carry a run's
+ * path.
+ */
+export function runToken(run: string, tenant: string): string {
+  return `kitrun:${run}:${tenant}`
+}
 // Taken when the module loads, so a test that stubs the global fetch to
 // shape what the code under test receives never reshapes its own setup.
 const FETCH = globalThis.fetch
@@ -58,7 +70,8 @@ const FETCH = globalThis.fetch
  * The fake is the one the integ battery runs against, on a port of its own.
  * The first test file to ask starts it and every file reads the line it
  * announces; the run's teardown (kit_fake_setup.ts) stops it. It needs
- * `pnpm install` and `pnpm run prisma:clients` in `integ/`.
+ * `pnpm install` and `pnpm run prisma:clients` in `integ/`. A bearer token
+ * of `runToken`'s shape names its run and tenant; any other routes as before.
  */
 export async function serve(service: string): Promise<string> {
   const dir = inject('kitFakeDir')
@@ -68,7 +81,11 @@ export async function serve(service: string): Promise<string> {
     const child = spawn(
       `${INTEG}node_modules/.bin/tsx`,
       [`${INTEG}server/${service}/main.ts`, '--port', '0'],
-      { cwd: INTEG, stdio: ['ignore', openSync(announced, 'w'), 'inherit'] },
+      {
+        cwd: INTEG,
+        env: { ...process.env, MIRAGE_RUN_TOKEN_PATTERN: RUN_TOKENS },
+        stdio: ['ignore', openSync(announced, 'w'), 'inherit'],
+      },
     )
     writeFileSync(join(dir, `${service}.pid`), String(child.pid))
     child.unref()
@@ -103,7 +120,6 @@ interface RequestOptions {
  * lists, holds and faults only the requests of the code under test.
  */
 export class KitRun {
-  readonly name = randomUUID().replaceAll('-', '')
   readonly url: string
   private readonly changes: Promise<void>[] = []
   private readonly stop = new AbortController()
@@ -111,10 +127,13 @@ export class KitRun {
   /**
    * @param origin the fake's origin, as `serve` answers it.
    * @param headers what selects the tenant, as the client under test sends it.
+   * @param name the run's name, for a token that must carry it (`runToken`);
+   *   a fresh one when left out.
    */
   constructor(
     readonly origin: string,
     private readonly tenantHeaders: Record<string, string>,
+    readonly name: string = randomUUID().replaceAll('-', ''),
   ) {
     this.url = `${origin}/_run/${this.name}`
   }

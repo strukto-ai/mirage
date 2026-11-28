@@ -13,32 +13,19 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from tests.vfs.databricks_volume.test_databricks_volume import (
-    FakeFiles,
-    make_vfs,
-    seed_directory,
-    seed_file,
-)
-
-ROOT = "/Volumes/main/default/agent_files/root"
+from tests.fixtures.databricks_volume import ROOT
+from tests.vfs.databricks_volume.test_databricks_volume import make_vfs
 
 
-@pytest.fixture
-def dbx_files() -> FakeFiles:
-    files = FakeFiles()
-    seed_directory(files, ROOT)
-    seed_file(files, f"{ROOT}/words.txt", b"beta\nalpha\nalpha\n")
-    seed_file(files, f"{ROOT}/.hidden", b"h\n")
-    files.create_directory(f"{ROOT}/sub")
-    seed_file(files, f"{ROOT}/sub/inner.txt", b"gamma\nalpha\n")
-    return files
-
-
-@pytest.fixture
-def ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.READ)
+@pytest_asyncio.fixture
+async def ws(volume) -> Workspace:
+    await volume.put(f"{ROOT}/words.txt", b"beta\nalpha\nalpha\n")
+    await volume.put(f"{ROOT}/.hidden", b"h\n")
+    await volume.put(f"{ROOT}/sub/inner.txt", b"gamma\nalpha\n")
+    return Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
 
 @pytest.mark.asyncio

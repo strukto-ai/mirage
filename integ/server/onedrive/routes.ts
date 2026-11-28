@@ -68,10 +68,24 @@ function stamp(ctx: Ctx<C>): string {
   return ctx.clock.nowIso(false)
 }
 
+// The drive root's created and modified time: the run's epoch, before the
+// first write. Reading it never ticks the clock, so rendering a folder moves
+// no later write's time.
+function rootStamp(ctx: Ctx<C>): string {
+  return new Date(ctx.clock.snapshot().baseMs).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
 // Real Graph defaults to "fail" for copy, move and folder creation. The
 // permissive blind-overwrite the fake used to do masked real client bugs.
 function conflictBehavior(ctx: Ctx<C>): string {
   return ctx.query.get('@microsoft.graph.conflictBehavior') ?? 'fail'
+}
+
+// The origin a minted URL starts from, with the run's path when the caller
+// reached the fake under one, so a download, monitor or delta link it
+// follows later lands in the same run rather than the default one.
+function baseOf(ctx: Ctx<C>): string {
+  return `${ctx.url.origin}${ctx.runPrefix}`
 }
 
 // Three URL shapes the fake MINTS are fetched with no Authorization header, on
@@ -81,9 +95,12 @@ function conflictBehavior(ctx: Ctx<C>): string {
 // That is right -- real Graph pre-authenticates all three -- so the account
 // they belong to has to be baked into the URL, exactly as the vendor bakes a
 // signature into its own. Reading `ctx.tenant` in these handlers would read
-// the default account and answer another caller's data.
+// the default account and answer another caller's data. The kit's `_tenant`
+// names it too, so a test's request list sees the request under the account
+// that minted it.
 function minted(ctx: Ctx<C>, kind: string, rest: string): string {
-  return `${ctx.url.origin}/${kind}/${encodeURIComponent(ctx.tenant)}/${rest}`
+  const tenant = encodeURIComponent(ctx.tenant)
+  return `${baseOf(ctx)}/${kind}/${tenant}/${rest}?_tenant=${tenant}`
 }
 
 async function sites(): Promise<Reply> {
@@ -183,7 +200,7 @@ async function uploadChunk(ctx: Ctx<C>): Promise<Reply> {
     return nameExists()
   }
   const row = await writeFile(ctx0, session.drive, session.path, buffer, true)
-  return { status: 201, body: await fileItem(ctx.sql, tenant, ctx.url.origin, row) }
+  return { status: 201, body: await fileItem(ctx.sql, tenant, baseOf(ctx), row) }
 }
 
 async function createUpload(ctx: Ctx<C>, drive: string, path: string): Promise<Reply> {
@@ -217,7 +234,10 @@ async function mkdir(ctx: Ctx<C>, drive: string, parent: string): Promise<Reply>
   if (!(await conflictFree(ctx.sql, ctx.tenant, drive, target))) {
     if (behavior === 'replace' && (await dirAt(ctx.sql, ctx.tenant, drive, target))) {
       // Real Graph returns the existing folder; children survive.
-      return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, stamp(ctx)) }
+      return {
+        status: 200,
+        body: await folderItem(ctx.sql, ctx.tenant, drive, target, rootStamp(ctx)),
+      }
     }
     if (behavior !== 'rename') return nameExists()
     // Real Graph inserts the counter before a file extension ("doc 1.pptx");
@@ -229,7 +249,7 @@ async function mkdir(ctx: Ctx<C>, drive: string, parent: string): Promise<Reply>
     target = joinPath(p, `${name} ${String(n)}`)
   }
   await addDir(base(ctx), drive, target)
-  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, stamp(ctx)) }
+  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, rootStamp(ctx)) }
 }
 
 async function patchItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
@@ -252,10 +272,10 @@ async function patchItem(ctx: Ctx<C>, drive: string, item: string): Promise<Repl
   if (isFile) {
     const moved = await moveFile(base(ctx), drive, p, dest)
     if (moved === null) return notFound()
-    return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, ctx.url.origin, moved) }
+    return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, baseOf(ctx), moved) }
   }
   await moveDir(base(ctx), drive, p, dest)
-  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, dest, stamp(ctx)) }
+  return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, dest, rootStamp(ctx)) }
 }
 
 async function copyItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
@@ -301,7 +321,7 @@ async function copyItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply
 async function childrenOf(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
   if (p !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
-  const value = await childItems(ctx.sql, ctx.tenant, ctx.url.origin, drive, p, stamp(ctx))
+  const value = await childItems(ctx.sql, ctx.tenant, baseOf(ctx), drive, p, rootStamp(ctx))
   return { status: 200, body: { value } }
 }
 
@@ -366,13 +386,13 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
   if (scope !== '' && !(await dirAt(ctx.sql, ctx.tenant, drive, scope))) return notFound()
   const token = ctx.query.get('token')
   const last = await lastChange(ctx.sql, ctx.tenant, drive)
-  const link = `${ctx.url.origin}${ctx.url.pathname}?token=${String(last)}`
+  const link = `${baseOf(ctx)}${ctx.url.pathname}?token=${String(last)}`
   if (token === 'latest') return { status: 200, body: { value: [], '@odata.deltaLink': link } }
   if (token === null) {
     return {
       status: 200,
       body: {
-        value: await scopeItems(ctx.sql, ctx.tenant, ctx.url.origin, drive, scope, stamp(ctx)),
+        value: await scopeItems(ctx.sql, ctx.tenant, baseOf(ctx), drive, scope, rootStamp(ctx)),
         '@odata.deltaLink': link,
       },
     }
@@ -398,12 +418,12 @@ async function delta(ctx: Ctx<C>, drive: string, folder: string): Promise<Reply>
 // An item by the id the renderer gave it, null when it is gone.
 async function itemById(ctx: Ctx<C>, drive: string, id: string): Promise<JsonValue | null> {
   const file = await fileById(ctx.sql, ctx.tenant, drive, id)
-  if (file !== null) return fileItem(ctx.sql, ctx.tenant, ctx.url.origin, file)
+  if (file !== null) return fileItem(ctx.sql, ctx.tenant, baseOf(ctx), file)
   let path: string | null = null
   if (id === folderId(drive, '')) path = ''
   else if (id.startsWith(`${drive}:folder:`)) path = id.slice(`${drive}:folder:`.length)
   if (path === null || !(await dirAt(ctx.sql, ctx.tenant, drive, path))) return null
-  return folderItem(ctx.sql, ctx.tenant, drive, path, stamp(ctx))
+  return folderItem(ctx.sql, ctx.tenant, drive, path, rootStamp(ctx))
 }
 
 async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string): Promise<Reply> {
@@ -421,7 +441,7 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
   if (action === 'content') {
     if (method === 'PUT') {
       const row = await writeFile(base(ctx), drive, item, new Uint8Array(ctx.body), true)
-      return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, ctx.url.origin, row) }
+      return { status: 200, body: await fileItem(ctx.sql, ctx.tenant, baseOf(ctx), row) }
     }
     const row = await fileAt(ctx.sql, ctx.tenant, drive, item)
     if (row === null) return notFound()
@@ -448,7 +468,7 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
     return (await removeAt(base(ctx), drive, item)) ? { status: 204 } : notFound()
   }
   if (method === 'PATCH') return patchItem(ctx, drive, item)
-  const found = await itemAt(ctx.sql, ctx.tenant, ctx.url.origin, drive, item, stamp(ctx))
+  const found = await itemAt(ctx.sql, ctx.tenant, baseOf(ctx), drive, item, rootStamp(ctx))
   return found === null ? notFound() : { status: 200, body: found }
 }
 

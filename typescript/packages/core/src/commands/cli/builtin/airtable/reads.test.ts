@@ -12,22 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { serve } from '../../../../../tests/fixtures/kit_fake.ts'
 import {
+  AirtableAccount,
   DONE,
   DONE_FORMULA,
   FEATURES,
-  FakeAirtable,
   MODEL_NOT_FOUND,
   OPS,
   ROADMAP,
-  TOKEN,
-} from '../../../../../tests/core/airtable/_test_util.ts'
+} from '../../../../../tests/fixtures/airtable_account.ts'
 import { MountMode } from '../../../../types.ts'
 import { AirtableVFS } from '../../../../vfs/airtable/airtable.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { AIRTABLE } from './index.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 // Mirrors python/tests/commands/cli/builtin/airtable/test_reads.py.
 
@@ -41,10 +58,9 @@ type Shell = (line: string) => Promise<[number, string, string]>
 
 const opened: Workspace[] = []
 
-function open(fake: FakeAirtable, overrides: Record<string, unknown> = {}): Shell {
-  vi.stubGlobal('fetch', fake.fetch)
-  const config = { token: TOKEN, requestsPerSecond: 10_000, ...overrides }
-  const mount = new AirtableVFS(config, { fetchFn: fake.fetch })
+function open(overrides: Record<string, unknown> = {}): Shell {
+  const config = account.config(overrides)
+  const mount = new AirtableVFS(config)
   const ws = new Workspace(
     { '/at/': [mount, MountMode.READ], '/s/': new RAMVFS() },
     { mode: MountMode.WRITE },
@@ -68,7 +84,7 @@ describe('airtable read verbs', () => {
   })
 
   it('scopes base list by baseIds', async () => {
-    const run = open(new FakeAirtable(), { baseIds: [OPS] })
+    const run = open({ baseIds: [OPS] })
     const [code, out] = await run('airtable base list')
     expect(code).toBe(0)
     expect(JSON.parse(out)).toEqual([
@@ -77,7 +93,7 @@ describe('airtable read verbs', () => {
   })
 
   it("prints the mount's own base.json and table.json", async () => {
-    const run = open(new FakeAirtable())
+    const run = open()
     expect((await run(`airtable base get ${ROADMAP}`))[1]).toBe(
       (await run(`cat ${BASE_DIR}/base.json`))[1],
     )
@@ -89,7 +105,7 @@ describe('airtable read verbs', () => {
   })
 
   it('refuses an unknown base or table', async () => {
-    const run = open(new FakeAirtable())
+    const run = open()
     expect(await run('airtable base get appNope0000000001')).toEqual([
       1,
       '',
@@ -103,50 +119,47 @@ describe('airtable read verbs', () => {
   })
 
   it('prints records.jsonl lines', async () => {
-    const run = open(new FakeAirtable())
+    const run = open()
     const [, listed] = await run(`airtable record list ${AT}`)
     expect(listed).toBe((await run(`cat ${TABLE_DIR}/records.jsonl`))[1])
     expect(listed.split('\n').filter((l) => l !== '')).toHaveLength(7)
   })
 
   it('refuses past the read cap rather than paging', async () => {
-    const fake = new FakeAirtable()
-    const run = open(fake, { maxReadRecords: 5 })
+    const run = open({ maxReadRecords: 5 })
     expect(await run(`airtable record list ${AT}`)).toEqual([
       1,
       '',
       'airtable record list: more than 5 records match (max_read_records); narrow them with ' +
         '--formula or --view, or take the first N with --max-records N\n',
     ])
-    expect(fake.recordCalls().map((c) => c.maxRecords)).toEqual(['6', '6'])
+    expect((await account.recordQueries()).map((c) => c.maxRecords)).toEqual(['6', '6'])
   })
 
   it('honors --max-records as asked', async () => {
-    const fake = new FakeAirtable()
-    const run = open(fake, { maxReadRecords: 5 })
+    const run = open({ maxReadRecords: 5 })
     const [code, out] = await run(`airtable record list ${AT} --max-records 7`)
     expect(code).toBe(0)
     expect(out.split('\n').filter((l) => l !== '')).toHaveLength(7)
-    expect(fake.recordCalls()[0]?.maxRecords).toBe('7')
+    expect((await account.recordQueries())[0]?.maxRecords).toBe('7')
     expect(await run(`airtable record list ${AT} --max-records 0`)).toEqual(
       usage('--max-records must be at least 1'),
     )
   })
 
   it('passes the formula and the view through', async () => {
-    const fake = new FakeAirtable()
-    const run = open(fake)
+    const run = open()
     expect(
       await run(
         `airtable record list ${AT} --view ${DONE} --formula "${DONE_FORMULA}" | jq -r .fields.Priority`,
       ),
     ).toEqual([0, '1\n3\n5\n7\n', ''])
-    const call = fake.recordCalls()[0]
+    const call = (await account.recordQueries())[0]
     expect([call?.view, call?.filterByFormula]).toEqual([DONE, DONE_FORMULA])
   })
 
   it('prints one line for record get', async () => {
-    const run = open(new FakeAirtable())
+    const run = open()
     const [code, out] = await run(`airtable record get ${AT} ${FIRST}`)
     expect(code).toBe(0)
     expect(out.split('\n')).toHaveLength(2)
@@ -160,7 +173,7 @@ describe('airtable read verbs', () => {
   })
 
   it('normalizes comments in api order', async () => {
-    const run = open(new FakeAirtable())
+    const run = open()
     const [code, out] = await run(`airtable comment list ${AT} ${FIRST}`)
     expect(code).toBe(0)
     const comments = JSON.parse(out) as Record<string, unknown>[]
@@ -183,11 +196,10 @@ describe('airtable read verbs', () => {
     `airtable record get --base ${OPS} --table tblBudget00000001 ${FIRST}`,
     `airtable comment list --base ${OPS} --table tblBudget00000001 ${FIRST}`,
   ])('refuses a base outside the scope unsent: %s', async (line) => {
-    const fake = new FakeAirtable()
-    const run = open(fake, { baseIds: [ROADMAP] })
+    const run = open({ baseIds: [ROADMAP] })
     const verb = line.split(' ').slice(0, 3).join(' ')
     expect(await run(line)).toEqual([1, '', `${verb}: ${OPS}: Permission denied\n`])
-    expect(fake.calls).toEqual([])
+    expect(await account.asked()).toEqual([])
   })
 
   it.each([
@@ -198,9 +210,8 @@ describe('airtable read verbs', () => {
     [`airtable record get ${AT}`, 'the following arguments are required: RECORD'],
     [`airtable comment list ${AT} a b`, 'unrecognized arguments: b'],
   ])('refuses operands as usage errors: %s', async (line, message) => {
-    const fake = new FakeAirtable()
-    const run = open(fake)
+    const run = open()
     expect(await run(line)).toEqual(usage(message))
-    expect(fake.calls).toEqual([])
+    expect(await account.asked()).toEqual([])
   })
 })

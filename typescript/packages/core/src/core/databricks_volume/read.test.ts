@@ -12,46 +12,67 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { read } from './read.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
-  makeAccessor,
-  notFoundResponse,
-  routedFetch,
+  DatabricksVolume,
+  FILES,
+  FILES_PREFIX,
+  ROOT,
   spec,
-} from '../../../tests/core/databricks_volume/_test_util.ts'
+} from '../../../tests/fixtures/databricks_volume.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { read } from './read.ts'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
+let origin = ''
+let volume: DatabricksVolume
+
+beforeAll(async () => {
+  origin = await serve('databricks')
+})
+
+beforeEach(async () => {
+  volume = new DatabricksVolume(origin)
+  await volume.reset()
+})
+
+afterEach(async () => {
+  await volume.run.close()
 })
 
 describe('readBytes', () => {
   it('downloads whole files without a Range header', async () => {
-    const { fetch, calls } = routedFetch(() => new Response('hello', { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'))
+    await volume.put(`${ROOT}/a.txt`, 'hello')
+    await volume.run.recordRequests('range')
+    const data = await read(volume.accessor(), spec('/volume/a.txt'))
     expect(new TextDecoder().decode(data)).toBe('hello')
-    expect(calls[0]?.headers.Range).toBeUndefined()
+    expect(await volume.run.headers('GET', FILES)).toEqual([{}])
   })
 
   it('sends Range for offset/size reads', async () => {
-    const { fetch, calls } = routedFetch(() => new Response('ell', { status: 206 }))
-    vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), {
+    await volume.put(`${ROOT}/a.txt`, 'hello')
+    await volume.run.recordRequests('range')
+    const data = await read(volume.accessor(), spec('/volume/a.txt'), {
       offset: 1,
       size: 3,
     })
     expect(new TextDecoder().decode(data)).toBe('ell')
-    expect(calls[0]?.headers.Range).toBe('bytes=1-3')
+    expect(await volume.run.headers('GET', FILES)).toEqual([{ range: 'bytes=1-3' }])
   })
 
   // A gateway in front of the Files API may answer 200 with the whole
   // object, which is a legal answer to a Range request and used to be
   // handed back whole for what the caller asked to be a window.
   it('slices locally when the server ignores the range', async () => {
-    const { fetch } = routedFetch(() => new Response('hello', { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), {
+    await volume.put(`${ROOT}/a.txt`, 'hello')
+    await volume.run.answerNext(
+      'GET',
+      FILES,
+      200,
+      new TextEncoder().encode('hello'),
+      1,
+      `${FILES_PREFIX}${ROOT}/a.txt`,
+    )
+    const data = await read(volume.accessor(), spec('/volume/a.txt'), {
       offset: 1,
       size: 3,
     })
@@ -59,17 +80,15 @@ describe('readBytes', () => {
   })
 
   it('short-circuits size=0 reads without a request', async () => {
-    const { fetch, calls } = routedFetch(() => new Response('x', { status: 200 }))
-    vi.stubGlobal('fetch', fetch)
-    const data = await read(makeAccessor(), spec('/volume/a.txt'), { size: 0 })
+    await volume.put(`${ROOT}/a.txt`, 'x')
+    await volume.run.recordRequests()
+    const data = await read(volume.accessor(), spec('/volume/a.txt'), { size: 0 })
     expect(data.byteLength).toBe(0)
-    expect(calls).toHaveLength(0)
+    expect(await volume.run.requests()).toEqual([])
   })
 
   it('raises ENOENT for missing files', async () => {
-    const { fetch } = routedFetch(() => notFoundResponse())
-    vi.stubGlobal('fetch', fetch)
-    const err = (await read(makeAccessor(), spec('/volume/gone.txt')).catch(
+    const err = (await read(volume.accessor(), spec('/volume/gone.txt')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')

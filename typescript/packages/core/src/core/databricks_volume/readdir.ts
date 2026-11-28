@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { toIsoZ } from '../../utils/dates.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
@@ -21,6 +20,7 @@ import { getMetadata, getDirectoryMetadata, listDirectoryContents } from './clie
 import type { DirectoryEntry } from './types.ts'
 import { isNotFound } from './errors.ts'
 import { backendPath } from './path.ts'
+import { modifiedToIso } from './stat.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { listingError } from '../../errors/fs.ts'
 
@@ -85,7 +85,7 @@ export async function readdir(
       new FileStat({
         name,
         size,
-        modified: entry.lastModified === null ? null : toIsoZ(new Date(entry.lastModified)),
+        modified: modifiedToIso(entry.lastModified),
         type: FileType.FILE,
         content: contentTypeForPath(name),
       }),

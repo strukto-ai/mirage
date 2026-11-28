@@ -23,24 +23,25 @@ from mirage.core.airtable.config import AirtableConfig
 from mirage.types import MountMode
 from mirage.vfs.airtable import AirtableVFS
 from mirage.vfs.ram import RAMVFS
-from tests.fixtures.airtable_api import TOKEN, FakeAirtable, airtable_api
+from tests.fixtures.airtable_account import AirtableAccount, airtable_account
 
-__all__ = ["airtable_api", "airtable_ws"]
+__all__ = ["airtable_account", "airtable_ws"]
 
 
 @pytest_asyncio.fixture
 async def airtable_ws(
-    airtable_api: FakeAirtable,
+    airtable_account: AirtableAccount,
 ) -> AsyncIterator[Callable[..., Workspace]]:
     """Open workspaces with the CLI installed beside a mount of the fake.
 
-    Both read the same account, ``/at`` the mount and ``/s`` a scratch
-    RAM tree, so a case can compare the CLI's bytes with the file's.
+    Both read the same account on the integ fake, ``/at`` the mount and
+    ``/s`` a scratch RAM tree, so a case can compare the CLI's bytes
+    with the file's.
     """
     opened: list[Workspace] = []
 
     def make(**overrides: Any) -> Workspace:
-        config = {"token": TOKEN, "requests_per_second": 10_000.0, **overrides}
+        config = airtable_account.fields(**overrides)
         ws = Workspace(
             {
                 "/at/": (

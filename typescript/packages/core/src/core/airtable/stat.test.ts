@@ -12,11 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ContentType, FileType, type FileStat } from '../../types.ts'
 import { AirtableVFS } from '../../vfs/airtable/airtable.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { FakeAirtable, makeAccessor } from '../../../tests/core/airtable/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { AirtableAccount } from '../../../tests/fixtures/airtable_account.ts'
+
+let origin = ''
+let account: AirtableAccount
+
+beforeAll(async () => {
+  origin = await serve('airtable')
+})
+
+beforeEach(async () => {
+  account = new AirtableAccount(origin)
+  await account.reset()
+  await account.run.recordRequests()
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 const ROOT = '/at'
 const BASE = `${ROOT}/bases/Product_Roadmap__appRoadmapBase001`
@@ -24,7 +42,7 @@ const TABLE = `${BASE}/Features__tblFeatures000001`
 
 function mounted(): Workspace {
   const vfs = Object.assign(new AirtableVFS({ token: 'pat' }), {
-    accessor: makeAccessor(new FakeAirtable()),
+    accessor: account.accessor(),
   })
   return new Workspace({ [`${ROOT}/`]: vfs })
 }

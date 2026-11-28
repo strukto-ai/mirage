@@ -28,77 +28,47 @@ from mirage.errors.types import FileTooLargeError
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.databricks_volume import DatabricksVolumeConfig
+from tests.fixtures.databricks_volume import FILES
 
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
-def _seed_directory(files, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.metadata[path] = type("Metadata", (), {"is_directory": True})()
-    files.directories.setdefault(path, [])
-
-
-def _seed_file(files, path: str, data: bytes) -> None:
-    parent = path.rsplit("/", 1)[0]
-    files.downloads[path] = data
-    files.metadata[path] = type(
-        "Metadata",
-        (),
-        {
-            "content_length": len(data),
-        },
-    )()
-    files.directories.setdefault(parent, [])
-    files.directories[parent].append(
-        type(
-            "Entry",
-            (),
-            {
-                "path": path,
-                "is_directory": False,
-                "file_size": len(data),
-            },
-        )()
-    )
-
-
 @pytest.mark.asyncio
-async def test_write_new_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_write_new_file(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
+    await volume.run.record_requests()
 
     await write(accessor, _path("/dbx/new.txt"), b"hello")
 
-    assert files.downloads[f"{remote_root}/new.txt"] == b"hello"
-    assert files.upload_calls == [(f"{remote_root}/new.txt", b"hello", True)]
+    assert await volume.content(f"{remote_root}/new.txt") == b"hello"
+    assert await volume.asked("PUT", FILES) == [f"{remote_root}/new.txt"]
+    assert await volume.run.params("PUT", FILES) == [{"overwrite": "true"}]
 
 
 @pytest.mark.asyncio
-async def test_write_overwrites_existing_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/new.txt", b"old")
+async def test_write_overwrites_existing_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/new.txt", b"old")
 
     await write(accessor, _path("/dbx/new.txt"), b"new")
 
-    assert files.downloads[f"{remote_root}/new.txt"] == b"new"
-    assert files.metadata[f"{remote_root}/new.txt"].content_length == 3
+    assert await volume.content(f"{remote_root}/new.txt") == b"new"
 
 
 @pytest.mark.asyncio
 async def test_write_fails_when_parent_is_missing(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await write(accessor, _path("/dbx/missing/new.txt"), b"x")
 
 
 @pytest.mark.asyncio
-async def test_write_fails_when_parent_is_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/parent.txt", b"file")
+async def test_write_fails_when_parent_is_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/parent.txt", b"file")
 
     with pytest.raises(NotADirectoryError):
         await write(accessor, _path("/dbx/parent.txt/new.txt"), b"x")
@@ -146,53 +116,54 @@ async def test_a_large_write_holds_a_bounded_amount_of_memory():
 
 @pytest.mark.asyncio
 async def test_a_write_past_the_put_cap_is_refused_before_any_request(
-    accessor, files, remote_root, monkeypatch
+    accessor, volume, remote_root, monkeypatch
 ):
-    _seed_directory(files, remote_root)
+    await volume.mkdir(remote_root)
+    await volume.run.record_requests()
     monkeypatch.setattr(write_module, "MAX_UPLOAD_SIZE", 4)
 
     with pytest.raises(FileTooLargeError) as caught:
         await write(accessor, _path("/dbx/big.bin"), b"12345")
 
     assert caught.value.filename == "/dbx/big.bin"
-    assert files.requests == []
+    assert await volume.run.requests() == []
 
 
 @pytest.mark.asyncio
-async def test_create_empty_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_create_empty_file(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     await create(accessor, _path("/dbx/empty.txt"))
 
-    assert files.downloads[f"{remote_root}/empty.txt"] == b""
+    assert await volume.content(f"{remote_root}/empty.txt") == b""
 
 
 @pytest.mark.asyncio
 async def test_create_fails_when_parent_is_missing(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await create(accessor, _path("/dbx/missing/empty.txt"))
 
 
 @pytest.mark.asyncio
-async def test_unlink_file(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/delete.txt", b"bye")
+async def test_unlink_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/delete.txt", b"bye")
+    await volume.run.record_requests()
 
     await unlink(accessor, _path("/dbx/delete.txt"))
 
-    assert f"{remote_root}/delete.txt" not in files.downloads
-    assert files.delete_calls == [f"{remote_root}/delete.txt"]
+    assert not await volume.has(f"{remote_root}/delete.txt")
+    assert await volume.asked("DELETE", FILES) == [f"{remote_root}/delete.txt"]
 
 
 @pytest.mark.asyncio
 async def test_unlink_missing_file_raises_file_not_found(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await unlink(accessor, _path("/dbx/missing.txt"))
@@ -200,10 +171,9 @@ async def test_unlink_missing_file_raises_file_not_found(
 
 @pytest.mark.asyncio
 async def test_unlink_directory_raises_is_a_directory(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/dir")
+    await volume.mkdir(f"{remote_root}/dir")
 
     with pytest.raises(IsADirectoryError):
         await unlink(accessor, _path("/dbx/dir"))
@@ -211,9 +181,9 @@ async def test_unlink_directory_raises_is_a_directory(
 
 @pytest.mark.asyncio
 async def test_file_mutation_paths_cannot_escape_root(
-    accessor, files, remote_root
+    accessor, volume, remote_root
 ):
-    _seed_directory(files, remote_root)
+    await volume.mkdir(remote_root)
     escaping = _path("/dbx/../escape.txt")
 
     with pytest.raises(ValueError):

@@ -1,0 +1,183 @@
+{
+  "meta": {
+    "pageCap": 3
+  },
+  "users": [
+    {
+      "id": "usrAda00000000001",
+      "email": "ada@example.com",
+      "name": "Ada"
+    },
+    {
+      "id": "usrBen00000000002",
+      "email": "ben@example.com",
+      "name": "Ben"
+    }
+  ],
+  "tokens": [
+    {
+      "token": "patTest0000000001.secret",
+      "userId": "usrAda00000000001"
+    }
+  ],
+  "bases": [
+    {
+      "id": "appRoadmapBase001",
+      "name": "Product Roadmap",
+      "permissionLevel": "create",
+      "tables": [
+        {
+          "id": "tblFeatures000001",
+          "name": "Features",
+          "primaryFieldId": "fldName0000000001",
+          "fields": [
+            {
+              "id": "fldName0000000001",
+              "name": "Name",
+              "type": "singleLineText"
+            },
+            {
+              "id": "fldStatus00000001",
+              "name": "Status",
+              "type": "singleSelect",
+              "options": {
+                "choices": [
+                  {
+                    "id": "selDone0000000001",
+                    "name": "Done"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "fldPriority000001",
+              "name": "Priority",
+              "type": "number",
+              "options": {
+                "precision": 0
+              }
+            }
+          ],
+          "views": [
+            {
+              "id": "viwGrid0000000001",
+              "name": "Grid view",
+              "type": "grid"
+            },
+            {
+              "id": "viwDone0000000001",
+              "name": "Done / shipped",
+              "type": "grid",
+              "filter": "{Status}='Done'"
+            }
+          ],
+          "records": [
+            {
+              "id": "rec00000000000001",
+              "createdTime": "2026-01-01T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 1",
+                "Priority": 1,
+                "Status": "Done"
+              },
+              "comments": [
+                {
+                  "id": "com00000000000001",
+                  "authorId": "usrBen00000000002",
+                  "text": "Looks good.",
+                  "createdTime": "2026-01-01T10:00:00.000Z"
+                },
+                {
+                  "id": "com00000000000002",
+                  "authorId": "usrAda00000000001",
+                  "text": "Shipped it.",
+                  "createdTime": "2026-01-02T10:00:00.000Z"
+                }
+              ]
+            },
+            {
+              "id": "rec00000000000002",
+              "createdTime": "2026-01-02T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 2",
+                "Priority": 2
+              }
+            },
+            {
+              "id": "rec00000000000003",
+              "createdTime": "2026-01-03T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 3",
+                "Priority": 3,
+                "Status": "Done"
+              }
+            },
+            {
+              "id": "rec00000000000004",
+              "createdTime": "2026-01-04T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 4",
+                "Priority": 4
+              }
+            },
+            {
+              "id": "rec00000000000005",
+              "createdTime": "2026-01-05T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 5",
+                "Priority": 5,
+                "Status": "Done"
+              }
+            },
+            {
+              "id": "rec00000000000006",
+              "createdTime": "2026-01-06T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 6",
+                "Priority": 6
+              }
+            },
+            {
+              "id": "rec00000000000007",
+              "createdTime": "2026-01-07T09:00:00.000Z",
+              "fields": {
+                "Name": "Feature 7",
+                "Priority": 7,
+                "Status": "Done"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "appOpsFinance0001",
+      "name": "Ops / Finance ✓",
+      "permissionLevel": "read",
+      "tables": [
+        {
+          "id": "tblBudget00000001",
+          "name": "Q3 / Budget",
+          "primaryFieldId": "fldLine0000000001",
+          "fields": [
+            {
+              "id": "fldLine0000000001",
+              "name": "Line",
+              "type": "singleLineText"
+            }
+          ],
+          "views": [],
+          "records": [
+            {
+              "id": "recBudget00000001",
+              "createdTime": "2026-01-01T09:00:00.000Z",
+              "fields": {
+                "Line": "Rent"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

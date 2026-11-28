@@ -13,33 +13,21 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
+import pytest_asyncio
 
 from mirage import MountMode, Workspace
-from tests.vfs.databricks_volume.test_databricks_volume import (
-    FakeFiles,
-    make_vfs,
-    seed_directory,
-    seed_file,
-)
-
-ROOT = "/Volumes/main/default/agent_files/root"
+from tests.fixtures.databricks_volume import ROOT
+from tests.vfs.databricks_volume.test_databricks_volume import make_vfs
 
 
-@pytest.fixture
-def dbx_files() -> FakeFiles:
-    files = FakeFiles()
-    seed_directory(files, ROOT)
-    seed_file(files, f"{ROOT}/src.txt", b"data")
-    return files
-
-
-@pytest.fixture
-def write_ws(dbx_files: FakeFiles) -> Workspace:
-    return Workspace({"/dbx/": make_vfs(dbx_files)}, mode=MountMode.WRITE)
+@pytest_asyncio.fixture
+async def write_ws(volume) -> Workspace:
+    await volume.put(f"{ROOT}/src.txt", b"data")
+    return Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
 
 
 @pytest.mark.asyncio
-async def test_mv_missing_source_reports_cannot_stat(write_ws, dbx_files):
+async def test_mv_missing_source_reports_cannot_stat(write_ws):
     io = await write_ws.shell("mv /dbx/missing /dbx/missing")
 
     assert io.exit_code != 0

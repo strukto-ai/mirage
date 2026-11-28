@@ -20,7 +20,7 @@ from mirage.types import VFSName
 from mirage.vfs.airtable import AirtableVFS
 from mirage.vfs.airtable.airtable import VFS_MD
 from mirage.vfs.registry import build_vfs
-from tests.fixtures.airtable_api import TOKEN
+from tests.fixtures.airtable_account import TOKEN
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
@@ -65,8 +65,10 @@ def test_state_redacts_the_token():
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_browses_bases_tables_and_records(airtable_api):
-    ws = Workspace({"/at/": _vfs(max_read_records=5)})
+async def test_a_workspace_browses_bases_tables_and_records(airtable_account):
+    ws = Workspace(
+        {"/at/": AirtableVFS(airtable_account.config(max_read_records=5))}
+    )
     try:
         tree = await ws.shell(
             "tree /at/bases/Product_Roadmap__appRoadmapBase001"
@@ -94,8 +96,10 @@ async def test_a_workspace_browses_bases_tables_and_records(airtable_api):
 
 
 @pytest.mark.asyncio
-async def test_head_pushes_its_line_count_into_max_records(airtable_api):
-    ws = Workspace({"/at/": _vfs(max_read_records=5)})
+async def test_head_pushes_its_line_count_into_max_records(airtable_account):
+    ws = Workspace(
+        {"/at/": AirtableVFS(airtable_account.config(max_read_records=5))}
+    )
     try:
         result = await ws.shell(f"head -n 2 {TABLE}/records.jsonl")
         assert result.exit_code == 0
@@ -107,7 +111,7 @@ async def test_head_pushes_its_line_count_into_max_records(airtable_api):
         )
     finally:
         await ws.close()
-    calls = airtable_api.record_calls()
+    calls = await airtable_account.record_queries()
     assert [c["maxRecords"] for c in calls] == ["2", "6", "6"]
     assert "offset" in calls[2]
 
