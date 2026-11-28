@@ -37,6 +37,7 @@ from mirage.mount.types import MountAttrs, ServedPrefix
 from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.runtime.types import ByteReader, PipeWriter
 from mirage.types import JsonValue
+from mirage.utils.path import CycleError
 from mirage.workspace.files import Files, reader_of
 from mirage.workspace.session import SessionState
 
@@ -250,6 +251,7 @@ class FsprotoServer:
         served: ServedPrefix | None = None,
     ) -> None:
         self._core = MountCore(files, session=session)
+        self._files = files._for_session(session.session_id)
         self._session_id = session.session_id
         self._run = run
         self._served = served
@@ -397,27 +399,37 @@ class FsprotoServer:
         release, once that and its handle's reads are; any other request,
         once every request before it is. A read holds one of
         FSPROTO_READ_CONCURRENCY slots while it is out, so a client that
-        asks ahead has no more than that many answered at once."""
-        while (frame := await self._requests.get()) is not None:
-            after: set[asyncio.Task[None]] = set()
-            if self._barrier is not None:
-                after.add(self._barrier)
-            handle = num(frame.head.get("fh"))
-            fh = None if handle is None else int(handle)
-            if self._reads(frame):
-                await self._slots.acquire()
-                self._reading[self._start(frame, after, True)] = fh
-            elif frame.head.get("op") == "release" and fh in self._read_only:
-                after.update(
-                    t for t, held in self._reading.items() if held == fh
-                )
-                self._reading[self._start(frame, after, False)] = fh
-            else:
-                after.update(self._reading)
-                self._reading.clear()
-                self._barrier = self._start(frame, after, False)
-        if self._answering:
-            await asyncio.wait(self._answering)
+        asks ahead has no more than that many answered at once. Stopped
+        before the pipe ends, it stops every answer still out before the
+        server lets its handles go."""
+        try:
+            while (frame := await self._requests.get()) is not None:
+                after: set[asyncio.Task[None]] = set()
+                if self._barrier is not None:
+                    after.add(self._barrier)
+                handle = num(frame.head.get("fh"))
+                fh = None if handle is None else int(handle)
+                if self._reads(frame):
+                    await self._slots.acquire()
+                    self._reading[self._start(frame, after, True)] = fh
+                elif (
+                    frame.head.get("op") == "release" and fh in self._read_only
+                ):
+                    after.update(
+                        t for t, held in self._reading.items() if held == fh
+                    )
+                    self._reading[self._start(frame, after, False)] = fh
+                else:
+                    after.update(self._reading)
+                    self._reading.clear()
+                    self._barrier = self._start(frame, after, False)
+            if self._answering:
+                await asyncio.wait(self._answering)
+        finally:
+            out = list(self._answering)
+            for task in out:
+                task.cancel()
+            await asyncio.gather(*out, return_exceptions=True)
 
     def _reads(self, frame: Frame) -> bool:
         """Whether a request only reads: an FSPROTO_READ_OPS op, or an
@@ -427,9 +439,12 @@ class FsprotoServer:
             frame (Frame): the request.
         """
         h = frame.head
-        if h.get("op") == "open":
+        op = h.get("op")
+        if not isinstance(op, str):
+            return False
+        if op == "open":
             return h.get("write") is not True and h.get("truncate") is not True
-        return h.get("op") in FSPROTO_READ_OPS
+        return op in FSPROTO_READ_OPS
 
     def _start(
         self, frame: Frame, after: set[asyncio.Task[None]], slot: bool
@@ -539,8 +554,12 @@ class FsprotoServer:
             a (MountAttrs): the attributes.
         """
         row = wire(a)
-        reader = reader_of(self._core.files)
-        if reader.has_xattrs(reader.follow(self._core.resolve(path))):
+        reader = reader_of(self._files)
+        try:
+            marked = reader.has_xattrs(reader.follow(self._core.resolve(path)))
+        except CycleError:
+            marked = True
+        if marked:
             row["x"] = True
         return row
 
@@ -552,7 +571,7 @@ class FsprotoServer:
         Args:
             path (str): a workspace path a reply is about.
         """
-        row = reader_of(self._core.files).owner(path)
+        row = reader_of(self._files).owner(path)
         return row is not None and row.sole_writer
 
     async def _keep(self, path: str) -> Head:

@@ -198,7 +198,9 @@ struct Content {
 /// client holds. `cached` when the kernel may keep its pages, so a read
 /// may never reach the client; `revoked` once a policy came to judge every
 /// call, which such an open can no longer let it; `watched` while a policy
-/// judges every call, so each write waits for its answer.
+/// judges every call, so each write waits for its answer; `apart` once a
+/// change the host pushed named its path, which may now name another
+/// file, so it reads apart from the opens after it.
 #[derive(Clone)]
 struct Open {
     path: String,
@@ -207,6 +209,7 @@ struct Open {
     attrs: Option<Attrs>,
     writes: bool,
     detached: bool,
+    apart: bool,
     cached: bool,
     revoked: bool,
     watched: bool,
@@ -304,11 +307,16 @@ struct Asked {
 
 /// Whose readers a read through open `fh` takes its bytes from: None for
 /// one that shares its file's, a read-only open through a host handle on a
-/// kept mount whose name still names its file, as the kernel shares that
-/// file's pages, and so their reads, among its opens; else the open's own.
+/// kept mount whose name still names its file and no change the host
+/// pushed named since it opened, as the kernel shares that file's pages,
+/// and so their reads, among its opens; else the open's own.
 fn owner_of(fh: u64, open: &Open) -> Option<u64> {
-    let shares =
-        open.cached && open.host.is_some() && !open.writes && !open.watched && !open.detached;
+    let shares = open.cached
+        && open.host.is_some()
+        && !open.writes
+        && !open.watched
+        && !open.detached
+        && !open.apart;
     (!shares).then_some(fh)
 }
 
@@ -728,6 +736,11 @@ impl Shared {
             st.epoch += 1;
             let hit = |p: &str| everything || reaches(changed, p);
             st.drop_reads(hit);
+            for open in st.opens.values_mut() {
+                if hit(&open.path) {
+                    open.apart = true;
+                }
+            }
             st.known.retain(|p, _| !hit(p));
             st.listings.retain(|p, _| !hit(p));
             let gone: Vec<String> = st.content.keys().filter(|p| hit(p)).cloned().collect();
@@ -911,9 +924,11 @@ impl MirageFs {
 
     /// Drop what the client keeps of `path`'s attributes, and its folder's
     /// listing, after an extended attribute changed on it here, set or not:
-    /// they say whether it carries one.
+    /// they say whether it carries one. It moves the epoch, so attributes
+    /// asked for before the change are not kept after it.
     fn xattrs_changed(&self, path: &str) {
         let mut st = self.st();
+        st.epoch += 1;
         st.known.remove(path);
         if let Some((dir, _)) = split(path) {
             st.listings.remove(&dir);
@@ -1070,6 +1085,13 @@ impl MirageFs {
         (content.version == attrs.version()).then(|| content.data.clone())
     }
 
+    /// Whether a read-only open of a file with `attrs` reads it whole
+    /// first: a kept regular file of at most WHOLE_FILE, unless the host
+    /// said to read only what is asked (`read_ahead: 0`).
+    fn whole_first(&self, attrs: &Attrs) -> bool {
+        self.served.ahead > 0 && attrs.kept && attrs.is(S_IFREG) && attrs.size <= WHOLE_FILE
+    }
+
     /// `path`'s whole content, and the attributes it was read at; kept
     /// unless a forget came while it was read.
     fn whole(&self, path: &str, attrs: Attrs) -> Result<(Arc<Vec<u8>>, Attrs), Errno> {
@@ -1116,6 +1138,7 @@ impl MirageFs {
                 attrs,
                 writes,
                 detached: false,
+                apart: false,
                 cached,
                 revoked: cached && crossed,
                 watched: asked.watched || crossed,
@@ -1896,9 +1919,7 @@ impl Filesystem for MirageFs {
         let watches = self.st().watches;
         if !writes
             && let Ok(attrs) = self.stat(&path)
-            && attrs.kept
-            && attrs.is(S_IFREG)
-            && attrs.size <= WHOLE_FILE
+            && self.whole_first(&attrs)
         {
             if let Some(data) = self.cached(&path, &attrs) {
                 let fh = self.opened(
@@ -2830,6 +2851,39 @@ mod tests {
     }
 
     #[test]
+    fn an_open_a_pushed_change_named_reads_apart_from_the_opens_after_it() {
+        let (fs, mut host) = hosted();
+        let old = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        fs.shared.forget("/w/a");
+        read_ahead_of(&fs, &mut host, old, CONTENT);
+        let new = fs.opened("/w/a", Some(8), None, false, true, unwatched(0));
+        let read = reading(&fs, new, 8, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 8, 4));
+        answer_read(&mut host, &sent, b"abcdefghWXYZ");
+        assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+        let mut st = locked(&fs.shared.state);
+        assert_eq!(reader_of(&mut st, new).owner, None);
+        assert!(owner_of(old, &st.opens[&old]).is_some());
+    }
+
+    #[test]
+    fn a_read_ahead_of_none_reads_no_file_whole_at_its_open() {
+        let small = attrs(true);
+        let (fs, _host) = hosted();
+        assert!(fs.whole_first(&small));
+        assert!(!fs.whole_first(&Attrs {
+            size: WHOLE_FILE + 1,
+            ..small.clone()
+        }));
+        let (none, _host) = hosted_as(Served {
+            ahead: 0,
+            ..Served::default()
+        });
+        assert!(!none.whole_first(&small));
+    }
+
+    #[test]
     fn a_read_ahead_of_none_reads_only_what_is_asked() {
         let (fs, mut host) = hosted_as(Served {
             ahead: 0,
@@ -2895,7 +2949,10 @@ mod tests {
         assert!(fs.bare("/w/bare"));
         assert!(!fs.bare("/w/marked"));
         assert!(!fs.bare("/w/unknown"));
+        let asked = locked(&fs.shared.state).epoch;
         fs.xattrs_changed("/w/bare");
+        assert!(!fs.bare("/w/bare"));
+        assert!(fs.keep("/w/bare", attrs(true), asked).is_err());
         assert!(!fs.bare("/w/bare"));
         let (older, _host) = hosted();
         locked(&older.shared.state).known.insert(

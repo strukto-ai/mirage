@@ -19,7 +19,7 @@ import { PolicyDenied } from '../policy/errors.ts'
 import { READ, type OpenMode } from '../runtime/handles/index.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { concat } from '../utils/bytes.ts'
-import { posixNormpath } from '../utils/path.ts'
+import { CycleError, posixNormpath } from '../utils/path.ts'
 import { S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -203,6 +203,7 @@ export class FsprotoServer {
   private ended = false
   private keeping = false
   private readonly sessionId: string
+  private readonly files: Files
 
   /**
    * @param run runs one request, with a line's write admission.
@@ -216,6 +217,7 @@ export class FsprotoServer {
     private readonly served: ServedPrefix | null = null,
   ) {
     this.core = new MountCore(files, { session })
+    this.files = files.forSession(session.sessionId)
     this.sessionId = session.sessionId
   }
 
@@ -481,8 +483,14 @@ export class FsprotoServer {
    */
   private wired(path: string, a: MountAttrs): Head {
     const row = wire(a)
-    const reader = readerOf(this.core.files)
-    if (reader.hasXattrs(reader.follow(this.core.resolve(path)))) row.x = true
+    const reader = readerOf(this.files)
+    let marked = true
+    try {
+      marked = reader.hasXattrs(reader.follow(this.core.resolve(path)))
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err
+    }
+    if (marked) row.x = true
     return row
   }
 
@@ -492,7 +500,7 @@ export class FsprotoServer {
    * Mirrors Python's `_kept`.
    */
   private kept(path: string): boolean {
-    return readerOf(this.core.files).owner(path)?.soleWriter === true
+    return readerOf(this.files).owner(path)?.soleWriter === true
   }
 
   /**

@@ -399,6 +399,77 @@ async def test_a_failure_is_named_by_its_errno():
 
 
 @pytest.mark.asyncio
+async def test_an_op_that_is_not_a_name_is_refused_and_the_next_is_answered():
+    ws, server, end, serving = await served()
+    refused = await asyncio.wait_for(end.call({"op": []}), 5)
+    assert "errno" in refused.head
+    plan = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert "errno" not in plan.head
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_link_that_leads_back_to_itself_lists_and_is_asked_of():
+    ws, server, end, serving = await served()
+    made = await end.call(
+        {"op": "symlink", "path": "/notes/loop", "target": "loop"}
+    )
+    assert "errno" not in made.head
+    listed = await end.call({"op": "list", "path": "/notes"})
+    assert dict(listed.head["e"])["loop"].get("x") is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_attributes_are_marked_as_the_served_session_sees_them():
+    ws = Workspace(
+        {"/notes": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "hidden": {"paths": {"hide": ["/notes/plan.txt"]}},
+            "open": {},
+        },
+        profile="hidden",
+    )
+    agent = await ws.session("agent", profile="open")
+    await agent.vfs.write("/notes/plan.txt", b"plan")
+    await agent.vfs.setxattr("/notes/plan.txt", "user.k", b"v")
+    server = FsprotoServer(
+        ws.vfs,
+        ws.get_session("agent"),
+        None,
+        ServedPrefix("/notes", "dev", None),
+    )
+    end = Client()
+    serving = asyncio.create_task(server.serve(end.reader, end))
+    plan = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert plan.head["a"].get("x") is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_server_stopped_while_a_read_is_out_runs_nothing_after_it():
+    vfs = SlowStat()
+    ws, server, end, serving = await served(vfs=vfs)
+    await ws.vfs.write("/notes/slow.txt", b"slow")
+    vfs.go.clear()
+    end.send({"op": "getattr", "path": "/notes/slow.txt", "id": 101})
+    end.send({"op": "mkdir", "path": "/notes/made", "mode": 0o755, "id": 102})
+    end.reader.feed_eof()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    serving.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await serving
+    vfs.go.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    with pytest.raises(FileNotFoundError):
+        await ws.vfs.stat("/notes/made")
+    end._task.cancel()
+
+
+@pytest.mark.asyncio
 async def test_setattr_truncates_and_answers_the_new_size():
     ws, server, end, serving = await served()
     done = await end.call(

@@ -373,6 +373,42 @@ describe('FsprotoServer', () => {
     await serving
   })
 
+  it('marks attributes as the served session sees them', async () => {
+    const ws = new Workspace(
+      { '/notes': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        profiles: { hidden: { paths: { hide: ['/notes/plan.txt'] } }, open: {} },
+        profile: 'hidden',
+      },
+    )
+    const agent = await ws.session('agent', { profile: 'open' })
+    await agent.vfs.write('/notes/plan.txt', 'plan')
+    await agent.vfs.setxattr('/notes/plan.txt', 'user.k', ENC.encode('v'))
+    const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
+      prefix: '/notes',
+      machine: 'dev',
+      changes: null,
+    })
+    const end = client()
+    const serving = server.serve(end.reader, end.writer)
+    const plan = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
+    expect((plan.head.a as Record<string, unknown>).x).toBe(true)
+    end.close()
+    await serving
+  })
+
+  it('lists a link that leads back to itself and asks of its attributes', async () => {
+    const { end, serving } = await served()
+    const made = await end.call({ op: 'symlink', path: '/notes/loop', target: 'loop' })
+    expect(made.head.errno).toBeUndefined()
+    const listed = await end.call({ op: 'list', path: '/notes' })
+    const rows = new Map(listed.head.e as [string, Record<string, unknown>][])
+    expect(rows.get('loop')?.x).toBe(true)
+    end.close()
+    await serving
+  })
+
   it('carries no more first bytes than a whole read', async () => {
     const { ws, end, serving } = await served()
     const path = '/notes/big.bin'
