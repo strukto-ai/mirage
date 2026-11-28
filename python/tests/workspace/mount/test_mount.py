@@ -904,7 +904,8 @@ async def test_a_batch_read_without_one_on_the_vfs_reads_each_file():
 
 
 class _Streamed(BaseVFS):
-    """Answers a whole read as a stream, 16 bytes in four chunks."""
+    """Answers a whole read as a stream, 16 bytes in four chunks, each one
+    a round trip after the last."""
 
     name = "streamed"
 
@@ -912,6 +913,7 @@ class _Streamed(BaseVFS):
         self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> AsyncIterator[bytes]:
         for _ in range(4):
+            await asyncio.sleep(0)
             yield b"x" * 4
 
 
@@ -920,7 +922,11 @@ async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
     # The files a batch reads must fit together, beside what the batch
     # already holds, in what the workspace has left, as one file must for
     # its own read, so a read of one left out meets the refusal; what a RAM
-    # store holds is already counted.
+    # store holds is already counted. The store is not local, so the batch
+    # asks for f and g at once and their chunks arrive in turn: once both
+    # are 12 bytes in, f's last would take the bytes built past the 24
+    # left, counting g's still arriving, so f is left out, and its bytes go
+    # with it, which leaves room for g's last.
     ram = RAMVFS()
     ram._store.files.update({"/f": b"x" * 16, "/g": b"x" * 16})
     one = MemoryBudget(8, lambda: 0)
@@ -936,11 +942,55 @@ async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
     assert await run_with_memory(both, built.read_many(["/b/f"], 64, 16)) == {}
     assert await run_with_memory(
         both, streamed.read_many(["/s/f", "/s/g"], 64)
-    ) == {"/s/f": b"x" * 16}
+    ) == {"/s/g": b"x" * 16}
     assert await run_with_memory(
         one, stored.read_many(["/r/f", "/r/g"], 64)
     ) == {"/r/f": b"x" * 16, "/r/g": b"x" * 16}
     assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}
+
+
+class _Remote(BaseVFS):
+    """A store whose reads each wait a round trip; counts how many of them
+    are out at once."""
+
+    name = "remote"
+    concurrent_reads = 3
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.out = 0
+        self.most = 0
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        self.out += 1
+        self.most = max(self.most, self.out)
+        await asyncio.sleep(0)
+        self.out -= 1
+        return b"x"
+
+
+class _Local(_Remote):
+    """The same store, holding its data locally."""
+
+    local = True
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_asks_a_store_for_as_many_as_it_reads_at_once():
+    # Each read of a store that is not local waits a round trip, so a batch
+    # with no batch read of its own asks it for its concurrent_reads files
+    # at once; a local one is read a file after another.
+    paths = [f"/d/f{i}" for i in range(7)]
+    remote, local = _Remote(), _Local()
+    assert await MountEntry("/d/", remote).read_many(paths, 64) == {
+        p: b"x" for p in paths
+    }
+    assert await MountEntry("/d/", local).read_many(paths, 64) == {
+        p: b"x" for p in paths
+    }
+    assert (remote.most, local.most) == (3, 1)
 
 
 class _Batched(BaseVFS):

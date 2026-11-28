@@ -22,6 +22,7 @@ from mirage.core.s3.client import (
     is_condition_lost,
     is_denied,
 )
+from mirage.core.s3.constants import CONCURRENT_READS
 from mirage.vfs.s3.config import S3Config
 from tests.core.s3.conftest import DENIED_CASES, LOST_CODES, client_error
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
@@ -192,3 +193,17 @@ async def test_the_test_seam_serves_every_client():
         manager = create_s3_client(S3Config(bucket="b"))
     async with manager as client:
         assert client is session._client
+
+
+@pytest.mark.asyncio
+async def test_a_client_keeps_a_connection_for_each_read_at_once():
+    # A read-ahead fetches CONCURRENT_READS objects at once; a smaller pool
+    # (botocore keeps ten unless told) would queue the rest behind it.
+    config = S3Config(
+        bucket="b",
+        region="us-east-1",
+        aws_access_key_id="key",
+        aws_secret_access_key="secret",
+    )
+    async with create_s3_client(config) as client:
+        assert client.meta.config.max_pool_connections == CONCURRENT_READS

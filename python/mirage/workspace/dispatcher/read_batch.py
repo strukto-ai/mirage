@@ -69,6 +69,9 @@ class ReadBatch:
         current_links (Callable[[], Mapping[str, str]] | None): answers
             the namespace's links as they stand, a new table once one
             changed; None while nothing is held.
+        concurrent_reads (int | None): how many files the mounts it
+            warmed read at once, the fewest any of them does
+            (``BaseVFS.concurrent_reads``); None when it warmed none.
     """
 
     kept: bool = False
@@ -78,6 +81,7 @@ class ReadBatch:
     count: int = 0
     links: Mapping[str, str] | None = None
     current_links: Callable[[], Mapping[str, str]] | None = None
+    concurrent_reads: int | None = None
 
     def take(self, virtual: str) -> bytes | None:
         """The bytes held for ``virtual``, handed out once; None when none

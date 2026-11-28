@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 
 import pytest
@@ -101,3 +102,29 @@ async def test_stat_image_file(accessor):
         PathSpec(vfs_path="img.png", virtual="/img.png", directory="/img.png"),
     )
     assert result.content == ContentType.IMAGE_PNG
+
+
+@pytest.mark.asyncio
+async def test_stat_asks_what_is_at_a_path_in_one_round_trip(
+    accessor, monkeypatch
+):
+    # Whether a directory or a file is at the path, and the fields kept
+    # under its name, are three lookups. Each waits here until all three
+    # are out, so a stat that asked them one after another, each waiting
+    # for the one before, would never finish.
+    store = accessor.store
+    together = asyncio.Barrier(3)
+    for name in ("has_dir", "has_file", "stat_many"):
+        original = getattr(store, name)
+
+        async def held(*args, _original=original):
+            await together.wait()
+            return await _original(*args)
+
+        monkeypatch.setattr(store, name, held)
+    path = PathSpec(
+        vfs_path="hello.txt", virtual="/hello.txt", directory="/hello.txt"
+    )
+    result = await asyncio.wait_for(stat(accessor, path), timeout=5)
+    assert result.type == FileType.FILE
+    assert result.size == len(b"hello world")

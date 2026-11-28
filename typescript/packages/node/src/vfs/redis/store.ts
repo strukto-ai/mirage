@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { READ_FILES_SCRIPT, TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
+import {
+  READ_FILES_SCRIPT,
+  SCAN_COUNT,
+  TRUNCATE_SCRIPT,
+} from '@struktoai/mirage-core/vfs/redis/constants'
 import { escapeGlob } from '@struktoai/mirage-core/vfs/redis/store'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
@@ -206,10 +210,16 @@ export class RedisStore implements RedisStoreLike {
   async *scanPaths(prefix: string): AsyncIterable<[string, boolean]> {
     const client = await this.client()
     const head = this.fk('')
-    for await (const page of client.scanIterator({ MATCH: escapeGlob(head + prefix) + '*' })) {
+    for await (const page of client.scanIterator({
+      MATCH: escapeGlob(head + prefix) + '*',
+      COUNT: SCAN_COUNT,
+    })) {
       for (const key of page) yield [key.slice(head.length), false]
     }
-    for await (const page of client.sScanIterator(this.dk(), { MATCH: escapeGlob(prefix) + '*' })) {
+    for await (const page of client.sScanIterator(this.dk(), {
+      MATCH: escapeGlob(prefix) + '*',
+      COUNT: SCAN_COUNT,
+    })) {
       for (const key of page) yield [key, true]
     }
   }
@@ -219,7 +229,7 @@ export class RedisStore implements RedisStoreLike {
     const pattern = `${escapeGlob(`${this.keyPrefix}file:${prefix}`)}*`
     const strip = `${this.keyPrefix}file:`.length
     const result: string[] = []
-    for await (const k of c.scanIterator({ MATCH: pattern })) {
+    for await (const k of c.scanIterator({ MATCH: pattern, COUNT: SCAN_COUNT })) {
       const keys = Array.isArray(k) ? k : [k]
       for (const key of keys) result.push(key.slice(strip))
     }
@@ -314,7 +324,7 @@ export class RedisStore implements RedisStoreLike {
   private async scanKeys(pattern: string): Promise<string[]> {
     const c = await this.client()
     const keys: string[] = []
-    for await (const k of c.scanIterator({ MATCH: pattern })) {
+    for await (const k of c.scanIterator({ MATCH: pattern, COUNT: SCAN_COUNT })) {
       if (Array.isArray(k)) for (const item of k) keys.push(item)
       else keys.push(k)
     }

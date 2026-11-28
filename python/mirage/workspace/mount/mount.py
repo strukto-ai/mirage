@@ -3031,12 +3031,16 @@ class MountEntry:
         self, scopes: list[PathSpec], limit: int, held_bytes: int
     ) -> dict[str, bytes]:
         """Each file's whole bytes as its own whole read answers them, by
-        virtual path. The bytes built for the batch must fit together, and
-        beside what it already holds, in what the workspace's
-        ``max_memory`` has left, as one file's must for its own read
-        (``_collected``), what a RAM store holds already counted; one
+        virtual path. A store whose data is not local is asked for up to
+        its ``concurrent_reads`` files at once, since each read waits a
+        round trip; a local one reads one file after another. The bytes
+        built for the batch, those still arriving among them, must fit
+        together, and beside what it already holds, in what the
+        workspace's ``max_memory`` has left, as one file's must for its own
+        read (``_collected``), what a RAM store holds already counted; one
         longer than ``limit`` bytes, one that does not fit, or one whose
-        read fails, is left out for its own read to meet.
+        read fails, is left out for its own read to meet, and the bytes it
+        built go with it.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
@@ -3046,39 +3050,52 @@ class MountEntry:
         counted = isinstance(self.vfs, RAMVFS)
         read: dict[str, bytes] = {}
         built = held_bytes
-        for scope in scopes:
-            parts: list[bytes] = []
-            size = 0
-            source: AsyncIterator[bytes] | None = None
-            try:
-                answer = await self._answer(self.index, scope)
-                found = await answer if inspect.isawaitable(answer) else answer
-                if isinstance(found, bytes):
-                    if len(found) <= limit:
-                        if not counted:
-                            check_memory(built + len(found))
-                            built += len(found)
-                        read[scope.virtual] = found
-                    continue
-                source = _as_stream(found)
-                async for chunk in source:
-                    size += len(chunk)
-                    if size > limit:
-                        break
-                    check_memory(built + size)
-                    parts.append(chunk)
-                else:
-                    read[scope.virtual] = b"".join(parts)
-                    built += size
-            except Exception as exc:
-                logger.debug(
-                    "batch read leaves %s to its own read: %s",
-                    scope.virtual,
-                    exc,
-                )
-            finally:
-                if source is not None:
-                    await close_quietly(source)
+        pending = iter(scopes)
+
+        async def read_rest() -> None:
+            nonlocal built
+            for scope in pending:
+                parts: list[bytes] = []
+                size = 0
+                source: AsyncIterator[bytes] | None = None
+                try:
+                    answer = await self._answer(self.index, scope)
+                    found = (
+                        await answer if inspect.isawaitable(answer) else answer
+                    )
+                    if isinstance(found, bytes):
+                        if len(found) <= limit:
+                            if not counted:
+                                check_memory(built + len(found))
+                                built += len(found)
+                            read[scope.virtual] = found
+                        continue
+                    source = _as_stream(found)
+                    async for chunk in source:
+                        if size + len(chunk) > limit:
+                            break
+                        check_memory(built + len(chunk))
+                        built += len(chunk)
+                        size += len(chunk)
+                        parts.append(chunk)
+                    else:
+                        read[scope.virtual] = b"".join(parts)
+                except Exception as exc:
+                    logger.debug(
+                        "batch read leaves %s to its own read: %s",
+                        scope.virtual,
+                        exc,
+                    )
+                finally:
+                    if scope.virtual not in read:
+                        built -= size
+                    if source is not None:
+                        await close_quietly(source)
+
+        width = 1 if self.vfs.local else max(1, self.vfs.concurrent_reads)
+        await asyncio.gather(
+            *(read_rest() for _ in range(min(width, len(scopes))))
+        )
         return read
 
     def live_pipe(self, path: str) -> DevicePipe | None:

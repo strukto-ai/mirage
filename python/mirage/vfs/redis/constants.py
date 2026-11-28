@@ -2,6 +2,11 @@ DEFAULT_PORT = 6379
 
 LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 
+# How many keys a SCAN or SSCAN looks at per round trip. Redis's own
+# default is 10, so a walk of the whole keyspace, which every directory
+# listing is, took one round trip per ten keys.
+SCAN_COUNT = 1000
+
 TRUNCATE_SCRIPT = """
 if ARGV[3] == '1' and redis.call('EXISTS', KEYS[1]) == 0 then
     return 0

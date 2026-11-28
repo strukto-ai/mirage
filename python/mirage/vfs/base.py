@@ -92,6 +92,12 @@ class BaseVFS:
     # like are never masked by a cached snapshot.
     caches_reads: bool = False
 
+    # How many of its files a read-ahead fetches at once, which is the
+    # most one batch warming the file cache names: a few for a service
+    # that limits its callers' rate, more for an object store, which
+    # serves many reads in parallel.
+    concurrent_reads: int = 8
+
     # Whether this VFS carries enough version information for
     # snapshot+replay drift detection. When True, the VFS's stat()
     # must populate FileStat.fingerprint with a stable per-path marker

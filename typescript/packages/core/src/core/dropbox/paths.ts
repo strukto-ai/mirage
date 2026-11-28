@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { lookup, type DropboxEntry } from './api.ts'
+import { soleCommandStarted } from '../../cache/index/scope.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
@@ -42,19 +43,38 @@ export function spelledOtherwise(
   return typeof named === 'string' && named !== key.slice(key.lastIndexOf('/') + 1)
 }
 
-/** Validate existing components below the configured root, never accepting case aliases. */
+/**
+ * Validate existing components below the configured root, never accepting case
+ * aliases. A folder the running command has found spelled exactly already is
+ * not asked about again (`DropboxAccessor.proven`), so a walk's reads share the
+ * folders above them instead of each asking for every one. Only such a folder
+ * is remembered, and only for the command, which its start stamp names: a
+ * streamed read runs as its output is pulled, after the command's own scope
+ * has closed, and still carries the stamp. The final name is always asked,
+ * since its entry is the answer. Mirrors Python's `check_path`.
+ */
 export async function checkPath(
   accessor: DropboxAccessor,
   path: PathSpec,
 ): Promise<DropboxEntry | null> {
   const key = stripSlash(rawPathOf(path))
+  const parts = key === '' ? [] : key.split('/')
+  const started = soleCommandStarted()
+  let proven = new Set<string>()
+  if (started !== null) {
+    if (accessor.proven?.started !== started) accessor.proven = { started, folders: proven }
+    proven = accessor.proven.folders
+  }
   let at = accessor.rootPath
   let entry: DropboxEntry | null = null
-  for (const part of key === '' ? [] : key.split('/')) {
+  for (const [i, part] of parts.entries()) {
     at = `${at}/${part}`
+    const folder = i < parts.length - 1
+    if (folder && proven.has(at)) continue
     entry = await lookup(accessor.tokenManager, at)
     if (entry == null) return null
     if (typeof entry.name === 'string' && entry.name !== part) throw enoent(path.virtual)
+    if (folder) proven.add(at)
   }
   return entry
 }

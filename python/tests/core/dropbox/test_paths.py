@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from importlib import import_module
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.dropbox import DropboxAccessor
+from mirage.cache.index.scope import command_scope
 from mirage.cache.types import ABSENT_WRITE, ReplaceRequest
 from mirage.core.dropbox import api
 from mirage.core.dropbox import read as read_ops
@@ -229,3 +231,58 @@ async def test_check_path_distinguishes_absence_errors_and_configured_root(
         0 if case == "root" else 1 if case == "refused" else 2
     )
     assert all(path.startswith("/Configured/Root/vault") for path in asked)
+
+
+@pytest.mark.asyncio
+async def test_a_command_asks_for_each_folder_above_its_files_once(
+    monkeypatch,
+):
+    # Within one command, the folders above two files of one directory are
+    # asked about once; each file is asked about every time, since its
+    # entry is the answer. "Docs" only matches the folder "docs" without
+    # regard to case, so it is no folder the command found and is asked
+    # about, and refused. A read the command streams runs as its output is
+    # pulled, after the command's scope has closed, and still shares them.
+    # A later command proves its folders again.
+    asked = []
+
+    async def metadata(tm, path):
+        asked.append(path)
+        name = path.rsplit("/", 1)[-1]
+        return {
+            ".tag": "file" if "." in name else "folder",
+            "name": "docs" if name.lower() == "docs" else name,
+        }
+
+    monkeypatch.setattr("mirage.core.dropbox.paths.lookup", metadata)
+    accessor = make_accessor()
+    pulled = asyncio.Event()
+
+    async def streamed():
+        await pulled.wait()
+        return await check_path(
+            accessor, PathSpec.from_str_path("/docs/sub/d.txt")
+        )
+
+    async with command_scope():
+        await check_path(accessor, PathSpec.from_str_path("/docs/sub/a.txt"))
+        await check_path(accessor, PathSpec.from_str_path("/docs/sub/b.txt"))
+        with pytest.raises(FileNotFoundError):
+            await check_path(
+                accessor, PathSpec.from_str_path("/Docs/sub/c.txt")
+            )
+        late = asyncio.ensure_future(streamed())
+    pulled.set()
+    await late
+    assert asked == [
+        "/docs",
+        "/docs/sub",
+        "/docs/sub/a.txt",
+        "/docs/sub/b.txt",
+        "/Docs",
+        "/docs/sub/d.txt",
+    ]
+    asked.clear()
+    async with command_scope():
+        await check_path(accessor, PathSpec.from_str_path("/docs/sub/a.txt"))
+    assert asked == ["/docs", "/docs/sub", "/docs/sub/a.txt"]

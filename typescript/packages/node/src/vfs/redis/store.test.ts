@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SCAN_COUNT } from '@struktoai/mirage-core/vfs/redis/constants'
 import { RedisStore } from './store.ts'
 
 const REDIS_URL = process.env.REDIS_URL
@@ -32,6 +33,31 @@ describe.skipIf(skip)('RedisStore', () => {
   afterEach(async () => {
     await store.clear()
     await store.close()
+  })
+
+  // Twin of test_every_scan_asks_for_many_keys_a_round_trip: Redis looks at
+  // COUNT keys a SCAN or SSCAN round trip, ten unless asked for more, and a
+  // directory listing walks the whole keyspace, so one listing of a large
+  // store took a round trip per ten keys. Every walk the store makes asks for
+  // SCAN_COUNT.
+  it('asks for many keys a round trip on every scan', async () => {
+    const client = await store.client()
+    const scans = vi.spyOn(client, 'scanIterator')
+    const sets = vi.spyOn(client, 'sScanIterator')
+    await store.addDir('/d')
+    await store.setFile('/d/a', new TextEncoder().encode('a'))
+    const found: [string, boolean][] = []
+    for await (const item of store.scanPaths('/d/')) found.push(item)
+    expect(found).toEqual([['/d/a', false]])
+    expect(await store.listFiles('/d/')).toEqual(['/d/a'])
+    await store.clear()
+    expect(scans).toHaveBeenCalled()
+    expect(sets).toHaveBeenCalled()
+    const counts = [
+      ...scans.mock.calls.map((call) => call[0]?.COUNT),
+      ...sets.mock.calls.map((call) => call[1]?.COUNT),
+    ]
+    expect(new Set(counts)).toEqual(new Set([SCAN_COUNT]))
   })
 
   it('connects afresh after the server drops its connection', async () => {

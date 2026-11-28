@@ -1612,12 +1612,14 @@ export class Dispatcher {
    * On a mount that keeps reads this keeps them in the read cache, and the
    * answer's `kept` says it did, so a caller warms no more of a run that keeps
    * none. Each read that follows still meets every check of its own and is
-   * served what this kept. On a mount that holds its data locally (`local`)
-   * this reads them for the caller instead, as `readHeld` says, and the answer
-   * holds the bytes; unless `hold` is false, where it reads none and only
-   * answers whether it would (`holds`), for a caller that does not know yet
-   * whether its files are on such a mount and reads nothing ahead there until
-   * it does.
+   * served what this kept. On a mount that holds its data locally (`local`),
+   * and on a store whose reads a cache would keep (`cachesReads`) in a
+   * workspace that keeps none, this reads them for the caller instead, as
+   * `readHeld` says, and the answer holds the bytes; unless `hold` is false,
+   * where it reads none and only answers whether it would (`holds`), for a
+   * caller that does not know yet whether its files are on such a mount and
+   * reads nothing ahead there until it does. A live source, whose reads no
+   * cache keeps, is read ahead on neither.
    *
    * Nothing is fetched where a check could refuse a read before its backend is
    * asked: nothing in a dry run or while a coded preVfs policy speaks for the
@@ -1654,7 +1656,7 @@ export class Dispatcher {
       ),
     )
     const batches = new Map<string, [MountEntry, CacheManager, PathSpec[]]>()
-    const local = new Map<string, [MountEntry, [PathSpec, Call][]]>()
+    const toHold = new Map<string, [MountEntry, [PathSpec, Call][]]>()
     for (const path of typed) {
       let call: Call
       try {
@@ -1674,7 +1676,7 @@ export class Dispatcher {
         continue
       }
       const manager = this.filler(call, mount)
-      if (mount.vfs.local) {
+      if (mount.vfs.local || (mount.vfs.cachesReads && !mount.cachesReads)) {
         if (
           !judged &&
           manager === null &&
@@ -1686,9 +1688,9 @@ export class Dispatcher {
         ) {
           holdable = true
           if (hold) {
-            const group = local.get(mount.prefix) ?? [mount, []]
+            const group = toHold.get(mount.prefix) ?? [mount, []]
             group[1].push([path, call])
-            local.set(mount.prefix, group)
+            toHold.set(mount.prefix, group)
           }
         }
         continue
@@ -1699,7 +1701,7 @@ export class Dispatcher {
       batches.set(mount.prefix, batch)
     }
     const held = new Map<string, HeldFile>()
-    for (const [mount, pairs] of local.values()) {
+    for (const [mount, pairs] of toHold.values()) {
       let heldBytes = 0
       for (const file of held.values()) heldBytes += file.data.byteLength
       for (const [name, file] of await this.readHeld(mount, pairs, stats, heldBytes)) {
@@ -1714,6 +1716,10 @@ export class Dispatcher {
       count,
       links: held.size > 0 ? links : null,
       currentLinks: held.size > 0 ? () => this.namespace.symlinkTargets() : null,
+      concurrentReads:
+        batches.size > 0
+          ? Math.min(...[...batches.values()].map(([mount]) => mount.vfs.concurrentReads))
+          : null,
     })
     if (batches.size === 0) return answer
     const warm = async (): Promise<void> => {
@@ -1777,9 +1783,9 @@ export class Dispatcher {
   }
 
   /**
-   * Read files on a mount that holds its data locally for the caller, each
-   * past the checks its own read meets: admitted as that read is, its answer
-   * completed through the same boundary.
+   * Read files for the caller on a mount whose reads the read-ahead holds,
+   * each past the checks its own read meets: admitted as that read is, its
+   * answer completed through the same boundary.
    *
    * A file the mount's index or the caller's stat does not size as a file of
    * at most READ_AHEAD_BYTES, an empty one (whose read asks whether a directory
@@ -1788,7 +1794,8 @@ export class Dispatcher {
    * call (`MountEntry.readMany`), which observes its index once for all of
    * them. Mirrors Python's Dispatcher._read_held.
    *
-   * @param mount the mount, which holds its data locally.
+   * @param mount the mount, which holds its data locally or is a store in a
+   *   workspace that keeps no reads.
    * @param pairs each file as the caller named it, with its walked and
    *   followed read.
    * @param stats the caller's stats of them, by the path it named.

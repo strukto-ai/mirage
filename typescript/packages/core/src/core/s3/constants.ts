@@ -23,6 +23,12 @@ export const CONDITION_LOST_CODES: ReadonlySet<string> = new Set([
 ])
 export const DENIED_CODES: ReadonlySet<string> = new Set(['403', 'AccessDenied'])
 
+// How many objects a read-ahead fetches at once (`concurrentReads`), and so
+// how many connections a mount's client keeps open: a bucket serves thousands
+// of reads a second, and a walk over small objects waits on each one's round
+// trip.
+export const CONCURRENT_READS = 64
+
 // A streamed upload's parts start at PART_SIZE and double every
 // PART_DOUBLING parts, so an upload under 8 GiB sends the parts it always
 // did and S3's 10,000 parts reach past its 5 TiB object cap; the last

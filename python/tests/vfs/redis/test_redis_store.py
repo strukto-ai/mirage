@@ -18,6 +18,7 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
+from mirage.vfs.redis.constants import SCAN_COUNT
 from mirage.vfs.redis.store import RedisStore
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -235,3 +236,30 @@ async def test_get_files_leaves_out_a_file_on_a_resp3_client(redis_prefix):
     finally:
         await s.clear()
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_every_scan_asks_for_many_keys_a_round_trip(store, monkeypatch):
+    # Redis looks at COUNT keys a SCAN or SSCAN round trip, ten unless
+    # asked for more, and a directory listing walks the whole keyspace, so
+    # one listing of a large store took a round trip per ten keys. Every
+    # walk the store makes asks for SCAN_COUNT.
+    asked: list[tuple[str, object]] = []
+    client = store._client
+    for name in ("scan", "sscan"):
+        original = getattr(client, name)
+
+        async def counted(*args, _name=name, _original=original, **kwargs):
+            asked.append((_name, kwargs.get("count")))
+            return await _original(*args, **kwargs)
+
+        monkeypatch.setattr(client, name, counted)
+    await store.add_dir("/d")
+    await store.set_file("/d/a", b"a")
+    assert [item async for item in store.scan_paths("/d/")] == [
+        ("/d/a", False)
+    ]
+    assert await store.list_files("/d/") == ["/d/a"]
+    await store.clear()
+    assert {name for name, _ in asked} == {"scan", "sscan"}
+    assert {count for _, count in asked} == {SCAN_COUNT}

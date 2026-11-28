@@ -22,6 +22,7 @@ from mirage.core.generic.rewrite import append_by_streamed_rewrite
 from mirage.core.s3.checksum import checksum as _checksum
 from mirage.core.s3.constants import (
     AWS_DOMAINS,
+    CONCURRENT_READS,
     CONDITION_SUPPORT,
     CUSTOM_CONDITION_SUPPORT,
     MD5_ETAG_STORES,
@@ -83,6 +84,7 @@ class S3VFS(BaseVFS):
     # byte store: stat() sizes every file from metadata
     sizes_always_known: bool = True
     caches_reads: bool = True
+    concurrent_reads: int = CONCURRENT_READS
     supports_snapshot: bool = True
     # stat and read both stamp the ETag, so the gate compares like with
     # like. Inherited by every S3AliasVFS provider.

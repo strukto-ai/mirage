@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -51,7 +52,7 @@ def _stale_md5(md5: JsonValue, data: bytes) -> bool:
     """Whether Drive's md5 names other bytes than the ones just read.
 
     The metadata and the download are two requests, so a write between
-    them leaves metadata that predates the bytes.
+    them leaves metadata that names other bytes than the ones read.
 
     Args:
         md5 (JsonValue): Drive's ``md5Checksum`` for the file.
@@ -77,8 +78,10 @@ async def read_file_versioned(
     A pinned path reads that revision's content. Otherwise the token
     comes from a capture when a recorder is bound and from the listed
     row when none is, so it never depends on the recorder; the row's
-    revision is not pinned, since it can be a TTL old. Either md5 is
-    checked against the bytes, and a stale one drops the token and the
+    revision is not pinned, since it can be a TTL old. The capture goes
+    out beside the download, so a read waits one round trip: either md5
+    is checked against the bytes, so a write between the two requests,
+    in whichever order they are answered, drops the token and the
     revision with it.
 
     Args:
@@ -99,8 +102,10 @@ async def read_file_versioned(
     if pinned:
         data = await drive.download_revision(file_id, pinned, window)
     elif recording_active():
-        md5, revision = await drive.capture_file_metadata(file_id)
-        data = await drive.download_file(file_id, window)
+        (md5, revision), data = await asyncio.gather(
+            drive.capture_file_metadata(file_id),
+            drive.download_file(file_id, window),
+        )
         if whole and _stale_md5(md5, data):
             revision = None
         elif whole:
@@ -200,7 +205,9 @@ async def read_stream(
     chunk, as :func:`read` gives it. A binary file is stamped as
     :func:`read_file_versioned` stamps a whole read, once the last chunk
     is in and checked against the md5 Drive gave: a stream abandoned
-    part-way stamps nothing.
+    part-way stamps nothing. The capture goes out beside the download,
+    and the first chunk waits for it, so one that fails fails the read
+    before any byte is handed on.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
@@ -215,27 +222,38 @@ async def read_stream(
     drive = accessor.drive
     pinned = revision_for(path.virtual)
     rec = record_stream("read", path.virtual, "gdrive", revision=pinned)
-    md5: str | None = None
-    revision = None
+    capture: asyncio.Future[tuple[str | None, str | None]] | None = None
+    captured: tuple[str | None, str | None] = (None, None)
     if pinned:
         chunks = drive.download_revision_stream(file_id, pinned)
     else:
         if rec is not None:
-            md5, revision = await drive.capture_file_metadata(file_id)
+            capture = asyncio.ensure_future(
+                drive.capture_file_metadata(file_id)
+            )
         chunks = drive.download_file_stream(file_id)
-    digest = hashlib.md5() if md5 else None
-    async with aclosing(chunks) as source:
-        async for chunk in source:
-            if digest is not None:
-                digest.update(chunk)
-            if rec is not None:
-                rec.bytes += len(chunk)
-            yield chunk
+    digest = hashlib.md5() if capture is not None else None
+    try:
+        async with aclosing(chunks) as source:
+            async for chunk in source:
+                if capture is not None:
+                    captured = await capture
+                if digest is not None:
+                    digest.update(chunk)
+                if rec is not None:
+                    rec.bytes += len(chunk)
+                yield chunk
+        if capture is not None:
+            captured = await capture
+    finally:
+        if capture is not None:
+            capture.cancel()
     if rec is not None:
         rec.complete = True
     if rec is None or pinned:
         return
-    if digest is not None and digest.hexdigest() != md5:
+    md5, revision = captured
+    if md5 and digest is not None and digest.hexdigest() != md5:
         return
     rec.revision = revision
     rec.fingerprint = drive_fingerprint(

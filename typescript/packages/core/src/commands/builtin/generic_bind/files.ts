@@ -169,11 +169,13 @@ const CROSSING_CALLS: ReadonlySet<string> = new Set([
   'truncate',
 ])
 
-// How many files a whole read warms ahead of itself (`ReadAhead`).
+// How many files a whole read warms ahead of itself (`ReadAhead`) until a
+// batch says how many its mount reads at once (`concurrentReads`).
 const READ_AHEAD = 8
 
-// How many files a whole read reads ahead on a mount that holds its data
-// locally, whose bytes the read-ahead hands over (`ReadBatch`).
+// How many files a whole read reads ahead on a mount whose bytes the
+// read-ahead hands over (`ReadBatch`): one that holds its data locally, or a
+// store in a workspace that keeps no reads.
 const READ_AHEAD_HELD = 64
 
 // The options of a read a held file answers: the whole stored bytes, whether
@@ -207,12 +209,12 @@ class Run {
   }
 }
 
-// A subtree answer and, once a read lands below it, its files grouped by
-// directory, each keyed by its path below `root`. Mirrors Python's `_Tree`.
+// A subtree answer and, once a read lands below it, its files as one run in
+// the order a walk reads them (`walkOrder`). Mirrors Python's `_Tree`.
 interface Tree {
   root: string
   rows: Map<string, FileStat>
-  groups: Map<string, string[]> | null
+  run: Run | null
 }
 
 /**
@@ -223,22 +225,27 @@ interface Tree {
  * of one, the files after it in its run go to the dispatcher as one
  * `read_many`, which keeps the small files among them in the read cache (one
  * request where the store reads a batch), and the batch after goes once half
- * of that one is read. Operands warm READ_AHEAD at a time. A walk warms as it
- * shows it reads what it lists: one file once it reads two in a row, twice as
- * many each time a read lands on a warmed file, up to READ_AHEAD, and none
+ * of that one is read. Operands warm READ_AHEAD at a time, or once a batch has
+ * answered as many as its mount reads at once (`concurrentReads`). A walk warms
+ * as it shows it reads what it lists: one file once it reads two in a row,
+ * twice as many each time a read lands on a warmed file, up to that, and none
  * once it passes over files it warmed, so a walk that reads few of the files
  * it lists (a name filter) fetches few it never reads; the pace reads on
  * warmed files set carries into the next directory, and a walk that reads in a
  * directory has passed over what it warmed and never read in each one neither
- * it nor above it. A read whose file is still being warmed waits for it,
+ * it nor above it. Below a subtree answer the files it names are one run, in
+ * the order a walk reads them (`walkOrder`), so read-ahead runs on into the
+ * next directory instead of starting over in each one. A read whose file is
+ * still being warmed waits for it,
  * so it is served warm instead of fetching the file again; a write in between
  * drops the cached copy as it drops any. A path in neither the operands nor
  * the latest LISTINGS listings and subtree answers warms nothing.
  *
- * On a mount that holds its data locally there is no read cache to warm: the
- * dispatcher reads the files for the command past each one's checks and hands
- * their bytes back (`ReadBatch`), and each whole read of one is answered from
- * them, once, while no change has reached the file since. Until a batch has
+ * On a mount that holds its data locally, and on a store in a workspace that
+ * keeps no reads, there is no read cache to warm: the dispatcher reads the
+ * files for the command past each one's checks and hands their bytes back
+ * (`ReadBatch`), and each whole read of one is answered from them, once,
+ * while no change has reached the file since. Until a batch has
  * said the mount holds its data, each asks the dispatcher to read nothing
  * there, so a command that stops after its first file (`cat a b | head -n 1`)
  * opens no other; the read that lands on such a batch reads ahead from itself
@@ -259,6 +266,7 @@ export class ReadAhead {
   private readonly runs = new Map<string, Run>()
   private readonly trees: Tree[] = []
   private width = 0
+  private warmWidth = READ_AHEAD
   private kept = true
   private holding = false
   private readonly unheld = new WeakSet<Promise<ReadBatch>>()
@@ -296,6 +304,7 @@ export class ReadAhead {
       size?: number | null
       warm?: boolean
       filetype?: string | null
+      level?: boolean
     }
     if (
       name === 'read' &&
@@ -320,8 +329,13 @@ export class ReadAhead {
       const files = (answer[0] as string[]).filter((n) => !n.endsWith('/'))
       this.keep(folder, new Run(files))
     } else if (name === 'read_tree' && answer[0] instanceof Map) {
-      this.trees.push({ root: folder, rows: answer[0] as Map<string, FileStat>, groups: null })
-      if (this.trees.length > LISTINGS) this.trees.shift()
+      const rows = answer[0] as Map<string, FileStat>
+      if (asked.level === true) {
+        this.keep(folder, listed(folder, rows))
+      } else {
+        this.trees.push({ root: folder, rows, run: null })
+        if (this.trees.length > LISTINGS) this.trees.shift()
+      }
     }
     return answer
   }
@@ -348,7 +362,7 @@ export class ReadAhead {
       run === this.operands
         ? this.holding
           ? READ_AHEAD_HELD
-          : READ_AHEAD
+          : this.warmWidth
         : this.paced(run, at, pending !== undefined)
     const start = Math.max(run.sent, this.holding && pending === undefined ? at : at + 1)
     const ahead = this.holding ? Math.min(width, run.latest || width) : width
@@ -390,6 +404,7 @@ export class ReadAhead {
     }
     if (pending === undefined) return null
     const batch = await pending
+    if (batch.concurrentReads !== null) this.warmWidth = batch.concurrentReads
     if (!batch.kept && !batch.holds) {
       this.kept = false
       this.trees.length = 0
@@ -426,7 +441,7 @@ export class ReadAhead {
     for (const name of passed) run.warming.delete(name)
     if (hit) {
       this.width = Math.min(
-        this.holding ? READ_AHEAD_HELD : READ_AHEAD,
+        this.holding ? READ_AHEAD_HELD : this.warmWidth,
         Math.max(1, this.width) * 2,
       )
     } else if (passed.length > 0) this.width = 0
@@ -467,8 +482,8 @@ export class ReadAhead {
     return run
   }
 
-  // The run a path is read in: the operands, its directory's listing, or that
-  // directory's files as a subtree answer holds them.
+  // The run a path is read in: the operands, its directory's listing, or the
+  // files of a subtree answer it lies below, in walk order.
   private run(virtual: string): Run | undefined {
     if (this.specs.has(virtual)) return this.operands
     const cut = virtual.lastIndexOf('/')
@@ -478,33 +493,67 @@ export class ReadAhead {
     for (const tree of [...this.trees].reverse()) {
       const base = `${rstripSlash(tree.root)}/`
       if (folder !== tree.root && !folder.startsWith(base)) continue
-      if (tree.groups === null) {
-        tree.groups = new Map()
+      if (tree.run === null) {
+        const files: string[] = []
         for (const [key, row] of tree.rows) {
-          if (row.type === FileType.DIRECTORY) continue
-          const above = key.slice(0, Math.max(0, key.lastIndexOf('/')))
-          const group = tree.groups.get(above)
-          if (group === undefined) tree.groups.set(above, [key])
-          else group.push(key)
+          if (row.type !== FileType.DIRECTORY) files.push(key)
         }
-      }
-      const rel = folder === tree.root ? '' : folder.slice(base.length)
-      const below = [...(tree.groups.get(rel) ?? [])].sort(compareCodePoints)
-      const rows = new Map<string, FileStat>()
-      for (const key of below) {
-        const row = tree.rows.get(key)
-        if (row !== undefined) rows.set(base + key, row)
-      }
-      return this.keep(
-        folder,
-        new Run(
+        const below = walkOrder(files)
+        const rows = new Map<string, FileStat>()
+        for (const key of below) {
+          const row = tree.rows.get(key)
+          if (row !== undefined) rows.set(base + key, row)
+        }
+        tree.run = new Run(
           below.map((key) => base + key),
           rows,
-        ),
-      )
+        )
+      }
+      return tree.run
     }
     return undefined
   }
+}
+
+/**
+ * The files of one directory's listing as its own run, by name: what a
+ * one-level subtree answer (`level`) names, each child keyed by its name, is
+ * a listing as a `readdir`'s is. Mirrors Python's `_listed`.
+ */
+function listed(folder: string, rows: ReadonlyMap<string, FileStat>): Run {
+  const base = `${rstripSlash(folder)}/`
+  const names: string[] = []
+  for (const [key, row] of rows) {
+    if (row.type !== FileType.DIRECTORY) names.push(key)
+  }
+  names.sort(compareCodePoints)
+  const kept = new Map<string, FileStat>()
+  for (const name of names) {
+    const row = rows.get(name)
+    if (row !== undefined) kept.set(base + name, row)
+  }
+  return new Run(
+    names.map((name) => base + name),
+    kept,
+  )
+}
+
+/**
+ * Files below a directory, keyed by their path below it, in the order a walk
+ * of it reads them: depth first, each directory's entries by name, a folder's
+ * files read where its name sorts among its siblings. Mirrors Python's
+ * `walk_order`.
+ */
+export function walkOrder(keys: Iterable<string>): string[] {
+  return [...keys].sort((a, b) => {
+    const left = a.split('/')
+    const right = b.split('/')
+    for (let i = 0; i < Math.min(left.length, right.length); i++) {
+      const order = compareCodePoints(left[i] ?? '', right[i] ?? '')
+      if (order !== 0) return order
+    }
+    return left.length - right.length
+  })
 }
 
 /**

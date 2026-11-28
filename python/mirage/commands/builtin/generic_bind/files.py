@@ -21,6 +21,7 @@ from collections.abc import (
     AsyncIterator,
     Awaitable,
     Callable,
+    Iterable,
     Iterator,
     Mapping,
     Sequence,
@@ -216,11 +217,13 @@ def with_reading(ctx: Context, reading: Reading) -> Iterator[Context]:
 # shortcut, where no mount sits below the subtree.
 _CROSSING_CALLS = frozenset({"write", "pwrite", "unlink", "mkdir", "truncate"})
 
-# How many files a whole read warms ahead of itself (``ReadAhead``).
+# How many files a whole read warms ahead of itself (``ReadAhead``) until
+# a batch says how many its mount reads at once (``concurrent_reads``).
 READ_AHEAD = 8
 
-# How many files a whole read reads ahead on a mount that holds its data
-# locally, whose bytes the read-ahead hands over (``ReadBatch``).
+# How many files a whole read reads ahead on a mount whose bytes the
+# read-ahead hands over (``ReadBatch``): one that holds its data locally,
+# or a store in a workspace that keeps no reads.
 READ_AHEAD_HELD = 64
 
 # The options of a read a held file answers: the whole stored bytes,
@@ -256,12 +259,12 @@ class _Run:
 
 @dataclass(slots=True)
 class _Tree:
-    """A subtree answer and, once a read lands below it, its files
-    grouped by directory, each keyed by its path below ``root``."""
+    """A subtree answer and, once a read lands below it, its files as one
+    run in the order a walk reads them (``walk_order``)."""
 
     root: str
     rows: Mapping[str, FileStat]
-    groups: dict[str, list[str]] | None = None
+    run: _Run | None = None
 
 
 class ReadAhead:
@@ -273,24 +276,29 @@ class ReadAhead:
     dispatcher as one ``read_many``, which keeps the small files among
     them in the read cache (one request where the store reads a batch),
     and the batch after goes once half of that one is read. Operands warm
-    ``READ_AHEAD`` at a time. A walk warms as it shows it reads what it
-    lists: one file once it reads two in a row, twice as many each time
-    a read lands on a warmed file, up to ``READ_AHEAD``, and none once
+    ``READ_AHEAD`` at a time, or once a batch has answered as many as its
+    mount reads at once (``concurrent_reads``). A walk warms as it shows
+    it reads what it lists: one file once it reads two in a row, twice as
+    many each time a read lands on a warmed file, up to that, and none once
     it passes over files it warmed, so a walk that reads few of the
     files it lists (a name filter) fetches few it never reads; the pace
     reads on warmed files set carries into the next directory, and a walk
     that reads in a directory has passed over what it warmed and never
-    read in each one neither it nor above it. A read whose file is still being
+    read in each one neither it nor above it. Below a subtree answer the
+    files it names are one run, in the order a walk reads them
+    (``walk_order``), so read-ahead runs on into the next directory instead
+    of starting over in each one. A read whose file is still being
     warmed waits for it, so it is served warm instead of fetching the
     file again; a write in between drops the cached copy as it drops any.
     A path in neither the operands nor the latest ``LISTINGS`` listings
     and subtree answers warms nothing.
 
-    On a mount that holds its data locally there is no read cache to
-    warm: the dispatcher reads the files for the command past each one's
-    checks and hands their bytes back (``ReadBatch``), and each whole
-    read of one is answered from them, once, while no change has reached
-    the file since. Until a batch has said the mount holds its data, each
+    On a mount that holds its data locally, and on a store in a workspace
+    that keeps no reads, there is no read cache to warm: the dispatcher
+    reads the files for the command past each one's checks and hands their
+    bytes back (``ReadBatch``), and each whole read of one is answered from
+    them, once, while no change has reached the file since. Until a batch
+    has said the mount holds its data, each
     asks the dispatcher to read nothing there, so a command that stops
     after its first file (``cat a b | head -n 1``) opens no other; the
     read that lands on such a batch reads ahead from itself instead.
@@ -317,6 +325,7 @@ class ReadAhead:
         self.runs: OrderedDict[str, _Run] = OrderedDict()
         self.trees: deque[_Tree] = deque(maxlen=LISTINGS)
         self.width = 0
+        self.warm_width = READ_AHEAD
         self.kept = True
         self.holding = False
         self.unheld: weakref.WeakSet[asyncio.Future[ReadBatch]] = (
@@ -375,7 +384,10 @@ class ReadAhead:
             files = [n for n in result if not n.endswith("/")]
             self._keep(folder, _Run(files))
         elif name == "read_tree" and isinstance(result, Mapping):
-            self.trees.append(_Tree(folder, result))
+            if options.get("level"):
+                self._keep(folder, _listed(folder, result))
+            else:
+                self.trees.append(_Tree(folder, result))
         return result, io
 
     async def _warmed(self, path: PathSpec, served: bool) -> bytes | None:
@@ -400,7 +412,7 @@ class ReadAhead:
         if run is not self.operands:
             self._entered(run, path.virtual.rpartition("/")[0] or "/")
         width = (
-            (READ_AHEAD_HELD if self.holding else READ_AHEAD)
+            (READ_AHEAD_HELD if self.holding else self.warm_width)
             if run is self.operands
             else self._paced(run, at, pending is not None)
         )
@@ -453,6 +465,8 @@ class ReadAhead:
         if pending is None:
             return None
         batch = await asyncio.shield(pending)
+        if batch.concurrent_reads is not None:
+            self.warm_width = batch.concurrent_reads
         if not batch.kept and not batch.holds:
             self.kept = False
             self.trees.clear()
@@ -491,7 +505,7 @@ class ReadAhead:
             del run.warming[name]
         if hit:
             self.width = min(
-                READ_AHEAD_HELD if self.holding else READ_AHEAD,
+                READ_AHEAD_HELD if self.holding else self.warm_width,
                 max(1, self.width) * 2,
             )
         elif passed:
@@ -539,8 +553,8 @@ class ReadAhead:
 
     def _run(self, virtual: str) -> _Run | None:
         """The run a path is read in: the operands, its directory's
-        listing, or that directory's files as a subtree answer holds
-        them."""
+        listing, or the files of a subtree answer it lies below, in walk
+        order."""
         if virtual in self.specs:
             return self.operands
         folder = virtual.rpartition("/")[0] or "/"
@@ -552,22 +566,48 @@ class ReadAhead:
             base = tree.root.rstrip("/") + "/"
             if folder != tree.root and not folder.startswith(base):
                 continue
-            if tree.groups is None:
-                tree.groups = {}
-                for key, row in tree.rows.items():
-                    if row.type is not FileType.DIRECTORY:
-                        above = key.rpartition("/")[0]
-                        tree.groups.setdefault(above, []).append(key)
-            rel = "" if folder == tree.root else folder[len(base) :]
-            below = sorted(tree.groups.get(rel, []))
-            return self._keep(
-                folder,
-                _Run(
+            if tree.run is None:
+                below = walk_order(
+                    key
+                    for key, row in tree.rows.items()
+                    if row.type is not FileType.DIRECTORY
+                )
+                tree.run = _Run(
                     [base + key for key in below],
                     rows={base + key: tree.rows[key] for key in below},
-                ),
-            )
+                )
+            return tree.run
         return None
+
+
+def _listed(folder: str, rows: Mapping[str, FileStat]) -> _Run:
+    """The files of one directory's listing as its own run, by name: what
+    a one-level subtree answer (``level``) names, each child keyed by its
+    name, is a listing as a ``readdir``'s is.
+
+    Args:
+        folder (str): the directory listed.
+        rows (Mapping[str, FileStat]): each child's stat, by name.
+    """
+    base = folder.rstrip("/") + "/"
+    names = sorted(
+        key for key, row in rows.items() if row.type is not FileType.DIRECTORY
+    )
+    return _Run(
+        [base + name for name in names],
+        rows={base + name: rows[name] for name in names},
+    )
+
+
+def walk_order(keys: Iterable[str]) -> list[str]:
+    """Files below a directory, keyed by their path below it, in the order
+    a walk of it reads them: depth first, each directory's entries by
+    name, a folder's files read where its name sorts among its siblings.
+
+    Args:
+        keys (Iterable[str]): the files' paths below the directory.
+    """
+    return sorted(keys, key=lambda key: key.split("/"))
 
 
 def _fitting(names: list[str], rows: Mapping[str, FileStat]) -> list[str]:

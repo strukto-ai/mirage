@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from typing import Any
 
 from mirage.accessor.redis import RedisAccessor
@@ -77,23 +78,11 @@ def _from_fields(
     )
 
 
-async def key_stat(store: RedisStore, p: str, is_dir: bool) -> FileStat:
-    """What ``stat`` answers for the normalized key ``p`` the store holds.
-
-    Args:
-        store (RedisStore): the mount's store.
-        p (str): the normalized key.
-        is_dir (bool): whether ``p`` is a directory.
-    """
-    raw = await store.get_attrs(p)
-    size = None if is_dir else await store.file_len(p)
-    return _from_fields(p, is_dir, raw, size, await store.get_modified(p))
-
-
 async def key_stats(
     store: RedisStore, keys: list[tuple[str, bool]]
 ) -> list[FileStat]:
-    """``key_stat`` for many keys, in one pipeline.
+    """What ``stat`` answers for each normalized key the store holds, in
+    one pipeline.
 
     Args:
         store (RedisStore): the mount's store.
@@ -111,10 +100,22 @@ async def stat(
     accessor: RedisAccessor,
     path_spec: PathSpec,
 ) -> FileStat:
+    """What is at a path, asked in one round trip: whether a directory or
+    a file is there and the fields either keeps under its name go out
+    together, rather than each waiting for the one before.
+
+    Args:
+        accessor (RedisAccessor): the mount's store.
+        path_spec (PathSpec): the path.
+    """
     store = accessor.store
     p = norm(path_spec.mount_path)
-    if await store.has_dir(p):
-        return await key_stat(store, p, True)
-    if await store.has_file(p):
-        return await key_stat(store, p, False)
+    is_dir, is_file, held = await asyncio.gather(
+        store.has_dir(p), store.has_file(p), store.stat_many([(p, False)])
+    )
+    raw, size, modified = held[0]
+    if is_dir:
+        return _from_fields(p, True, raw, None, modified)
+    if is_file:
+        return _from_fields(p, False, raw, size, modified)
     raise await lookup_error(store, path_spec, p)
