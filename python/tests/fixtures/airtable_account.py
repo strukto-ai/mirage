@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import parse_qsl, quote, unquote
@@ -63,15 +64,21 @@ class AirtableAccount:
 
     def __init__(self, origin: str) -> None:
         self.run = KitRun(origin, {"Authorization": f"Bearer {TOKEN}"})
+        # What was recorded before the run was last reloaded.
+        self.earlier: list[dict[str, Any]] = []
 
-    async def reset(self, page_cap: int | None = None) -> None:
-        """Seed the run afresh with the unit fixture's world.
+    async def reset(
+        self, page_cap: int | None = None, fixture: str = FIXTURE
+    ) -> None:
+        """Seed the run afresh with a fixture's world, the unit one unless
+        named.
 
         Args:
-            page_cap (int | None): the most records or comments a page
-                holds, the fixture's own if None.
+            page_cap (int | None): the most records, comments or payloads
+                a page holds, the fixture's own if None.
+            fixture (str): the fixture under integ/fixtures/airtable/.
         """
-        body: dict[str, Any] = {"fixture": FIXTURE}
+        body: dict[str, Any] = {"fixture": fixture}
         if page_cap is not None:
             body["extras"] = {"pageCap": page_cap}
         await self.run.call("POST", "/reset", json=body)
@@ -193,10 +200,97 @@ class AirtableAccount:
             "DELETE", f"/v0/{base}/{quote(table, safe='')}/{record}"
         )
 
-    async def _listed(self) -> list[dict[str, Any]]:
+    async def record_requests(self) -> None:
+        """Start listing the account's requests afresh."""
+        self.earlier = []
+        await self.run.record_requests()
+
+    async def store(self, sql: str, *params: Any) -> None:
+        """Store a state no Airtable request makes, one SQL statement on
+        the run. That reloads the run, which stops a recording, so the
+        requests listed so far are kept and the recording starts again.
+
+        Args:
+            sql (str): the statement.
+            *params (Any): its parameters.
+        """
+        self.earlier += await self._recorded()
+        await self.run.execute(sql, *params)
+        await self.run.record_requests()
+
+    async def webhook(self, base: str) -> str:
+        """Make a webhook on a base, as its owner would, and its id.
+
+        Args:
+            base (str): the base's id.
+        """
+        made = await self.run.call(
+            "POST",
+            f"/v0/bases/{base}/webhooks",
+            json={
+                "specification": {
+                    "options": {"filters": {"dataTypes": ["tableData"]}}
+                }
+            },
+        )
+        return str(made["id"])
+
+    async def drop_webhook(self, base: str, hook: str) -> None:
+        """Delete a webhook, as its owner would.
+
+        Args:
+            base (str): the base's id.
+            hook (str): the webhook's id.
+        """
+        await self.run.call("DELETE", f"/v0/bases/{base}/webhooks/{hook}")
+
+    async def push(self, hook: str, payload: dict[str, Any]) -> None:
+        """Add a payload to a webhook, numbered after its last. The fake
+        writes payloads only for record writes, so one about a schema or
+        an error is stored as Airtable would leave it.
+
+        Args:
+            hook (str): the webhook's id.
+            payload (dict[str, Any]): the payload as Airtable sends it.
+        """
+        await self.store(
+            "INSERT INTO AirtableWebhookPayload "
+            '(tenant, webhookId, cursor, "transaction", body) '
+            "SELECT tenant, id, lastCursor + 1, "
+            '(SELECT COALESCE(MAX("transaction"), 0) + 1 '
+            "FROM AirtableWebhookPayload WHERE tenant = 'default'), ? "
+            "FROM AirtableWebhook WHERE tenant = 'default' AND id = ?",
+            json.dumps(payload),
+            hook,
+        )
+        await self.store(
+            "UPDATE AirtableWebhook SET lastCursor = lastCursor + 1 "
+            "WHERE tenant = 'default' AND id = ?",
+            hook,
+        )
+
+    async def expire(self, hook: str, oldest: int) -> None:
+        """Let a webhook's payloads before ``oldest`` expire, as Airtable
+        lets them after seven days.
+
+        Args:
+            hook (str): the webhook's id.
+            oldest (int): the first payload kept.
+        """
+        await self.store(
+            "DELETE FROM AirtableWebhookPayload WHERE tenant = 'default' "
+            "AND webhookId = ? AND cursor < ?",
+            hook,
+            oldest,
+        )
+
+    async def _recorded(self) -> list[dict[str, Any]]:
         listed = await self.run.call("GET", "/_kit/requests")
         requests: list[dict[str, Any]] = listed["requests"]
         return requests
+
+    async def _listed(self) -> list[dict[str, Any]]:
+        return self.earlier + await self._recorded()
 
     async def record_queries(self) -> list[dict[str, str]]:
         """The query of each records listing since recording started, with

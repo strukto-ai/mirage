@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "pageCap": 2
+  },
+  "users": [
+    {
+      "id": "usrAda00000000001",
+      "email": "ada@example.com",
+      "name": "Ada"
+    }
+  ],
+  "tokens": [
+    {
+      "token": "patTest0000000001.secret",
+      "userId": "usrAda00000000001"
+    }
+  ],
+  "bases": [
+    {
+      "id": "appRoadmap0000001",
+      "name": "Roadmap",
+      "permissionLevel": "create",
+      "tables": [
+        {
+          "id": "tblFeatures000001",
+          "name": "Features",
+          "primaryFieldId": "fldName0000000001",
+          "fields": [
+            {
+              "id": "fldName0000000001",
+              "name": "Name",
+              "type": "singleLineText"
+            }
+          ],
+          "views": [],
+          "records": []
+        }
+      ]
+    }
+  ]
+}

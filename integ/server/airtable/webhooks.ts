@@ -17,7 +17,7 @@ import { all, exec, one } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import { authenticate, baseFor, onlyQuery, requireIds } from './access.ts'
 import type { C } from './config.ts'
-import { WEBHOOK, hooksOf, payloadCount } from './payloads.ts'
+import { WEBHOOK, hooksOf, lastCursor } from './payloads.ts'
 import { changeOne } from './store.ts'
 import { bodyOf, guard, invalidRequest, isObject, notFound, ok, refuse } from './wire.ts'
 import { mintId } from './writes.ts'
@@ -72,7 +72,7 @@ export const listWebhooks = guard(async (ctx: Ctx<C>): Promise<Reply> => {
     webhooks.push({
       id: hook.id,
       areNotificationsEnabled: hook.url !== null,
-      cursorForNextPayload: (await payloadCount(ctx.sql, ctx.tenant, hook.id)) + 1,
+      cursorForNextPayload: (await lastCursor(ctx.sql, ctx.tenant, hook.id)) + 1,
       lastNotificationResult: null,
       notificationUrl: hook.url,
       isHookEnabled: true,
@@ -121,6 +121,9 @@ export const listPayloads = guard(async (ctx: Ctx<C>): Promise<Reply> => {
   if (limit > PAYLOADS_PAGE) return refuse(invalidRequest())
   const world = await baseFor(ctx, who, ctx.params.base ?? '')
   const hook = await hookFor(ctx, world.base.id)
+  // A page holds min(limit, the fixture's pageCap) payloads, as a records or
+  // comments page does, so a battery can page through a few.
+  const size = Math.min(limit, world.pageCap)
   const rows = all<{ cursor: number; body: string }>(
     ctx.sql,
     'SELECT cursor, body FROM AirtableWebhookPayload WHERE tenant = ? AND webhookId = ? AND ' +
@@ -128,13 +131,16 @@ export const listPayloads = guard(async (ctx: Ctx<C>): Promise<Reply> => {
     ctx.tenant,
     hook.id,
     cursor,
-    limit + 1,
+    size + 1,
   )
-  const page = rows.slice(0, limit)
+  const page = rows.slice(0, size)
   const last = page.at(-1)
+  // A page that found nothing from `cursor` on still ends past every payload
+  // the webhook has had: when the ones from `cursor` expired, the reader is
+  // moved past them rather than told nothing happened.
   return ok({
     payloads: page.map((row) => JSON.parse(row.body) as JsonValue),
-    cursor: last === undefined ? cursor : last.cursor + 1,
-    mightHaveMore: rows.length > limit,
+    cursor: last === undefined ? Math.max(cursor, hook.lastCursor + 1) : last.cursor + 1,
+    mightHaveMore: rows.length > size,
   })
 })

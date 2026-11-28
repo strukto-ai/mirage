@@ -18,7 +18,7 @@ import type { Db } from './store.ts'
 import type { JsonObject } from './wire.ts'
 
 export const WEBHOOK =
-  'SELECT tenant, id, baseId, spec, url, expirationTime, seq FROM AirtableWebhook'
+  'SELECT tenant, id, baseId, spec, url, expirationTime, lastCursor, seq FROM AirtableWebhook'
 
 export async function hooksOf(db: Db, tenant: string, baseId: string): Promise<AirtableWebhook[]> {
   return all<AirtableWebhook>(
@@ -29,10 +29,12 @@ export async function hooksOf(db: Db, tenant: string, baseId: string): Promise<A
   )
 }
 
-export async function payloadCount(db: Db, tenant: string, webhookId: string): Promise<number> {
+// The number of the webhook's last payload, 0 before its first; one that has
+// expired leaves its number taken.
+export async function lastCursor(db: Db, tenant: string, webhookId: string): Promise<number> {
   const found = one<{ n: number }>(
     db,
-    'SELECT COUNT(*) AS n FROM AirtableWebhookPayload WHERE tenant = ? AND webhookId = ?',
+    'SELECT lastCursor AS n FROM AirtableWebhook WHERE tenant = ? AND id = ?',
     tenant,
     webhookId,
   )
@@ -71,7 +73,7 @@ export async function notePayloads(
     changedTablesById: changes,
   })
   for (const hook of hooks) {
-    const cursor = (await payloadCount(db, tenant, hook.id)) + 1
+    const cursor = (await lastCursor(db, tenant, hook.id)) + 1
     exec(
       db,
       'INSERT INTO AirtableWebhookPayload (tenant, webhookId, cursor, "transaction", body) ' +
@@ -81,6 +83,13 @@ export async function notePayloads(
       cursor,
       transaction,
       body,
+    )
+    exec(
+      db,
+      'UPDATE AirtableWebhook SET lastCursor = ? WHERE tenant = ? AND id = ?',
+      cursor,
+      tenant,
+      hook.id,
     )
   }
 }

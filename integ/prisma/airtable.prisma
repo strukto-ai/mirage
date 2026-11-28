@@ -175,6 +175,10 @@ model AirtableWebhook {
   spec           String
   url            String?
   expirationTime String
+  // The number of the webhook's last payload, 0 before its first. A payload
+  // that expires leaves it, as on Airtable, so a cursor never names two
+  // payloads and a reader that fell behind is told it skipped some.
+  lastCursor     Int     @default(0)
   seq            Int
 
   @@id([tenant, id])
