@@ -76,6 +76,7 @@ async def test_rename_conflict_sets_the_file_aside_then_deletes_it(
             _BASE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
+        m.get(_BASE + "/root:/a.txt", payload={"id": "1", "file": {}})
         m.patch(_BASE + "/root:/b.txt", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/a.txt", status=200, payload={"id": "1"})
         m.delete(staged, status=204)
@@ -107,6 +108,7 @@ async def test_rename_conflict_replaces_empty_dir_destination(
             payload={"id": "2", "name": "dst", "folder": {"childCount": 0}},
         )
         m.get(_BASE + "/root:/dst:/children", payload={"value": []})
+        m.get(_BASE + "/root:/src", payload={"id": "1", "folder": {}})
         m.patch(_BASE + "/root:/dst", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/src", status=200, payload={"id": "1"})
         m.get(_staged("dst", ":/children"), payload={"value": []})

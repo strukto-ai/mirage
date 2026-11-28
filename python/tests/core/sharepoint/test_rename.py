@@ -73,6 +73,7 @@ async def test_rename_conflict_sets_the_file_aside_then_deletes_it(
             _DRIVE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
+        m.get(_DRIVE + "/root:/a.txt", payload={"id": "1", "file": {}})
         m.patch(_DRIVE + "/root:/b.txt", status=200, payload={"id": "2"})
         m.patch(_DRIVE + "/root:/a.txt", status=200, payload={"id": "1"})
         m.delete(staged, status=204)

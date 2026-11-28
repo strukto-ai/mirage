@@ -176,4 +176,18 @@ describe('gdrive rename', () => {
     await renamed('/src.txt', '/dst.txt')
     expect((await account.items()).map((item) => [item.id, item.name])).toEqual([[src, 'dst.txt']])
   })
+
+  it('finishes a move whose landing went through but answered an error', async () => {
+    // A relay's 502, say: the item is found under the name by its id, and the
+    // file it replaces is deleted.
+    const src = await account.upload('src.txt', 'new')
+    await account.upload('dst.txt', 'old')
+    await account.run.beforeNext(
+      [['PATCH', FILE]],
+      () => account.run.call('PATCH', `/drive/v3/files/${src}`, { json: { name: 'dst.txt' } }),
+      502,
+    )
+    await renamed('/src.txt', '/dst.txt')
+    expect((await account.items()).map((item) => [item.id, item.name])).toEqual([[src, 'dst.txt']])
+  })
 })

@@ -108,19 +108,23 @@ async function retire(
  * moves aside under a staged name, the op lands on the name, and what moved
  * aside is deleted last. A held destination is measured before the op and
  * refused as gone when a folder took it. A refused or lost step puts both back
- * (`landThenRetire`), handing a landing and the op's reply to `undo`. Returns
- * the op's reply and the destination it replaced when that was looked up.
- * Mirrors Python's `replace_onto`.
+ * (`landThenRetire`), handing a landing and what landed to `undo`; a landing
+ * whose answer was lost is found at the name (`arrived`). `moves` says the op
+ * is a move, which leaves nothing at `from`. Returns what landed and the
+ * destination it replaced when that was looked up. Mirrors Python's
+ * `replace_onto`.
  */
-export async function replaceOnto<T>(
+export async function replaceOnto(
   tm: DropboxTokenManager,
   src: PathSpec,
   dst: PathSpec,
+  from: string,
   to: string,
-  op: (to: string) => Promise<T>,
-  undo: (landed: string, reply: T) => Promise<unknown>,
+  op: (to: string) => Promise<Partial<DropboxEntry>>,
+  undo: (landed: string, made: Partial<DropboxEntry>) => Promise<unknown>,
+  moves: boolean,
   emptyFolder: boolean,
-): Promise<[T, DropboxEntry | null]> {
+): Promise<[Partial<DropboxEntry>, DropboxEntry | null]> {
   const cond = await writeCondition(dst, 'copy')
   let rev: string | null = null
   let live: ReturnType<typeof liveOf> = null
@@ -129,6 +133,7 @@ export async function replaceOnto<T>(
     rev = await nativeCondition(dst, cond, live, 'copy')
   }
   let existing: DropboxEntry
+  let source: DropboxEntry
   try {
     return [await op(to), null]
   } catch (err) {
@@ -137,6 +142,9 @@ export async function replaceOnto<T>(
     if (!err.summary.startsWith(TAKEN)) throw err
     if (rev !== null && err.summary.startsWith(TAKEN_BY_FOLDER)) throw await stale(dst)
     existing = await getMetadata(tm, to)
+    const read = await lookup(tm, from)
+    if (read === null) throw enoent(src.virtual)
+    source = read
     const blocks =
       existing['.tag'] === 'folder' &&
       !(emptyFolder && (await listFolder(tm, to, { limit: 1 })).length === 0)
@@ -145,7 +153,7 @@ export async function replaceOnto<T>(
   const folder = existing['.tag'] === 'folder'
   const content = live !== null ? live.content : tokenOf(existing.content_hash)
   const aside = asideName(to)
-  let landed: T
+  let landed: Partial<DropboxEntry>
   try {
     const moved = await setAside(
       () => moveAside(tm, dst, to, aside, folder, content),
@@ -157,6 +165,7 @@ export async function replaceOnto<T>(
       () => retire(tm, dst, aside, moved, cond),
       () => absent(tm, aside),
       () => movePath(tm, aside, to),
+      () => arrived(tm, from, to, source, moves),
     )
   } catch (err) {
     if (err instanceof DropboxApiError && err.summary.startsWith(MISSING_SOURCE)) {
@@ -165,6 +174,28 @@ export async function replaceOnto<T>(
     throw (await retaken(err, cond, dst)) ?? err
   }
   return [landed, existing]
+}
+
+/**
+ * What an op whose answer was lost landed at `to`: an entry of the source's
+ * kind there, a file with its content hash, and for a move only once nothing
+ * is left at `from`. Mirrors Python's `_arrived`.
+ */
+async function arrived(
+  tm: DropboxTokenManager,
+  from: string,
+  to: string,
+  source: DropboxEntry,
+  moves: boolean,
+): Promise<DropboxEntry | null> {
+  const there = await lookup(tm, to)
+  if (there?.['.tag'] !== source['.tag']) return null
+  if (there['.tag'] === 'file') {
+    const content = tokenOf(source.content_hash)
+    if (content === null || tokenOf(there.content_hash) !== content) return null
+  }
+  if (moves && (await lookup(tm, from)) !== null) return null
+  return there
 }
 
 // Whether nothing is at `path` any more. Mirrors Python's `_absent`.
@@ -188,9 +219,11 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
     tm,
     src,
     dst,
+    from,
     to,
     (at) => copyPath(tm, from, at),
     (landed, made) => deletePath(tm, landed, tokenOf(made.rev)),
+    false,
     false,
   )
   record('copy', dst.virtual, 'dropbox', 0, timer)

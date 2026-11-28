@@ -24,6 +24,7 @@ import {
   notFound,
   objOf,
   parseItemPath,
+  preconditionFailed,
   refDrive,
   refParent,
   strOf,
@@ -252,10 +253,22 @@ async function mkdir(ctx: Ctx<C>, drive: string, parent: string): Promise<Reply>
   return { status: 200, body: await folderItem(ctx.sql, ctx.tenant, drive, target, rootStamp(ctx)) }
 }
 
+// An update or delete held with If-Match runs only while the file still
+// carries the eTag (or cTag) named; Graph answers 412 otherwise. A folder
+// renders no eTag here, so none is held.
+function staleIfMatch(ctx: Ctx<C>, file: { etag: string; ctag: string } | null): Reply | null {
+  const want = ctx.headers['if-match']
+  if (want === undefined || file === null || want === file.etag || want === file.ctag) return null
+  return preconditionFailed()
+}
+
 async function patchItem(ctx: Ctx<C>, drive: string, item: string): Promise<Reply> {
   const p = norm(item)
-  const isFile = (await fileAt(ctx.sql, ctx.tenant, drive, p)) !== null
+  const file = await fileAt(ctx.sql, ctx.tenant, drive, p)
+  const isFile = file !== null
   if (!isFile && !(await dirAt(ctx.sql, ctx.tenant, drive, p))) return notFound()
+  const refused = staleIfMatch(ctx, file)
+  if (refused !== null) return refused
   const body = objOf(ctx.json())
   const name = strOf(body.name, baseName(p))
   const ref = objOf(body.parentReference)
@@ -465,6 +478,8 @@ async function driveOp(ctx: Ctx<C>, method: string, drive: string, rest: string)
         body: { error: { code: 'invalidRequest', message: 'Cannot delete root' } },
       }
     }
+    const refused = staleIfMatch(ctx, await fileAt(ctx.sql, ctx.tenant, drive, norm(item)))
+    if (refused !== null) return refused
     return (await removeAt(base(ctx), drive, item)) ? { status: 204 } : notFound()
   }
   if (method === 'PATCH') return patchItem(ctx, drive, item)

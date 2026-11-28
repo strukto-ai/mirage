@@ -49,6 +49,21 @@ async function move(
   })
 }
 
+// The item a move onto `name` in `folderId` landed, read by its id, null while
+// it is not there. Mirrors Python's `_moved_as`.
+async function movedAs(
+  drive: DriveApi,
+  fileId: string,
+  name: string,
+  folderId: string,
+): Promise<DriveFile | null> {
+  const item = await drive.getFile(fileId)
+  if (item.trashed === true || item.name !== name || !(item.parents ?? []).includes(folderId)) {
+    return null
+  }
+  return item
+}
+
 /**
  * Move an item, replacing a file or an empty folder at the destination,
  * handed what is at `src` and its parent and at `dst` and its parent.
@@ -105,6 +120,8 @@ export const rename = eaccesOnDenied(async function (
       await deleteReplaced(drive, dstEntry)
     },
     () => gone(drive, dstEntry.extra.file_id as string),
+    undefined,
+    () => movedAs(drive, fileId, name, dstParentId),
   )
   const moved: unknown = item
   return typeof moved === 'object' && moved !== null ? statFromItem(item) : null

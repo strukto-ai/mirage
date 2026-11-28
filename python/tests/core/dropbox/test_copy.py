@@ -155,3 +155,40 @@ async def test_copy_keeps_a_folder_that_took_the_name_before_it_moved(account):
     assert await account.run.bodies("POST", DELETE_ROUTE) == []
     assert await account.names() == ["a.txt", "b.txt"]
     assert await account.names("/b.txt") == ["child.txt"]
+
+
+async def _at_copy(account, nth: int, change, status: int | None) -> None:
+    """Run ``change`` while the ``nth`` copy from now waits, then answer it
+    with ``status``."""
+    if nth == 1:
+        await account.run.before_next([("POST", COPY_ROUTE)], change, status)
+        return
+    await account.run.before_next(
+        [("POST", COPY_ROUTE)],
+        lambda: _at_copy(account, nth - 1, change, status),
+    )
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_finished(account):
+    # The copy onto the freed name lands, but its answer is lost: it is
+    # found there by its content hash, and the file set aside is deleted.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await _at_copy(
+        account,
+        2,
+        lambda: account.run.call(
+            "POST",
+            COPY_ROUTE,
+            json={"from_path": "/a.txt", "to_path": "/b.txt"},
+        ),
+        502,
+    )
+    await copy(
+        account.accessor(),
+        PathSpec.from_str_path("/a.txt"),
+        PathSpec.from_str_path("/b.txt"),
+    )
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"mine"

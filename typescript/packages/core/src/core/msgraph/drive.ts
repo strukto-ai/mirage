@@ -252,19 +252,47 @@ export async function copyTree(
     false,
     dstVirtual,
     () => copyOnto(config, src, dst),
-    () => graphDelete(config, dst.item()),
+    (made) => graphDelete(config, dst.item(), pickString(asObject(made), 'eTag')),
+    () => landedAs(config, dst, srcItem, false),
   )
 }
 
-// Copy `src` onto a free `dst`, a conflict thrown. Mirrors Python's
-// `_copy_onto`.
+// Copy `src` onto a free `dst`, a conflict thrown, answering the copy as it
+// landed, read once its monitor completed, so its undo is held to that eTag.
+// Mirrors Python's `_copy_onto`.
 async function copyOnto(
   config: ReturnType<typeof resolveMsGraphConfig>,
   src: DriveLoc,
   dst: DriveLoc,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   const conflict = await copyRequest(config, src, dst)
   if (conflict !== null) throw new GraphError(500, conflict.code, conflict.message)
+  return graphGet(config, dst.item())
+}
+
+// Whether `there` carries a content hash of `source`'s, under any name both
+// carry (quickXorHash, sha1Hash, sha256Hash). Mirrors Python's `_same_hashes`.
+function sameHashes(source: Record<string, unknown>, there: Record<string, unknown>): boolean {
+  const ours = asObject(asObject(source.file).hashes)
+  const theirs = asObject(asObject(there.file).hashes)
+  return Object.entries(ours).some(([key, value]) => value && theirs[key] === value)
+}
+
+/**
+ * What a landing whose answer was lost made at `dst`: for a move, the source
+ * item itself, by id; for a copy, a file carrying a content hash of the
+ * source's. Null while nothing there tells it. Mirrors Python's `_landed_as`.
+ */
+async function landedAs(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  dst: DriveLoc,
+  source: Record<string, unknown>,
+  moves: boolean,
+): Promise<Record<string, unknown> | null> {
+  const there = await urlItem(config, dst.item())
+  if (there === null) return null
+  if (moves) return there.id === source.id ? there : null
+  return 'file' in there && sameHashes(source, there) ? there : null
 }
 
 /**
@@ -272,17 +300,20 @@ async function copyOnto(
  * `land` answered. Graph refuses a taken name, so what holds it moves aside
  * under a staged name, the item lands on the name, and what moved aside is
  * deleted last, a folder only while it lists no child, so one added while the
- * item landed is not deleted with it. A refused or lost step puts both back
- * (`landThenRetire`). Mirrors Python's `_replace_over`.
+ * item landed is not deleted with it. A refused or lost step puts both back,
+ * and a landing whose answer was lost but which went through (`arrived`) is
+ * finished (`landThenRetire`). `takeBack` is held to the eTag a landing landed
+ * with. Mirrors Python's `_replace_over`.
  */
-async function replaceOver<T>(
+async function replaceOver(
   config: ReturnType<typeof resolveMsGraphConfig>,
   dst: DriveLoc,
   folder: boolean,
   dstVirtual: string | undefined,
-  land: () => Promise<T>,
-  takeBack: (landed: T) => Promise<unknown>,
-): Promise<T> {
+  land: () => Promise<Record<string, unknown>>,
+  takeBack: (landed: Record<string, unknown>) => Promise<unknown>,
+  arrived: () => Promise<Record<string, unknown> | null>,
+): Promise<Record<string, unknown>> {
   const name = baseName(dst.path)
   const staged = asideName(name)
   const aside = dst.renamed(staged)
@@ -301,6 +332,7 @@ async function replaceOver<T>(
     },
     async () => (await urlItem(config, aside.item())) === null,
     () => graphPatch(config, aside.item(), { name }),
+    arrived,
   )
 }
 
@@ -333,6 +365,7 @@ export async function renameReplace(
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
   let destination: Record<string, unknown>
+  let source: Record<string, unknown>
   try {
     return {
       moved: await graphPatch(config, src.item(), moveBody(src, dst)),
@@ -355,6 +388,7 @@ export async function renameReplace(
       const children = await graphList(config, dst.item('/children'))
       if (children.length > 0) throw error
     }
+    source = await graphGet(config, src.item())
   }
   const moved = await replaceOver(
     config,
@@ -362,7 +396,9 @@ export async function renameReplace(
     destination.folder !== undefined,
     dstVirtual,
     () => graphPatch(config, src.item(), moveBody(src, dst)),
-    () => graphPatch(config, dst.item(), moveBody(dst, src)),
+    (landed) =>
+      graphPatch(config, dst.item(), moveBody(dst, src), pickString(asObject(landed), 'eTag')),
+    () => landedAs(config, dst, source, true),
   )
   return { moved, replacedNonFile: !('file' in destination) }
 }

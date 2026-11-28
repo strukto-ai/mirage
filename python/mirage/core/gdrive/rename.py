@@ -73,6 +73,28 @@ async def _move(
     )
 
 
+async def _moved_as(
+    drive: DriveApi, file_id: str, name: str, folder_id: str
+) -> dict[str, Any] | None:
+    """The item a move onto ``name`` in ``folder_id`` landed, read by its
+    id, None while it is not there.
+
+    Args:
+        drive (DriveApi): the Drive client.
+        file_id (str): the item moved.
+        name (str): the Drive name it lands under.
+        folder_id (str): the folder it lands in.
+    """
+    item = await drive.get_file(file_id)
+    if (
+        item.get("trashed")
+        or item.get("name") != name
+        or folder_id not in (item.get("parents") or [])
+    ):
+        return None
+    return dict(item)
+
+
 @eacces_on_denied
 async def rename(
     accessor: GDriveAccessor,
@@ -143,5 +165,6 @@ async def rename(
         lambda _: _move(drive, file_id, back, src_parent_id, dst_parent_id),
         retire,
         lambda: gone(drive, replaced.extra["file_id"]),
+        arrived=lambda: _moved_as(drive, file_id, name, dst_parent_id),
     )
     return stat_from_item(item) if isinstance(item, dict) else None

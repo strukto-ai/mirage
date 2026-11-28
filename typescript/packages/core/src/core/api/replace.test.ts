@@ -19,7 +19,8 @@ import { asideName, landThenRetire, setAside } from './replace.ts'
 // Each step records its name, and fails when told to.
 class Steps {
   readonly done: string[] = []
-  gone = false
+  gone: boolean | Error = false
+  found: string | null = null
 
   constructor(private readonly failing: Record<string, Error> = {}) {}
 
@@ -31,7 +32,13 @@ class Steps {
 
   isGone(): Promise<boolean> {
     this.done.push('gone?')
-    return Promise.resolve(this.gone)
+    const gone = this.gone
+    return gone instanceof Error ? Promise.reject(gone) : Promise.resolve(gone)
+  }
+
+  arrived(): Promise<string | null> {
+    this.done.push('arrived?')
+    return Promise.resolve(this.found)
   }
 }
 
@@ -42,6 +49,7 @@ function replaced(steps: Steps, restore = true): Promise<string> {
     () => steps.step('retire'),
     () => steps.isGone(),
     restore ? () => steps.step('restore') : undefined,
+    () => steps.arrived(),
   )
 }
 
@@ -66,6 +74,9 @@ describe('replace', () => {
   it.each([
     ['dropped', new TypeError('fetch failed')],
     ['5xx', new ApiError('bad gateway', 502)],
+    // A retried 503 answers with what its retry met, after the first attempt
+    // moved the item.
+    ['retried', new ApiError('not found', 404)],
   ])('puts back a set-aside whose answer was lost (%s)', async (_kind, failure) => {
     // The move may have gone through, so the name is put back; the error that
     // called for it stays the one thrown.
@@ -110,6 +121,39 @@ describe('replace', () => {
     const steps = new Steps({ retire: new TypeError('fetch failed') })
     steps.gone = true
     expect(await replaced(steps)).toBe('land')
+    expect(steps.done).toEqual(['land', 'retire', 'gone?'])
+  })
+
+  it('finishes a lost landing that went through', async () => {
+    // The landing holds the name, where nothing can be put back: what it made
+    // is found and the replace goes on to the retire.
+    const steps = new Steps({ land: new TypeError('fetch failed') })
+    steps.found = 'found'
+    expect(await replaced(steps)).toBe('found')
+    expect(steps.done).toEqual(['land', 'arrived?', 'retire'])
+  })
+
+  it('restores after a lost landing that did not land', async () => {
+    const steps = new Steps({ land: new ApiError('bad gateway', 502) })
+    await expect(replaced(steps)).rejects.toBeInstanceOf(ApiError)
+    expect(steps.done).toEqual(['land', 'arrived?', 'restore'])
+  })
+
+  it('asks nothing after a refused landing', async () => {
+    // A 4xx means nothing landed, so the service is not asked.
+    const steps = new Steps({ land: new ApiError('denied', 403) })
+    steps.found = 'found'
+    await expect(replaced(steps)).rejects.toBeInstanceOf(ApiError)
+    expect(steps.done).toEqual(['land', 'restore'])
+  })
+
+  it('keeps the landing when the retire cannot be told', async () => {
+    // The delete may have gone through: undoing the landing then would leave
+    // nothing at the name, so the landing stays and the error is thrown.
+    const failure = new TypeError('fetch failed')
+    const steps = new Steps({ retire: failure })
+    steps.gone = new TypeError('still failing')
+    await expect(replaced(steps)).rejects.toBe(failure)
     expect(steps.done).toEqual(['land', 'retire', 'gone?'])
   })
 

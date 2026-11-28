@@ -136,6 +136,7 @@ describe('copyTree', () => {
       { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
       { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: retry },
       { method: 'GET', url: retry, body: { status: 'completed' } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '3', eTag: 'e3', file: {} } },
       { method: 'DELETE', url: staged('b.txt'), status: 204 },
     ])
 
@@ -147,6 +148,31 @@ describe('copyTree', () => {
     const deleted = rec.calls.filter(([m]) => m === 'DELETE')
     expect(deleted).toHaveLength(1)
     expect(deleted[0]?.[1]).toMatch(staged('b.txt'))
+  })
+
+  it('finds a copy whose landing went through by its hash', async () => {
+    // The copy onto the freed name lands, but reading its monitor fails: a file
+    // at the name with the source's hash is that copy, so the file set aside is
+    // deleted and nothing is put back.
+    const monitor = 'https://monitor.test/op/4'
+    const retry = 'https://monitor.test/op/4-retry'
+    const hashes = { quickXorHash: 'q1' }
+    const rec = stubFetch([
+      { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: monitor },
+      { method: 'GET', url: monitor, body: { status: 'failed', ...CONFLICT } },
+      { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', file: { hashes } } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
+      { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
+      { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: retry },
+      { method: 'GET', url: retry, status: 502, body: { error: { code: 'badGateway' } } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '3', file: { hashes } } },
+      { method: 'DELETE', url: staged('b.txt'), status: 204 },
+    ])
+
+    await copyTree(config, loc('a.txt'), loc('b.txt'))
+
+    expect(rec.pending()).toBe(0)
+    expect(rec.calls.filter(([m]) => m === 'PATCH')).toHaveLength(1)
   })
 
   it.each(['monitor', 'http'] as const)(
@@ -250,6 +276,7 @@ describe('renameReplace', () => {
     const rec = stubFetch([
       { method: 'PATCH', url: itemUrl('a.txt'), status: 409, body: CONFLICT },
       { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', name: 'b.txt', size: 1, file: {} } },
+      { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', file: {} } },
       { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2' } },
       { method: 'PATCH', url: itemUrl('a.txt'), body: { id: '1', name: 'b.txt' } },
       { method: 'DELETE', url: staged('b.txt'), status: 204 },
@@ -269,6 +296,7 @@ describe('renameReplace', () => {
       { method: 'PATCH', url: itemUrl('src'), status: 409, body: CONFLICT },
       { method: 'GET', url: itemUrl('dst'), body: { id: '2', name: 'dst', folder: {} } },
       { method: 'GET', url: itemUrl('dst', '/children'), body: { value: [] } },
+      { method: 'GET', url: itemUrl('src'), body: { id: '1', folder: {} } },
       { method: 'PATCH', url: itemUrl('dst'), body: { id: '2' } },
       { method: 'PATCH', url: itemUrl('src'), body: { id: '1', name: 'dst' } },
       { method: 'GET', url: staged('dst', ':/children'), body: { value: [] } },
@@ -842,6 +870,41 @@ describe('a replace on the Graph fake', () => {
     expect(await names()).toEqual(['b.txt', 'sub'])
     expect(await names('sub')).toEqual(['a.txt'])
     expect(text(await drive.content('b.txt'))).toBe('theirs')
+  })
+
+  it('finishes a rename whose landing went through', async () => {
+    // The third PATCH (the first met the taken name, the second set the file
+    // there aside) lands, but its answer is a relay's 502: the item is found at
+    // the name by its id, and the file set aside is deleted.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext([['PATCH', ITEM]], () =>
+      drive.run.beforeNext([['PATCH', ITEM]], () =>
+        drive.run.beforeNext(
+          [['PATCH', ITEM]],
+          () => drive.run.call('PATCH', '/me/drive/root:/a.txt', { json: { name: 'b.txt' } }),
+          502,
+        ),
+      ),
+    )
+    await replaced(renameReplace, 'a.txt', 'b.txt')
+    expect(await names()).toEqual(['b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('mine')
+  })
+
+  it.each([
+    ['rename', renameReplace],
+    ['copy', copyTree],
+  ] as const)('a %s take back leaves a landing another client wrote onto', async (name, op) => {
+    // The delete of what moved aside is refused, and another client wrote
+    // onto the landed item meanwhile: the take back is held to the eTag it
+    // landed with, so that write stays at the name.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext([['DELETE', ITEM]], () => drive.write('b.txt', 'later'), 403)
+    await expect(replaced(op, 'a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(text(await drive.content('b.txt'))).toBe('later')
+    expect((await names()).includes('a.txt')).toBe(name === 'copy')
   })
 
   it('keeps a folder given a child while the source moves', async () => {

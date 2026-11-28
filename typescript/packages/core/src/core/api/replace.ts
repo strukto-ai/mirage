@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RETRIED_ANSWERS } from './constants.ts'
 import { ApiError } from './errors.ts'
 
 /**
@@ -26,9 +27,16 @@ export function asideName(name: string): string {
 
 // Whether the service refused the request, so nothing it asked for happened. A
 // dropped connection, an abort, a 5xx or a check run after the request may
-// each follow a change that went through.
+// each follow a change that went through, and so may a 404: a client that
+// retries a 503 answers with what the retry met, after its first attempt moved
+// the item.
 function answered(err: unknown): boolean {
-  return err instanceof ApiError && err.status !== null && err.status < 500
+  return (
+    err instanceof ApiError &&
+    err.status !== null &&
+    err.status < 500 &&
+    !RETRIED_ANSWERS.has(err.status)
+  )
 }
 
 // An undo step, its failure logged, so the error that called for it stays
@@ -41,14 +49,14 @@ async function quietly(step: () => Promise<unknown>, what: string): Promise<void
   }
 }
 
-// Whether what a refused retire named is gone after all; a failed check
-// counts as there.
-async function goneAfterAll(gone: () => Promise<boolean>): Promise<boolean> {
+// Ask the service what a step whose answer was lost did, null when the
+// question fails too.
+async function asked<V>(check: () => Promise<V>, what: string): Promise<V | null> {
   try {
-    return await gone()
+    return await check()
   } catch (err) {
-    console.debug(`could not tell whether the retire went through: ${String(err)}`)
-    return false
+    console.debug(`could not tell whether ${what}: ${String(err)}`)
+    return null
   }
 }
 
@@ -70,14 +78,53 @@ export async function setAside<T>(
   }
 }
 
+// Settle a landing that threw, answering the landing to finish, null once
+// what was set aside is put back. One whose answer was lost may have gone
+// through, and then holds the name, where `restore` cannot put anything
+// back: `arrived` finds it. Mirrors Python's `_landing_failed`, which also
+// takes a landing back under a cancellation.
+async function landingFailed<T>(
+  err: unknown,
+  restore: (() => Promise<unknown>) | undefined,
+  arrived: (() => Promise<T | null>) | undefined,
+): Promise<T | null> {
+  if (arrived !== undefined && !answered(err)) {
+    const found = await asked(arrived, 'the landing went through')
+    if (found !== null) return found
+  }
+  if (restore !== undefined) await quietly(restore, 'restore the destination')
+  return null
+}
+
+// Settle a retire that threw, answering whether it went through after all.
+// It is undone only while what it named is still there: a delete whose
+// answer was lost may have gone through, so a failed check keeps the
+// landing, since undoing it then would leave nothing at the name. Mirrors
+// Python's `_retire_failed`.
+async function retireFailed<T>(
+  landed: T,
+  takeBack: (landed: T) => Promise<unknown>,
+  gone: () => Promise<boolean>,
+  restore: (() => Promise<unknown>) | undefined,
+): Promise<boolean> {
+  const went = await asked(gone, 'the retire went through')
+  if (went !== false) return went === true
+  await quietly(() => takeBack(landed), 'take back the landing')
+  if (restore !== undefined) await quietly(restore, 'restore the destination')
+  return false
+}
+
 /**
  * Land an item on a name, then retire what held the name before, answering
- * what `land` answered. What held it was set aside (`restore` puts it back)
- * or, on a service that keeps two items of one name, left beside the landing
- * (`restore` undefined). A failed landing restores it. A failed retire takes
- * the landing back and restores it, unless what it named is gone after all: a
- * delete whose answer was lost went through, so the replace stands. Mirrors
- * Python's `land_then_retire`.
+ * what `land` answered or what `arrived` found. What held it was set aside
+ * (`restore` puts it back) or, on a service that keeps two items of one name,
+ * left beside the landing (`restore` undefined). A refused landing restores
+ * it; one whose answer was lost but which went through (`arrived`, null when
+ * it did not or the service cannot tell it from another writer's) is
+ * finished. A failed retire takes the landing back, held to the version it
+ * landed as, and restores it, unless what it named is gone after all or that
+ * cannot be told: the replace then stands. Mirrors Python's
+ * `land_then_retire`.
  */
 export async function landThenRetire<T>(
   land: () => Promise<T>,
@@ -85,20 +132,21 @@ export async function landThenRetire<T>(
   retire: () => Promise<unknown>,
   gone: () => Promise<boolean>,
   restore?: () => Promise<unknown>,
+  arrived?: () => Promise<T | null>,
 ): Promise<T> {
   let landed: T
   try {
     landed = await land()
   } catch (err) {
-    if (restore !== undefined) await quietly(restore, 'restore the destination')
-    throw err
+    const found = await landingFailed(err, restore, arrived)
+    if (found === null) throw err
+    console.debug(`the landing went through after all: ${String(err)}`)
+    landed = found
   }
   try {
     await retire()
   } catch (err) {
-    if (await goneAfterAll(gone)) return landed
-    await quietly(() => takeBack(landed), 'take back the landing')
-    if (restore !== undefined) await quietly(restore, 'restore the destination')
+    if (await retireFailed(landed, takeBack, gone, restore)) return landed
     throw err
   }
   return landed

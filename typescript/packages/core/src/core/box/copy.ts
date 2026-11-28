@@ -153,7 +153,9 @@ export async function gone(tm: BoxTokenManager, item: BoxItem): Promise<boolean>
  * staged name first, a file held to `etag`, then the item lands on the name,
  * and what moved aside is deleted last: a file held to the version its move
  * answered, a folder only while it is empty. A refused or lost step puts both
- * back (`landThenRetire`). Mirrors Python's `replace_item`.
+ * back, and a landing whose answer was lost but which went through
+ * (`arrived`) is finished (`landThenRetire`). `takeBack` is held to the
+ * version a landing landed as. Mirrors Python's `replace_item`.
  */
 export async function replaceItem(
   accessor: BoxAccessor,
@@ -163,6 +165,7 @@ export async function replaceItem(
   etag: string | null,
   land: () => Promise<BoxItem>,
   takeBack: (landed: BoxItem) => Promise<unknown>,
+  arrived: () => Promise<BoxItem | null>,
 ): Promise<BoxItem> {
   const tm = accessor.tokenManager
   const parts = pathParts(dst)
@@ -187,6 +190,7 @@ export async function replaceItem(
       retire,
       () => gone(tm, existing),
       () => place(tm, existing, name, undefined),
+      arrived,
     )
   } catch (err) {
     throw (await retaken(err, cond, dst)) ?? err
@@ -194,10 +198,30 @@ export async function replaceItem(
 }
 
 /**
+ * The copy of `item` a copy onto `name` landed: a file of that name in
+ * `folderId` with `item`'s sha1, null when there is none, or no sha1 to tell it
+ * by. Mirrors Python's `_copied_as`.
+ */
+async function copiedAs(
+  tm: BoxTokenManager,
+  item: BoxItem,
+  folderId: string,
+  name: string,
+): Promise<BoxItem | null> {
+  const sha1 = item.sha1
+  if (sha1 === undefined || sha1 === '') return null
+  const found = (await listFolderItems(tm, folderId)).find(
+    (entry) => entry.type === 'file' && entry.name === name && entry.sha1 === sha1,
+  )
+  return found ?? null
+}
+
+/**
  * Copy a file onto the file that holds `dst`'s name. A stale destination is
  * refused before anything is sent; the rest is `replaceItem`, whose undo for a
  * landed copy is its delete, held to the version it landed as, so a write onto
- * it since is kept. Mirrors Python's `_copy_over`.
+ * it since is kept. A copy whose answer was lost is found by its sha1
+ * (`copiedAs`). Mirrors Python's `_copy_over`.
  */
 async function copyOver(
   accessor: BoxAccessor,
@@ -225,6 +249,7 @@ async function copyOver(
     etag,
     () => copyFile(tm, item.id, folderId, newName),
     (made) => deleteFile(tm, made.id, made.etag ?? null),
+    () => copiedAs(tm, item, folderId, newName),
   )
 }
 

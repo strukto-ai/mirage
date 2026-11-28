@@ -27,7 +27,8 @@ class Steps:
     def __init__(self, failing: dict[str, BaseException] | None = None):
         self.done: list[str] = []
         self.failing = failing or {}
-        self.gone = False
+        self.gone: bool | BaseException = False
+        self.found: str | None = None
 
     async def step(self, name: str) -> str:
         self.done.append(name)
@@ -37,7 +38,13 @@ class Steps:
 
     async def is_gone(self) -> bool:
         self.done.append("gone?")
+        if isinstance(self.gone, BaseException):
+            raise self.gone
         return self.gone
+
+    async def arrived(self) -> str | None:
+        self.done.append("arrived?")
+        return self.found
 
 
 async def _replace(steps: Steps, restore: bool = True) -> str:
@@ -47,6 +54,7 @@ async def _replace(steps: Steps, restore: bool = True) -> str:
         lambda: steps.step("retire"),
         steps.is_gone,
         (lambda: steps.step("restore")) if restore else None,
+        steps.arrived,
     )
 
 
@@ -69,8 +77,12 @@ async def test_a_refused_set_aside_moved_nothing_so_nothing_goes_back():
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure",
-    [ConnectionResetError("dropped"), ApiError("bad gateway", 502)],
-    ids=["dropped", "5xx"],
+    [
+        ConnectionResetError("dropped"),
+        ApiError("bad gateway", 502),
+        ApiError("not found", 404),
+    ],
+    ids=["dropped", "5xx", "retried"],
 )
 async def test_a_set_aside_whose_answer_is_lost_is_put_back(failure):
     # The move may have gone through, so the name is put back; the error
@@ -166,3 +178,89 @@ async def test_a_cancelled_retire_that_went_through_still_cancels():
     with pytest.raises(asyncio.CancelledError):
         await _replace(steps)
     assert steps.done == ["land", "retire", "gone?"]
+
+
+@pytest.mark.asyncio
+async def test_a_lost_landing_that_went_through_is_finished():
+    # The landing holds the name, where nothing can be put back: what it
+    # made is found and the replace goes on to the retire.
+    steps = Steps({"land": ConnectionResetError("dropped")})
+    steps.found = "found"
+    assert await _replace(steps) == "found"
+    assert steps.done == ["land", "arrived?", "retire"]
+
+
+@pytest.mark.asyncio
+async def test_a_lost_landing_that_did_not_land_restores():
+    steps = Steps({"land": ApiError("bad gateway", 502)})
+    with pytest.raises(ApiError):
+        await _replace(steps)
+    assert steps.done == ["land", "arrived?", "restore"]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_landing_asks_nothing():
+    # A 4xx means nothing landed, so the service is not asked.
+    steps = Steps({"land": ApiError("denied", 403)})
+    steps.found = "found"
+    with pytest.raises(ApiError):
+        await _replace(steps)
+    assert steps.done == ["land", "restore"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_landing_that_went_through_puts_both_back():
+    steps = Steps({"land": asyncio.CancelledError()})
+    steps.found = "found"
+    with pytest.raises(asyncio.CancelledError):
+        await _replace(steps)
+    assert steps.done == ["land", "arrived?", "take back found", "restore"]
+
+
+@pytest.mark.asyncio
+async def test_a_retire_that_cannot_be_told_keeps_the_landing():
+    # The delete may have gone through: undoing the landing then would
+    # leave nothing at the name, so the landing stays and the error is
+    # raised.
+    failure = ConnectionResetError("dropped")
+    steps = Steps({"retire": failure})
+    steps.gone = ConnectionResetError("still dropped")
+    with pytest.raises(ConnectionResetError) as caught:
+        await _replace(steps)
+    assert caught.value is failure
+    assert steps.done == ["land", "retire", "gone?"]
+
+
+@pytest.mark.asyncio
+async def test_a_second_cancellation_lets_the_undo_finish():
+    steps = Steps({"retire": ApiError("denied", 403)})
+    taking = asyncio.Event()
+    release = asyncio.Event()
+
+    async def take_back(landed: str) -> None:
+        steps.done.append(f"take back {landed}")
+        taking.set()
+        await release.wait()
+
+    task = asyncio.ensure_future(
+        land_then_retire(
+            lambda: steps.step("land"),
+            take_back,
+            lambda: steps.step("retire"),
+            steps.is_gone,
+            lambda: steps.step("restore"),
+        )
+    )
+    await taking.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert steps.done == [
+        "land",
+        "retire",
+        "gone?",
+        "take back land",
+        "restore",
+    ]

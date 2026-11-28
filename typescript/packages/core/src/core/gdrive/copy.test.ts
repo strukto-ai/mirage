@@ -187,4 +187,22 @@ describe('gdrive copy', () => {
     const made = items.find((item) => item.name === 'dst.txt')
     expect(await account.content(made?.id ?? '')).toBe('new')
   })
+
+  it('finishes a copy whose landing went through but answered an error', async () => {
+    // The copy lands beside the destination, but its answer is a relay's 502:
+    // it is found there by its md5, and the file it replaces is deleted, so one
+    // copy holds the name.
+    const src = await account.upload('src.txt', 'new')
+    await account.upload('dst.txt', 'old')
+    await account.run.beforeNext(
+      [['POST', COPY]],
+      () => account.run.call('POST', `/drive/v3/files/${src}/copy`, { json: { name: 'dst.txt' } }),
+      502,
+    )
+    await copied('/src.txt', '/dst.txt')
+    const items = await account.items()
+    expect(items.map((item) => item.name).sort()).toEqual(['dst.txt', 'src.txt'])
+    const made = items.find((item) => item.name === 'dst.txt')
+    expect(await account.content(made?.id ?? '')).toBe('new')
+  })
 })

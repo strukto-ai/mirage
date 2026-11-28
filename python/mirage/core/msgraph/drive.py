@@ -69,8 +69,6 @@ from mirage.utils.ranges import window_for
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 UPLOAD_CHUNK = 10 * 327680
 
@@ -281,7 +279,8 @@ async def copy_tree(
         False,
         dst_virtual,
         lambda: _copy_onto(accessor, src, dst),
-        lambda _: graph_delete(accessor, dst.item()),
+        lambda made: graph_delete(accessor, dst.item(), made.get("eTag")),
+        lambda: _landed_as(accessor, dst, src_item, moves=False),
     )
 
 
@@ -289,17 +288,61 @@ async def _copy_onto(
     accessor: OneDriveAccessor | SharePointAccessor,
     src: DriveLoc,
     dst: DriveLoc,
-) -> None:
+) -> dict[str, Any]:
     """Copy ``src`` onto a free ``dst``, a conflict raised.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         src (DriveLoc): source item.
         dst (DriveLoc): where the copy lands.
+
+    Returns:
+        dict[str, Any]: the copy as it landed, read once its monitor
+        completed, so its undo is held to that eTag.
     """
     err = await _copy_request(accessor, src, dst)
     if err is not None:
         raise GraphError(500, err[0], err[1])
+    return await graph_get(accessor, dst.item())
+
+
+def _same_hashes(source: Mapping[str, Any], there: Mapping[str, Any]) -> bool:
+    """Whether ``there`` carries a content hash of ``source``'s, under any
+    name both carry (quickXorHash, sha1Hash, sha256Hash).
+
+    Args:
+        source (dict[str, Any]): the source file.
+        there (dict[str, Any]): what is at the name.
+    """
+    ours = (source.get("file") or {}).get("hashes") or {}
+    theirs = (there.get("file") or {}).get("hashes") or {}
+    return any(
+        value and theirs.get(key) == value for key, value in ours.items()
+    )
+
+
+async def _landed_as(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    dst: DriveLoc,
+    source: Mapping[str, Any],
+    moves: bool,
+) -> dict[str, Any] | None:
+    """What a landing whose answer was lost made at ``dst``: for a move,
+    the source item itself, by id; for a copy, a file carrying a content
+    hash of the source's. None while nothing there tells it.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        dst (DriveLoc): the name it lands on.
+        source (dict[str, Any]): the source, as it was read.
+        moves (bool): whether the landing is a move.
+    """
+    there = await _url_item(accessor, dst.item())
+    if there is None:
+        return None
+    if moves:
+        return there if there.get("id") == source.get("id") else None
+    return there if "file" in there and _same_hashes(source, there) else None
 
 
 async def _replace_over(
@@ -307,27 +350,33 @@ async def _replace_over(
     dst: DriveLoc,
     folder: bool,
     dst_virtual: str | None,
-    land: Callable[[], Awaitable[T]],
-    take_back: Callable[[T], Awaitable[Any]],
-) -> T:
+    land: Callable[[], Awaitable[dict[str, Any]]],
+    take_back: Callable[[dict[str, Any]], Awaitable[Any]],
+    arrived: Callable[[], Awaitable[dict[str, Any] | None]],
+) -> dict[str, Any]:
     """Land an item on the file or empty folder that holds ``dst``.
 
     Graph refuses a taken name, so what holds it moves aside under a
     staged name, the item lands on the name, and what moved aside is
     deleted last, a folder only while it lists no child, so one added
     while the item landed is not deleted with it. A refused or lost step
-    puts both back (``land_then_retire``).
+    puts both back, and a landing whose answer was lost but which went
+    through is finished (``land_then_retire``).
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         dst (DriveLoc): what is replaced.
         folder (bool): whether ``dst`` is a folder.
         dst_virtual (str | None): full destination operand for errors.
-        land (Callable[[], Awaitable[T]]): the copy or move onto the name.
-        take_back (Callable[[T], Awaitable[Any]]): what undoes a landing.
+        land (Callable[[], Awaitable[dict[str, Any]]]): the copy or move
+            onto the name, answering the item that landed.
+        take_back (Callable[[dict[str, Any]], Awaitable[Any]]): what
+            undoes a landing, held to the eTag it landed with.
+        arrived (Callable[[], Awaitable[dict[str, Any] | None]]): what
+            the landing made, when it went through.
 
     Returns:
-        T: what ``land`` answered.
+        dict[str, Any]: what landed.
     """
     name = base_name(dst.path)
     staged = aside_name(name)
@@ -351,6 +400,7 @@ async def _replace_over(
         retire,
         gone,
         lambda: graph_patch(accessor, aside.item(), {"name": name}),
+        arrived,
     )
 
 
@@ -407,6 +457,7 @@ async def rename_replace(
             children = await graph_list(accessor, dst.item("/children"))
             if children:
                 raise
+        src_item = await graph_get(accessor, src.item())
     else:
         return MovedItem(
             moved=moved if isinstance(moved, dict) else {},
@@ -418,7 +469,10 @@ async def rename_replace(
         "folder" in dst_item,
         dst_virtual,
         lambda: graph_patch(accessor, src.item(), _move_body(src, dst)),
-        lambda _: graph_patch(accessor, dst.item(), _move_body(dst, src)),
+        lambda landed: graph_patch(
+            accessor, dst.item(), _move_body(dst, src), landed.get("eTag")
+        ),
+        lambda: _landed_as(accessor, dst, src_item, moves=True),
     )
     return MovedItem(
         moved=moved if isinstance(moved, dict) else {},

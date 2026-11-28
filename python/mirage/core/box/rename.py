@@ -17,8 +17,12 @@ from typing import Any
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.types import WriteCondition
-from mirage.core.box.api import list_folder_items
-from mirage.core.box.client import BoxApiError
+from mirage.core.box.api import (
+    get_file_info,
+    get_folder_info,
+    list_folder_items,
+)
+from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.core.box.copy import (
     held_file,
     place,
@@ -68,6 +72,31 @@ def _folder_of(item: Mapping[str, Any]) -> str | None:
     return str(entries[-1]["id"]) if entries else None
 
 
+async def _moved_as(
+    tm: BoxTokenManager,
+    item: Mapping[str, Any],
+    name: str,
+    folder_id: str,
+) -> dict[str, Any] | None:
+    """The item a move onto ``name`` in ``folder_id`` landed, read by its
+    id, None while it is not there.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        item (dict[str, Any]): the item moved.
+        name (str): the name it lands on.
+        folder_id (str): the folder it lands in.
+    """
+    info: Mapping[str, Any]
+    if item.get("type") == "folder":
+        info = await get_folder_info(tm, item["id"])
+    else:
+        info = await get_file_info(tm, item["id"])
+    if info.get("name") != name or _folder_of(info) != folder_id:
+        return None
+    return dict(info)
+
+
 async def _replace_onto(
     accessor: BoxAccessor,
     item: Mapping[str, Any],
@@ -80,7 +109,9 @@ async def _replace_onto(
     A stale destination file is refused before anything is sent, and so
     is a folder that holds anything, the item itself included (``mv -T
     d/c d``). The rest is ``replace_item``, whose undo for a landed item
-    moves it back to its folder and name.
+    moves it back to its folder and name, held to the version it landed
+    as, and which finds a move whose answer was lost by the item's id
+    (``_moved_as``).
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -112,7 +143,10 @@ async def _replace_onto(
         cond,
         etag,
         lambda: place(tm, item, new_name, folder_id),
-        lambda landed: place(tm, landed, item["name"], _folder_of(item)),
+        lambda landed: place(
+            tm, landed, item["name"], _folder_of(item), landed.get("etag")
+        ),
+        lambda: _moved_as(tm, item, new_name, folder_id),
     )
 
 

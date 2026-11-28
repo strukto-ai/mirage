@@ -65,6 +65,16 @@ function renamed(src: string, dst: string): Promise<void> {
   return rename(account.accessor(), PathSpec.fromStrPath(src), PathSpec.fromStrPath(dst))
 }
 
+// Run `change` while the `nth` move from now waits, then answer it with
+// `status`.
+async function atMove(nth: number, change: () => Promise<unknown>, status: number): Promise<void> {
+  if (nth === 1) {
+    await account.run.beforeNext([['POST', MOVE]], change, status)
+    return
+  }
+  await account.run.beforeNext([['POST', MOVE]], () => atMove(nth - 1, change, status))
+}
+
 describe('dropbox rename onto a taken name', () => {
   it('sets the file aside, takes its name, then deletes it', async () => {
     await account.put('/a.txt', ENC.encode('mine'))
@@ -126,5 +136,36 @@ describe('dropbox rename onto a taken name', () => {
     expect(await account.names()).toEqual(['dst', 'src'])
     expect(await account.names('/dst')).toEqual(['late.txt'])
     expect(await account.names('/src')).toEqual(['x.txt'])
+  })
+
+  it('finishes a move whose landing went through', async () => {
+    // The third move (the first met the taken name, the second set the file
+    // there aside) lands, but its answer is lost: the moved file is found at
+    // the name, and the file set aside is deleted.
+    await account.put('/a.txt', ENC.encode('mine'))
+    await account.put('/b.txt', ENC.encode('theirs'))
+    await atMove(
+      3,
+      () => account.run.call('POST', MOVE, { json: { from_path: '/a.txt', to_path: '/b.txt' } }),
+      502,
+    )
+    await renamed('/a.txt', '/b.txt')
+    expect(await account.names()).toEqual(['b.txt'])
+    expect(new TextDecoder().decode(await account.read('/b.txt'))).toBe('mine')
+  })
+
+  it('leaves a landing another client wrote onto when the delete is refused', async () => {
+    // Its rev moved on, so it stays at the name rather than going back with
+    // that write.
+    await account.put('/a.txt', ENC.encode('mine'))
+    await account.put('/b.txt', ENC.encode('theirs'))
+    await account.run.beforeNext(
+      [['POST', DELETE]],
+      () => account.put('/b.txt', ENC.encode('later')),
+      409,
+    )
+    await expect(renamed('/a.txt', '/b.txt')).rejects.toBeInstanceOf(DropboxApiError)
+    expect(new TextDecoder().decode(await account.read('/b.txt'))).toBe('later')
+    expect(await account.names()).not.toContain('a.txt')
   })
 })

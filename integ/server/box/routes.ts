@@ -37,6 +37,7 @@ import {
 } from './store.ts'
 import {
   boxError,
+  etagOf,
   eventEntry,
   listOrder,
   nameInUse,
@@ -290,10 +291,10 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
 
 // If-Match names the etag (the item's version) a request was based on; Box
 // answers 412 when the file moved on since (measured 2026-10-05 for uploads,
-// 2026-10-08 for deletes).
-function staleIfMatch(ctx: Ctx<C>, item: { version: number }): Reply | null {
+// 2026-10-08 for deletes). It is checked against the etag the item renders.
+function staleIfMatch(ctx: Ctx<C>, item: Item): Reply | null {
   const want = ctx.headers['if-match']
-  if (want === undefined || want === String(item.version)) return null
+  if (want === undefined || want === etagOf(item)) return null
   return boxError(412, 'precondition_failed', 'the resource has been modified')
 }
 

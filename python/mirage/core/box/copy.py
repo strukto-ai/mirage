@@ -222,6 +222,7 @@ async def replace_item(
     etag: str | None,
     land: Callable[[], Awaitable[dict[str, Any]]],
     take_back: Callable[[dict[str, Any]], Awaitable[Any]],
+    arrived: Callable[[], Awaitable[dict[str, Any] | None]],
 ) -> dict[str, Any]:
     """Land an item on the name ``existing`` holds, replacing it.
 
@@ -229,7 +230,8 @@ async def replace_item(
     name first, a file held to ``etag``, then the item lands on the name,
     and what moved aside is deleted last: a file held to the version its
     move answered, a folder only while it is empty. A refused or lost
-    step puts both back (``land_then_retire``).
+    step puts both back, and a landing whose answer was lost but which
+    went through is finished (``land_then_retire``).
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -240,7 +242,9 @@ async def replace_item(
         land (Callable[[], Awaitable[dict[str, Any]]]): the copy or move
             onto the name.
         take_back (Callable[[dict[str, Any]], Awaitable[Any]]): what
-            undoes a landing.
+            undoes a landing, held to the version it landed as.
+        arrived (Callable[[], Awaitable[dict[str, Any] | None]]): what
+            the landing made, when it went through.
 
     Returns:
         dict[str, Any]: what the landing answered.
@@ -268,9 +272,39 @@ async def replace_item(
             retire,
             lambda: gone(tm, existing),
             lambda: place(tm, existing, name, None),
+            arrived,
         )
     except BoxApiError as exc:
         raise (await retaken(exc, cond, dst)) or exc
+
+
+async def _copied_as(
+    tm: BoxTokenManager,
+    item: Mapping[str, Any],
+    folder_id: str,
+    name: str,
+) -> dict[str, Any] | None:
+    """The copy of ``item`` a copy onto ``name`` landed: a file of that
+    name in ``folder_id`` with ``item``'s sha1, None when there is none,
+    or no sha1 to tell it by.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        item (dict[str, Any]): the file copied.
+        folder_id (str): the folder the copy lands in.
+        name (str): the name it lands on.
+    """
+    sha1 = item.get("sha1")
+    if not sha1:
+        return None
+    for entry in await list_folder_items(tm, folder_id):
+        if (
+            entry.get("type") == "file"
+            and entry.get("name") == name
+            and entry.get("sha1") == sha1
+        ):
+            return dict(entry)
+    return None
 
 
 async def _copy_over(
@@ -284,7 +318,8 @@ async def _copy_over(
 
     A stale destination is refused before anything is sent; the rest is
     ``replace_item``, whose undo for a landed copy is its delete, held to
-    the version it landed as, so a write onto it since is kept.
+    the version it landed as, so a write onto it since is kept. A copy
+    whose answer was lost is found by its sha1 (``_copied_as``).
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -309,6 +344,7 @@ async def _copy_over(
         etag,
         lambda: copy_file(tm, item["id"], folder_id, name=new_name),
         lambda made: delete_file(tm, made["id"], made.get("etag")),
+        lambda: _copied_as(tm, item, folder_id, new_name),
     )
 
 

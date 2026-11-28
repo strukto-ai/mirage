@@ -164,3 +164,57 @@ async def test_rename_conflict_probe_is_bounded_to_one_entry(account):
     assert [body.get("limit") for body in listed] == [1]
     assert await account.run.bodies("POST", CONTINUE_ROUTE) == []
     assert await _deleted(account) == []
+
+
+async def _at_move(account, nth: int, change, status: int | None) -> None:
+    """Run ``change`` while the ``nth`` move from now waits, then answer it
+    with ``status``."""
+    if nth == 1:
+        await account.run.before_next([("POST", MOVE_ROUTE)], change, status)
+        return
+    await account.run.before_next(
+        [("POST", MOVE_ROUTE)],
+        lambda: _at_move(account, nth - 1, change, status),
+    )
+
+
+@pytest.mark.asyncio
+async def test_rename_whose_landing_went_through_is_finished(account):
+    # The third move (the first met the taken name, the second set the
+    # file there aside) lands, but its answer is lost: the moved file is
+    # found at the name by its id, and the file set aside is deleted.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await _at_move(
+        account,
+        3,
+        lambda: account.run.call(
+            "POST",
+            MOVE_ROUTE,
+            json={"from_path": "/a.txt", "to_path": "/b.txt"},
+        ),
+        502,
+    )
+    await _rename(account, "/a.txt", "/b.txt")
+    assert await account.names() == ["b.txt"]
+    assert await account.read("/b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+async def test_rename_take_back_leaves_a_landing_another_client_wrote(
+    account,
+):
+    # The delete of the file set aside is refused, and another client
+    # wrote onto the moved file meanwhile: its rev moved on, so it stays
+    # at the name rather than going back with that write.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.before_next(
+        [("POST", DELETE_ROUTE)],
+        lambda: account.put("/b.txt", b"later"),
+        409,
+    )
+    with pytest.raises(DropboxApiError):
+        await _rename(account, "/a.txt", "/b.txt")
+    assert await account.read("/b.txt") == b"later"
+    assert "a.txt" not in await account.names()

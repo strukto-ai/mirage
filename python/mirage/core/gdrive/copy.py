@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import posixpath
+from typing import Any
 
 from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.api.replace import land_then_retire
@@ -78,6 +79,39 @@ async def delete_replaced(drive: DriveApi, row: FileStat) -> None:
     await drive.delete_file(file_id)
 
 
+async def _copied_as(
+    drive: DriveApi,
+    md5: str | None,
+    name: str,
+    folder_id: str,
+    replaced: FileStat,
+) -> dict[str, Any] | None:
+    """The copy a copy onto ``name`` landed in ``folder_id``: an item of
+    that name there, other than the one it replaces, with the source's
+    md5. None when there is none, or no md5 (a Google file) to tell it by.
+
+    Args:
+        drive (DriveApi): the Drive client.
+        md5 (str | None): the source's md5, as its row read it.
+        name (str): the Drive name the copy lands under.
+        folder_id (str): the folder it lands in.
+        replaced (FileStat): the destination it replaces.
+    """
+    if not md5:
+        return None
+    listed = await drive.list_files(
+        folder_id, drive_id=replaced.extra.get("drive_id")
+    )
+    for item in listed:
+        if (
+            item.get("name") == name
+            and item.get("id") != replaced.extra["file_id"]
+            and item.get("md5Checksum") == md5
+        ):
+            return dict(item)
+    return None
+
+
 async def gone(drive: DriveApi, file_id: str) -> bool:
     """Whether an item is gone from Drive, or sits in its trash.
 
@@ -110,7 +144,8 @@ async def copy(
     once the copy has landed beside it, which Drive's two items of one
     name in a folder allow (``delete_replaced``): a refused copy leaves it
     as it was, and a refused delete drops the copy again and names the
-    destination, as cp's refused create does. Both paths naming one item
+    destination, as cp's refused create does; a copy whose answer was
+    lost is found by its md5 (``_copied_as``). Both paths naming one item
     (Drive lists a legacy item under each of its parents) leaves nothing
     to copy; GNU cp refuses it by inode, which a Drive row lacks.
 
@@ -158,6 +193,7 @@ async def copy(
         item = await drive.copy_file(src_node.id, name, dst_parent_id)
         return stat_from_item(item) if isinstance(item, dict) else None
     replaced = dst_entry
+    md5 = entry.extra.get("md5_checksum")
 
     async def retire() -> None:
         try:
@@ -172,5 +208,6 @@ async def copy(
         lambda made: drive.delete_file(made["id"]),
         retire,
         lambda: gone(drive, replaced.extra["file_id"]),
+        arrived=lambda: _copied_as(drive, md5, name, dst_parent_id, replaced),
     )
     return stat_from_item(item) if isinstance(item, dict) else None

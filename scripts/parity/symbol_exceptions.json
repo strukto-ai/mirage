@@ -214,6 +214,11 @@
     "bodyChunks": "Reads a fetch ReadableStream, shared by apiStream and the GitHub transport's stream; Python's api_stream reads aiohttp's iter_chunked."
    }
   },
+  "core/api/replace": {
+   "python_only": {
+    "_undisturbed": "Runs an undo to its end before a task's cancellation reaches the caller; an asyncio task can be cancelled between two awaited steps, while a JavaScript promise runs on, so landThenRetire has nothing to hold back."
+   }
+  },
   "core/render/json": {
    "python_only": {
     "ecma_numbers": "orjson writes a float its own way; TypeScript's JSON.stringify already spells each number as ECMAScript does."

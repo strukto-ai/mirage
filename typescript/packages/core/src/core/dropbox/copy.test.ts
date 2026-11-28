@@ -142,7 +142,26 @@ describe('dropbox copy onto a taken name', () => {
     expect(await account.names()).toEqual(['a.txt', 'b.txt'])
     expect(new TextDecoder().decode(await account.read('/b.txt'))).toBe('theirs')
   })
+
+  it('finishes a copy whose landing went through', async () => {
+    // The copy onto the freed name lands, but its answer is lost: it is found
+    // there by its content hash, and the file set aside is deleted.
+    await account.put('/a.txt', ENC.encode('mine'))
+    await account.put('/b.txt', ENC.encode('theirs'))
+    await account.run.beforeNext([['POST', COPY]], () =>
+      account.run.beforeNext(
+        [['POST', COPY]],
+        () => account.run.call('POST', COPY, { json: { from_path: '/a.txt', to_path: '/b.txt' } }),
+        502,
+      ),
+    )
+    await copy(account.accessor(), PathSpec.fromStrPath('/a.txt'), PathSpec.fromStrPath('/b.txt'))
+    expect(await account.names()).toEqual(['a.txt', 'b.txt'])
+    expect(new TextDecoder().decode(await account.read('/b.txt'))).toBe('mine')
+  })
 })
+
+const COPY = '/2/files/copy_v2'
 
 vi.mock('./paths.ts', async (original) => ({
   ...(await original<typeof PathsModule>()),

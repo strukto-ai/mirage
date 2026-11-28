@@ -169,6 +169,7 @@ async def test_copy_sets_a_conflicting_file_aside_then_deletes_it(
         m.patch(_url("b.txt"), payload={"id": "2", "file": {}})
         m.post(_url("a.txt", "/copy"), status=202, headers={"Location": retry})
         m.get(retry, payload={"status": "completed"})
+        m.get(_url("b.txt"), payload={"id": "3", "eTag": "e3", "file": {}})
         m.delete(_STAGED, status=204)
         await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
         (aside,) = m.requests[("PATCH", URL(_url("b.txt")))]
@@ -178,6 +179,35 @@ async def test_copy_sets_a_conflicting_file_aside_then_deletes_it(
         assert ("GET", URL(retry)) in m.requests
         deleted = [url for method, url in m.requests if method == "DELETE"]
         assert len(deleted) == 1 and _STAGED.match(str(deleted[0]))
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_found_by_its_hash(
+    exact_cloud_paths,
+):
+    # The copy onto the freed name lands, but reading its monitor fails: a
+    # file at the name with the source's hash is that copy, so the file set
+    # aside is deleted and nothing is put back.
+    monitor = "https://monitor.example/op/4"
+    retry = "https://monitor.example/op/4-retry"
+    hashes = {"quickXorHash": "q1"}
+    with aioresponses() as m:
+        m.post(
+            _url("a.txt", "/copy"), status=202, headers={"Location": monitor}
+        )
+        m.get(monitor, payload={"status": "failed", **_CONFLICT})
+        m.get(_url("a.txt"), payload={"id": "1", "file": {"hashes": hashes}})
+        m.get(_url("b.txt"), payload={"id": "2", "file": {}})
+        m.patch(_url("b.txt"), payload={"id": "2", "file": {}})
+        m.post(_url("a.txt", "/copy"), status=202, headers={"Location": retry})
+        m.get(retry, status=502, payload={"error": {"code": "badGateway"}})
+        m.get(_url("b.txt"), payload={"id": "3", "file": {"hashes": hashes}})
+        m.delete(_STAGED, status=204)
+        await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
+        deleted = [url for method, url in m.requests if method == "DELETE"]
+        assert len(deleted) == 1 and _STAGED.match(str(deleted[0]))
+        (aside,) = m.requests[("PATCH", URL(_url("b.txt")))]
+        assert _STAGED.match(_url(aside.kwargs["json"]["name"]))
 
 
 @pytest.mark.asyncio
@@ -942,6 +972,52 @@ async def test_a_delete_that_went_through_keeps_the_replace(onedrive, op):
     kept = ["a.txt"] if op is copy_tree else []
     assert await _names(onedrive) == [*kept, "b.txt"]
     assert await onedrive.content("b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_whose_landing_went_through_is_finished(onedrive):
+    # The third PATCH (the first met the taken name, the second set the
+    # file there aside) lands, but its answer is a relay's 502: the item is
+    # found at the name by its id, and the file set aside is deleted.
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+
+    async def land() -> None:
+        await onedrive.run.call(
+            "PATCH", "/me/drive/root:/a.txt", json={"name": "b.txt"}
+        )
+
+    await onedrive.run.before_next(
+        [("PATCH", ITEM_ROUTE)],
+        lambda: onedrive.run.before_next(
+            [("PATCH", ITEM_ROUTE)],
+            lambda: onedrive.run.before_next(
+                [("PATCH", ITEM_ROUTE)], land, status=502
+            ),
+        ),
+    )
+    await _replace(onedrive, rename_replace, "a.txt", "b.txt")
+    assert await _names(onedrive) == ["b.txt"]
+    assert await onedrive.content("b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [rename_replace, copy_tree])
+async def test_a_take_back_leaves_a_landing_another_client_wrote(onedrive, op):
+    # The delete of what moved aside is refused, and another client wrote
+    # onto the landed item meanwhile: the take back is held to the eTag it
+    # landed with, so that write stays at the name.
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await onedrive.run.before_next(
+        [("DELETE", ITEM_ROUTE)],
+        lambda: onedrive.write("b.txt", b"later"),
+        status=403,
+    )
+    with pytest.raises(GraphError):
+        await _replace(onedrive, op, "a.txt", "b.txt")
+    assert await onedrive.content("b.txt") == b"later"
+    assert ("a.txt" in await _names(onedrive)) is (op is copy_tree)
 
 
 @pytest.mark.asyncio

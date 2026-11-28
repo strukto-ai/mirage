@@ -251,3 +251,30 @@ async def test_copy_whose_delete_went_through_keeps_the_copy(google_account):
     assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
     (made,) = (item for item in items if item["name"] == "dst.txt")
     assert await google_account.content(made["id"]) == b"new"
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_finished(google_account):
+    # The copy lands beside the destination, but its answer is a relay's
+    # 502: it is found there by its md5, and the file it replaces is
+    # deleted, so one copy holds the name.
+    src_id = await google_account.upload("src.txt", b"new")
+    await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("POST", COPY)],
+        lambda: google_account.run.call(
+            "POST", f"/drive/v3/files/{src_id}/copy", json={"name": "dst.txt"}
+        ),
+        status=502,
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
+    (made,) = (item for item in items if item["name"] == "dst.txt")
+    assert await google_account.content(made["id"]) == b"new"

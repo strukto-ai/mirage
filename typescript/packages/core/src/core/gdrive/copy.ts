@@ -18,7 +18,7 @@ import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { landThenRetire } from '../api/replace.ts'
 import { GoogleApiError } from '../google/client.ts'
-import { FOLDER_MIME } from '../google/drive.ts'
+import { FOLDER_MIME, type DriveFile } from '../google/drive.ts'
 import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
@@ -59,6 +59,30 @@ export async function deleteReplaced(drive: DriveApi, row: FileStat): Promise<vo
   await drive.deleteFile(fileId)
 }
 
+/**
+ * The copy a copy onto `name` landed in `folderId`: an item of that name there,
+ * other than the one it replaces, with the source's md5. Null when there is
+ * none, or no md5 (a Google file) to tell it by. Mirrors Python's `_copied_as`.
+ */
+async function copiedAs(
+  drive: DriveApi,
+  md5: unknown,
+  name: string,
+  folderId: string,
+  replaced: FileStat,
+): Promise<DriveFile | null> {
+  if (typeof md5 !== 'string' || md5 === '') return null
+  const driveId = replaced.extra.drive_id
+  const listed = await drive.listFiles({
+    folderId,
+    driveId: typeof driveId === 'string' ? driveId : null,
+  })
+  const found = listed.find(
+    (item) => item.name === name && item.id !== replaced.extra.file_id && item.md5Checksum === md5,
+  )
+  return found ?? null
+}
+
 /** Whether an item is gone from Drive, or sits in its trash. Mirrors Python's `gone`. */
 export async function gone(drive: DriveApi, fileId: string): Promise<boolean> {
   try {
@@ -76,7 +100,8 @@ export async function gone(drive: DriveApi, fileId: string): Promise<boolean> {
  * only once the copy has landed beside it, which Drive's two items of one name
  * in a folder allow (`deleteReplaced`): a refused copy leaves it as it was, and
  * a refused delete drops the copy again and names the destination, as cp's
- * refused create does. Both paths naming one item (Drive lists a
+ * refused create does; a copy whose answer was lost is found by its md5
+ * (`copiedAs`). Both paths naming one item (Drive lists a
  * legacy item under each of its parents) leaves nothing to copy; GNU cp
  * refuses it by inode, which a Drive row lacks. Answers the stat of what the
  * copy made, null when it merged into a folder already there or found the
@@ -132,6 +157,8 @@ export const copy = eaccesOnDenied(async function (
       }
     },
     () => gone(drive, dstEntry.extra.file_id as string),
+    undefined,
+    () => copiedAs(drive, entry.extra.md5_checksum, target, dstParentId, dstEntry),
   )
   const copied: unknown = item
   return typeof copied === 'object' && copied !== null ? statFromItem(item) : null

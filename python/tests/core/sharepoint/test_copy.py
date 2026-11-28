@@ -105,6 +105,10 @@ async def test_copy_file_conflict_sets_the_file_aside_then_deletes_it(
         )
         m.get(retry_monitor, payload={"status": "completed"})
         m.patch(_DRIVE + "/root:/b.txt", payload={"id": "2", "file": {}})
+        m.get(
+            _DRIVE + "/root:/b.txt",
+            payload={"id": "3", "eTag": "e3", "file": {}},
+        )
         m.delete(staged, status=204)
         await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
         (aside,) = m.requests[("PATCH", URL(_DRIVE + "/root:/b.txt"))]

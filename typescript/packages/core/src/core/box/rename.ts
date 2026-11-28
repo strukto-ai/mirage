@@ -19,7 +19,14 @@ import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { uploadStat } from '../../utils/upload.ts'
-import { listFolderItems, type BoxFileInfo, type BoxItem } from './api.ts'
+import {
+  getFileInfo,
+  getFolderInfo,
+  listFolderItems,
+  type BoxFileInfo,
+  type BoxItem,
+} from './api.ts'
+import type { BoxTokenManager } from './client.ts'
 import { heldFile, place, replaceFile, replaceItem, retaken } from './copy.ts'
 import { statFromItem } from './readdir.ts'
 import { liveItemOf, parentFolder, pathParts } from './resolve.ts'
@@ -48,11 +55,27 @@ function folderOf(
 }
 
 /**
+ * The item a move onto `name` in `folderId` landed, read by its id, null while
+ * it is not there. Mirrors Python's `_moved_as`.
+ */
+async function movedAs(
+  tm: BoxTokenManager,
+  item: BoxItem,
+  name: string,
+  folderId: string,
+): Promise<BoxItem | null> {
+  const info: BoxItem & Partial<Pick<BoxFileInfo, 'path_collection'>> =
+    item.type === 'folder' ? await getFolderInfo(tm, item.id) : await getFileInfo(tm, item.id)
+  return info.name === name && folderOf(info) === folderId ? info : null
+}
+
+/**
  * Move `item` onto what holds `dst`'s name. A stale destination file is
  * refused before anything is sent, and so is a folder that holds anything, the
  * item itself included (`mv -T d/c d`). The rest is `replaceItem`, whose undo
- * for a landed item moves it back to its folder and name. Mirrors Python's
- * `_replace_onto`.
+ * for a landed item moves it back to its folder and name, held to the version
+ * it landed as, and which finds a move whose answer was lost by the item's id
+ * (`movedAs`). Mirrors Python's `_replace_onto`.
  */
 async function replaceOnto(
   accessor: BoxAccessor,
@@ -89,7 +112,8 @@ async function replaceOnto(
     cond,
     etag,
     () => place(tm, item, newName, folderId),
-    (landed) => place(tm, landed, item.name, folderOf(item)),
+    (landed) => place(tm, landed, item.name, folderOf(item), landed.etag ?? null),
+    () => movedAs(tm, item, newName, folderId),
   )
 }
 

@@ -260,3 +260,27 @@ async def test_rename_whose_delete_went_through_keeps_the_move(google_account):
     assert [(item["id"], item["name"]) for item in items] == [
         (src_id, "dst.txt")
     ]
+
+
+@pytest.mark.asyncio
+async def test_rename_whose_landing_went_through_is_finished(google_account):
+    # The move lands, but its answer is a relay's 502: the item is found
+    # under the name by its id, and the file it replaces is deleted.
+    src_id = await google_account.upload("src.txt", b"new")
+    await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("PATCH", FILE)],
+        lambda: google_account.patch(src_id, name="dst.txt"),
+        status=502,
+    )
+    await call(
+        rename,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert [(item["id"], item["name"]) for item in items] == [
+        (src_id, "dst.txt")
+    ]

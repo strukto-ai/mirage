@@ -592,6 +592,62 @@ describe('box write ops', () => {
     expect(text(await account.read(other))).toBe('other')
   })
 
+  it('finishes a move whose landing went through', async () => {
+    // The move onto the freed name lands, but its answer is lost: the item is
+    // found there by its id, and the file set aside is deleted.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext([['PUT', FILE_ROUTE]], () =>
+      account.run.beforeNext([['PUT', FILE_ROUTE]], () => account.rename(ids.a, 'b.txt'), 502),
+    )
+    await rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h)
+    expect(await account.names(ids.data)).toEqual(['b.txt', 'dst', 'sub'])
+    expect((await account.child(ids.data, 'b.txt')).id).toBe(ids.a)
+  })
+
+  it('finishes a copy whose landing went through', async () => {
+    // The copy lands, but its answer is lost: it is found by its sha1, and the
+    // file set aside is deleted.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext(
+      [['POST', COPY_FILE_ROUTE]],
+      () =>
+        account.run.call('POST', `/2.0/files/${ids.a}/copy`, {
+          json: { parent: { id: ids.data }, name: 'b.txt' },
+        }),
+      502,
+    )
+    await copy(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    const made = await account.child(ids.data, 'b.txt')
+    expect(text(await account.read(made.id))).toBe('hello')
+  })
+
+  it('leaves a landing another client wrote onto when the delete is refused', async () => {
+    // The move back is held to the version that landed, so the write another
+    // client made onto the landed item stays where it is.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext(
+      [['DELETE', FILE_ROUTE]],
+      () => account.uploadVersion(ids.a, ENC.encode('theirs')),
+      403,
+    )
+    await expect(
+      rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect((await account.child(ids.data, 'b.txt')).id).toBe(ids.a)
+    expect(text(await account.read(ids.a))).toBe('theirs')
+    expect(await account.names(ids.data)).not.toContain('a.txt')
+  })
+
   it('refuses a folder holding only the item itself', async () => {
     // mv -T d/c d: moving the only child out would leave the folder empty for
     // its delete, so it is asked for a child before anything moves.
