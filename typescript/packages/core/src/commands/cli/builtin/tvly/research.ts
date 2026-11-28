@@ -17,7 +17,7 @@
 // licenses/third_party/tavily-cli.txt).
 
 import type { TavilyAccessor } from '../../../../accessor/tavily.ts'
-import { callerSignal } from '../../../../context/session_context.ts'
+import { callerSignal, currentCaller, withCaller } from '../../../../context/session_context.ts'
 import {
   TavilyAPIError,
   TavilyUnanswered,
@@ -354,7 +354,8 @@ export async function run(
       { clientName },
     )
     const settled = new IOResult()
-    return [liveResearch(chunks, settled, ctx, fl.asBool('json'), output), settled]
+    const live = liveResearch(chunks, settled, ctx, fl.asBool('json'), output)
+    return [withCaller(live, currentCaller()), settled]
   }
   const result = await tavilyRequest(
     accessor,

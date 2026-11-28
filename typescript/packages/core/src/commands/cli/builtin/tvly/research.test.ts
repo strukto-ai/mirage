@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { currentCaller } from '../../../../context/session_context.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { TVLY } from './index.ts'
 import { route, streamEvents } from './research.ts'
@@ -194,6 +195,22 @@ describe('tvly research', () => {
     } finally {
       await ws.close()
     }
+  })
+
+  it('opens a stream request as the line that ran it', async () => {
+    // The stream opens its request once the shell reads it, after the
+    // handler returned, and the network gateway still sees tvly ask.
+    const asked: [string | null, readonly string[] | undefined][] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        const caller = currentCaller()
+        asked.push([caller.command, caller.invocation?.program])
+        return Promise.resolve(new Response('data: {"n": 1}\n\ndata: [DONE]\n\n'))
+      }),
+    )
+    expect(await run('tvly research topic --stream --json')).toEqual([0, '{"n":1}\n', ''])
+    expect(asked).toEqual([['tvly', ['tvly', 'research']]])
   })
 
   it.each([

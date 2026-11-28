@@ -14,13 +14,14 @@
 
 import inspect
 from types import SimpleNamespace
+from typing import Any
 
 import aioresponses.core
 from aiohttp import ClientResponse
 
 
 class _PatchedClientResponse(ClientResponse):
-    def __init__(self, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs.setdefault("stream_writer", SimpleNamespace(output_size=0))
         super().__init__(*args, **kwargs)
 
@@ -34,4 +35,4 @@ def patch_aioresponses() -> None:
     """
     params = inspect.signature(ClientResponse.__init__).parameters
     if "stream_writer" in params:
-        aioresponses.core.ClientResponse = _PatchedClientResponse
+        setattr(aioresponses.core, "ClientResponse", _PatchedClientResponse)

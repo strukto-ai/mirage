@@ -55,6 +55,7 @@ from mirage.commands.cli.walk import node_help
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import UsageStyle
+from mirage.context.session_context import current_caller, with_caller
 from mirage.core.tavily.client import (
     TavilyAPIError,
     TavilyUnanswered,
@@ -434,7 +435,7 @@ async def run(
         )
         settled = IOResult()
         live = live_research(chunks, settled, ctx, fl.as_bool("json"), output)
-        return live, settled
+        return with_caller(live, current_caller()), settled
     result = await tavily_request(
         accessor,
         "POST",

@@ -26,6 +26,7 @@ from mirage import Workspace
 from mirage.commands.cli.builtin.tvly import TVLY
 from mirage.commands.cli.builtin.tvly.research import route, stream_events
 from mirage.io.types import materialize
+from mirage.policy import NetworkContext, Policy
 
 RESEARCH = "https://api.tavily.com/research"
 DONE = {
@@ -226,6 +227,41 @@ async def test_a_json_stream_hands_on_each_event_as_it_arrives():
     assert first.data == b'{"n":1}\n'
     assert b"".join(rest) == b'{"n":2}\n'
     assert result.exit_code == 0
+
+
+class _Watch(Policy):
+    """Keeps what each connection it judges was opened for."""
+
+    def __init__(self) -> None:
+        self.asked: list[NetworkContext] = []
+
+    async def pre_network(self, ctx: NetworkContext) -> None:
+        self.asked.append(ctx)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_opens_its_request_as_the_line_that_ran_it():
+    # The stream opens its request once the shell reads it, after the
+    # handler returned, and a network policy still sees tvly ask.
+    async def send(_: web.Request, response: web.StreamResponse) -> None:
+        await response.write(b'data: {"n": 1}\n\ndata: [DONE]\n\n')
+        await response.write_eof()
+
+    watch = _Watch()
+    async for server in serve_stream(send):
+        ws = Workspace({})
+        ws.policies.add(watch)
+        ws.register_cli(
+            "tvly",
+            TVLY,
+            {"api_key": "tvly-k", "base_url": str(server.make_url(""))},
+        )
+        result = await ws.shell("tvly research topic --stream --json")
+        await ws.close()
+    assert (result.exit_code, result.stdout) == (0, b'{"n":1}\n')
+    assert [(ctx.command, ctx.program) for ctx in watch.asked] == [
+        ("tvly", ("tvly", "research"))
+    ]
 
 
 @pytest.mark.asyncio
