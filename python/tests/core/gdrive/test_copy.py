@@ -249,5 +249,5 @@ async def test_copy_whose_delete_went_through_keeps_the_copy(google_account):
     )
     items = await google_account.items()
     assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
-    (made,) = [item for item in items if item["name"] == "dst.txt"]
+    (made,) = (item for item in items if item["name"] == "dst.txt")
     assert await google_account.content(made["id"]) == b"new"
