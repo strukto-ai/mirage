@@ -156,16 +156,6 @@ export async function deleteNode(db: Db, tenant: string, path: string): Promise<
   deleteOne(db, tenant, norm(path))
 }
 
-// A directory delete takes the subtree with it. The prefix carries its own
-// trailing slash so "/a/bc" is not swept away with "/a/b". It is `startsWith`
-// as Prisma ran it on SQLite: LIKE with the prefix unescaped, so ASCII case is
-// ignored and `%` or `_` match as wildcards. Kept exactly.
-export async function deleteTree(db: Db, tenant: string, path: string): Promise<void> {
-  const at = norm(path)
-  exec(db, 'DELETE FROM DatabricksNode WHERE tenant = ? AND path LIKE ?', tenant, `${at}/%`)
-  deleteOne(db, tenant, at)
-}
-
 // Children of one directory, files before directories and each in insertion
 // order, which is the order the two python dicts iterated in. Only rows under
 // the directory's own prefix are read; `parentOf` still decides.

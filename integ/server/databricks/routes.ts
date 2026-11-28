@@ -20,7 +20,6 @@ import {
   bytesOf,
   childrenOf,
   deleteNode,
-  deleteTree,
   fileAt,
   isDir,
   makeDir,
@@ -146,10 +145,19 @@ async function createDir(ctx: Ctx<C>): Promise<Reply> {
   return { status: 200, body: { path: norm(remote) } }
 }
 
+// The Files API deletes only an empty directory: a caller removes what is in
+// it first, and a child written after its listing refuses the delete. The
+// refusal is the generic one, not a probed wording.
 async function removeDir(ctx: Ctx<C>): Promise<Reply> {
   const remote = remoteOf(ctx)
   if (!(await isDir(ctx.sql, ctx.tenant, norm(remote)))) return notFound(remote)
-  await deleteTree(ctx.sql, ctx.tenant, remote)
+  if ((await childrenOf(ctx.sql, ctx.tenant, remote)).length > 0) {
+    return {
+      status: 400,
+      body: { error_code: 'BAD_REQUEST', message: `Directory is not empty: ${remote}` },
+    }
+  }
+  await deleteNode(ctx.sql, ctx.tenant, remote)
   return { status: 200, body: {} }
 }
 

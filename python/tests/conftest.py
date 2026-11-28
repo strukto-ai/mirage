@@ -102,6 +102,14 @@ def dropbox_origin() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
+def databricks_origin() -> Iterator[str]:
+    """The integ Databricks fake's origin, one fake for every test that
+    asks."""
+    with serve("databricks") as origin:
+        yield origin
+
+
+@pytest.fixture(scope="session")
 def github_origin() -> Iterator[str]:
     """The integ GitHub fake's origin, one fake for every test that asks."""
     with serve("github") as origin:

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from types import SimpleNamespace
+from email.utils import parsedate_to_datetime
 
 import pytest
 from pydantic import ValidationError
@@ -28,47 +28,27 @@ from mirage.vfs.databricks_volume import (
     DatabricksVolumeConfig,
     DatabricksVolumeVFS,
 )
-from tests.fixtures.databricks_api import FakeFiles
+from tests.fixtures.databricks_volume import FILES, ROOT, DatabricksVolume
 from tests.fixtures.driver_ops import ops
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
 
-
-def make_vfs(files: FakeFiles) -> DatabricksVolumeVFS:
-    return DatabricksVolumeVFS(
-        DatabricksVolumeConfig(
-            catalog="main",
-            schema="default",
-            volume="agent_files",
-            root_path="/root",
-            host=files.host,
-            token="secret",
-        )
-    )
+OFFLINE = DatabricksVolumeConfig(
+    catalog="main",
+    schema="default",
+    volume="agent_files",
+    root_path="/root",
+    host="https://dbc.example.com",
+    token="secret",
+)
 
 
-def seed_directory(files: FakeFiles, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.metadata[path] = SimpleNamespace(is_directory=True)
-    files.directories.setdefault(path, [])
+def make_vfs(volume: DatabricksVolume) -> DatabricksVolumeVFS:
+    return DatabricksVolumeVFS(volume.config())
 
 
-def seed_file(files: FakeFiles, path: str, data: bytes) -> None:
-    parent = path.rsplit("/", 1)[0]
-    files.downloads[path] = data
-    files.metadata[path] = SimpleNamespace(
-        content_length=len(data),
-        content_type=None,
-        last_modified=None,
-    )
-    files.directories.setdefault(parent, [])
-    files.directories[parent].append(
-        SimpleNamespace(
-            path=path,
-            is_directory=False,
-            file_size=len(data),
-        )
-    )
+def spec(virtual: str, prefix: str = "/volume") -> PathSpec:
+    return PathSpec.from_str_path(virtual, mount_key(virtual, prefix))
 
 
 def test_config_validation_and_normalization():
@@ -90,26 +70,18 @@ def test_config_validation_and_normalization():
 
 
 def test_backend_path_uses_volume_root_and_strips_mount_prefix():
-    config = DatabricksVolumeConfig(
-        catalog="main",
-        schema="default",
-        volume="agent_files",
-        root_path="/root",
-        host="https://dbc.example.com",
-        token="secret",
-    )
     path = PathSpec(
         vfs_path=mount_key("/volume/reports/latest.md", "/volume"),
         virtual="/volume/reports/latest.md",
         directory="/volume/reports",
     )
-    assert backend_path(config, path) == (
+    assert backend_path(OFFLINE, path) == (
         "/Volumes/main/default/agent_files/root/reports/latest.md"
     )
 
 
 def test_vfs_state_redacts_token():
-    vfs = make_vfs(FakeFiles())
+    vfs = DatabricksVolumeVFS(OFFLINE)
     state = vfs.get_state()
     assert state["type"] == VFSName.DATABRICKS_VOLUME
     assert state["needs_override"] is True
@@ -120,7 +92,7 @@ def test_vfs_state_redacts_token():
 
 
 def test_vfs_registers_ops():
-    vfs = make_vfs(FakeFiles())
+    vfs = DatabricksVolumeVFS(OFFLINE)
     op_names = served(vfs)
     assert {"read", "readdir", "stat", "write", "create", "unlink"} <= op_names
     assert vfs.name == "databricks_volume"
@@ -128,7 +100,7 @@ def test_vfs_registers_ops():
 
 
 def test_vfs_registers_commands():
-    vfs = make_vfs(FakeFiles())
+    vfs = DatabricksVolumeVFS(OFFLINE)
     command_names = {command.name for command in mount_commands(vfs)}
     assert {
         "cat",
@@ -146,100 +118,34 @@ def test_vfs_registers_commands():
 
 
 @pytest.mark.asyncio
-async def test_read_stat_readdir_range_stream_and_exists():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.downloads[f"{root}/reports/latest.md"] = b"abcdef"
-    files.metadata[f"{root}/reports/latest.md"] = SimpleNamespace(
-        content_length=6,
-        content_type=None,
-        last_modified="Tue, 14 Nov 2023 22:13:20 GMT",
-    )
-    files.metadata[f"{root}/reports"] = SimpleNamespace(is_directory=True)
-    files.directories[f"{root}/reports"] = [
-        SimpleNamespace(
-            path=f"{root}/reports/latest.md",
-            is_directory=False,
-            file_size=6,
-        )
-    ]
-    vfs = make_vfs(files)
+async def test_read_stat_readdir_range_stream_and_exists(volume):
+    await volume.put(f"{ROOT}/reports/latest.md", b"abcdef")
+    vfs = make_vfs(volume)
+    latest = spec("/volume/reports/latest.md")
 
-    assert (
-        await read(
-            vfs.accessor,
-            PathSpec.from_str_path(
-                "/volume/reports/latest.md",
-                mount_key("/volume/reports/latest.md", "/volume"),
-            ),
-        )
-        == b"abcdef"
-    )
-    assert (
-        await read(
-            vfs.accessor,
-            PathSpec.from_str_path(
-                "/volume/reports/latest.md",
-                mount_key("/volume/reports/latest.md", "/volume"),
-            ),
-            offset=1,
-            size=3,
-        )
-        == b"bcd"
-    )
+    assert await read(vfs.accessor, latest) == b"abcdef"
+    assert await read(vfs.accessor, latest, offset=1, size=3) == b"bcd"
     chunks = [
         chunk
-        async for chunk in read_stream(
-            vfs.accessor,
-            PathSpec.from_str_path(
-                "/volume/reports/latest.md",
-                mount_key("/volume/reports/latest.md", "/volume"),
-            ),
-            chunk_size=2,
-        )
+        async for chunk in read_stream(vfs.accessor, latest, chunk_size=2)
     ]
     assert chunks == [b"ab", b"cd", b"ef"]
-    file_stat = await ops(vfs).stat(
-        PathSpec.from_str_path(
-            "/volume/reports/latest.md",
-            mount_key("/volume/reports/latest.md", "/volume"),
-        )
-    )
+    file_stat = await ops(vfs).stat(latest)
     assert file_stat.name == "latest.md"
     assert file_stat.size == 6
-    assert file_stat.modified == "2023-11-14T22:13:20Z"
-    assert await exists(
-        vfs.accessor,
-        PathSpec.from_str_path(
-            "/volume/reports/latest.md",
-            mount_key("/volume/reports/latest.md", "/volume"),
-        ),
-    )
-    assert not await exists(
-        vfs.accessor,
-        PathSpec.from_str_path(
-            "/volume/missing.md", mount_key("/volume/missing.md", "/volume")
-        ),
-    )
-    entries = await ops(vfs).readdir(
-        PathSpec.from_str_path(
-            "/volume/reports", mount_key("/volume/reports", "/volume")
-        )
-    )
+    assert file_stat.modified == parsedate_to_datetime(
+        await volume.modified(f"{ROOT}/reports/latest.md")
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert await exists(vfs.accessor, latest)
+    assert not await exists(vfs.accessor, spec("/volume/missing.md"))
+    entries = await ops(vfs).readdir(spec("/volume/reports"))
     assert [row.name for row in entries] == ["latest.md"]
 
 
 @pytest.mark.asyncio
-async def test_workspace_read_mode_uses_registered_ops():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.downloads[f"{root}/latest.md"] = b"hello"
-    files.metadata[f"{root}/latest.md"] = SimpleNamespace(
-        content_length=5,
-        content_type=None,
-        last_modified=None,
-    )
-    ws = Workspace({"/volume": make_vfs(files)}, mode=MountMode.READ)
+async def test_workspace_read_mode_uses_registered_ops(volume):
+    await volume.put(f"{ROOT}/latest.md", b"hello")
+    ws = Workspace({"/volume": make_vfs(volume)}, mode=MountMode.READ)
 
     assert await ws.vfs.read("/volume/latest.md") == b"hello"
     file_stat = await ws.vfs.stat("/volume/latest.md")
@@ -247,54 +153,35 @@ async def test_workspace_read_mode_uses_registered_ops():
 
 
 @pytest.mark.asyncio
-async def test_vfs_exposes_file_write_ops():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    vfs = make_vfs(files)
+async def test_vfs_exposes_file_write_ops(volume):
+    await volume.mkdir(ROOT)
+    vfs = make_vfs(volume)
 
-    await ops(vfs).write(
-        PathSpec.from_str_path(
-            "/volume/new.txt", mount_key("/volume/new.txt", "/volume")
-        ),
-        b"hello",
-    )
-    await ops(vfs).create(
-        PathSpec.from_str_path(
-            "/volume/empty.txt", mount_key("/volume/empty.txt", "/volume")
-        )
-    )
-    await ops(vfs).unlink(
-        PathSpec.from_str_path(
-            "/volume/new.txt", mount_key("/volume/new.txt", "/volume")
-        )
-    )
+    await ops(vfs).write(spec("/volume/new.txt"), b"hello")
+    await ops(vfs).create(spec("/volume/empty.txt"))
+    await ops(vfs).unlink(spec("/volume/new.txt"))
 
-    assert files.downloads[f"{root}/empty.txt"] == b""
-    assert f"{root}/new.txt" not in files.downloads
+    assert await volume.content(f"{ROOT}/empty.txt") == b""
+    assert not await volume.has(f"{ROOT}/new.txt")
 
 
 @pytest.mark.asyncio
-async def test_workspace_write_mode_uses_file_write_ops():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_write_mode_uses_file_write_ops(volume):
+    await volume.mkdir(ROOT)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
 
     await ws.vfs.write("/dbx/new.txt", b"hello")
     await ws.vfs.create("/dbx/empty.txt")
     await ws.vfs.unlink("/dbx/new.txt")
 
-    assert f"{root}/new.txt" not in files.downloads
-    assert files.downloads[f"{root}/empty.txt"] == b""
+    assert not await volume.has(f"{ROOT}/new.txt")
+    assert await volume.content(f"{ROOT}/empty.txt") == b""
 
 
 @pytest.mark.asyncio
-async def test_workspace_write_mode_preserves_sibling_index_rows():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_write_mode_preserves_sibling_index_rows(volume):
+    await volume.mkdir(ROOT)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
     index = ws.mount("/dbx/").index_store
 
     old = FileStat(
@@ -340,11 +227,9 @@ async def test_workspace_write_mode_preserves_sibling_index_rows():
 
 
 @pytest.mark.asyncio
-async def test_read_only_mount_rejects_file_write_ops():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+async def test_read_only_mount_rejects_file_write_ops(volume):
+    await volume.mkdir(ROOT)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     with pytest.raises(PermissionError):
         await ws.vfs.write("/dbx/new.txt", b"hello")
@@ -355,62 +240,59 @@ async def test_read_only_mount_rejects_file_write_ops():
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_touch_and_rm():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_execute_databricks_volume_touch_and_rm(volume):
+    await volume.mkdir(ROOT)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
+    await volume.run.record_requests()
 
     touch_io = await ws.shell("touch /dbx/created.txt")
     rm_io = await ws.shell("rm /dbx/created.txt")
 
     assert touch_io.exit_code == 0
-    assert files.delete_calls == [f"{root}/created.txt"]
-    assert f"{root}/created.txt" not in files.downloads
+    assert await volume.asked("DELETE", FILES) == [f"{ROOT}/created.txt"]
+    assert not await volume.has(f"{ROOT}/created.txt")
     assert rm_io.exit_code == 0
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_rm_resolves_glob():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    seed_file(files, f"{root}/one.txt", b"one")
-    seed_file(files, f"{root}/two.txt", b"two")
-    seed_file(files, f"{root}/keep.md", b"keep")
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_execute_databricks_volume_rm_resolves_glob(volume):
+    await volume.put(f"{ROOT}/one.txt", b"one")
+    await volume.put(f"{ROOT}/two.txt", b"two")
+    await volume.put(f"{ROOT}/keep.md", b"keep")
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
+    await volume.run.record_requests()
 
     io = await ws.shell("rm /dbx/*.txt")
 
     assert io.exit_code == 0
-    assert files.delete_calls == [f"{root}/one.txt", f"{root}/two.txt"]
-    assert f"{root}/one.txt" not in files.downloads
-    assert f"{root}/two.txt" not in files.downloads
-    assert files.downloads[f"{root}/keep.md"] == b"keep"
+    assert await volume.asked("DELETE", FILES) == [
+        f"{ROOT}/one.txt",
+        f"{ROOT}/two.txt",
+    ]
+    assert not await volume.has(f"{ROOT}/one.txt")
+    assert not await volume.has(f"{ROOT}/two.txt")
+    assert await volume.content(f"{ROOT}/keep.md") == b"keep"
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_touch_resolves_glob():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    seed_file(files, f"{root}/existing.txt", b"existing")
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_execute_databricks_volume_touch_resolves_glob(volume):
+    await volume.put(f"{ROOT}/existing.txt", b"existing")
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
+    await volume.run.record_requests()
 
     io = await ws.shell("touch /dbx/*.txt")
 
     assert io.exit_code == 0
-    assert files.upload_calls == []
-    assert f"{root}/*.txt" not in files.downloads
+    assert await volume.asked("PUT", FILES) == []
+    assert not await volume.has(f"{ROOT}/*.txt")
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_rm_rejects_directory():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    seed_directory(files, f"{root}/dir")
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.WRITE)
+async def test_workspace_execute_databricks_volume_rm_rejects_directory(
+    volume,
+):
+    await volume.mkdir(f"{ROOT}/dir")
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.WRITE)
 
     io = await ws.shell("rm /dbx/dir")
 
@@ -419,11 +301,9 @@ async def test_workspace_execute_databricks_volume_rm_rejects_directory():
 
 
 @pytest.mark.asyncio
-async def test_read_only_mount_rejects_file_write_commands():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    seed_directory(files, root)
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+async def test_read_only_mount_rejects_file_write_commands(volume):
+    await volume.mkdir(ROOT)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     touch_io = await ws.shell("touch /dbx/created.txt")
     rm_io = await ws.shell("rm /dbx/created.txt")
@@ -439,23 +319,9 @@ async def test_read_only_mount_rejects_file_write_commands():
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_uses_databricks_volume_mount_for_ls():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.directory_metadata.add(root)
-    files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        content_length=18,
-        content_type=None,
-        last_modified=None,
-    )
-    files.directories[root] = [
-        SimpleNamespace(
-            path=f"{root}/debug_output.json",
-            is_directory=False,
-            file_size=18,
-        )
-    ]
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+async def test_workspace_execute_uses_databricks_volume_mount_for_ls(volume):
+    await volume.put(f"{ROOT}/debug_output.json", b'{"ok": true}\nsecond\n')
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     io = await ws.shell("ls /dbx")
     slash_io = await ws.shell("ls /dbx/")
@@ -464,26 +330,15 @@ async def test_workspace_execute_uses_databricks_volume_mount_for_ls():
     assert b"debug_output.json" in io.stdout
     assert slash_io.exit_code == 0
     assert b"debug_output.json" in slash_io.stdout
-    mount = await ws._registry.resolve_mount(
-        "ls",
-        [PathSpec.from_str_path("/dbx", mount_key("/dbx", "/dbx"))],
-        "/",
-    )
+    mount = await ws._registry.resolve_mount("ls", [spec("/dbx", "/dbx")], "/")
     assert mount is not None
     assert mount.prefix == "/dbx/"
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_stat_and_cat():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.downloads[f"{root}/debug_output.json"] = b'{"ok": true}\nsecond\n'
-    files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        content_length=20,
-        content_type=None,
-        last_modified=None,
-    )
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+async def test_workspace_execute_databricks_volume_stat_and_cat(volume):
+    await volume.put(f"{ROOT}/debug_output.json", b'{"ok": true}\nsecond\n')
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     stat_io = await ws.shell("stat /dbx/debug_output.json")
     cat_io = await ws.shell("cat /dbx/debug_output.json")
@@ -498,37 +353,10 @@ async def test_workspace_execute_databricks_volume_stat_and_cat():
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_find_files():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.directory_metadata.update({root, f"{root}/nested"})
-    files.metadata[f"{root}/nested"] = SimpleNamespace(is_directory=True)
-    files.metadata[f"{root}/debug_output.json"] = SimpleNamespace(
-        content_length=2,
-        content_type=None,
-        last_modified=None,
-    )
-    files.metadata[f"{root}/nested/result.txt"] = SimpleNamespace(
-        content_length=2,
-        content_type=None,
-        last_modified=None,
-    )
-    files.directories[root] = [
-        SimpleNamespace(
-            path=f"{root}/debug_output.json",
-            is_directory=False,
-            file_size=2,
-        ),
-        SimpleNamespace(path=f"{root}/nested", is_directory=True),
-    ]
-    files.directories[f"{root}/nested"] = [
-        SimpleNamespace(
-            path=f"{root}/nested/result.txt",
-            is_directory=False,
-            file_size=2,
-        )
-    ]
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+async def test_workspace_execute_databricks_volume_find_files(volume):
+    await volume.put(f"{ROOT}/debug_output.json", b"{}")
+    await volume.put(f"{ROOT}/nested/result.txt", b"ok")
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     io = await ws.shell("find /dbx -maxdepth 2 -type f")
 
@@ -538,53 +366,14 @@ async def test_workspace_execute_databricks_volume_find_files():
 
 
 @pytest.mark.asyncio
-async def test_workspace_execute_databricks_volume_recursive_grep_and_rg():
-    files = FakeFiles()
-    root = "/Volumes/main/default/agent_files/root"
-    files.directory_metadata.update(
-        {
-            root,
-            f"{root}/nested",
-            f"{root}/nested/deeper",
-        }
+async def test_workspace_execute_databricks_volume_recursive_grep_and_rg(
+    volume,
+):
+    await volume.put(f"{ROOT}/nested/info.txt", b"alpha debug line\n")
+    await volume.put(
+        f"{ROOT}/nested/deeper/notes.md", b"# Notes\nbeta debug detail\n"
     )
-    files.metadata[f"{root}/nested"] = SimpleNamespace(is_directory=True)
-    files.metadata[f"{root}/nested/deeper"] = SimpleNamespace(
-        is_directory=True
-    )
-    files.metadata[f"{root}/nested/info.txt"] = SimpleNamespace(
-        content_length=17,
-        content_type=None,
-        last_modified=None,
-    )
-    files.metadata[f"{root}/nested/deeper/notes.md"] = SimpleNamespace(
-        content_length=26,
-        content_type=None,
-        last_modified=None,
-    )
-    files.downloads[f"{root}/nested/info.txt"] = b"alpha debug line\n"
-    files.downloads[f"{root}/nested/deeper/notes.md"] = (
-        b"# Notes\nbeta debug detail\n"
-    )
-    files.directories[root] = [
-        SimpleNamespace(path=f"{root}/nested", is_directory=True),
-    ]
-    files.directories[f"{root}/nested"] = [
-        SimpleNamespace(
-            path=f"{root}/nested/info.txt",
-            is_directory=False,
-            file_size=17,
-        ),
-        SimpleNamespace(path=f"{root}/nested/deeper", is_directory=True),
-    ]
-    files.directories[f"{root}/nested/deeper"] = [
-        SimpleNamespace(
-            path=f"{root}/nested/deeper/notes.md",
-            is_directory=False,
-            file_size=26,
-        )
-    ]
-    ws = Workspace({"/dbx/": make_vfs(files)}, mode=MountMode.READ)
+    ws = Workspace({"/dbx/": make_vfs(volume)}, mode=MountMode.READ)
 
     grep_io = await ws.shell("grep -R -n debug /dbx/nested")
     rg_io = await ws.shell("rg debug /dbx/nested")

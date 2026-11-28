@@ -1,6 +1,6 @@
 import { createServer, type RequestListener } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { jsonResponse, spec } from '../../../tests/core/databricks_volume/_test_util.ts'
+import { spec } from '../../../tests/fixtures/databricks_volume.ts'
 import { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { materialize } from '../../io/types.ts'
 import { MountMode } from '../../types.ts'
@@ -32,6 +32,15 @@ const accessor = (overrides: Record<string, unknown> = {}) =>
   )
 
 afterEach(() => vi.unstubAllGlobals())
+
+// These tests shape the wire itself (encodings, credentials per request, a
+// body that fails), so each answers its own requests.
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
 
 describe('Files client', () => {
   it('escapes path segments without changing their boundaries', async () => {

@@ -12,49 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
+import pytest
 
 from mirage import MountMode, Workspace
 from mirage.vfs.ram import RAMVFS
-from tests.vfs.databricks_volume.test_databricks_volume import (
-    FakeFiles,
-    make_vfs,
-    seed_file,
-)
-
-ROOT = "/Volumes/main/default/agent_files/root"
+from tests.fixtures.databricks_volume import ROOT
+from tests.vfs.databricks_volume.test_databricks_volume import make_vfs
 
 
-def _run(ws, cmd):
-    async def _inner():
-        io = await ws.shell(cmd)
-        return await io.stdout_str(), await io.stderr_str(), io.exit_code
-
-    return asyncio.run(_inner())
-
-
-def _ws_with_dbx_tree():
-    files = FakeFiles()
-    files.create_directory(ROOT)
-    files.create_directory(f"{ROOT}/tree")
-    files.create_directory(f"{ROOT}/tree/sub")
-    seed_file(files, f"{ROOT}/tree/a.txt", b"aaa\n")
-    seed_file(files, f"{ROOT}/tree/sub/b.txt", b"bbb\n")
-    dbx = make_vfs(files)
+@pytest.mark.asyncio
+async def test_single_file_missing_parent_is_posix_error(volume):
+    # Option B / POSIX: a single-file copy never creates the destination's
+    # parent directory; it errors like coreutils instead of mkdir -p.
+    await volume.put(f"{ROOT}/tree/a.txt", b"aaa\n")
+    await volume.put(f"{ROOT}/tree/sub/b.txt", b"bbb\n")
     ram = RAMVFS()
     ws = Workspace(
         {
-            "/dbx": (dbx, MountMode.WRITE),
+            "/dbx": (make_vfs(volume), MountMode.WRITE),
             "/m": (ram, MountMode.WRITE),
         },
     )
-    return ws, files, ram
-
-
-def test_single_file_missing_parent_is_posix_error():
-    # Option B / POSIX: a single-file copy never creates the destination's
-    # parent directory; it errors like coreutils instead of mkdir -p.
-    ws, _files, ram = _ws_with_dbx_tree()
     ram._store.files["/lone.txt"] = b"z\n"
-    _out, _err, code = _run(ws, "cp /m/lone.txt /dbx/nope/deep/lone.txt")
-    assert code == 1
+    io = await ws.shell("cp /m/lone.txt /dbx/nope/deep/lone.txt")
+    assert io.exit_code == 1

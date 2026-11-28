@@ -12,34 +12,57 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import {
+  DatabricksVolume,
+  DIRS,
+  DIRS_PREFIX,
+  FILES,
+  ROOT,
+  spec,
+} from '../../../tests/fixtures/databricks_volume.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { DirListing, type FileStat, FileType } from '../../types.ts'
 import { readdir } from './readdir.ts'
-import {
-  jsonResponse,
-  makeAccessor,
-  notFoundResponse,
-  routedFetch,
-  spec,
-  TEST_ROOT,
-} from '../../../tests/core/databricks_volume/_test_util.ts'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
+let origin = ''
+let volume: DatabricksVolume
+
+beforeAll(async () => {
+  origin = await serve('databricks')
 })
+
+beforeEach(async () => {
+  volume = new DatabricksVolume(origin)
+  await volume.reset()
+})
+
+afterEach(async () => {
+  await volume.run.close()
+})
+
+// A listing's first page as Databricks answers one with more to come: the
+// fake lists a directory on one page, so a test that needs two arms the first.
+async function firstPage(...names: string[]): Promise<void> {
+  await volume.run.answerNext(
+    'GET',
+    DIRS,
+    200,
+    {
+      contents: names.map((name) => ({ path: `${ROOT}/${name}`, name, file_size: 1 })),
+      next_page_token: 'next',
+    },
+    1,
+    `${DIRS_PREFIX}${ROOT}`,
+    '',
+  )
+}
 
 describe('readdir', () => {
   it('lists sorted rows named without trailing slashes', async () => {
-    const { fetch } = routedFetch(() =>
-      jsonResponse({
-        contents: [
-          { path: `${TEST_ROOT}/b.txt`, is_directory: false, file_size: 2 },
-          { path: `${TEST_ROOT}/a`, is_directory: true },
-        ],
-      }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
+    await volume.put(`${ROOT}/b.txt`, 'bb')
+    await volume.mkdir(`${ROOT}/a`)
+    const rows = (await readdir(volume.accessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.type])).toEqual([
       ['a', FileType.DIRECTORY],
       ['b.txt', FileType.FILE],
@@ -47,40 +70,27 @@ describe('readdir', () => {
   })
 
   it('follows next_page_token pagination', async () => {
-    const { fetch, calls } = routedFetch((call) => {
-      if (call.url.includes('page_token=next')) {
-        return jsonResponse({ contents: [{ path: `${TEST_ROOT}/b.txt`, file_size: 1 }] })
-      }
-      return jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }],
-        next_page_token: 'next',
-      })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
+    await volume.put(`${ROOT}/b.txt`, 'b')
+    await firstPage('a.txt')
+    await volume.run.recordRequests()
+    const rows = (await readdir(volume.accessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => row.name)).toEqual(['a.txt', 'b.txt'])
-    expect(calls).toHaveLength(2)
+    expect(await volume.run.params('GET', DIRS)).toEqual([{}, { page_token: 'next' }])
   })
 
   it('pages no further than a limit and marks the listing partial', async () => {
-    const { fetch, calls } = routedFetch(() =>
-      jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }],
-        next_page_token: 'next',
-      }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const cut = await readdir(makeAccessor(), spec('/volume/'), 1)
+    await volume.put(`${ROOT}/b.txt`, 'b')
+    await firstPage('a.txt')
+    await volume.run.recordRequests()
+    const cut = await readdir(volume.accessor(), spec('/volume/'), 1)
     expect(cut).toBeInstanceOf(DirListing)
     expect((cut as DirListing).partial).toBe(true)
     expect((cut as DirListing).entries.map((row) => row.name)).toEqual(['a.txt'])
-    expect(calls).toHaveLength(1)
+    expect(await volume.asked('GET', DIRS)).toHaveLength(1)
   })
 
   it('raises ENOENT for missing directories', async () => {
-    const { fetch } = routedFetch(() => notFoundResponse())
-    vi.stubGlobal('fetch', fetch)
-    const err = (await readdir(makeAccessor(), spec('/volume/missing')).catch(
+    const err = (await readdir(volume.accessor(), spec('/volume/missing')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOENT')
@@ -90,45 +100,29 @@ describe('readdir', () => {
     // The Files API 404s `/a.txt/x` exactly as it does a name that is simply
     // absent, so only the ancestor walk can tell GNU's "Not a directory"
     // from "No such file or directory".
-    const { fetch } = routedFetch((call) => {
-      // The two probes differ only by endpoint, so the route has to read it:
-      // both URLs end in the same volume path.
-      if (call.url.includes('/fs/files') && call.url.endsWith(`${TEST_ROOT}/a.txt`)) {
-        return jsonResponse({})
-      }
-      return notFoundResponse()
-    })
-    vi.stubGlobal('fetch', fetch)
-    const err = (await readdir(makeAccessor(), spec('/volume/a.txt/x')).catch(
+    await volume.put(`${ROOT}/a.txt`, 'abc')
+    const err = (await readdir(volume.accessor(), spec('/volume/a.txt/x')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOTDIR')
   })
 
   it('settles a file operand on one probe, without walking its ancestors', async () => {
-    const { fetch, calls } = routedFetch((call) => {
-      if (call.method === 'HEAD') return jsonResponse({})
-      return notFoundResponse()
-    })
-    vi.stubGlobal('fetch', fetch)
-    const err = (await readdir(makeAccessor(), spec('/volume/docs/a.txt')).catch(
+    await volume.put(`${ROOT}/docs/a.txt`, 'abc')
+    await volume.run.recordRequests()
+    const err = (await readdir(volume.accessor(), spec('/volume/docs/a.txt')).catch(
       (e: unknown) => e,
     )) as Error & { code?: string }
     expect(err.code).toBe('ENOTDIR')
-    expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
+    expect(await volume.asked('HEAD', FILES)).toEqual([`${ROOT}/docs/a.txt`])
+    expect(await volume.asked('HEAD', DIRS)).toEqual([])
   })
 
   it('answers each child with its size, type and modified time', async () => {
-    const { fetch } = routedFetch(() =>
-      jsonResponse({
-        contents: [
-          { path: `${TEST_ROOT}/a.txt`, file_size: 6, last_modified: 1_700_000_000_000 },
-          { path: `${TEST_ROOT}/d`, is_directory: true },
-        ],
-      }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const [file, dir] = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
+    await volume.put(`${ROOT}/a.txt`, 'abcdef')
+    await volume.mkdir(`${ROOT}/d`)
+    await volume.setModified(`${ROOT}/a.txt`, 1_700_000_000_000)
+    const [file, dir] = (await readdir(volume.accessor(), spec('/volume/'))) as FileStat[]
     expect([file?.type, file?.size, file?.modified]).toEqual([
       FileType.FILE,
       6,
@@ -138,30 +132,22 @@ describe('readdir', () => {
   })
 
   it('backfills a lister-omitted size with one HEAD', async () => {
-    const { fetch, calls } = routedFetch((call) => {
-      if (call.method === 'HEAD') {
-        return new Response(null, { status: 200, headers: { 'content-length': '7' } })
-      }
-      return jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/a.txt` }, { path: `${TEST_ROOT}/b.txt`, file_size: 3 }],
-      })
-    })
-    vi.stubGlobal('fetch', fetch)
-    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
+    // The fake's listings leave out poem.txt's size.
+    await volume.put(`${ROOT}/poem.txt`, 'roses r')
+    await volume.put(`${ROOT}/b.txt`, 'abc')
+    await volume.run.recordRequests()
+    const rows = (await readdir(volume.accessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.size])).toEqual([
-      ['a.txt', 7],
       ['b.txt', 3],
+      ['poem.txt', 7],
     ])
-    expect(calls.filter((c) => c.method === 'HEAD')).toHaveLength(1)
+    expect(await volume.asked('HEAD', FILES)).toEqual([`${ROOT}/poem.txt`])
   })
+
   it('interprets early-epoch listing timestamps as milliseconds', async () => {
-    const { fetch } = routedFetch(() =>
-      jsonResponse({
-        contents: [{ path: `${TEST_ROOT}/early.txt`, file_size: 1, last_modified: 1000 }],
-      }),
-    )
-    vi.stubGlobal('fetch', fetch)
-    const [file] = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
+    await volume.put(`${ROOT}/early.txt`, 'x')
+    await volume.setModified(`${ROOT}/early.txt`, 1000)
+    const [file] = (await readdir(volume.accessor(), spec('/volume/'))) as FileStat[]
     expect(file?.modified).toBe('1970-01-01T00:00:01Z')
   })
 })

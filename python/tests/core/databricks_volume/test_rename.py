@@ -13,54 +13,52 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
-from types import SimpleNamespace
+from collections.abc import Awaitable, Callable
 
 import pytest
 
 from mirage.core.databricks_volume.rename import rename
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.databricks_volume import DIRS, FILES
 
 
 def _path(path: str) -> PathSpec:
     return PathSpec.from_str_path(path, mount_key(path, "/dbx"))
 
 
-def _seed_directory(files, path: str) -> None:
-    files.directory_metadata.add(path)
-    files.directories.setdefault(path, [])
-    parent = path.rsplit("/", 1)[0]
-    if parent and parent != path:
-        files.directories.setdefault(parent, []).append(
-            SimpleNamespace(path=path, is_directory=True, file_size=None)
-        )
+async def _while_listing(
+    volume, nth: int, change: Callable[[], Awaitable[None]]
+) -> None:
+    """Run ``change`` while the ``nth`` directory listing from now waits:
+    each listing before it, held, arms the hold on the next.
 
-
-def _seed_file(files, path: str, data: bytes) -> None:
-    parent = path.rsplit("/", 1)[0]
-    files.downloads[path] = data
-    files.metadata[path] = SimpleNamespace(
-        is_directory=False, file_size=len(data)
-    )
-    files.directories.setdefault(parent, []).append(
-        SimpleNamespace(path=path, is_directory=False, file_size=len(data))
+    Args:
+        volume (DatabricksVolume): the volume.
+        nth (int): which listing, counting from one.
+        change (Callable[[], Awaitable[None]]): what another client does.
+    """
+    if nth == 1:
+        await volume.run.before_next([("GET", DIRS)], change)
+        return
+    await volume.run.before_next(
+        [("GET", DIRS)], lambda: _while_listing(volume, nth - 1, change)
     )
 
 
 @pytest.mark.asyncio
-async def test_rename_file_moves_bytes(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/src.txt", b"data")
+async def test_rename_file_moves_bytes(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/src.txt", b"data")
 
     await rename(accessor, _path("/dbx/src.txt"), _path("/dbx/dst.txt"))
 
-    assert files.downloads[f"{remote_root}/dst.txt"] == b"data"
-    assert f"{remote_root}/src.txt" not in files.downloads
+    assert await volume.content(f"{remote_root}/dst.txt") == b"data"
+    assert not await volume.has(f"{remote_root}/src.txt")
 
 
 @pytest.mark.asyncio
-async def test_rename_missing_source_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_rename_missing_source_fails(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await rename(
@@ -69,19 +67,19 @@ async def test_rename_missing_source_fails(accessor, files, remote_root):
 
 
 @pytest.mark.asyncio
-async def test_rename_same_path_is_noop(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_file(files, f"{remote_root}/src.txt", b"data")
+async def test_rename_same_path_is_noop(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/src.txt", b"data")
+    await volume.run.record_requests()
 
     await rename(accessor, _path("/dbx/src.txt"), _path("/dbx/src.txt"))
 
-    assert files.downloads[f"{remote_root}/src.txt"] == b"data"
-    assert f"{remote_root}/src.txt" not in files.delete_calls
+    assert await volume.content(f"{remote_root}/src.txt") == b"data"
+    assert await volume.asked("DELETE", FILES) == []
 
 
 @pytest.mark.asyncio
-async def test_rename_same_missing_path_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
+async def test_rename_same_missing_path_fails(accessor, volume, remote_root):
+    await volume.mkdir(remote_root)
 
     with pytest.raises(FileNotFoundError):
         await rename(
@@ -92,71 +90,61 @@ async def test_rename_same_missing_path_fails(accessor, files, remote_root):
 
 
 @pytest.mark.asyncio
-async def test_rename_directory_moves_tree(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
+async def test_rename_directory_moves_tree(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/d/a.txt", b"aaa")
 
     await rename(accessor, _path("/dbx/d"), _path("/dbx/d2"))
 
-    assert files.downloads[f"{remote_root}/d2/a.txt"] == b"aaa"
-    assert f"{remote_root}/d" not in files.directory_metadata
+    assert await volume.content(f"{remote_root}/d2/a.txt") == b"aaa"
+    assert not await volume.has(f"{remote_root}/d")
 
 
 @pytest.mark.asyncio
-async def test_rename_into_own_subtree_fails(accessor, files, remote_root):
-    _seed_directory(files, remote_root)
-    _seed_directory(files, f"{remote_root}/d")
-    _seed_file(files, f"{remote_root}/d/a.txt", b"aaa")
+async def test_rename_into_own_subtree_fails(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/d/a.txt", b"aaa")
+    await volume.run.record_requests()
 
     with pytest.raises(ValueError):
         await rename(accessor, _path("/dbx/d"), _path("/dbx/d/d"))
 
-    assert files.downloads[f"{remote_root}/d/a.txt"] == b"aaa"
-    assert f"{remote_root}/d" in files.directory_metadata
-    assert files.create_directory_calls == []
-    assert files.upload_calls == []
-    assert files.delete_calls == []
-    assert files.delete_directory_calls == []
+    assert await volume.content(f"{remote_root}/d/a.txt") == b"aaa"
+    assert await volume.has(f"{remote_root}/d")
+    assert await volume.asked("PUT", DIRS) == []
+    assert await volume.asked("PUT", FILES) == []
+    assert await volume.asked("DELETE", FILES) == []
+    assert await volume.asked("DELETE", DIRS) == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("late", ["file", "directory", "replaced"])
 async def test_rename_keeps_an_entry_written_after_the_copy(
-    accessor, files, remote_root, late
+    accessor, volume, remote_root, late
 ):
     # Only what the copy carried is deleted: an entry written under the
     # source since, or one replaced since its copy, stays there, and the
-    # move is ENOTEMPTY rather than a loss.
+    # move is ENOTEMPTY rather than a loss. Another client writes it once
+    # the copy is done, while the delete walk's listing of the source
+    # waits: the copy lists the source, and `late` too when it is there.
     d = f"{remote_root}/d"
-    _seed_directory(files, remote_root)
-    _seed_directory(files, d)
     if late == "replaced":
-        _seed_directory(files, f"{d}/late")
-    _seed_file(files, f"{d}/a.txt", b"aaa")
-    inner = files.upload
+        await volume.mkdir(f"{d}/late")
+    await volume.put(f"{d}/a.txt", b"aaa")
 
-    def racing(path, contents, overwrite=False):
-        files.upload = inner
-        inner(path, contents, overwrite)
+    async def write_late() -> None:
         if late == "directory":
-            _seed_directory(files, f"{d}/late")
+            await volume.mkdir(f"{d}/late")
             return
         if late == "replaced":
-            files.directories.pop(f"{d}/late")
-            files.directory_metadata.discard(f"{d}/late")
-            files.directories[d] = [
-                e for e in files.directories[d] if e.path != f"{d}/late"
-            ]
-        _seed_file(files, f"{d}/late", b"late")
+            await volume.rmdir(f"{d}/late")
+        await volume.put(f"{d}/late", b"late")
 
-    files.upload = racing
+    await _while_listing(volume, 3 if late == "replaced" else 2, write_late)
     with pytest.raises(OSError) as refused:
         await rename(accessor, _path("/dbx/d"), _path("/dbx/d2"))
     assert refused.value.errno == errno.ENOTEMPTY
-    assert files.downloads[f"{remote_root}/d2/a.txt"] == b"aaa"
-    assert f"{d}/a.txt" not in files.downloads
+    assert await volume.content(f"{remote_root}/d2/a.txt") == b"aaa"
+    assert not await volume.has(f"{d}/a.txt")
     if late == "directory":
-        assert f"{d}/late" in files.directory_metadata
+        assert await volume.has(f"{d}/late")
     else:
-        assert files.downloads[f"{d}/late"] == b"late"
+        assert await volume.content(f"{d}/late") == b"late"

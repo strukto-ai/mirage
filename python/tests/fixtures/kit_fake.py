@@ -16,6 +16,7 @@ import asyncio
 import base64
 import inspect
 import json
+import os
 import selectors
 import sqlite3
 import subprocess
@@ -34,7 +35,21 @@ INTEG = Path(__file__).resolve().parents[3] / "integ"
 START_SECONDS = 20
 STOP_SECONDS = 5
 SETUP_HEADER = "X-Kit-Setup"
+# A bearer token that names its run and tenant, as integ/README.md's
+# credential routing reads one.
+RUN_TOKENS = "^kitrun:(?<run>[^:]+):(?<tenant>[^:]+)$"
 T = TypeVar("T")
+
+
+def run_token(run: str, tenant: str) -> str:
+    """The bearer token that reaches ``tenant`` in ``run`` on a fake
+    :func:`serve` started.
+
+    Args:
+        run (str): the run's name.
+        tenant (str): the tenant in it.
+    """
+    return f"kitrun:{run}:{tenant}"
 
 
 @contextmanager
@@ -43,11 +58,14 @@ def serve(service: str) -> Iterator[str]:
 
     The fake is the one the integ battery runs against, started on a port
     of its own. It needs ``pnpm install`` and ``pnpm run prisma:clients``
-    in ``integ/``.
+    in ``integ/``. A bearer token of :func:`run_token`'s shape names its
+    run and tenant, for a client whose config takes a bare origin and so
+    cannot carry a run's path; any other token routes as before.
 
     Args:
         service (str): directory under ``integ/server/`` holding main.ts.
     """
+    env = {**os.environ, "MIRAGE_RUN_TOKEN_PATTERN": RUN_TOKENS}
     process = subprocess.Popen(
         [
             str(INTEG / "node_modules" / ".bin" / "tsx"),
@@ -58,6 +76,7 @@ def serve(service: str) -> Iterator[str]:
         cwd=INTEG,
         stdout=subprocess.PIPE,
         text=True,
+        env=env,
     )
     assert process.stdout is not None
     try:
@@ -123,10 +142,14 @@ class KitRun:
         origin (str): the fake's origin, as :func:`serve` yields it.
         headers (dict[str, str]): what selects the tenant, as the client
             under test sends it.
+        name (str | None): the run's name, for a token that must carry it
+            (:func:`run_token`); a fresh one if None.
     """
 
-    def __init__(self, origin: str, headers: dict[str, str]) -> None:
-        self.name = uuid.uuid4().hex
+    def __init__(
+        self, origin: str, headers: dict[str, str], name: str | None = None
+    ) -> None:
+        self.name = name if name is not None else uuid.uuid4().hex
         self.origin = origin
         self.url = f"{origin}/_run/{self.name}"
         self.http = aiohttp.ClientSession(

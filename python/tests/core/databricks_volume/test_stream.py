@@ -3,11 +3,13 @@ import pytest
 from mirage.core.databricks_volume.stream import read_stream
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+from tests.fixtures.databricks_volume import FILES
 
 
 @pytest.mark.asyncio
-async def test_read_stream_chunks_file(accessor, files, remote_root):
-    files.downloads[f"{remote_root}/reports/latest.md"] = b"abcdef"
+async def test_read_stream_chunks_file(accessor, volume, remote_root):
+    await volume.put(f"{remote_root}/reports/latest.md", b"abcdef")
+    await volume.run.record_requests()
     path = PathSpec.from_str_path(
         "/volume/reports/latest.md",
         mount_key("/volume/reports/latest.md", "/volume"),
@@ -17,5 +19,7 @@ async def test_read_stream_chunks_file(accessor, files, remote_root):
     ]
     assert chunks == [b"ab", b"cd", b"ef"]
     # Streaming should use one download body, not one Range GET per chunk.
-    assert files.download_calls == [f"{remote_root}/reports/latest.md"]
-    assert len(files.requests) == 1
+    assert await volume.asked("GET", FILES) == [
+        f"{remote_root}/reports/latest.md"
+    ]
+    assert len(await volume.run.requests()) == 1
