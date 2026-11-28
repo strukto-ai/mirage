@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { randomUUID } from 'node:crypto'
-import { type Entry, Operator } from 'opendal'
+import { Operator } from 'opendal'
 import { HfBucketsAccessor } from '../../src/accessor/hf_buckets.ts'
 import { KitRun } from '../../../core/tests/fixtures/kit_fake.ts'
 
@@ -32,39 +32,6 @@ export const UNTIL_CLEARED = 1_000_000
 
 /** One request as the tests read it: its name, path and query. */
 export type Logged = [string, string, string]
-
-function bound(target: object, key: string | symbol): unknown {
-  const value: unknown = Reflect.get(target, key, target)
-  return typeof value === 'function'
-    ? (value as (...args: unknown[]) => unknown).bind(target)
-    : value
-}
-
-function withoutSize(entry: Entry): Entry {
-  const meta = entry.metadata()
-  const bare = new Proxy(meta, {
-    get: (target, key) => (key === 'contentLength' ? null : bound(target, key)),
-  })
-  return new Proxy(entry, {
-    get: (target, key) => (key === 'metadata' ? () => bare : bound(target, key)),
-  })
-}
-
-/**
- * Make `op`'s listings name `key` with a null size.
- *
- * The node binding types a listed size as possibly null, but a Hub page
- * without one reads as 0 through it (probed), so the null is staged on the
- * real entry; both hosts keep the stat that fills it. Twin of Python's
- * ListedBare.
- */
-export function listedWithoutSize(op: Operator, key: string): void {
-  const list = op.list.bind(op)
-  Object.defineProperty(op, 'list', {
-    value: async (...args: Parameters<Operator['list']>): Promise<Entry[]> =>
-      (await list(...args)).map((entry) => (entry.path() === key ? withoutSize(entry) : entry)),
-  })
-}
 
 interface Listed {
   method: string

@@ -17,7 +17,7 @@ import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
-import { HfBucket, listedWithoutSize } from '../../../tests/fixtures/hf_bucket.ts'
+import { HfBucket, TREE } from '../../../tests/fixtures/hf_bucket.ts'
 import { readdir as listStats } from './readdir.ts'
 
 let origin = ''
@@ -129,15 +129,23 @@ describe('hf readdir', () => {
     })
   })
 
-  it('backfills a lister-omitted size with one stat', async () => {
-    const bucket = await seeded(FILES)
-    const accessor = bucket.accessor()
-    listedWithoutSize(await accessor.operator(), 'config.json')
+  it('lists each size as its row has it', async () => {
+    // One tree request and no stat. The Hub sends a size for every file
+    // (its own client requires one); a row without one, which it does not
+    // send, reads as 0 through opendal, whose row size defaults to 0, so
+    // the listing never holds a missing size to fill.
+    const bucket = await seeded({ 'data/a.txt': 'hello', 'data/b.txt': 'abc' })
     await bucket.run.recordRequests()
-    const rows = (await listStats(accessor, PathSpec.fromStrPath('/'))) as FileStat[]
-    expect(rows.find((row) => row.name === 'config.json')?.size).toBe(2)
-    // One stat, which the node binding sends as a paths-info form.
-    expect((await bucket.log()).map(([name]) => name)).toEqual(['tree', 'paths_info'])
+    await bucket.run.answerNext('GET', TREE, 200, [
+      { type: 'file', path: 'data/a.txt', size: 5 },
+      { type: 'file', path: 'data/b.txt' },
+    ])
+    const rows = (await listStats(bucket.accessor(), PathSpec.fromStrPath('/data'))) as FileStat[]
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.size]))).toEqual({
+      'a.txt': 5,
+      'b.txt': 0,
+    })
+    expect((await bucket.log()).map(([name]) => name)).toEqual(['tree'])
   })
 
   it('lists mount-relative under a key prefix', async () => {

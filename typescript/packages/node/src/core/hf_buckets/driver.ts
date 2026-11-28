@@ -82,12 +82,11 @@ async function* listChildren(conn: HfConn, pfx: string): AsyncIterable<ChildEntr
       yield { key: rstripSlash(rel), kind: 'd' }
       continue
     }
-    // The Hub tree API carries a size for every file (for LFS files it is
-    // the object size, not the pointer's); when the lister omits the
-    // metadata, one stat per affected file fills the gap so the index
-    // never caches an unknown size.
-    const size = sizeOf(entry.metadata()) ?? sizeOf(await conn.op.stat(rel))
-    yield { key: rel, kind: 'f', size }
+    // The size is the row's, with no stat to fill one in: the Hub sends a
+    // size for every file (its own client requires one), and opendal reads
+    // a row without one as 0 before it gets here. The binding types the
+    // size as nullable, so a null would stay unknown, not become a guess.
+    yield { key: rel, kind: 'f', size: sizeOf(entry.metadata()) }
   }
 }
 

@@ -37,8 +37,7 @@ class HfBucketsVFS(BaseVFS):
     name: str = VFSName.HF_BUCKETS
     caches_reads: bool = True
     # The Hub tree API reports each file's exact byte size (the LFS
-    # object size for LFS files); readdir backfills any lister-omitted
-    # size with one stat.
+    # object size for LFS files), and readdir lists it as the row has it.
     sizes_always_known: bool = True
     supports_snapshot: bool = True
     # stat stamps the paths-info xet hash and a read stamps its download's

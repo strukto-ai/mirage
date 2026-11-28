@@ -40,54 +40,6 @@ UNTIL_CLEARED = 1_000_000
 OWN = object()
 
 
-class _Bare:
-    """A listed entry with no metadata.
-
-    Args:
-        path (str): the entry's path.
-    """
-
-    def __init__(self, path: str) -> None:
-        self.path = path
-        self.metadata = None
-
-
-async def _bared(entries: Any, key: str) -> AsyncIterator[Any]:
-    async for entry in entries:
-        yield _Bare(entry.path) if entry.path == key else entry
-
-
-class ListedBare:
-    """A real opendal operator whose listings name ``key`` with no
-    metadata.
-
-    The Python binding never omits an entry's metadata (a size it was not
-    given reads as 0), but the node binding's size can be null, and both
-    hosts keep the stat that fills it; this keeps the Python twin of that
-    branch run.
-
-    Args:
-        op (opendal.AsyncOperator): the operator.
-        key (str): the key listed bare.
-    """
-
-    def __init__(self, op: opendal.AsyncOperator, key: str) -> None:
-        self._op = op
-        self._key = key
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._op, name)
-
-    async def list(self, path: str, **kw: Any) -> AsyncIterator[Any]:
-        """The operator's listing, ``key`` bare.
-
-        Args:
-            path (str): the directory listed.
-            **kw (Any): what opendal's list takes.
-        """
-        return _bared(await self._op.list(path, **kw), self._key)
-
-
 class HfBucket:
     """One Hugging Face bucket on the integ ``hf`` fake, and the writes a
     test arranges it by.

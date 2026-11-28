@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.hf_buckets.readdir import readdir as list_stats
 from mirage.types import PathSpec
-from tests.fixtures.hf_bucket import ListedBare
+from tests.fixtures.hf_bucket import TREE
 
 
 async def readdir(acc, path: PathSpec) -> list[str]:
@@ -107,14 +107,24 @@ async def test_readdir_directory_exists_only_while_it_holds_a_key(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_readdir_backfills_lister_omitted_size(make_acc):
-    # When the lister omits metadata, readdir does one stat per affected
-    # file instead of caching an unknown size.
-    acc = await make_acc({"a.txt": b"hello", "b.txt": b"abc"})
-    real = acc.operator
-    acc.operator = lambda: ListedBare(real(), "a.txt")
-    rows = await list_stats(acc, PathSpec.from_str_path("/"))
-    assert {row.name: row.size for row in rows} == {"a.txt": 5, "b.txt": 3}
+async def test_readdir_lists_each_size_as_its_row_has_it(make_acc, bucket):
+    # One tree request and no stat. The Hub sends a size for every file
+    # (its own client requires one); a row without one, which it does not
+    # send, reads as 0 through opendal, whose row size defaults to 0, so
+    # the listing never holds a missing size to fill.
+    acc = await make_acc({"data/a.txt": b"hello", "data/b.txt": b"abc"})
+    await bucket.run.answer_next(
+        "GET",
+        TREE,
+        200,
+        [
+            {"type": "file", "path": "data/a.txt", "size": 5},
+            {"type": "file", "path": "data/b.txt"},
+        ],
+    )
+    rows = await list_stats(acc, PathSpec.from_str_path("/data"))
+    assert {row.name: row.size for row in rows} == {"a.txt": 5, "b.txt": 0}
+    assert [name for name, _, _ in await bucket.log()] == ["tree"]
 
 
 @pytest.mark.asyncio

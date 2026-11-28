@@ -21,11 +21,7 @@ from mirage.accessor.hf_buckets import HfBucketsAccessor
 from mirage.core.hf_buckets.driver import DRIVER, HfConn
 from mirage.core.hf_hub.client import HfHubError
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
-from tests.fixtures.hf_bucket import (
-    PATHS_INFO,
-    TREE,
-    ListedBare,
-)
+from tests.fixtures.hf_bucket import PATHS_INFO, TREE
 
 
 async def _op(make_acc, files: dict[str, bytes]) -> HfConn:
@@ -95,14 +91,6 @@ async def test_list_children_maps_the_self_entry_to_a_marker(make_acc, bucket):
     )
     got = [(e.kind, e.key) async for e in DRIVER.list_children(op, "data/")]
     assert got == [("marker", "data/"), ("f", "data/a.json")]
-
-
-@pytest.mark.asyncio
-async def test_list_children_stat_fills_a_missing_size(make_acc):
-    acc = await make_acc({"data/a.json": b"12345"})
-    op = HfConn(accessor=acc, op=ListedBare(acc.operator(), "data/a.json"))
-    got = [e async for e in DRIVER.list_children(op, "data/")]
-    assert [(e.key, e.kind, e.size) for e in got] == [("data/a.json", "f", 5)]
 
 
 @pytest.mark.asyncio
