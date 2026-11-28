@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { eexist, enoent, enotdir, enotsup, listingError } from '../../errors/fs.ts'
+import { eexist, enoent, enotdir, enotempty, enotsup, listingError } from '../../errors/fs.ts'
+import { asideName, landThenRetire, setAside } from '../api/replace.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool, sizeOf, sliceOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -100,6 +101,20 @@ export class DriveLoc {
     return parentPath(this.path)
   }
 
+  // A sibling under another name, where what holds this one's name waits
+  // while an item replacing it lands.
+  renamed(name: string): DriveLoc {
+    const path = rstripSlash(this.path)
+    const virtual = rstripSlash(this.virtual)
+    return new DriveLoc({
+      drive: this.drive,
+      path: path.slice(0, path.length - baseName(path).length) + name,
+      virtual: virtual.slice(0, virtual.length - baseName(virtual).length) + name,
+      url: this.url,
+      ref: this.ref,
+    })
+  }
+
   reference(folder = ''): string {
     return this.ref(folder)
   }
@@ -156,6 +171,16 @@ async function copyOnce(
 ): Promise<GraphError | null> {
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
+  return copyRequest(config, src, dst)
+}
+
+// One Graph copy request and its monitor, a conflict surfaced. Mirrors
+// Python's `_copy_request`.
+async function copyRequest(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  src: DriveLoc,
+  dst: DriveLoc,
+): Promise<GraphError | null> {
   try {
     const monitor = await graphPostMonitor(config, src.item('/copy'), {
       name: baseName(dst.path),
@@ -221,11 +246,94 @@ export async function copyTree(
   if (srcItem.folder !== undefined || dstItem.folder !== undefined) {
     throw new GraphError(409, conflict.code, conflict.message)
   }
-  await graphDelete(config, dst.item())
-  const secondConflict = await copyOnce(config, src, dst, srcVirtual, dstVirtual)
-  if (secondConflict !== null) {
-    throw new GraphError(500, secondConflict.code, secondConflict.message)
-  }
+  await replaceOver(
+    config,
+    dst,
+    false,
+    dstVirtual,
+    () => copyOnto(config, src, dst),
+    (made) => graphDelete(config, dst.item(), pickString(asObject(made), 'eTag')),
+    () => landedAs(config, dst, srcItem, false),
+  )
+}
+
+// Copy `src` onto a free `dst`, a conflict thrown, answering the copy as it
+// landed, read once its monitor completed, so its undo is held to that eTag.
+// Mirrors Python's `_copy_onto`.
+async function copyOnto(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  src: DriveLoc,
+  dst: DriveLoc,
+): Promise<Record<string, unknown>> {
+  const conflict = await copyRequest(config, src, dst)
+  if (conflict !== null) throw new GraphError(500, conflict.code, conflict.message)
+  return graphGet(config, dst.item())
+}
+
+// Whether `there` carries a content hash of `source`'s, under any name both
+// carry (quickXorHash, sha1Hash, sha256Hash). Mirrors Python's `_same_hashes`.
+function sameHashes(source: Record<string, unknown>, there: Record<string, unknown>): boolean {
+  const ours = asObject(asObject(source.file).hashes)
+  const theirs = asObject(asObject(there.file).hashes)
+  return Object.entries(ours).some(([key, value]) => value && theirs[key] === value)
+}
+
+/**
+ * What a landing whose answer was lost made at `dst`: for a move, the source
+ * item itself, by id; for a copy, a file carrying a content hash of the
+ * source's. Null while nothing there tells it. Mirrors Python's `_landed_as`.
+ */
+async function landedAs(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  dst: DriveLoc,
+  source: Record<string, unknown>,
+  moves: boolean,
+): Promise<Record<string, unknown> | null> {
+  const there = await urlItem(config, dst.item())
+  if (there === null) return null
+  if (moves) return there.id === source.id ? there : null
+  return 'file' in there && sameHashes(source, there) ? there : null
+}
+
+/**
+ * Land an item on the file or empty folder that holds `dst`, answering what
+ * `land` answered. Graph refuses a taken name, so what holds it moves aside
+ * under a staged name, the item lands on the name, and what moved aside is
+ * deleted last, a folder only while it lists no child, so one added while the
+ * item landed is not deleted with it. A refused or lost step puts both back,
+ * and a landing whose answer was lost but which went through (`arrived`) is
+ * finished (`landThenRetire`). `takeBack` is held to the eTag a landing landed
+ * with. Mirrors Python's `_replace_over`.
+ */
+async function replaceOver(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  dst: DriveLoc,
+  folder: boolean,
+  dstVirtual: string | undefined,
+  land: () => Promise<Record<string, unknown>>,
+  takeBack: (landed: Record<string, unknown>) => Promise<unknown>,
+  arrived: () => Promise<Record<string, unknown> | null>,
+): Promise<Record<string, unknown>> {
+  const name = baseName(dst.path)
+  const staged = asideName(name)
+  const aside = dst.renamed(staged)
+  await setAside(
+    () => graphPatch(config, dst.item(), { name: staged }),
+    () => graphPatch(config, aside.item(), { name }),
+  )
+  return landThenRetire(
+    land,
+    takeBack,
+    async () => {
+      if (folder && (await graphList(config, aside.item('/children'))).length > 0) {
+        throw enotempty(dstVirtual ?? `/${stripSlash(dst.virtual)}`)
+      }
+      await graphDelete(config, aside.item())
+    },
+    async () => (await urlItem(config, aside.item())) === null,
+    () => graphPatch(config, aside.item(), { name }),
+    arrived,
+  )
 }
 
 function moveBody(src: DriveLoc, dst: DriveLoc): Record<string, unknown> {
@@ -256,9 +364,13 @@ export async function renameReplace(
 ): Promise<MovedItem> {
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
-  const body = moveBody(src, dst)
+  let destination: Record<string, unknown>
+  let source: Record<string, unknown>
   try {
-    return { moved: await graphPatch(config, src.item(), body), replacedNonFile: false }
+    return {
+      moved: await graphPatch(config, src.item(), moveBody(src, dst)),
+      replacedNonFile: false,
+    }
   } catch (error) {
     if (
       !(error instanceof GraphError) ||
@@ -266,15 +378,29 @@ export async function renameReplace(
     ) {
       throw error
     }
-    const destination = await graphGet(config, dst.item())
+    // GNU mv overwrites the destination, but a Graph move has no
+    // conflictBehavior that works across account types: the conflicting file
+    // (or empty folder) moves aside, the item takes its name, and what moved
+    // aside is deleted (replaceOver). A non-empty folder conflict keeps the
+    // original error, mirroring mv's "Directory not empty".
+    destination = await graphGet(config, dst.item())
     if (destination.folder !== undefined) {
       const children = await graphList(config, dst.item('/children'))
       if (children.length > 0) throw error
     }
-    await graphDelete(config, dst.item())
-    const replacedNonFile = !('file' in destination)
-    return { moved: await graphPatch(config, src.item(), body), replacedNonFile }
+    source = await graphGet(config, src.item())
   }
+  const moved = await replaceOver(
+    config,
+    dst,
+    destination.folder !== undefined,
+    dstVirtual,
+    () => graphPatch(config, src.item(), moveBody(src, dst)),
+    (landed) =>
+      graphPatch(config, dst.item(), moveBody(dst, src), pickString(asObject(landed), 'eTag')),
+    () => landedAs(config, dst, source, true),
+  )
+  return { moved, replacedNonFile: !('file' in destination) }
 }
 
 async function urlItem(

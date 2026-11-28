@@ -16,8 +16,12 @@ import pytest
 
 from mirage.core.gdrive.copy import copy
 from mirage.core.gdrive.readdir import readdir
-from mirage.types import PathSpec
-from tests.fixtures.handed import call
+from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.handed import call, entry_at
+
+FILE = "/drive/v3/files/:id"
+COPY = "/drive/v3/files/:id/copy"
+REASON = "insufficientFilePermissions"
 
 
 def spec(virtual: str) -> PathSpec:
@@ -136,3 +140,141 @@ async def test_copy_missing_src_raises(google_account):
             spec("/missing.txt"),
             dst=spec("/dst.txt"),
         )
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_keeps_the_destination(google_account):
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.refuse(
+        "POST", COPY, 403, "This file cannot be copied by the user.", REASON
+    )
+    with pytest.raises(PermissionError) as refused:
+        await call(
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    assert refused.value.filename == spec("/src.txt").virtual
+    assert await google_account.content(dst_id) == b"old"
+    assert len(await google_account.items()) == 2
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_delete_drops_the_copy(google_account):
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.refuse(
+        "DELETE",
+        FILE,
+        403,
+        "The user does not have sufficient permissions for this file.",
+        REASON,
+        path=f"/drive/v3/files/{dst_id}",
+    )
+    with pytest.raises(PermissionError) as refused:
+        await call(
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    assert refused.value.filename == spec("/dst.txt").virtual
+    assert await google_account.content(dst_id) == b"old"
+    assert len(await google_account.items()) == 2
+
+
+@pytest.mark.asyncio
+async def test_copy_onto_the_same_item_does_nothing(google_account):
+    file_id = await google_account.upload("f.txt", b"data")
+    accessor = google_account.drive_accessor()
+    entry = await entry_at(readdir, accessor, spec("/f.txt"))
+    # Drive lists a legacy item under each of its parents, so another
+    # folder's row can name this same id. A row naming no folder is taken
+    # as listed, which stands in for that second listing.
+    twin = FileStat(
+        name="f.txt", type=FileType.FILE, extra={"file_id": file_id}
+    )
+    await google_account.run.record_requests()
+    await copy(
+        accessor, spec("/f.txt"), spec("/b/f.txt"), entry, dst_entry=twin
+    )
+    assert await google_account.asked("POST", COPY) == []
+    assert await google_account.asked("DELETE", FILE) == []
+    assert len(await google_account.items()) == 1
+
+
+@pytest.mark.asyncio
+async def test_copy_leaves_a_destination_another_client_renamed(
+    google_account,
+):
+    # The file is renamed away while the copy lands: it no longer holds the
+    # destination, and Drive deletes by id wherever an item went, so the
+    # copy takes the name and that file is left as it is.
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("POST", COPY)], lambda: google_account.patch(dst_id, name="kept.txt")
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    names = sorted(item["name"] for item in await google_account.items())
+    assert names == ["dst.txt", "kept.txt", "src.txt"]
+    assert await google_account.content(dst_id) == b"old"
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_delete_went_through_keeps_the_copy(google_account):
+    # The delete lands, but its answer is an error (a relay's 502, say):
+    # the file it named is gone, so dropping the copy would leave nothing.
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("DELETE", FILE)], lambda: google_account.delete(dst_id), status=502
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
+    (made,) = (item for item in items if item["name"] == "dst.txt")
+    assert await google_account.content(made["id"]) == b"new"
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_finished(google_account):
+    # The copy lands beside the destination, but its answer is a relay's
+    # 502: it is found there by its md5, and the file it replaces is
+    # deleted, so one copy holds the name.
+    src_id = await google_account.upload("src.txt", b"new")
+    await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("POST", COPY)],
+        lambda: google_account.run.call(
+            "POST", f"/drive/v3/files/{src_id}/copy", json={"name": "dst.txt"}
+        ),
+        status=502,
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
+    (made,) = (item for item in items if item["name"] == "dst.txt")
+    assert await google_account.content(made["id"]) == b"new"

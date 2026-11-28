@@ -99,13 +99,17 @@ def _graph_error_of(
 ) -> Exception:
     try:
         data = json.loads(text)
-        err = data.get("error", {}) if isinstance(data, dict) else {}
     except ValueError:
+        data = None
+    err = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(err, dict):
         err = {}
+    code = err.get("code")
+    message = err.get("message")
     return GraphError(
         resp.status,
-        err.get("code", "unknownError"),
-        err.get("message", f"{method} {url}"),
+        code if isinstance(code, str) else "unknownError",
+        message if isinstance(message, str) else f"{method} {url}",
     )
 
 
@@ -352,21 +356,52 @@ async def graph_post_monitor(
     return location
 
 
+def _if_match(etag: str | None) -> dict[str, Any] | None:
+    return None if etag is None else {"If-Match": etag}
+
+
 async def graph_patch(
     accessor: OneDriveAccessor | SharePointAccessor,
     url: str,
     body: dict[str, Any],
+    etag: str | None = None,
 ) -> dict[str, Any]:
+    """PATCH a driveItem, held to ``etag`` when one is named: Graph answers
+    412 once the item moved on from it.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        url (str): the item's URL.
+        body (dict[str, Any]): the fields to change.
+        etag (str | None): the eTag the change is held to, None to go
+            plain.
+    """
     data: dict[str, Any] = await _graph_request(
-        accessor, "PATCH", url, json_body=body
+        accessor,
+        "PATCH",
+        url,
+        json_body=body,
+        extra_headers=_if_match(etag),
     )
     return data
 
 
 async def graph_delete(
-    accessor: OneDriveAccessor | SharePointAccessor, url: str
+    accessor: OneDriveAccessor | SharePointAccessor,
+    url: str,
+    etag: str | None = None,
 ) -> None:
-    await _graph_request(accessor, "DELETE", url, read="none")
+    """DELETE a driveItem, held to ``etag`` when one is named.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        url (str): the item's URL.
+        etag (str | None): the eTag the delete is held to, None to go
+            plain.
+    """
+    await _graph_request(
+        accessor, "DELETE", url, read="none", extra_headers=_if_match(etag)
+    )
 
 
 async def graph_put_bytes(

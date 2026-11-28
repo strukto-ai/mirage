@@ -46,6 +46,13 @@ export function nameInUse(taken: { type: string; id: string; name: string }): Re
 }
 export const unauthorized = (): Reply => boxError(401, 'unauthorized', 'missing bearer token')
 
+// The etag an item renders and an If-Match is checked against: a file's
+// version, and one fixed tag for a folder, whose version the fake never
+// advances.
+export function etagOf(item: Item): string {
+  return item.type === 'file' ? String(item.version) : '0'
+}
+
 export function render(item: Item): JsonValue {
   const out: Record<string, JsonValue> = {
     type: item.type,
@@ -57,10 +64,8 @@ export function render(item: Item): JsonValue {
   if (item.type === 'file') {
     out.size = (item.content ?? new Uint8Array(0)).length
     out.sha1 = item.sha1
-    out.etag = String(item.version)
-  } else {
-    out.etag = '0'
   }
+  out.etag = etagOf(item)
   return out
 }
 

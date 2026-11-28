@@ -204,8 +204,25 @@ export async function movePath(
     : {}
 }
 
-export async function copyPath(tm: DropboxTokenManager, from: string, to: string): Promise<void> {
-  await dropboxRpc(tm, '/files/copy_v2', { from_path: from, to_path: to, autorename: false })
+/**
+ * Copy one entry with `/files/copy_v2` onto a free `to`, answering the copy's
+ * metadata (`.tag` names its kind), or an empty object when the reply carries
+ * none. Mirrors Python's `copy_path`.
+ */
+export async function copyPath(
+  tm: DropboxTokenManager,
+  from: string,
+  to: string,
+): Promise<Partial<DropboxEntry>> {
+  const reply = (await dropboxRpc(tm, '/files/copy_v2', {
+    from_path: from,
+    to_path: to,
+    autorename: false,
+  })) as { metadata?: unknown } | null
+  const metadata = reply?.metadata
+  return metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? (metadata as Partial<DropboxEntry>)
+    : {}
 }
 
 export const SEARCH_PAGE = 1000

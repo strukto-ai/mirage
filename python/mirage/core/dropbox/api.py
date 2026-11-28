@@ -157,8 +157,19 @@ async def move_path(
 
 async def copy_path(
     tm: DropboxTokenManager, from_path: str, to_path: str
-) -> None:
-    await dropbox_rpc(
+) -> dict[str, Any]:
+    """Copy one entry with ``/files/copy_v2``.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        from_path (str): the entry to copy.
+        to_path (str): where the copy lands; must not exist.
+
+    Returns:
+        dict[str, Any]: the copy's metadata (``.tag`` names its kind), or
+        an empty dict when the reply carries none.
+    """
+    reply = await dropbox_rpc(
         tm,
         "/files/copy_v2",
         {
@@ -167,6 +178,8 @@ async def copy_path(
             "autorename": False,
         },
     )
+    metadata = reply.get("metadata") if isinstance(reply, dict) else None
+    return metadata if isinstance(metadata, dict) else {}
 
 
 async def search_files(

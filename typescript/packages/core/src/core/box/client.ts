@@ -301,11 +301,12 @@ export async function boxPutJson(
   tm: BoxTokenManager,
   url: string,
   body: Record<string, unknown>,
+  headers: Record<string, string> = {},
 ): Promise<unknown> {
   return apiRequest('PUT', url, {
     timeout: tm.timeout,
     errorOf: errorOf('PUT', url),
-    headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json' },
+    headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json', ...headers },
     json: body,
   })
 }

@@ -13,10 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { eacces, eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { type FileStat, FileType, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { FOLDER_MIME } from '../google/drive.ts'
+import { landThenRetire } from '../api/replace.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { FOLDER_MIME, type DriveFile } from '../google/drive.ts'
 import type { DriveApi } from './api.ts'
 import { liveRow, statFromItem } from './readdir.ts'
 import type { DriveNode } from './resolve.ts'
@@ -36,11 +38,74 @@ async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string
 }
 
 /**
+ * Delete the item a move or copy replaced, while it is still there. Drive
+ * deletes by id wherever the item went, so it is read again first: one another
+ * writer trashed, renamed or moved while the replacement landed no longer holds
+ * the destination and is left as it is. Drive has no conditional delete;
+ * reading it just before leaves one request for another writer's move to land
+ * in. Mirrors Python's `delete_replaced`.
+ */
+export async function deleteReplaced(drive: DriveApi, row: FileStat): Promise<void> {
+  const fileId = row.extra.file_id as string
+  const live = await drive.getFile(fileId)
+  if (live.trashed === true) return
+  const there = statFromItem(live)
+  const parents = row.extra.parents as string[] | undefined
+  const now = new Set((there.extra.parents as string[] | undefined) ?? [])
+  const then = new Set(parents ?? [])
+  const moved =
+    parents !== undefined && (now.size !== then.size || [...then].some((id) => !now.has(id)))
+  if (there.name !== row.name || moved) return
+  await drive.deleteFile(fileId)
+}
+
+/**
+ * The copy a copy onto `name` landed in `folderId`: an item of that name there,
+ * other than the one it replaces, with the source's md5. Null when there is
+ * none, or no md5 (a Google file) to tell it by. Mirrors Python's `_copied_as`.
+ */
+async function copiedAs(
+  drive: DriveApi,
+  md5: unknown,
+  name: string,
+  folderId: string,
+  replaced: FileStat,
+): Promise<DriveFile | null> {
+  if (typeof md5 !== 'string' || md5 === '') return null
+  const driveId = replaced.extra.drive_id
+  const listed = await drive.listFiles({
+    folderId,
+    driveId: typeof driveId === 'string' ? driveId : null,
+  })
+  const found = listed.find(
+    (item) => item.name === name && item.id !== replaced.extra.file_id && item.md5Checksum === md5,
+  )
+  return found ?? null
+}
+
+/** Whether an item is gone from Drive, or sits in its trash. Mirrors Python's `gone`. */
+export async function gone(drive: DriveApi, fileId: string): Promise<boolean> {
+  try {
+    return (await drive.getFile(fileId, 'id,trashed')).trashed === true
+  } catch (err) {
+    if (err instanceof GoogleApiError && err.status === 404) return true
+    throw err
+  }
+}
+
+/**
  * Copy a file or folder server-side, handed what is at `src` and at `dst`
  * and its parent. `cp -r` merges into an existing folder and creates a
- * missing one, mirroring the msgraph copy_tree. Answers the stat of what the
- * copy made, null when it merged into a folder already there. Mirrors
- * Python's `copy`.
+ * missing one, mirroring the msgraph copy_tree. A file it replaces is deleted
+ * only once the copy has landed beside it, which Drive's two items of one name
+ * in a folder allow (`deleteReplaced`): a refused copy leaves it as it was, and
+ * a refused delete drops the copy again and names the destination, as cp's
+ * refused create does; a copy whose answer was lost is found by its md5
+ * (`copiedAs`). Both paths naming one item (Drive lists a
+ * legacy item under each of its parents) leaves nothing to copy; GNU cp
+ * refuses it by inode, which a Drive row lacks. Answers the stat of what the
+ * copy made, null when it merged into a folder already there or found the
+ * item itself. Mirrors Python's `copy`.
  */
 export const copy = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
@@ -72,12 +137,28 @@ export const copy = eaccesOnDenied(async function (
     return made
   }
   if (dstEntry !== null && dstEntry.type === FileType.DIRECTORY) throw eisdir(dst)
-  if (dstEntry !== null) await drive.deleteFile(dstEntry.extra.file_id as string)
+  if (dstEntry !== null && dstEntry.extra.file_id === srcNode.id) return null
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
-  const item = await drive.copyFile(
-    srcNode.id,
-    driveTargetName(basename, srcNode.mimeType),
-    dstParentId,
+  const target = driveTargetName(basename, srcNode.mimeType)
+  if (dstEntry === null) {
+    const made = await drive.copyFile(srcNode.id, target, dstParentId)
+    const copied: unknown = made
+    return typeof copied === 'object' && copied !== null ? statFromItem(made) : null
+  }
+  const item = await landThenRetire(
+    () => drive.copyFile(srcNode.id, target, dstParentId),
+    (made) => drive.deleteFile(made.id),
+    async () => {
+      try {
+        await deleteReplaced(drive, dstEntry)
+      } catch (err) {
+        if (err instanceof GoogleApiError && err.status === 403) throw eacces(dst)
+        throw err
+      }
+    },
+    () => gone(drive, dstEntry.extra.file_id as string),
+    undefined,
+    () => copiedAs(drive, entry.extra.md5_checksum, target, dstParentId, dstEntry),
   )
   const copied: unknown = item
   return typeof copied === 'object' && copied !== null ? statFromItem(item) : null

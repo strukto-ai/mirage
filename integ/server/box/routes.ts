@@ -37,6 +37,7 @@ import {
 } from './store.ts'
 import {
   boxError,
+  etagOf,
   eventEntry,
   listOrder,
   nameInUse,
@@ -290,10 +291,10 @@ async function upload(ctx: Ctx<C>): Promise<Reply> {
 
 // If-Match names the etag (the item's version) a request was based on; Box
 // answers 412 when the file moved on since (measured 2026-10-05 for uploads,
-// 2026-10-08 for deletes).
-function staleIfMatch(ctx: Ctx<C>, item: { version: number }): Reply | null {
+// 2026-10-08 for deletes). It is checked against the etag the item renders.
+function staleIfMatch(ctx: Ctx<C>, item: Item): Reply | null {
   const want = ctx.headers['if-match']
-  if (want === undefined || want === String(item.version)) return null
+  if (want === undefined || want === etagOf(item)) return null
   return boxError(412, 'precondition_failed', 'the resource has been modified')
 }
 
@@ -336,12 +337,15 @@ function deleteOf(kind: string, param: string) {
 }
 
 // PUT on an item is the vendor's rename AND its move: both are stated as a
-// name and/or a new parent on the same call.
+// name and/or a new parent on the same call. It honours If-Match as uploads
+// and deletes do (the vendor's reference for updating a file and a folder).
 function updateOf(kind: string, param: string) {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     if (!authed(ctx)) return unauthorized()
     const item = await typedItem(ctx.sql, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
+    const refused = staleIfMatch(ctx, item)
+    if (refused !== null) return refused
     const body = obj(ctx.json())
     const name = str(body.name, item.name)
     const parentId = str(obj(body.parent).id, item.parentId ?? '')

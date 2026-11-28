@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import (
@@ -23,28 +23,30 @@ from mirage.cache.context import (
     write_condition,
 )
 from mirage.cache.types import WriteCondition
+from mirage.core.api.replace import aside_name, land_then_retire, set_aside
 from mirage.core.dropbox.api import (
     copy_path,
     delete_path,
     get_metadata,
     list_folder,
     lookup,
+    move_path,
     refused,
 )
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.constants import (
+    CONTENT_HASH,
     MISSING_SOURCE,
+    REV,
     TAKEN,
     TAKEN_BY_FOLDER,
 )
-from mirage.core.dropbox.fingerprint import live_of
+from mirage.core.dropbox.fingerprint import live_of, token_of
 from mirage.core.dropbox.paths import check_path, dropbox_path_of
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, enotempty
 from mirage.errors.types import StaleWriteError
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
-
-T = TypeVar("T")
 
 
 async def _retaken(
@@ -64,63 +66,201 @@ async def _retaken(
     return await stale(dst, version=condition_version(cond))
 
 
+async def _move_aside(
+    tm: DropboxTokenManager,
+    dst: PathSpec,
+    to_path: str,
+    aside: str,
+    folder: bool,
+    content: str | None,
+) -> dict[str, Any]:
+    """Move what holds the destination aside, refusing one that changed.
+
+    Dropbox moves on no condition, so what moved is checked after: a
+    file must still carry the content read, a folder must still be one.
+    A refusal here comes after the move, so ``set_aside`` moves it back.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        dst (PathSpec): the destination, for the refusal.
+        to_path (str): its Dropbox path.
+        aside (str): where it moves.
+        folder (bool): whether it was a folder.
+        content (str | None): the content token a file was read with.
+
+    Returns:
+        dict[str, Any]: what moved aside, as the move answered it.
+    """
+    moved = await move_path(tm, to_path, aside)
+    if folder:
+        kept = moved.get(".tag") == "folder"
+    else:
+        kept = moved.get(".tag") == "file" and (
+            content is None or token_of(moved.get(CONTENT_HASH)) == content
+        )
+    if not kept:
+        raise await stale(dst)
+    return moved
+
+
+async def _retire(
+    tm: DropboxTokenManager,
+    dst: PathSpec,
+    aside: str,
+    moved: Mapping[str, Any],
+    cond: WriteCondition | None,
+) -> None:
+    """Delete what was set aside: a file held to the rev its move
+    answered, a folder only while it lists no child, so one written while
+    the op landed is not deleted with it: mv's "Directory not empty".
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        dst (PathSpec): the destination, for ENOTEMPTY.
+        aside (str): where it was set aside.
+        moved (dict[str, Any]): what moved there, as the move answered it.
+        cond (WriteCondition | None): the op's condition.
+    """
+    if moved.get(".tag") == "folder":
+        if await list_folder(tm, aside, limit=1):
+            raise enotempty(dst)
+        await delete_path(tm, aside)
+        return
+    rev = token_of(moved.get(REV))
+    try:
+        await delete_path(tm, aside, rev)
+    except DropboxApiError as exc:
+        raise (await refused(dst, exc, cond, rev)) or exc
+
+
 async def replace_onto(
     tm: DropboxTokenManager,
     src: PathSpec,
     dst: PathSpec,
+    from_path: str,
     to_path: str,
-    op: Callable[[], Awaitable[T]],
+    op: Callable[[str], Awaitable[dict[str, Any]]],
+    undo: Callable[[str, dict[str, Any]], Awaitable[Any]],
+    moves: bool,
     empty_folder: bool,
-) -> tuple[T, dict[str, Any] | None]:
-    """Run a copy or move, replacing a file that holds the destination name.
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Run a copy or move, replacing what holds the destination name.
 
     The op goes first, since Dropbox answers a missing source before a
-    taken name. A held destination is measured before the op, cleared with
-    its rev on a taken name, and refused as gone when a folder took it.
+    taken name. On a taken name, what holds it (a file, or an empty
+    folder where ``empty_folder``) moves aside under a staged name, the
+    op lands on the name, and what moved aside is deleted last. A held
+    destination is measured before the op and refused as gone when a
+    folder took it. A refused or lost step puts both back
+    (``land_then_retire``), handing a landing to ``undo``; a landing
+    whose answer was lost is found at the name (``_arrived``).
 
     Args:
         tm (DropboxTokenManager): the account's token manager.
         src (PathSpec): the source, for ENOENT.
         dst (PathSpec): the destination.
+        from_path (str): the source's Dropbox path.
         to_path (str): the destination's Dropbox path.
-        op (Callable[[], Awaitable[T]]): the copy or move.
+        op (Callable[[str], Awaitable[dict[str, Any]]]): the copy or
+            move to a path, answering what landed.
+        undo (Callable[[str, dict[str, Any]], Awaitable[Any]]): what takes
+            back an entry the op landed at a path, handed what landed.
+        moves (bool): whether the op is a move, which leaves nothing at
+            ``from_path``.
         empty_folder (bool): whether an empty folder there gives way too.
 
     Returns:
-        tuple[T, dict[str, Any] | None]: the op's reply, and the
-        destination it replaced when that was looked up.
+        tuple[dict[str, Any], dict[str, Any] | None]: what landed, and
+        the destination it replaced when that was looked up.
     """
     cond = await write_condition(dst, "copy")
     rev = None
+    live = None
     if cond is not None and condition_version(cond):
         live = live_of(await lookup(tm, to_path))
         rev = await native_condition(dst, cond, live, "copy")
     try:
-        return await op(), None
+        return await op(to_path), None
     except DropboxApiError as exc:
         if exc.summary.startswith(MISSING_SOURCE):
             raise enoent(src.virtual) from exc
         if not exc.summary.startswith(TAKEN):
             raise
-        existing: dict[str, Any] | None = None
-        if rev is None:
-            existing = await get_metadata(tm, to_path)
-            if existing.get(".tag") == "folder" and not (
-                empty_folder and not await list_folder(tm, to_path, limit=1)
-            ):
-                raise
-        elif exc.summary.startswith(TAKEN_BY_FOLDER):
+        if rev is not None and exc.summary.startswith(TAKEN_BY_FOLDER):
             raise await stale(dst) from exc
-        try:
-            await delete_path(tm, to_path, rev)
-        except DropboxApiError as err:
-            raise (await refused(dst, err, cond, rev)) or err
-        try:
-            return await op(), existing
-        except DropboxApiError as again:
-            if again.summary.startswith(MISSING_SOURCE):
-                raise enoent(src.virtual) from again
-            raise (await _retaken(again, cond, dst)) or again
+        existing = await get_metadata(tm, to_path)
+        source = await lookup(tm, from_path)
+        if source is None:
+            raise enoent(src.virtual) from exc
+        folder = existing.get(".tag") == "folder"
+        if folder and not (
+            empty_folder and not await list_folder(tm, to_path, limit=1)
+        ):
+            raise
+    content = (
+        live.content
+        if live is not None
+        else token_of(existing.get(CONTENT_HASH))
+    )
+    aside = aside_name(to_path)
+    try:
+        moved = await set_aside(
+            lambda: _move_aside(tm, dst, to_path, aside, folder, content),
+            lambda: move_path(tm, aside, to_path),
+        )
+        landed = await land_then_retire(
+            lambda: op(to_path),
+            lambda landed: undo(to_path, landed),
+            lambda: _retire(tm, dst, aside, moved, cond),
+            lambda: _absent(tm, aside),
+            lambda: move_path(tm, aside, to_path),
+            lambda: _arrived(tm, from_path, to_path, source, moves),
+        )
+    except DropboxApiError as err:
+        if err.summary.startswith(MISSING_SOURCE):
+            raise enoent(src.virtual) from err
+        raise (await _retaken(err, cond, dst)) or err
+    return landed, existing
+
+
+async def _arrived(
+    tm: DropboxTokenManager,
+    from_path: str,
+    to_path: str,
+    source: Mapping[str, Any],
+    moves: bool,
+) -> dict[str, Any] | None:
+    """What an op whose answer was lost landed at ``to_path``: an entry of
+    the source's kind there, a file with its content hash, and for a move
+    only once nothing is left at ``from_path``.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        from_path (str): the source's Dropbox path.
+        to_path (str): the name the op landed on.
+        source (dict[str, Any]): the source, as it was read.
+        moves (bool): whether the op is a move.
+    """
+    there = await lookup(tm, to_path)
+    if there is None or there.get(".tag") != source.get(".tag"):
+        return None
+    if there.get(".tag") == "file":
+        content = token_of(source.get(CONTENT_HASH))
+        if content is None or token_of(there.get(CONTENT_HASH)) != content:
+            return None
+    if moves and await lookup(tm, from_path) is not None:
+        return None
+    return there
+
+
+async def _absent(tm: DropboxTokenManager, path: str) -> bool:
+    """Whether nothing is at ``path`` any more.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        path (str): the Dropbox path.
+    """
+    return await lookup(tm, path) is None
 
 
 async def copy(
@@ -145,8 +285,11 @@ async def copy(
         tm,
         src,
         dst,
+        from_path,
         to_path,
-        lambda: copy_path(tm, from_path, to_path),
+        lambda to: copy_path(tm, from_path, to),
+        lambda landed, made: delete_path(tm, landed, token_of(made.get(REV))),
+        moves=False,
         empty_folder=False,
     )
     record("copy", dst.virtual, "dropbox", 0, timer)

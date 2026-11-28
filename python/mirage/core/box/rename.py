@@ -18,47 +18,136 @@ from typing import Any
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.types import WriteCondition
 from mirage.core.box.api import (
-    update_file,
-    update_folder,
+    get_file_info,
+    get_folder_info,
+    list_folder_items,
 )
-from mirage.core.box.client import BoxApiError
-from mirage.core.box.copy import replace_file, retaken
+from mirage.core.box.client import BoxApiError, BoxTokenManager
+from mirage.core.box.copy import (
+    held_file,
+    place,
+    replace_file,
+    replace_item,
+    retaken,
+)
 from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import live_item_of, parent_folder, path_parts
-from mirage.core.box.rmdir import delete_empty_folder
-from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.fs import eisdir, enoent, enotdir, enotempty
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils.upload import upload_stat
 
 
-async def _clear_dest(
-    accessor: BoxAccessor,
-    dst: PathSpec,
-    existing: Mapping[str, Any] | None,
-    src: Mapping[str, Any],
-) -> WriteCondition | None:
-    # mv overwrites the destination; Box 409s on a name clash, so clear
-    # an existing dst first. A type mismatch is refused with rename(2)'s own
-    # errnos and outranks emptiness, since real rename answers EISDIR for a
-    # file onto a directory whether or not that directory has children. Only
-    # a folder gives way to a folder, and then only an empty one: a non-empty
-    # one is mv's "Directory not empty", which recursive=false gets from Box
-    # for free, exactly as rmdir does.
-    if existing is None:
-        if src.get("type") == "file":
-            return await replace_file(accessor, dst, None)
-        return None
-    if existing["id"] == src["id"]:
-        return None
+def _refuse_mismatch(
+    dst: PathSpec, existing: Mapping[str, Any], src: Mapping[str, Any]
+) -> None:
+    """Refuse a type mismatch with rename(2)'s own errnos.
+
+    A mismatch outranks emptiness, since real rename answers EISDIR for a
+    file onto a directory whether or not that directory has children.
+
+    Args:
+        dst (PathSpec): the destination.
+        existing (dict[str, Any]): what is at ``dst``.
+        src (dict[str, Any]): the item moving onto it.
+    """
     if existing.get("type") != "folder":
         if src.get("type") == "folder":
             raise enotdir(dst.virtual)
-        return await replace_file(accessor, dst, existing)
-    if src.get("type") != "folder":
+    elif src.get("type") != "folder":
         raise eisdir(dst.virtual)
-    await delete_empty_folder(accessor.token_manager, existing["id"], dst)
-    return None
+
+
+def _folder_of(item: Mapping[str, Any]) -> str | None:
+    """The folder an item sits in, from a listing's ``parent`` or a
+    lookup's ``path_collection``.
+
+    Args:
+        item (dict[str, Any]): the item as a listing or a lookup answered.
+    """
+    parent = item.get("parent")
+    if isinstance(parent, Mapping) and parent.get("id"):
+        return str(parent["id"])
+    entries = (item.get("path_collection") or {}).get("entries") or []
+    return str(entries[-1]["id"]) if entries else None
+
+
+async def _moved_as(
+    tm: BoxTokenManager,
+    item: Mapping[str, Any],
+    name: str,
+    folder_id: str,
+) -> dict[str, Any] | None:
+    """The item a move onto ``name`` in ``folder_id`` landed, read by its
+    id, None while it is not there.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        item (dict[str, Any]): the item moved.
+        name (str): the name it lands on.
+        folder_id (str): the folder it lands in.
+    """
+    info: Mapping[str, Any]
+    if item.get("type") == "folder":
+        info = await get_folder_info(tm, item["id"])
+    else:
+        info = await get_file_info(tm, item["id"])
+    if info.get("name") != name or _folder_of(info) != folder_id:
+        return None
+    return dict(info)
+
+
+async def _replace_onto(
+    accessor: BoxAccessor,
+    item: Mapping[str, Any],
+    dst: PathSpec,
+    folder_id: str,
+    existing: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Move ``item`` onto what holds ``dst``'s name.
+
+    A stale destination file is refused before anything is sent, and so
+    is a folder that holds anything, the item itself included (``mv -T
+    d/c d``). The rest is ``replace_item``, whose undo for a landed item
+    moves it back to its folder and name, held to the version it landed
+    as, and which finds a move whose answer was lost by the item's id
+    (``_moved_as``).
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        item (dict[str, Any]): the item moving.
+        dst (PathSpec): where it lands.
+        folder_id (str): the folder ``dst`` is in.
+        existing (dict[str, Any]): what is at ``dst``.
+    """
+    _refuse_mismatch(dst, existing, item)
+    tm = accessor.token_manager
+    new_name = path_parts(dst)[-1]
+    cond: WriteCondition | None = None
+    etag: str | None = None
+    live: Mapping[str, Any] | None = existing
+    if existing.get("type") == "folder":
+        if await list_folder_items(tm, existing["id"], limit=1):
+            raise enotempty(dst.virtual)
+    else:
+        cond, live, etag = await held_file(accessor, dst, existing)
+    if live is None:
+        try:
+            return await place(tm, item, new_name, folder_id)
+        except BoxApiError as exc:
+            raise (await retaken(exc, cond, dst)) or exc
+    return await replace_item(
+        accessor,
+        dst,
+        live,
+        cond,
+        etag,
+        lambda: place(tm, item, new_name, folder_id),
+        lambda landed: place(
+            tm, landed, item["name"], _folder_of(item), landed.get("etag")
+        ),
+        lambda: _moved_as(tm, item, new_name, folder_id),
+    )
 
 
 async def rename(
@@ -96,22 +185,19 @@ async def rename(
     new_name = path_parts(dst)[-1]
     upto = lost_count()
     timer = start_op()
-    cond = await _clear_dest(
-        accessor, dst, await live_item_of(accessor, dst, dst_entry), item
-    )
-    try:
-        if item.get("type") == "folder":
-            moved = await update_folder(
-                tm, item["id"], name=new_name, parent_id=folder_id
-            )
-        else:
-            moved = await update_file(
-                tm, item["id"], name=new_name, parent_id=folder_id
-            )
-    except BoxApiError as exc:
-        raise (await retaken(exc, cond, dst)) or exc
+    existing = await live_item_of(accessor, dst, dst_entry)
+    if existing is not None and existing["id"] != item["id"]:
+        moved = await _replace_onto(accessor, item, dst, folder_id, existing)
+    else:
+        cond: WriteCondition | None = None
+        if existing is None and item.get("type") == "file":
+            cond = await replace_file(accessor, dst, None)
+        try:
+            moved = await place(tm, item, new_name, folder_id)
+        except BoxApiError as exc:
+            raise (await retaken(exc, cond, dst)) or exc
     # Only a folder has a subtree to drop, and only a positive "file"
-    # rules one out. _clear_dest refused a file onto a folder, so dst
+    # rules one out. _replace refused a file onto a folder, so dst
     # held nothing below it unless the moved item is a folder.
     folder = item.get("type") != "file"
     op = "rename_prefix" if folder else "rename"

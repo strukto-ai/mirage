@@ -42,6 +42,7 @@ const ITEMS_ROUTE = '/2.0/folders/:folder_id/items'
 const NEW_FILE_ROUTE = '/2.0/files/content'
 const VERSION_ROUTE = '/2.0/files/:file_id/content'
 const COPY_FILE_ROUTE = '/2.0/files/:file_id/copy'
+const FILE_ROUTE = '/2.0/files/:file_id'
 
 let origin: string
 let account: BoxAccount
@@ -369,8 +370,9 @@ describe('box write ops', () => {
   })
 
   it('rename refuses a non-empty folder destination with ENOTEMPTY', async () => {
-    // Box decides the emptiness, not us: recursive=false 409s on a folder
-    // with children, and that is mv's "Directory not empty".
+    // The folder is asked for a child before anything moves, and the delete
+    // goes with recursive=false, which 409s on one written since: either is
+    // mv's "Directory not empty".
     const ids = await data()
     await account.put('x.txt', ENC.encode('x'), ids.dst)
     const accessor = account.accessor()
@@ -519,6 +521,145 @@ describe('box write ops', () => {
       expect(caught).toBeInstanceOf(BoxApiError)
       expect(records).toEqual([])
     }
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+  })
+
+  it('a refused delete drops the copy', async () => {
+    // The copy lands beside b.txt under a staged name before b.txt goes, so a
+    // refused delete leaves b.txt as it was and takes the copy back.
+    const ids = await data()
+    const other = await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.answerNext('DELETE', FILE_ROUTE, 403)
+    await expect(
+      copy(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('rename replaces a file destination', async () => {
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h)
+    expect((await account.child(ids.data, 'b.txt')).id).toBe(ids.a)
+    expect(await account.names(ids.data)).toEqual(['b.txt', 'dst', 'sub'])
+  })
+
+  it('a refused rename keeps the destination file', async () => {
+    const ids = await data()
+    const other = await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.answerNext('PUT', FILE_ROUTE, 403)
+    await expect(
+      rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('a refused delete moves the file back', async () => {
+    const ids = await data()
+    const moving = await account.put('c.txt', ENC.encode('c'), ids.sub)
+    const other = await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/sub/c.txt'), spec('/data/b.txt'))
+    await account.run.answerNext('DELETE', FILE_ROUTE, 403)
+    await expect(
+      rename(accessor, spec('/data/sub/c.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    expect((await account.child(ids.sub, 'c.txt')).id).toBe(moving)
+    expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('a refused move onto the freed name puts the destination back', async () => {
+    // The file there moves aside, then the move onto the freed name is
+    // refused: the file set aside takes its name back.
+    const ids = await data()
+    const other = await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.answerNext('PUT', FILE_ROUTE, 403, undefined, 1, `/2.0/files/${ids.a}`)
+    await expect(
+      rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('finishes a move whose landing went through', async () => {
+    // The move onto the freed name lands, but its answer is lost: the item is
+    // found there by its id, and the file set aside is deleted.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext([['PUT', FILE_ROUTE]], () =>
+      account.run.beforeNext([['PUT', FILE_ROUTE]], () => account.rename(ids.a, 'b.txt'), 502),
+    )
+    await rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h)
+    expect(await account.names(ids.data)).toEqual(['b.txt', 'dst', 'sub'])
+    expect((await account.child(ids.data, 'b.txt')).id).toBe(ids.a)
+  })
+
+  it('finishes a copy whose landing went through', async () => {
+    // The copy lands, but its answer is lost: it is found by its sha1, and the
+    // file set aside is deleted.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext(
+      [['POST', COPY_FILE_ROUTE]],
+      () =>
+        account.run.call('POST', `/2.0/files/${ids.a}/copy`, {
+          json: { parent: { id: ids.data }, name: 'b.txt' },
+        }),
+      502,
+    )
+    await copy(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    const made = await account.child(ids.data, 'b.txt')
+    expect(text(await account.read(made.id))).toBe('hello')
+  })
+
+  it('leaves a landing another client wrote onto when the delete is refused', async () => {
+    // The move back is held to the version that landed, so the write another
+    // client made onto the landed item stays where it is.
+    const ids = await data()
+    await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.beforeNext(
+      [['DELETE', FILE_ROUTE]],
+      () => account.uploadVersion(ids.a, ENC.encode('theirs')),
+      403,
+    )
+    await expect(
+      rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect((await account.child(ids.data, 'b.txt')).id).toBe(ids.a)
+    expect(text(await account.read(ids.a))).toBe('theirs')
+    expect(await account.names(ids.data)).not.toContain('a.txt')
+  })
+
+  it('refuses a folder holding only the item itself', async () => {
+    // mv -T d/c d: moving the only child out would leave the folder empty for
+    // its delete, so it is asked for a child before anything moves.
+    const ids = await data()
+    const inner = await account.mkdir('c', ids.dst)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/dst/c'), spec('/data/dst'))
+    await expect(rename(accessor, spec('/data/dst/c'), spec('/data/dst'), h)).rejects.toMatchObject(
+      { code: 'ENOTEMPTY' },
+    )
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'dst', 'sub'])
+    expect((await account.child(ids.dst, 'c')).id).toBe(inner)
   })
 
   it('a rename onto its own name sends and records nothing', async () => {

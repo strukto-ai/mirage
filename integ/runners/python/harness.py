@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 
@@ -759,12 +759,25 @@ def undecodable(streams: dict[str, bytes]) -> list[str]:
     ]
 
 
+def faults_url(base: str) -> str:
+    """The kit's fault plans under ``base``, the tenant it names kept.
+
+    Args:
+        base (str): the fake's base URL for this run: ``/_run/<id>``
+            included, or a ``_tenant`` query naming the account.
+    """
+    parts = urlsplit(base)
+    path = parts.path.rstrip("/") + "/_kit/faults"
+    return urlunsplit(parts._replace(path=path))
+
+
 async def arm_faults(base: str, plans: list[dict]) -> None:
     """Arm a case's fault plans on its target's kit fake.
 
     Args:
         base (str): the fake's base URL for this run, ``/_run/<id>``
-            included, so the plans land on this run's world only.
+            included or a ``_tenant`` query, so the plans land on this
+            run's world or account only.
         plans (list[dict]): the case's ``faults``, as the kit reads them.
 
     Raises:
@@ -772,7 +785,7 @@ async def arm_faults(base: str, plans: list[dict]) -> None:
     """
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            f"{base}/_kit/faults", json={"plans": plans}
+            faults_url(base), json={"plans": plans}
         ) as resp:
             if resp.status != 200:
                 raise ValueError(f"fault plans refused: {await resp.text()}")
@@ -792,7 +805,7 @@ async def disarm_faults(base: str) -> list[str]:
         list[str]: one note per plan that did not serve every request.
     """
     async with aiohttp.ClientSession() as session:
-        async with session.delete(f"{base}/_kit/faults") as resp:
+        async with session.delete(faults_url(base)) as resp:
             resp.raise_for_status()
             plans = (await resp.json())["plans"]
     return [

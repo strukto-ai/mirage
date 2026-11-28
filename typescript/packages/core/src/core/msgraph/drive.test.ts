@@ -1,7 +1,11 @@
 import { asNumber, parentPath, writeItem } from './drive.ts'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resolveOneDriveConfig } from '../../accessor/onedrive.ts'
 import { PathSpec } from '../../types.ts'
+import { GraphDrive } from '../../../tests/fixtures/graph_drive.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { driveLoc } from '../onedrive/client.ts'
 import { GraphError } from './client.ts'
 import { resolveMsGraphConfig } from './config.ts'
 import { DriveLoc, batchTree, copyTree, deltaTree, renameReplace } from './drive.ts'
@@ -22,6 +26,10 @@ const itemUrl = (path: string, action = ''): string => {
 }
 const refPath = (folder = ''): string =>
   folder !== '' ? `/me/drive/root:/${folder}` : '/me/drive/root:'
+const staged = (name: string, action = ''): RegExp =>
+  new RegExp(
+    `^${itemUrl(name).replaceAll('.', '\\.')}\\.mirage-[0-9a-f]{32}${action.replaceAll('/', '\\/')}$`,
+  )
 
 function loc(path: string, drive = ''): DriveLoc {
   return new DriveLoc({ drive, path, virtual: `/od/${path}`, url: itemUrl, ref: refPath })
@@ -31,7 +39,7 @@ const config = resolveMsGraphConfig({ accessToken: 'tok' })
 
 interface Route {
   method: string
-  url: string
+  url: string | RegExp
   status?: number
   body?: unknown
   location?: string
@@ -58,7 +66,11 @@ function stubFetch(routes: Route[]): Recorder {
       if (typeof init?.body === 'string') {
         bodies.push(JSON.parse(init.body) as Record<string, unknown>)
       }
-      const index = queue.findIndex((route) => route.method === method && route.url === url)
+      const index = queue.findIndex(
+        (route) =>
+          route.method === method &&
+          (typeof route.url === 'string' ? route.url === url : route.url.test(url)),
+      )
       if (index === -1) throw new Error(`unstubbed request: ${method} ${url}`)
       const route = queue.splice(index, 1)[0]
       if (route === undefined) throw new Error('unreachable')
@@ -113,7 +125,7 @@ describe('copyTree', () => {
     })
   })
 
-  it('deletes a conflicting file destination and copies again', async () => {
+  it('sets a conflicting file aside, lands on its name, then deletes it', async () => {
     const monitor = 'https://monitor.test/op/3'
     const retry = 'https://monitor.test/op/3-retry'
     const rec = stubFetch([
@@ -121,23 +133,53 @@ describe('copyTree', () => {
       { method: 'GET', url: monitor, body: { status: 'failed', ...CONFLICT } },
       { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', name: 'a.txt', size: 1, file: {} } },
       { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', name: 'b.txt', size: 1, file: {} } },
-      { method: 'DELETE', url: itemUrl('b.txt'), status: 204 },
+      { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
       { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: retry },
       { method: 'GET', url: retry, body: { status: 'completed' } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '3', eTag: 'e3', file: {} } },
+      { method: 'DELETE', url: staged('b.txt'), status: 204 },
     ])
 
     await copyTree(config, loc('a.txt'), loc('b.txt'))
 
     expect(rec.pending()).toBe(0)
-    expect(rec.calls.filter(([m]) => m === 'DELETE')).toEqual([['DELETE', itemUrl('b.txt')]])
-    expect(
-      rec.calls.filter(([m, u]) => m === 'POST' && u === itemUrl('a.txt', '/copy')),
-    ).toHaveLength(2)
+    expect(String(rec.bodies[1]?.name)).toMatch(/^b\.txt\.mirage-[0-9a-f]{32}$/)
+    expect(rec.bodies[2]).toMatchObject({ name: 'b.txt' })
+    const deleted = rec.calls.filter(([m]) => m === 'DELETE')
+    expect(deleted).toHaveLength(1)
+    expect(deleted[0]?.[1]).toMatch(staged('b.txt'))
+  })
+
+  it('finds a copy whose landing went through by its hash', async () => {
+    // The copy onto the freed name lands, but reading its monitor fails: a file
+    // at the name with the source's hash is that copy, so the file set aside is
+    // deleted and nothing is put back.
+    const monitor = 'https://monitor.test/op/4'
+    const retry = 'https://monitor.test/op/4-retry'
+    const hashes = { quickXorHash: 'q1' }
+    const rec = stubFetch([
+      { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: monitor },
+      { method: 'GET', url: monitor, body: { status: 'failed', ...CONFLICT } },
+      { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', file: { hashes } } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
+      { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
+      { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 202, location: retry },
+      { method: 'GET', url: retry, status: 502, body: { error: { code: 'badGateway' } } },
+      { method: 'GET', url: itemUrl('b.txt'), body: { id: '3', file: { hashes } } },
+      { method: 'DELETE', url: staged('b.txt'), status: 204 },
+    ])
+
+    await copyTree(config, loc('a.txt'), loc('b.txt'))
+
+    expect(rec.pending()).toBe(0)
+    expect(rec.calls.filter(([m]) => m === 'PATCH')).toHaveLength(1)
   })
 
   it.each(['monitor', 'http'] as const)(
     'normalizes a failed replacement retry via %s to 500',
     async (transport) => {
+      // The copy onto the freed name is the retry: refused, the file set aside
+      // takes its name back and nothing is deleted.
       const retry = 'https://monitor.test/op/retry-failed'
       const routes: Route[] =
         transport === 'monitor'
@@ -150,8 +192,9 @@ describe('copyTree', () => {
         { method: 'POST', url: itemUrl('a.txt', '/copy'), status: 409, body: CONFLICT },
         { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', file: {} } },
         { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
-        { method: 'DELETE', url: itemUrl('b.txt'), status: 204 },
+        { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2', file: {} } },
         ...routes,
+        { method: 'PATCH', url: staged('b.txt'), body: { id: '2', name: 'b.txt', file: {} } },
       ])
 
       await expect(copyTree(config, loc('a.txt'), loc('b.txt'))).rejects.toMatchObject({
@@ -159,10 +202,9 @@ describe('copyTree', () => {
         code: 'nameAlreadyExists',
       })
       expect(rec.pending()).toBe(0)
-      expect(rec.calls.filter(([method]) => method === 'DELETE')).toEqual([
-        ['DELETE', itemUrl('b.txt')],
-      ])
+      expect(rec.calls.filter(([method]) => method === 'DELETE')).toEqual([])
       expect(rec.calls.filter(([method]) => method === 'POST')).toHaveLength(2)
+      expect(rec.bodies.at(-1)).toEqual({ name: 'b.txt' })
     },
   )
 
@@ -230,27 +272,35 @@ describe('copyTree', () => {
 })
 
 describe('renameReplace', () => {
-  it('deletes a conflicting file destination and patches again', async () => {
+  it('sets a conflicting file aside, takes its name, then deletes it', async () => {
     const rec = stubFetch([
       { method: 'PATCH', url: itemUrl('a.txt'), status: 409, body: CONFLICT },
       { method: 'GET', url: itemUrl('b.txt'), body: { id: '2', name: 'b.txt', size: 1, file: {} } },
-      { method: 'DELETE', url: itemUrl('b.txt'), status: 204 },
-      { method: 'PATCH', url: itemUrl('a.txt'), body: { id: '1' } },
+      { method: 'GET', url: itemUrl('a.txt'), body: { id: '1', file: {} } },
+      { method: 'PATCH', url: itemUrl('b.txt'), body: { id: '2' } },
+      { method: 'PATCH', url: itemUrl('a.txt'), body: { id: '1', name: 'b.txt' } },
+      { method: 'DELETE', url: staged('b.txt'), status: 204 },
     ])
 
     await renameReplace(config, loc('a.txt'), loc('b.txt'))
 
     expect(rec.pending()).toBe(0)
-    expect(rec.calls.filter(([m]) => m === 'PATCH')).toHaveLength(2)
+    expect(String(rec.bodies[1]?.name)).toMatch(/^b\.txt\.mirage-[0-9a-f]{32}$/)
+    expect(rec.bodies[2]).toMatchObject({ name: 'b.txt' })
   })
 
-  it('probes an empty folder destination, deletes it, and patches again', async () => {
+  it('probes an empty folder destination twice, sets it aside, then deletes it', async () => {
+    // Before it moves aside, and again, where it was set aside, just before its
+    // delete.
     const rec = stubFetch([
       { method: 'PATCH', url: itemUrl('src'), status: 409, body: CONFLICT },
       { method: 'GET', url: itemUrl('dst'), body: { id: '2', name: 'dst', folder: {} } },
       { method: 'GET', url: itemUrl('dst', '/children'), body: { value: [] } },
-      { method: 'DELETE', url: itemUrl('dst'), status: 204 },
-      { method: 'PATCH', url: itemUrl('src'), body: { id: '1' } },
+      { method: 'GET', url: itemUrl('src'), body: { id: '1', folder: {} } },
+      { method: 'PATCH', url: itemUrl('dst'), body: { id: '2' } },
+      { method: 'PATCH', url: itemUrl('src'), body: { id: '1', name: 'dst' } },
+      { method: 'GET', url: staged('dst', ':/children'), body: { value: [] } },
+      { method: 'DELETE', url: staged('dst'), status: 204 },
     ])
 
     await renameReplace(config, loc('src'), loc('dst'))
@@ -700,4 +750,180 @@ it.each([true, -1, 0.5, '12'])('keeps an invalid Graph count unknown', (value) =
 
 it('resolves the parent of a directory with a trailing slash', () => {
   expect(parentPath('parent/nested/')).toBe('parent')
+})
+
+function text(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
+}
+
+describe('a replace on the Graph fake', () => {
+  const ITEM = '/me/drive/*rest'
+  const DENIED = { error: { code: 'accessDenied', message: 'Access denied.' } }
+  let origin: string
+  let drive: GraphDrive
+
+  beforeAll(async () => {
+    origin = await serve('onedrive')
+  }, 30_000)
+
+  beforeEach(async () => {
+    drive = new GraphDrive(origin)
+    await drive.reset()
+  })
+
+  afterEach(async () => {
+    await drive.run.close()
+  })
+
+  async function names(folder = ''): Promise<string[]> {
+    const at = folder !== '' ? `root:/${folder}:/children` : 'root/children'
+    const listed = await drive.run.call<{ value: { name: string }[] }>('GET', `/me/drive/${at}`)
+    return listed.value.map((child) => child.name).sort()
+  }
+
+  async function replaced(op: typeof renameReplace | typeof copyTree, src: string, dst: string) {
+    const odConfig = resolveOneDriveConfig({
+      accessToken: drive.token,
+      graphBaseUrl: drive.run.url,
+    })
+    await op(odConfig, driveLoc(odConfig, src), driveLoc(odConfig, dst), `/${src}`, `/${dst}`)
+  }
+
+  it.each([
+    ['rename', renameReplace],
+    ['copy', copyTree],
+  ] as const)('a %s leaves no staged name', async (name, op) => {
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await replaced(op, 'a.txt', 'b.txt')
+    expect(await names()).toEqual(name === 'copy' ? ['a.txt', 'b.txt'] : ['b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('mine')
+  })
+
+  it('a refused set-aside keeps the destination', async () => {
+    // The move meets the taken name, then moving the file aside is refused:
+    // nothing moved.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.answerNext('PATCH', ITEM, 409, CONFLICT)
+    await drive.run.answerNext('PATCH', ITEM, 403, DENIED)
+    await expect(replaced(renameReplace, 'a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(await names()).toEqual(['a.txt', 'b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('theirs')
+  })
+
+  it('a refused move onto the freed name puts the destination back', async () => {
+    // The move meets the taken name, the file moves aside, then the move onto
+    // the freed name is refused (a view-only source, say): the file takes its
+    // name back.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext([['PATCH', ITEM]], () =>
+      drive.run.beforeNext([['PATCH', ITEM]], () =>
+        drive.run.answerNext('PATCH', ITEM, 403, DENIED),
+      ),
+    )
+    await expect(replaced(renameReplace, 'a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(await names()).toEqual(['a.txt', 'b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('theirs')
+  })
+
+  it('a refused copy onto the freed name puts the destination back', async () => {
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.answerNext('POST', ITEM, 409, CONFLICT)
+    await drive.run.answerNext('POST', ITEM, 403, DENIED)
+    await expect(replaced(copyTree, 'a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(await names()).toEqual(['a.txt', 'b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('theirs')
+  })
+
+  it.each([
+    ['rename', renameReplace],
+    ['copy', copyTree],
+  ] as const)('a %s whose delete went through keeps the replace', async (name, op) => {
+    // The delete of what moved aside lands, but its answer is an error (a
+    // relay's 502, say): the item it named is gone, so the replace stands.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext(
+      [['DELETE', ITEM]],
+      async () => {
+        const [aside] = (await names()).filter((n) => n.includes('.mirage-'))
+        await drive.remove(aside ?? '')
+      },
+      502,
+    )
+    await replaced(op, 'a.txt', 'b.txt')
+    expect(await names()).toEqual(name === 'copy' ? ['a.txt', 'b.txt'] : ['b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('mine')
+  })
+
+  it.each([
+    ['rename', renameReplace],
+    ['copy', copyTree],
+  ] as const)('a refused delete takes the landed %s back', async (_name, op) => {
+    await drive.write('sub/a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.answerNext('DELETE', ITEM, 403, DENIED)
+    await expect(replaced(op, 'sub/a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(await names()).toEqual(['b.txt', 'sub'])
+    expect(await names('sub')).toEqual(['a.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('theirs')
+  })
+
+  it('finishes a rename whose landing went through', async () => {
+    // The third PATCH (the first met the taken name, the second set the file
+    // there aside) lands, but its answer is a relay's 502: the item is found at
+    // the name by its id, and the file set aside is deleted.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext([['PATCH', ITEM]], () =>
+      drive.run.beforeNext([['PATCH', ITEM]], () =>
+        drive.run.beforeNext(
+          [['PATCH', ITEM]],
+          () => drive.run.call('PATCH', '/me/drive/root:/a.txt', { json: { name: 'b.txt' } }),
+          502,
+        ),
+      ),
+    )
+    await replaced(renameReplace, 'a.txt', 'b.txt')
+    expect(await names()).toEqual(['b.txt'])
+    expect(text(await drive.content('b.txt'))).toBe('mine')
+  })
+
+  it.each([
+    ['rename', renameReplace],
+    ['copy', copyTree],
+  ] as const)('a %s take back leaves a landing another client wrote onto', async (name, op) => {
+    // The delete of what moved aside is refused, and another client wrote
+    // onto the landed item meanwhile: the take back is held to the eTag it
+    // landed with, so that write stays at the name.
+    await drive.write('a.txt', 'mine')
+    await drive.write('b.txt', 'theirs')
+    await drive.run.beforeNext([['DELETE', ITEM]], () => drive.write('b.txt', 'later'), 403)
+    await expect(replaced(op, 'a.txt', 'b.txt')).rejects.toBeInstanceOf(GraphError)
+    expect(text(await drive.content('b.txt'))).toBe('later')
+    expect((await names()).includes('a.txt')).toBe(name === 'copy')
+  })
+
+  it('keeps a folder given a child while the source moves', async () => {
+    // Another client writes into the empty folder just as it moves aside (the
+    // move after the one that met the name): the probe made just before the
+    // delete sees the child, so the source goes back and the folder takes its
+    // name again.
+    await drive.write('src/x.txt', 'x')
+    await drive.run.call('POST', '/me/drive/root/children', {
+      json: { name: 'dst', folder: {} },
+    })
+    await drive.run.beforeNext([['PATCH', ITEM]], () =>
+      drive.run.beforeNext([['PATCH', ITEM]], () => drive.write('dst/late.txt', 'late')),
+    )
+    await expect(replaced(renameReplace, 'src', 'dst')).rejects.toMatchObject({
+      code: 'ENOTEMPTY',
+    })
+    expect(await names()).toEqual(['dst', 'src'])
+    expect(await names('dst')).toEqual(['late.txt'])
+    expect(await names('src')).toEqual(['x.txt'])
+  })
 })

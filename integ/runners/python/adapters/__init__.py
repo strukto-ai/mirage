@@ -3561,6 +3561,25 @@ async def teardown_target(
         await service.teardown()
 
 
+def fault_base(service: "Service | None", target: dict) -> str | None:
+    """Where a case arms fault plans: the target's kit fake, scoped to this
+    run's world (gws), or to the account the target's first mount signs in
+    as, for a fake that tenants by bearer token. None for any other target,
+    whose faulting case is refused rather than run unfaulted.
+
+    Args:
+        service (Service | None): the target's service, None for none.
+        target (dict): the target.
+    """
+    if isinstance(service, GwsService):
+        return service.url
+    if isinstance(service, (BoxService, OneDriveService, SharePointService)):
+        return f"{service.url}?_tenant={service.token}"
+    if isinstance(service, DropboxService):
+        return f"{service.url}?_tenant={service.account(target['mounts'][0])}"
+    return None
+
+
 def job_store(target: dict, run_id: str) -> WorkspaceStateStore | None:
     """Build the target's state store with its execution plane on Redis, or
     None for the in-memory default.
@@ -3698,10 +3717,7 @@ async def open_target(
     # attributes.
     if target.get("env"):
         ws.env = {**ws.env, **target["env"]}
-    # Where a case arms fault plans: the target's kit fake, scoped to this
-    # run. Only gws is wired today; a case naming faults on any other
-    # target is refused rather than run unfaulted.
-    faults = service.url if isinstance(service, GwsService) else None
+    faults = fault_base(service, target)
     return (
         ws,
         functools.partial(teardown_target, [ws], cleanups, service),

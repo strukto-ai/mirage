@@ -95,6 +95,10 @@ DRAW_HINT = re.compile(
 )
 
 KEPT_ON_PROCESS_RANDOMNESS = {
+    ("core/api/replace.py", "uuid.uuid4"): (
+        "a replaced destination waits under a staged name in the service, "
+        "so a seeded name would collide with an earlier run's leftover"
+    ),
     ("core/machine/write.py", "uuid.uuid4"): (
         "the staged upload's temp name lives on the machine, so a seeded "
         "name would collide with an earlier run's leftover"

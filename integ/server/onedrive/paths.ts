@@ -44,6 +44,18 @@ export function nameExists(): Reply {
   }
 }
 
+export function preconditionFailed(): Reply {
+  return {
+    status: 412,
+    body: {
+      error: {
+        code: 'preconditionFailed',
+        message: 'The resource has changed since the caller last read it',
+      },
+    },
+  }
+}
+
 // Graph addresses an item by wedging its path into the URL between `/root:`
 // and `:/`, so the same route serves `/root`, `/root/children`,
 // `/root:/a/b.txt`, and `/root:/a/b.txt:/content`. Splitting that back into

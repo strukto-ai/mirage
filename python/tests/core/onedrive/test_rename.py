@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from aioresponses import CallbackResult, aioresponses
 from yarl import URL
@@ -10,6 +12,16 @@ from mirage.types import PathSpec
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 
 _CONFLICT = {"error": {"code": "nameAlreadyExists", "message": "x"}}
+
+
+def _staged(name: str, action: str = "") -> re.Pattern[str]:
+    return re.compile(
+        "^"
+        + re.escape(f"{_BASE}/root:/{name}.mirage-")
+        + "[0-9a-f]{32}"
+        + re.escape(action)
+        + "$"
+    )
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -54,17 +66,20 @@ async def test_rename_same_parent_omits_parent_reference():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_deletes_file_destination_and_retries(
+async def test_rename_conflict_sets_the_file_aside_then_deletes_it(
     exact_cloud_paths,
 ):
+    staged = _staged("b.txt")
     with aioresponses() as m:
         m.patch(_BASE + "/root:/a.txt", status=409, payload=_CONFLICT)
         m.get(
             _BASE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_BASE + "/root:/b.txt", status=204)
+        m.get(_BASE + "/root:/a.txt", payload={"id": "1", "file": {}})
+        m.patch(_BASE + "/root:/b.txt", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/a.txt", status=200, payload={"id": "1"})
+        m.delete(staged, status=204)
         await rename(
             _accessor(),
             PathSpec.from_str_path("/a.txt"),
@@ -72,10 +87,14 @@ async def test_rename_conflict_deletes_file_destination_and_retries(
         )
         # aioresponses' __exit__ only calls stop(), so registering the
         # DELETE proves nothing on its own: without these the test passes
-        # when rename swallows the 409 and does neither the delete nor
-        # the retry.
-        assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
-        assert len(m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]) == 2
+        # when rename swallows the 409 and neither sets the file aside nor
+        # deletes it.
+        (aside,) = m.requests[("PATCH", URL(_BASE + "/root:/b.txt"))]
+        assert aside.kwargs["json"]["name"].startswith("b.txt.mirage-")
+        moves = m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]
+        assert [mv.kwargs["json"]["name"] for mv in moves] == ["b.txt"] * 2
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and staged.match(str(deleted[0]))
 
 
 @pytest.mark.asyncio
@@ -89,15 +108,27 @@ async def test_rename_conflict_replaces_empty_dir_destination(
             payload={"id": "2", "name": "dst", "folder": {"childCount": 0}},
         )
         m.get(_BASE + "/root:/dst:/children", payload={"value": []})
-        m.delete(_BASE + "/root:/dst", status=204)
+        m.get(_BASE + "/root:/src", payload={"id": "1", "folder": {}})
+        m.patch(_BASE + "/root:/dst", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/src", status=200, payload={"id": "1"})
+        m.get(_staged("dst", ":/children"), payload={"value": []})
+        m.delete(_staged("dst"), status=204)
         await rename(
             _accessor(),
             PathSpec.from_str_path("/src"),
             PathSpec.from_str_path("/dst"),
         )
-        assert ("GET", URL(_BASE + "/root:/dst:/children")) in m.requests
-        assert ("DELETE", URL(_BASE + "/root:/dst")) in m.requests
+        # The folder is asked for children twice: before it moves aside,
+        # and again, where it was set aside, just before its delete.
+        probes = [
+            u
+            for verb, u in m.requests
+            if verb == "GET" and str(u).endswith(":/children")
+        ]
+        assert str(probes[0]) == _BASE + "/root:/dst:/children"
+        assert _staged("dst", ":/children").match(str(probes[1]))
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and _staged("dst").match(str(deleted[0]))
         assert len(m.requests[("PATCH", URL(_BASE + "/root:/src"))]) == 2
 
 

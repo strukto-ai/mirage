@@ -25,6 +25,7 @@ import aiohttp
 from mirage.accessor.base import Accessor
 from mirage.accessor.onedrive import OneDriveAccessor
 from mirage.accessor.sharepoint import SharePointAccessor
+from mirage.core.api.replace import aside_name, land_then_retire, set_aside
 from mirage.core.msgraph.client import (
     GraphError,
     cancel_upload,
@@ -44,7 +45,14 @@ from mirage.core.msgraph.client import (
 )
 from mirage.core.msgraph.constants import BATCH_LIMIT
 from mirage.core.msgraph.paths import check_item
-from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
+from mirage.errors.fs import (
+    eexist,
+    enoent,
+    enotdir,
+    enotempty,
+    enotsup,
+    listing_error,
+)
 from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
@@ -109,6 +117,17 @@ class DriveLoc:
     def parent(self) -> str:
         return parent_path(self.path)
 
+    def renamed(self, name: str) -> "DriveLoc":
+        # A sibling under another name, where what holds this one's name
+        # waits while an item replacing it lands.
+        path = self.path.rstrip("/")
+        virt = self.virt.rstrip("/")
+        return replace(
+            self,
+            path=path[: len(path) - len(base_name(path))] + name,
+            virt=virt[: len(virt) - len(base_name(virt))] + name,
+        )
+
 
 def parent_path(path: str) -> str:
     return path.strip("/").rpartition("/")[0]
@@ -159,7 +178,7 @@ async def copy_once(
     Graph copies default to ``fail`` on a name conflict and the
     ``@microsoft.graph.conflictBehavior=replace`` query parameter is
     files-only (and unsupported on OneDrive Consumer), so the caller
-    resolves conflicts itself (delete-and-retry for files, per-child
+    resolves conflicts itself (a file moved aside and replaced, per-child
     merge for folders).
 
     Args:
@@ -175,6 +194,25 @@ async def copy_once(
     """
     await check_item(accessor, src, src_virtual)
     await check_item(accessor, dst, dst_virtual)
+    return await _copy_request(accessor, src, dst)
+
+
+async def _copy_request(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    src: DriveLoc,
+    dst: DriveLoc,
+) -> tuple[str, str] | None:
+    """One Graph copy request and its monitor, a conflict surfaced.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        src (DriveLoc): source item.
+        dst (DriveLoc): destination item.
+
+    Returns:
+        tuple[str, str] | None: ``(code, message)`` of a failed copy, or
+        None when the copy completed.
+    """
     body = {
         "name": base_name(dst.path),
         "parentReference": _parent_reference(src, dst),
@@ -235,10 +273,135 @@ async def copy_tree(
         return
     if "folder" in src_item or "folder" in dst_item:
         raise GraphError(409, code, message)
-    await graph_delete(accessor, dst.item())
-    err = await copy_once(accessor, src, dst, src_virtual, dst_virtual)
+    await _replace_over(
+        accessor,
+        dst,
+        False,
+        dst_virtual,
+        lambda: _copy_onto(accessor, src, dst),
+        lambda made: graph_delete(accessor, dst.item(), made.get("eTag")),
+        lambda: _landed_as(accessor, dst, src_item, moves=False),
+    )
+
+
+async def _copy_onto(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    src: DriveLoc,
+    dst: DriveLoc,
+) -> dict[str, Any]:
+    """Copy ``src`` onto a free ``dst``, a conflict raised.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        src (DriveLoc): source item.
+        dst (DriveLoc): where the copy lands.
+
+    Returns:
+        dict[str, Any]: the copy as it landed, read once its monitor
+        completed, so its undo is held to that eTag.
+    """
+    err = await _copy_request(accessor, src, dst)
     if err is not None:
         raise GraphError(500, err[0], err[1])
+    return await graph_get(accessor, dst.item())
+
+
+def _same_hashes(source: Mapping[str, Any], there: Mapping[str, Any]) -> bool:
+    """Whether ``there`` carries a content hash of ``source``'s, under any
+    name both carry (quickXorHash, sha1Hash, sha256Hash).
+
+    Args:
+        source (dict[str, Any]): the source file.
+        there (dict[str, Any]): what is at the name.
+    """
+    ours = (source.get("file") or {}).get("hashes") or {}
+    theirs = (there.get("file") or {}).get("hashes") or {}
+    return any(
+        value and theirs.get(key) == value for key, value in ours.items()
+    )
+
+
+async def _landed_as(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    dst: DriveLoc,
+    source: Mapping[str, Any],
+    moves: bool,
+) -> dict[str, Any] | None:
+    """What a landing whose answer was lost made at ``dst``: for a move,
+    the source item itself, by id; for a copy, a file carrying a content
+    hash of the source's. None while nothing there tells it.
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        dst (DriveLoc): the name it lands on.
+        source (dict[str, Any]): the source, as it was read.
+        moves (bool): whether the landing is a move.
+    """
+    there = await _url_item(accessor, dst.item())
+    if there is None:
+        return None
+    if moves:
+        return there if there.get("id") == source.get("id") else None
+    return there if "file" in there and _same_hashes(source, there) else None
+
+
+async def _replace_over(
+    accessor: OneDriveAccessor | SharePointAccessor,
+    dst: DriveLoc,
+    folder: bool,
+    dst_virtual: str | None,
+    land: Callable[[], Awaitable[dict[str, Any]]],
+    take_back: Callable[[dict[str, Any]], Awaitable[Any]],
+    arrived: Callable[[], Awaitable[dict[str, Any] | None]],
+) -> dict[str, Any]:
+    """Land an item on the file or empty folder that holds ``dst``.
+
+    Graph refuses a taken name, so what holds it moves aside under a
+    staged name, the item lands on the name, and what moved aside is
+    deleted last, a folder only while it lists no child, so one added
+    while the item landed is not deleted with it. A refused or lost step
+    puts both back, and a landing whose answer was lost but which went
+    through is finished (``land_then_retire``).
+
+    Args:
+        accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
+        dst (DriveLoc): what is replaced.
+        folder (bool): whether ``dst`` is a folder.
+        dst_virtual (str | None): full destination operand for errors.
+        land (Callable[[], Awaitable[dict[str, Any]]]): the copy or move
+            onto the name, answering the item that landed.
+        take_back (Callable[[dict[str, Any]], Awaitable[Any]]): what
+            undoes a landing, held to the eTag it landed with.
+        arrived (Callable[[], Awaitable[dict[str, Any] | None]]): what
+            the landing made, when it went through.
+
+    Returns:
+        dict[str, Any]: what landed.
+    """
+    name = base_name(dst.path)
+    staged = aside_name(name)
+    aside = dst.renamed(staged)
+    await set_aside(
+        lambda: graph_patch(accessor, dst.item(), {"name": staged}),
+        lambda: graph_patch(accessor, aside.item(), {"name": name}),
+    )
+
+    async def retire() -> None:
+        if folder and await graph_list(accessor, aside.item("/children")):
+            raise enotempty(dst_virtual or "/" + dst.virt.strip("/"))
+        await graph_delete(accessor, aside.item())
+
+    async def gone() -> bool:
+        return await _url_item(accessor, aside.item()) is None
+
+    return await land_then_retire(
+        land,
+        take_back,
+        retire,
+        gone,
+        lambda: graph_patch(accessor, aside.item(), {"name": name}),
+        arrived,
+    )
 
 
 def _move_body(src: DriveLoc, dst: DriveLoc) -> dict[str, Any]:
@@ -278,29 +441,42 @@ async def rename_replace(
     """
     await check_item(accessor, src, src_virtual)
     await check_item(accessor, dst, dst_virtual)
-    body = _move_body(src, dst)
-    replaced_non_file = False
     try:
-        moved = await graph_patch(accessor, src.item(), body)
+        moved = await graph_patch(accessor, src.item(), _move_body(src, dst))
     except GraphError as exc:
         if exc.status != 409 and exc.code != "nameAlreadyExists":
             raise
         # GNU mv overwrites the destination, but a Graph move has no
-        # conflictBehavior that works across account types: drop the
-        # conflicting file (or empty folder) and retry. A non-empty
-        # folder conflict keeps the original error, mirroring mv's
-        # "Directory not empty".
+        # conflictBehavior that works across account types: the conflicting
+        # file (or empty folder) moves aside, the item takes its name, and
+        # what moved aside is deleted (_replace_over). A non-empty folder
+        # conflict keeps the original error, mirroring mv's "Directory not
+        # empty".
         dst_item = await graph_get(accessor, dst.item())
         if "folder" in dst_item:
             children = await graph_list(accessor, dst.item("/children"))
             if children:
                 raise
-        await graph_delete(accessor, dst.item())
-        replaced_non_file = "file" not in dst_item
-        moved = await graph_patch(accessor, src.item(), body)
+        src_item = await graph_get(accessor, src.item())
+    else:
+        return MovedItem(
+            moved=moved if isinstance(moved, dict) else {},
+            replaced_non_file=False,
+        )
+    moved = await _replace_over(
+        accessor,
+        dst,
+        "folder" in dst_item,
+        dst_virtual,
+        lambda: graph_patch(accessor, src.item(), _move_body(src, dst)),
+        lambda landed: graph_patch(
+            accessor, dst.item(), _move_body(dst, src), landed.get("eTag")
+        ),
+        lambda: _landed_as(accessor, dst, src_item, moves=True),
+    )
     return MovedItem(
         moved=moved if isinstance(moved, dict) else {},
-        replaced_non_file=replaced_non_file,
+        replaced_non_file="file" not in dst_item,
     )
 
 

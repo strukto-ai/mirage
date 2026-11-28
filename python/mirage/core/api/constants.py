@@ -15,3 +15,8 @@
 # Seconds a network request may stall, waiting to connect or between two
 # reads of its response, when its mount or account names no `timeout`.
 DEFAULT_TIMEOUT = 30
+
+# A refusal a client may answer for a change that went through: one that
+# retries a 503 (Graph's) answers with what its retry met, a 404 once the
+# first attempt moved the item.
+RETRIED_ANSWERS = frozenset({404})

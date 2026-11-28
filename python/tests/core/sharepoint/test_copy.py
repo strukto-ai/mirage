@@ -75,10 +75,13 @@ async def test_copy_raises_when_monitor_reports_failed():
 
 
 @pytest.mark.asyncio
-async def test_copy_file_conflict_deletes_destination_and_retries(
+async def test_copy_file_conflict_sets_the_file_aside_then_deletes_it(
     exact_cloud_paths,
 ):
     monitor = "https://monitor.example/sp/1"
+    staged = re.compile(
+        "^" + re.escape(f"{_DRIVE}/root:/b.txt.mirage-") + "[0-9a-f]{32}$"
+    )
     with aioresponses() as m:
         m.post(
             _DRIVE + "/root:/a.txt:/copy",
@@ -94,7 +97,6 @@ async def test_copy_file_conflict_deletes_destination_and_retries(
             _DRIVE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_DRIVE + "/root:/b.txt", status=204)
         retry_monitor = "https://monitor.example/sp/1-retry"
         m.post(
             _DRIVE + "/root:/a.txt:/copy",
@@ -102,12 +104,20 @@ async def test_copy_file_conflict_deletes_destination_and_retries(
             headers={"Location": retry_monitor},
         )
         m.get(retry_monitor, payload={"status": "completed"})
-        await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
-        assert ("DELETE", URL(_DRIVE + "/root:/b.txt")) in m.requests
-        assert (
-            len(m.requests[("POST", URL(_DRIVE + "/root:/a.txt:/copy"))]) == 2
+        m.patch(_DRIVE + "/root:/b.txt", payload={"id": "2", "file": {}})
+        m.get(
+            _DRIVE + "/root:/b.txt",
+            payload={"id": "3", "eTag": "e3", "file": {}},
         )
+        m.delete(staged, status=204)
+        await copy(_accessor(), _spec("a.txt"), _spec("b.txt"))
+        (aside,) = m.requests[("PATCH", URL(_DRIVE + "/root:/b.txt"))]
+        assert aside.kwargs["json"]["name"].startswith("b.txt.mirage-")
+        copies = m.requests[("POST", URL(_DRIVE + "/root:/a.txt:/copy"))]
+        assert [c.kwargs["json"]["name"] for c in copies] == ["b.txt"] * 2
         assert ("GET", URL(retry_monitor)) in m.requests
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and staged.match(str(deleted[0]))
 
 
 @pytest.mark.asyncio

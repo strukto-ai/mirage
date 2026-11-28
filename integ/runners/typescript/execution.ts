@@ -413,9 +413,20 @@ export function undecodable(streams: Record<string, Uint8Array>): string[] {
     .map(([name]) => `${name}: not UTF-8; pin the bytes with od -An -tx1`)
 }
 
+/**
+ * The kit's fault plans under `base` (`/_run/<id>` included, or a `_tenant`
+ * query naming the account), the tenant it names kept. Mirrors Python's
+ * `faults_url`.
+ */
+function faultsUrl(base: string): string {
+  const url = new URL(base)
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}/_kit/faults`
+  return url.toString()
+}
+
 /** Arm a case's fault plans on its target's kit fake, scoped to this run. */
 async function armFaults(base: string, plans: Record<string, unknown>[]): Promise<void> {
-  const r = await fetch(`${base}/_kit/faults`, {
+  const r = await fetch(faultsUrl(base), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ plans }),
@@ -430,7 +441,7 @@ async function armFaults(base: string, plans: Record<string, unknown>[]): Promis
  * proves nothing about the fault.
  */
 async function disarmFaults(base: string): Promise<string[]> {
-  const r = await fetch(`${base}/_kit/faults`, { method: 'DELETE' })
+  const r = await fetch(faultsUrl(base), { method: 'DELETE' })
   if (!r.ok) throw new Error(`fault plans not disarmed: ${String(r.status)}`)
   const { plans } = (await r.json()) as { plans: FaultReport[] }
   return plans

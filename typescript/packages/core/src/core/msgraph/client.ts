@@ -307,19 +307,33 @@ export async function graphPostMonitor(
   return location
 }
 
+function ifMatch(etag: string | null): Record<string, string> {
+  return etag === null ? {} : { 'If-Match': etag }
+}
+
+/**
+ * PATCH a driveItem, held to `etag` when one is named: Graph answers 412 once
+ * the item moved on from it. Mirrors Python's `graph_patch`.
+ */
 export async function graphPatch(
   config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
   body: Record<string, unknown>,
+  etag: string | null = null,
 ): Promise<Record<string, unknown>> {
-  return (await graphRequest(config, 'PATCH', url, { json: body })) as Record<string, unknown>
+  return (await graphRequest(config, 'PATCH', url, {
+    json: body,
+    headers: ifMatch(etag),
+  })) as Record<string, unknown>
 }
 
+/** DELETE a driveItem, held to `etag` when one is named. Mirrors Python's `graph_delete`. */
 export async function graphDelete(
   config: ReturnType<typeof resolveMsGraphConfig>,
   url: string,
+  etag: string | null = null,
 ): Promise<void> {
-  await graphRequest(config, 'DELETE', url, { read: 'none' })
+  await graphRequest(config, 'DELETE', url, { read: 'none', headers: ifMatch(etag) })
 }
 
 export async function graphPutBytes(

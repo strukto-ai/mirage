@@ -14,11 +14,13 @@
 
 import pytest
 
+from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.copy import copy, dir_copy
 from mirage.types import PathSpec
 
 COPY_ROUTE = "/2/files/copy_v2"
 DELETE_ROUTE = "/2/files/delete_v2"
+MOVE_ROUTE = "/2/files/move_v2"
 
 
 def _pairs(bodies: list) -> list[tuple[str, str]]:
@@ -42,8 +44,9 @@ async def test_copy_maps_paths_under_mount_root(account):
 
 @pytest.mark.asyncio
 async def test_copy_replaces_existing_destination_file(account):
-    # Dropbox refuses a copy onto a file; cp replaces it, so the file goes
-    # and the copy is asked again.
+    # Dropbox refuses a copy onto a file; cp replaces it, so the file moves
+    # aside under a staged name, the copy lands on its name, and the file
+    # set aside goes, held to the rev its move answered.
     await account.put("/a.txt", b"mine")
     await account.put("/b.txt", b"theirs")
     await account.run.record_requests()
@@ -52,10 +55,66 @@ async def test_copy_replaces_existing_destination_file(account):
         PathSpec.from_str_path("/a.txt"),
         PathSpec.from_str_path("/b.txt"),
     )
+    (aside,) = _pairs(await account.run.bodies("POST", MOVE_ROUTE))
+    assert aside[0] == "/b.txt" and aside[1].startswith("/b.txt.mirage-")
+    assert _pairs(await account.run.bodies("POST", COPY_ROUTE)) == [
+        ("/a.txt", "/b.txt"),
+        ("/a.txt", "/b.txt"),
+    ]
     deleted = await account.run.bodies("POST", DELETE_ROUTE)
-    assert [body["path"] for body in deleted] == ["/b.txt"]
-    assert len(await account.run.bodies("POST", COPY_ROUTE)) == 2
+    assert [body["path"] for body in deleted] == [aside[1]]
+    assert deleted[0]["parent_rev"]
+    assert await account.names() == ["a.txt", "b.txt"]
     assert await account.read("/b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_landing_puts_the_destination_back(account):
+    # The copy meets the taken name, the file moves aside, then the copy
+    # onto the freed name is refused: the file moves back to its name.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.record_requests()
+    await account.run.answer_next(
+        "POST", COPY_ROUTE, 409, {"error_summary": "to/conflict/file/.."}
+    )
+    await account.run.answer_next(
+        "POST",
+        COPY_ROUTE,
+        409,
+        {"error_summary": "from_lookup/restricted_content/.."},
+    )
+    with pytest.raises(DropboxApiError):
+        await copy(
+            account.accessor(),
+            PathSpec.from_str_path("/a.txt"),
+            PathSpec.from_str_path("/b.txt"),
+        )
+    aside, back = _pairs(await account.run.bodies("POST", MOVE_ROUTE))
+    assert back == (aside[1], "/b.txt")
+    assert await account.run.bodies("POST", DELETE_ROUTE) == []
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_delete_drops_the_copy(account):
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.answer_next(
+        "POST",
+        DELETE_ROUTE,
+        409,
+        {"error_summary": "path_lookup/restricted_content/.."},
+    )
+    with pytest.raises(DropboxApiError):
+        await copy(
+            account.accessor(),
+            PathSpec.from_str_path("/a.txt"),
+            PathSpec.from_str_path("/b.txt"),
+        )
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"theirs"
 
 
 @pytest.mark.asyncio
@@ -71,3 +130,65 @@ async def test_dir_copy_copies_the_tree_in_one_request(account):
         ("/Team/src", "/Team/dst")
     ]
     assert await account.read("/Team/dst/x.txt") == b"x"
+
+
+@pytest.mark.asyncio
+async def test_copy_keeps_a_folder_that_took_the_name_before_it_moved(account):
+    # Another client swaps the file for a folder holding a child just
+    # before the file moves aside: what moved is not the file read, so it
+    # moves back, and nothing is deleted.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.record_requests()
+
+    async def turn_folder() -> None:
+        await account.remove("/b.txt")
+        await account.put("/b.txt/child.txt", b"child")
+
+    await account.run.before_next([("POST", MOVE_ROUTE)], turn_folder)
+    with pytest.raises(OSError):
+        await copy(
+            account.accessor(),
+            PathSpec.from_str_path("/a.txt"),
+            PathSpec.from_str_path("/b.txt"),
+        )
+    assert await account.run.bodies("POST", DELETE_ROUTE) == []
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.names("/b.txt") == ["child.txt"]
+
+
+async def _at_copy(account, nth: int, change, status: int | None) -> None:
+    """Run ``change`` while the ``nth`` copy from now waits, then answer it
+    with ``status``."""
+    if nth == 1:
+        await account.run.before_next([("POST", COPY_ROUTE)], change, status)
+        return
+    await account.run.before_next(
+        [("POST", COPY_ROUTE)],
+        lambda: _at_copy(account, nth - 1, change, status),
+    )
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_finished(account):
+    # The copy onto the freed name lands, but its answer is lost: it is
+    # found there by its content hash, and the file set aside is deleted.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await _at_copy(
+        account,
+        2,
+        lambda: account.run.call(
+            "POST",
+            COPY_ROUTE,
+            json={"from_path": "/a.txt", "to_path": "/b.txt"},
+        ),
+        502,
+    )
+    await copy(
+        account.accessor(),
+        PathSpec.from_str_path("/a.txt"),
+        PathSpec.from_str_path("/b.txt"),
+    )
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"mine"

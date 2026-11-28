@@ -61,20 +61,29 @@ async def test_rename_same_parent_omits_parent_reference():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_deletes_file_destination_and_retries(
+async def test_rename_conflict_sets_the_file_aside_then_deletes_it(
     exact_cloud_paths,
 ):
+    staged = re.compile(
+        "^" + re.escape(f"{_DRIVE}/root:/b.txt.mirage-") + "[0-9a-f]{32}$"
+    )
     with aioresponses() as m:
         m.patch(_DRIVE + "/root:/a.txt", status=409, payload=_CONFLICT)
         m.get(
             _DRIVE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_DRIVE + "/root:/b.txt", status=204)
+        m.get(_DRIVE + "/root:/a.txt", payload={"id": "1", "file": {}})
+        m.patch(_DRIVE + "/root:/b.txt", status=200, payload={"id": "2"})
         m.patch(_DRIVE + "/root:/a.txt", status=200, payload={"id": "1"})
+        m.delete(staged, status=204)
         await rename(_accessor(), _spec("a.txt"), _spec("b.txt"))
-        assert ("DELETE", URL(_DRIVE + "/root:/b.txt")) in m.requests
-        assert len(m.requests[("PATCH", URL(_DRIVE + "/root:/a.txt"))]) == 2
+        (aside,) = m.requests[("PATCH", URL(_DRIVE + "/root:/b.txt"))]
+        assert aside.kwargs["json"]["name"].startswith("b.txt.mirage-")
+        moves = m.requests[("PATCH", URL(_DRIVE + "/root:/a.txt"))]
+        assert [mv.kwargs["json"]["name"] for mv in moves] == ["b.txt"] * 2
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and staged.match(str(deleted[0]))
 
 
 @pytest.mark.asyncio

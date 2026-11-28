@@ -387,23 +387,33 @@ export async function deleteFolder(
 export async function updateFile(
   tm: BoxTokenManager,
   fileId: string,
-  opts: { name?: string; parentId?: string },
+  opts: { name?: string; parentId?: string; etag?: string | null },
 ): Promise<BoxItem> {
   const body: Record<string, unknown> = {}
   if (opts.name !== undefined) body.name = opts.name
   if (opts.parentId !== undefined) body.parent = { id: opts.parentId }
-  return (await boxPutJson(tm, `${tm.apiBase}/files/${fileId}`, body)) as BoxItem
+  return (await boxPutJson(
+    tm,
+    `${tm.apiBase}/files/${fileId}`,
+    body,
+    ifMatch(opts.etag ?? null),
+  )) as BoxItem
 }
 
 export async function updateFolder(
   tm: BoxTokenManager,
   folderId: string,
-  opts: { name?: string; parentId?: string },
+  opts: { name?: string; parentId?: string; etag?: string | null },
 ): Promise<BoxItem> {
   const body: Record<string, unknown> = {}
   if (opts.name !== undefined) body.name = opts.name
   if (opts.parentId !== undefined) body.parent = { id: opts.parentId }
-  return (await boxPutJson(tm, `${tm.apiBase}/folders/${folderId}`, body)) as BoxItem
+  return (await boxPutJson(
+    tm,
+    `${tm.apiBase}/folders/${folderId}`,
+    body,
+    ifMatch(opts.etag ?? null),
+  )) as BoxItem
 }
 
 export async function copyFile(

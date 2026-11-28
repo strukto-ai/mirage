@@ -13,12 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
-import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { entryAt, handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
 import { copy } from './copy.ts'
+
+const FILE = '/drive/v3/files/:id'
+const COPY = '/drive/v3/files/:id/copy'
+const DENIED = 'The user does not have sufficient permissions for this file.'
+const REASON = 'insufficientFilePermissions'
 
 let origin: string
 let account: GoogleAccount
@@ -107,5 +112,97 @@ describe('gdrive copy', () => {
 
   it('missing src raises ENOENT', async () => {
     await expect(copied('/missing.txt', '/dst.txt')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('a refused copy keeps the destination', async () => {
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.refuse('POST', COPY, 403, 'This file cannot be copied by the user.', {
+      reason: REASON,
+    })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({
+      code: 'EACCES',
+      virtualPath: spec('/src.txt').virtual,
+    })
+    expect(await account.content(dst)).toBe('old')
+    expect(await account.items()).toHaveLength(2)
+  })
+
+  it('a refused delete drops the copy', async () => {
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.refuse('DELETE', FILE, 403, DENIED, {
+      reason: REASON,
+      path: `/drive/v3/files/${dst}`,
+    })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({
+      code: 'EACCES',
+      virtualPath: spec('/dst.txt').virtual,
+    })
+    expect(await account.content(dst)).toBe('old')
+    expect(await account.items()).toHaveLength(2)
+  })
+
+  it('does nothing onto the same item', async () => {
+    const id = await account.upload('f.txt', 'data')
+    const accessor = account.driveAccessor()
+    const entry = await entryAt(readdir, accessor, spec('/f.txt'))
+    // Drive lists a legacy item under each of its parents, so another
+    // folder's row can name this same id. A row naming no folder is taken as
+    // listed, which stands in for that second listing.
+    const twin = new FileStat({ name: 'f.txt', type: FileType.FILE, extra: { file_id: id } })
+    await account.run.recordRequests()
+    await copy(accessor, spec('/f.txt'), spec('/b/f.txt'), undefined, {
+      entry,
+      dstEntry: twin,
+    })
+    expect(await account.asked('POST', COPY)).toEqual([])
+    expect(await account.asked('DELETE', FILE)).toEqual([])
+    expect(await account.items()).toHaveLength(1)
+  })
+
+  it('leaves a destination another client renamed while the copy landed', async () => {
+    // It no longer holds the destination, and Drive deletes by id wherever an
+    // item went, so the copy takes the name and that file is left as it is.
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.run.beforeNext([['POST', COPY]], () =>
+      account.run.call('PATCH', `/drive/v3/files/${dst}`, { json: { name: 'kept.txt' } }),
+    )
+    await copied('/src.txt', '/dst.txt')
+    const names = (await account.items()).map((item) => item.name).sort()
+    expect(names).toEqual(['dst.txt', 'kept.txt', 'src.txt'])
+    expect(await account.content(dst)).toBe('old')
+  })
+
+  it('keeps the copy when its delete went through but answered an error', async () => {
+    // A relay's 502, say: the file it named is gone, so dropping the copy
+    // would leave nothing at the destination.
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.run.beforeNext([['DELETE', FILE]], () => account.delete(dst), 502)
+    await copied('/src.txt', '/dst.txt')
+    const items = await account.items()
+    expect(items.map((item) => item.name).sort()).toEqual(['dst.txt', 'src.txt'])
+    const made = items.find((item) => item.name === 'dst.txt')
+    expect(await account.content(made?.id ?? '')).toBe('new')
+  })
+
+  it('finishes a copy whose landing went through but answered an error', async () => {
+    // The copy lands beside the destination, but its answer is a relay's 502:
+    // it is found there by its md5, and the file it replaces is deleted, so one
+    // copy holds the name.
+    const src = await account.upload('src.txt', 'new')
+    await account.upload('dst.txt', 'old')
+    await account.run.beforeNext(
+      [['POST', COPY]],
+      () => account.run.call('POST', `/drive/v3/files/${src}/copy`, { json: { name: 'dst.txt' } }),
+      502,
+    )
+    await copied('/src.txt', '/dst.txt')
+    const items = await account.items()
+    expect(items.map((item) => item.name).sort()).toEqual(['dst.txt', 'src.txt'])
+    const made = items.find((item) => item.name === 'dst.txt')
+    expect(await account.content(made?.id ?? '')).toBe('new')
   })
 })

@@ -53,6 +53,7 @@ ITEMS_ROUTE = "/2.0/folders/:folder_id/items"
 NEW_FILE_ROUTE = "/2.0/files/content"
 VERSION_ROUTE = "/2.0/files/:file_id/content"
 COPY_FILE_ROUTE = "/2.0/files/:file_id/copy"
+FILE_ROUTE = "/2.0/files/:file_id"
 
 
 async def _data(account) -> dict[str, str]:
@@ -368,8 +369,9 @@ async def test_rename_replaces_empty_folder_destination(account):
 
 @pytest.mark.asyncio
 async def test_rename_refuses_nonempty_folder_destination(account):
-    # Box decides the emptiness, not us: recursive=false 409s on a folder
-    # with children, and that is mv's "Directory not empty".
+    # The folder is asked for a child before anything moves, and the
+    # delete goes with recursive=false, which 409s on one written since:
+    # either is mv's "Directory not empty".
     ids = await _data(account)
     await account.put("x.txt", b"x", ids["dst"])
     with pytest.raises(OSError) as caught:
@@ -564,6 +566,196 @@ async def test_a_replaced_file_is_recorded_only_once_its_copy_lands(
         assert _recorded(scope) == [("copy", "/data/b.txt")]
     else:
         assert _recorded(scope) == []
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_delete_drops_the_copy(account):
+    # The copy lands beside b.txt under a staged name before b.txt goes, so
+    # a refused delete leaves b.txt as it was and takes the copy back.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.answer_next("DELETE", FILE_ROUTE, 403)
+    with pytest.raises(BoxApiError):
+        await call(
+            copy,
+            readdir,
+            account.accessor(),
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_replaces_file_destination(account):
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await call(
+        rename,
+        readdir,
+        account.accessor(),
+        _spec("/data/a.txt"),
+        dst=_spec("/data/b.txt"),
+    )
+    assert (await account.child(ids["data"], "b.txt"))["id"] == ids["a.txt"]
+    assert await account.names(ids["data"]) == ["b.txt", "dst", "sub"]
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_keeps_the_destination_file(account):
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.answer_next("PUT", FILE_ROUTE, 403)
+    with pytest.raises(BoxApiError):
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_delete_moves_the_file_back(account):
+    ids = await _data(account)
+    moving = await account.put("c.txt", b"c", ids["sub"])
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.answer_next("DELETE", FILE_ROUTE, 403)
+    with pytest.raises(BoxApiError):
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/sub/c.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert (await account.child(ids["sub"], "c.txt"))["id"] == moving
+    assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_landing_puts_the_destination_back(account):
+    # The file there moves aside, then the move onto the freed name is
+    # refused: the file set aside takes its name back.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.answer_next(
+        "PUT", FILE_ROUTE, 403, path=f"/2.0/files/{ids['a.txt']}"
+    )
+    with pytest.raises(BoxApiError):
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_whose_landing_went_through_is_finished(account):
+    # The move onto the freed name lands, but its answer is lost: the item
+    # is found there by its id, and the file set aside is deleted.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+
+    async def landing() -> None:
+        await account.run.before_next(
+            [("PUT", FILE_ROUTE)],
+            lambda: account.rename(ids["a.txt"], "b.txt"),
+            502,
+        )
+
+    await account.run.before_next([("PUT", FILE_ROUTE)], landing)
+    await call(
+        rename,
+        readdir,
+        account.accessor(),
+        _spec("/data/a.txt"),
+        dst=_spec("/data/b.txt"),
+    )
+    assert await account.names(ids["data"]) == ["b.txt", "dst", "sub"]
+    assert (await account.child(ids["data"], "b.txt"))["id"] == ids["a.txt"]
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_landing_went_through_is_finished(account):
+    # The copy lands, but its answer is lost: it is found by its sha1, and
+    # the file set aside is deleted.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+
+    async def copied() -> None:
+        await account.run.call(
+            "POST",
+            f"/2.0/files/{ids['a.txt']}/copy",
+            json={"parent": {"id": ids["data"]}, "name": "b.txt"},
+        )
+
+    await account.run.before_next([("POST", COPY_FILE_ROUTE)], copied, 502)
+    await call(
+        copy,
+        readdir,
+        account.accessor(),
+        _spec("/data/a.txt"),
+        dst=_spec("/data/b.txt"),
+    )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert await account.content("data/b.txt") == HELLO
+
+
+@pytest.mark.asyncio
+async def test_rename_take_back_leaves_a_landing_another_client_wrote(
+    account,
+):
+    # The delete of the file set aside is refused, and another client
+    # wrote onto the landed item meanwhile: the move back is held to the
+    # version that landed, so that write stays where it is.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.before_next(
+        [("DELETE", FILE_ROUTE)],
+        lambda: account.upload_version(ids["a.txt"], b"theirs"),
+        403,
+    )
+    with pytest.raises(BoxApiError):
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert (await account.child(ids["data"], "b.txt"))["id"] == ids["a.txt"]
+    assert await account.content("data/b.txt") == b"theirs"
+    assert "a.txt" not in await account.names(ids["data"])
+
+
+@pytest.mark.asyncio
+async def test_rename_refuses_a_folder_holding_only_the_item_itself(account):
+    # mv -T d/c d: moving the only child out would leave the folder empty
+    # for its delete, so it is asked for a child before anything moves.
+    ids = await _data(account)
+    inner = await account.mkdir("c", ids["dst"])
+    with pytest.raises(OSError) as caught:
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/dst/c"),
+            dst=_spec("/data/dst"),
+        )
+    assert caught.value.errno == errno.ENOTEMPTY
+    assert await account.names(ids["data"]) == ["a.txt", "dst", "sub"]
+    assert (await account.child(ids["dst"], "c"))["id"] == inner
 
 
 @pytest.mark.asyncio

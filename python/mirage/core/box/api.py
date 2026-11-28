@@ -469,13 +469,16 @@ async def update_file(
     file_id: str,
     name: str | None = None,
     parent_id: str | None = None,
+    etag: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {}
     if name is not None:
         body["name"] = name
     if parent_id is not None:
         body["parent"] = {"id": parent_id}
-    return await box_put_json(tm, f"{tm.api_base}/files/{file_id}", body)
+    return await box_put_json(
+        tm, f"{tm.api_base}/files/{file_id}", body, if_match(etag)
+    )
 
 
 async def update_folder(
@@ -483,13 +486,16 @@ async def update_folder(
     folder_id: str,
     name: str | None = None,
     parent_id: str | None = None,
+    etag: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {}
     if name is not None:
         body["name"] = name
     if parent_id is not None:
         body["parent"] = {"id": parent_id}
-    return await box_put_json(tm, f"{tm.api_base}/folders/{folder_id}", body)
+    return await box_put_json(
+        tm, f"{tm.api_base}/folders/{folder_id}", body, if_match(etag)
+    )
 
 
 async def copy_file(
