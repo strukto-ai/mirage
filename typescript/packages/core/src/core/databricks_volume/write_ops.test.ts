@@ -127,7 +127,8 @@ describe('a large write', () => {
       for (let i = 0; i < 64; i++) yield await Promise.resolve(block)
     }
     await write(accessor, spec('/volume/big.bin'), source())
-    expect(bodies).toEqual([spilled])
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toBe(spilled)
     expect(stored).toBe(64 * block.byteLength)
     expect(largest).toBeLessThan(MEMORY_LIMIT)
   })

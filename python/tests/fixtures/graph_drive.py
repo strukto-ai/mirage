@@ -32,6 +32,16 @@ ME_DRIVE = "/me/drive/*rest"
 DRIVES = "/drives/:drive/*rest"
 SITES = "/sites"
 SITE_DRIVES = "/sites/:site/drives"
+# What a read or stat asks for; any other request it sends is reported.
+READS = {
+    "item",
+    "children",
+    "content",
+    "version_content",
+    "download",
+    "sites",
+    "drives",
+}
 
 
 class GraphDrive:
@@ -51,13 +61,17 @@ class GraphDrive:
         self.token = uuid.uuid4().hex
         self.drive = drive
         self.run = KitRun(origin, {"Authorization": f"Bearer {self.token}"})
-        self.prefix = "/me/drive" if drive == ONEDRIVE else f"/drives/{drive}"
+        self.prefix = (
+            "/me/drive"
+            if drive == ONEDRIVE
+            else f"/drives/{quote(drive, safe='')}"
+        )
 
     async def reset(self) -> None:
         """Start the account afresh, its drive declared."""
         await self.run.call("POST", "/reset", json={"tenants": [self.token]})
         if self.drive != ONEDRIVE:
-            await self.run.call("PUT", f"/drives/{quote(self.drive)}")
+            await self.run.call("PUT", f"/drives/{quote(self.drive, safe='')}")
 
     def config(self, provider: str, **fields: Any) -> dict[str, Any]:
         """A mount config for ``provider`` (onedrive or sharepoint) on the
@@ -212,7 +226,8 @@ class GraphDrive:
         """The requests no read or stat should make, since recording
         started: a second sites or drives lookup, a children listing past
         the ``children_allowed`` a test's own ``ls`` makes, and any request
-        to a route outside the ones a read takes.
+        a read does not make, an upload, a delete or a delta read among
+        them.
 
         Args:
             children_allowed (int): children listings not counted.
@@ -228,7 +243,7 @@ class GraphDrive:
             f"children of {path or '/'}"
             for path in children[children_allowed:]
         ]
-        out += [f"{name} {path}" for name, path, _ in log if " " in name]
+        out += [f"{name} {path}" for name, path, _ in log if name not in READS]
         return out
 
     async def queries(self, name: str) -> list[str]:

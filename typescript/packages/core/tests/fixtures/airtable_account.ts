@@ -97,7 +97,7 @@ export class AirtableAccount {
       const query = offset === undefined ? '' : `?offset=${encodeURIComponent(offset)}`
       const page = await this.run.call<{ records: AirtableRecord[]; offset?: string }>(
         'GET',
-        `/v0/${base}/${table}${query}`,
+        `/v0/${base}/${encodeURIComponent(table)}${query}`,
       )
       found.push(...page.records)
       if (page.offset === undefined) return found
@@ -109,7 +109,7 @@ export class AirtableAccount {
   async create(base: string, table: string, ...cells: Row[]): Promise<string[]> {
     const made = await this.run.call<{ records: { id: string }[] }>(
       'POST',
-      `/v0/${base}/${table}`,
+      `/v0/${base}/${encodeURIComponent(table)}`,
       {
         json: { records: cells.map((fields) => ({ fields })) },
       },

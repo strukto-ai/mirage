@@ -1416,9 +1416,12 @@ describe('the read-token contract', () => {
         expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
         expect((await fake.fetches()) - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
         // A new gridfs key's stat miss asks filesColl whether the key names a
-        // folder, a dispatcher the read rows refuse; the read itself reaches nothing.
-        const statMiss = family === 'gridfs' && target === 'new'
-        expect(written).toEqual(statMiss ? ['filesColl'] : [])
+        // folder, a dispatcher the read rows refuse; a Graph write is the one
+        // upload the fake's request list shows. The read itself reaches nothing.
+        let wrote: string[] = []
+        if (family in GRAPH) wrote = [`upload ${WRITE_TARGETS[target]}`]
+        else if (family === 'gridfs' && target === 'new') wrote = ['filesColl']
+        expect(written).toEqual(wrote)
         expect(await reachOf(fake)).toEqual(written)
       } finally {
         await ws.close()

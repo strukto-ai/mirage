@@ -26,6 +26,8 @@ const DRIVES = '/drives/:drive/*rest'
 const SITES = '/sites'
 const SITE_DRIVES = '/sites/:site/drives'
 const BYTES = ['download', 'content', 'version_content']
+// What a read or stat asks for; any other request it sends is reported.
+const READS = ['item', 'children', 'content', 'version_content', 'download', 'sites', 'drives']
 
 /** One request as the tests read it: its name, the path in the drive it names, and its query. */
 export type Logged = [string, string, string]
@@ -86,7 +88,7 @@ export class GraphDrive {
     readonly drive: string = ONEDRIVE,
   ) {
     this.run = new KitRun(origin, { Authorization: `Bearer ${this.token}` })
-    this.prefix = drive === ONEDRIVE ? '/me/drive' : `/drives/${drive}`
+    this.prefix = drive === ONEDRIVE ? '/me/drive' : `/drives/${encodeURIComponent(drive)}`
   }
 
   /** Start the account afresh, its drive declared, its requests recorded from here. */
@@ -210,8 +212,8 @@ export class GraphDrive {
   /**
    * The requests no read or stat should make, since recording started: a
    * second sites or drives lookup, a children listing past the
-   * `childrenAllowed` a test's own `ls` makes, and any request to a route
-   * outside the ones a read takes.
+   * `childrenAllowed` a test's own `ls` makes, and any request a read does
+   * not make, an upload, a delete or a delta read among them.
    */
   async reach(childrenAllowed = 0): Promise<string[]> {
     const log = await this.log()
@@ -220,7 +222,7 @@ export class GraphDrive {
     if (log.filter(([name]) => name === 'drives').length > 1) out.push('drives listed twice')
     const children = log.filter(([name]) => name === 'children').map(([, path]) => path)
     for (const path of children.slice(childrenAllowed)) out.push(`children of ${path || '/'}`)
-    for (const [name, path] of log) if (name.includes(' ')) out.push(`${name} ${path}`)
+    for (const [name, path] of log) if (!READS.includes(name)) out.push(`${name} ${path}`)
     return out
   }
 

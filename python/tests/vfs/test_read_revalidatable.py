@@ -1523,10 +1523,16 @@ def test_a_written_file_is_served_without_a_download(
     assert out == b"new\n"
     assert downloads == WRITE_EXCEPTIONS.get(family, 0)
     # A new gridfs key's stat miss asks files_coll whether the key names a
-    # folder, a dispatcher the read rows refuse; the read itself reaches
+    # folder, a dispatcher the read rows refuse; a Graph write is the one
+    # upload the fake's request list shows. The read itself reaches
     # nothing.
-    stat_miss = family == "gridfs" and target == "new"
-    assert written == (["files_coll"] if stat_miss else [])
+    if family in GRAPH:
+        wrote = [f"upload {WRITE_TARGETS[target]}"]
+    elif family == "gridfs" and target == "new":
+        wrote = ["files_coll"]
+    else:
+        wrote = []
+    assert written == wrote
     assert fake.reach() == written
 
 

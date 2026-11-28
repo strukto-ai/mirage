@@ -14,7 +14,7 @@
 
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import parse_qsl, unquote
+from urllib.parse import parse_qsl, quote, unquote
 
 import pytest_asyncio
 
@@ -117,7 +117,7 @@ class AirtableAccount:
         params: dict[str, str] = {}
         while True:
             page = await self.run.call(
-                "GET", f"/v0/{base}/{table}", params=params
+                "GET", f"/v0/{base}/{quote(table, safe='')}", params=params
             )
             found.extend(page["records"])
             if "offset" not in page:
@@ -138,7 +138,9 @@ class AirtableAccount:
         params: dict[str, str] = {}
         while True:
             page = await self.run.call(
-                "GET", f"/v0/{base}/{table}/{record}/comments", params=params
+                "GET",
+                f"/v0/{base}/{quote(table, safe='')}/{record}/comments",
+                params=params,
             )
             found.extend(page["comments"])
             if page.get("offset") is None:
@@ -157,7 +159,7 @@ class AirtableAccount:
         """
         made = await self.run.call(
             "POST",
-            f"/v0/{base}/{table}",
+            f"/v0/{base}/{quote(table, safe='')}",
             json={"records": [{"fields": c} for c in cells]},
         )
         return [r["id"] for r in made["records"]]
@@ -174,7 +176,9 @@ class AirtableAccount:
             **cells (Any): the cells to set.
         """
         await self.run.call(
-            "PATCH", f"/v0/{base}/{table}/{record}", json={"fields": cells}
+            "PATCH",
+            f"/v0/{base}/{quote(table, safe='')}/{record}",
+            json={"fields": cells},
         )
 
     async def delete(self, base: str, table: str, record: str) -> None:
@@ -185,7 +189,9 @@ class AirtableAccount:
             table (str): the table's id.
             record (str): the record's id.
         """
-        await self.run.call("DELETE", f"/v0/{base}/{table}/{record}")
+        await self.run.call(
+            "DELETE", f"/v0/{base}/{quote(table, safe='')}/{record}"
+        )
 
     async def _listed(self) -> list[dict[str, Any]]:
         listed = await self.run.call("GET", "/_kit/requests")
