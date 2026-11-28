@@ -240,8 +240,9 @@ class _Run:
     """Files a command reads in turn: its operands, or the files of one
     directory as a listing or subtree answer named them. ``sent`` is
     where the next batch starts, ``latest`` how many files the batch
-    before it took, ``last`` where the latest read was and ``rows`` what
-    a subtree answer holds at each name."""
+    before it took, ``last`` where the latest read was, ``rows`` what
+    a subtree answer holds at each name and ``reach`` how many of its
+    files a walk of it can read, -1 for all of them."""
 
     names: list[str]
     sent: int = 0
@@ -250,6 +251,7 @@ class _Run:
     order: dict[str, int] | None = None
     warming: dict[str, asyncio.Future[ReadBatch]] = field(default_factory=dict)
     rows: Mapping[str, FileStat] | None = None
+    reach: int = -1
 
     def at(self, virtual: str) -> int | None:
         if self.order is None:
@@ -287,7 +289,10 @@ class ReadAhead:
     read in each one neither it nor above it. Below a subtree answer the
     files it names are one run, in the order a walk reads them
     (``walk_order``), so read-ahead runs on into the next directory instead
-    of starting over in each one. A read whose file is still being
+    of starting over in each one. A walk lists at most ``walk_limit``
+    entries below its operand, in that order, so no batch reaches past
+    that many files of a listing or a subtree answer: a walk stopped at
+    its cap fetches nothing beyond it. A read whose file is still being
     warmed waits for it, so it is served warm instead of fetching the
     file again; a write in between drops the cached copy as it drops any.
     A path in neither the operands nor the latest ``LISTINGS`` listings
@@ -315,10 +320,18 @@ class ReadAhead:
         dispatch (DispatchFn): the command's dispatcher.
         paths (Sequence[PathSpec]): its operands as typed; the names
             each glob resolves to follow them in the order resolved.
+        walk_limit (Callable[[str], int] | None): how many entries a walk
+            lists below a folder, -1 for any number; None caps nothing.
     """
 
-    def __init__(self, dispatch: DispatchFn, paths: Sequence[PathSpec]):
+    def __init__(
+        self,
+        dispatch: DispatchFn,
+        paths: Sequence[PathSpec],
+        walk_limit: Callable[[str], int] | None = None,
+    ):
         self.inner = dispatch
+        self.walk_limit = walk_limit
         self.operands = _Run([], sent=1, order={})
         self.specs: dict[str, PathSpec] = {}
         self.stats: dict[str, FileStat] = {}
@@ -382,10 +395,12 @@ class ReadAhead:
                 self.stats[path.virtual] = result
         elif name == "readdir" and isinstance(result, list):
             files = [n for n in result if not n.endswith("/")]
-            self._keep(folder, _Run(files))
+            self._keep(folder, _Run(files, reach=self._reach(folder)))
         elif name == "read_tree" and isinstance(result, Mapping):
             if options.get("level"):
-                self._keep(folder, _listed(folder, result))
+                listed = _listed(folder, result)
+                listed.reach = self._reach(folder)
+                self._keep(folder, listed)
             else:
                 self.trees.append(_Tree(folder, result))
         return result, io
@@ -420,24 +435,23 @@ class ReadAhead:
             run.sent, at if self.holding and pending is None else at + 1
         )
         ahead = min(width, run.latest or width) if self.holding else width
+        end = (
+            len(run.names) if run.reach < 0 else min(len(run.names), run.reach)
+        )
         if (
             self.kept
             and width
-            and start < len(run.names)
+            and start < end
             and start - at <= max(1, ahead // 2)
         ):
             rows = run.rows or {}
+            window = run.names[start : min(start + width, end)]
             found = {
                 n: row
-                for n in run.names[start : start + width]
+                for n in window
                 if (row := self.stats.get(n) or rows.get(n)) is not None
             }
-            names = list(
-                takewhile(
-                    lambda n: n not in run.warming,
-                    run.names[start : start + width],
-                )
-            )
+            names = list(takewhile(lambda n: n not in run.warming, window))
             if self.holding:
                 names = _fitting(names, found)
             run.sent = start + len(names)
@@ -575,9 +589,19 @@ class ReadAhead:
                 tree.run = _Run(
                     [base + key for key in below],
                     rows={base + key: tree.rows[key] for key in below},
+                    reach=self._reach(tree.root),
                 )
             return tree.run
         return None
+
+    def _reach(self, folder: str) -> int:
+        """How many files of a listing or subtree answer at ``folder`` a
+        walk of it can read: no more than the entries it lists there.
+
+        Args:
+            folder (str): the directory listed.
+        """
+        return -1 if self.walk_limit is None else self.walk_limit(folder)
 
 
 def _listed(folder: str, rows: Mapping[str, FileStat]) -> _Run:
@@ -1082,7 +1106,10 @@ def command_files(
     if vfs is None:
         name = ctx.spec.name if ctx.spec is not None else ""
         raise TypeError(f"{name}: no workspace files")
-    ahead = ReadAhead(vfs.dispatch, paths)
+    mounts = mounts_of(ctx)
+    ahead = ReadAhead(
+        vfs.dispatch, paths, None if mounts is None else mounts.walk_limit
+    )
     dispatch = ahead.dispatch
     crossing = crosses_mounts(ctx)
     reading = None if crossing else _READINGS.get()
@@ -1091,7 +1118,6 @@ def command_files(
     # -o /ram/out` typed on another mount).
     home = mount_root(ctx)
     anchor = home + "/"
-    mounts = mounts_of(ctx)
 
     async def call(name: str, path: PathSpec, /, **kwargs: Any) -> Any:
         return await dispatched_call(dispatch, name, path, **kwargs)

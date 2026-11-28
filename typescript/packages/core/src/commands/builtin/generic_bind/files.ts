@@ -189,8 +189,9 @@ const LISTINGS = 16
 // Files a command reads in turn: its operands, or the files of one directory
 // as a listing or subtree answer named them. `sent` is where the next batch
 // starts, `latest` how many files the batch before it took, `last` where the
-// latest read was and `rows` what a subtree answer holds at each name.
-// Mirrors Python's `_Run`.
+// latest read was, `rows` what a subtree answer holds at each name and `reach`
+// how many of its files a walk of it can read, -1 for all of them. Mirrors
+// Python's `_Run`.
 class Run {
   sent = 0
   latest = 0
@@ -201,6 +202,7 @@ class Run {
   constructor(
     readonly names: string[],
     readonly rows: ReadonlyMap<string, FileStat> | null = null,
+    public reach = -1,
   ) {}
 
   at(virtual: string): number | undefined {
@@ -235,11 +237,13 @@ interface Tree {
  * directory has passed over what it warmed and never read in each one neither
  * it nor above it. Below a subtree answer the files it names are one run, in
  * the order a walk reads them (`walkOrder`), so read-ahead runs on into the
- * next directory instead of starting over in each one. A read whose file is
- * still being warmed waits for it,
- * so it is served warm instead of fetching the file again; a write in between
- * drops the cached copy as it drops any. A path in neither the operands nor
- * the latest LISTINGS listings and subtree answers warms nothing.
+ * next directory instead of starting over in each one. A walk lists at most
+ * `walkLimit` entries below its operand, in that order, so no batch reaches
+ * past that many files of a listing or a subtree answer: a walk stopped at its
+ * cap fetches nothing beyond it. A read whose file is still being warmed waits
+ * for it, so it is served warm instead of fetching the file again; a write in
+ * between drops the cached copy as it drops any. A path in neither the
+ * operands nor the latest LISTINGS listings and subtree answers warms nothing.
  *
  * On a mount that holds its data locally, and on a store in a workspace that
  * keeps no reads, there is no read cache to warm: the dispatcher reads the
@@ -272,9 +276,17 @@ export class ReadAhead {
   private readonly unheld = new WeakSet<Promise<ReadBatch>>()
   private walked: Run | null = null
 
+  /**
+   * @param inner the command's dispatcher.
+   * @param paths its operands as typed; the names each glob resolves to follow
+   *   them in the order resolved.
+   * @param walkLimit how many entries a walk lists below a folder, -1 for any
+   *   number; null caps nothing.
+   */
   constructor(
     private readonly inner: DispatchFn,
     paths: readonly PathSpec[],
+    private readonly walkLimit: ((folder: string) => number) | null = null,
   ) {
     this.operands.sent = 1
     this.operands.order = new Map()
@@ -327,11 +339,13 @@ export class ReadAhead {
       this.stats.set(path.virtual, answer[0])
     } else if (name === 'readdir' && Array.isArray(answer[0])) {
       const files = (answer[0] as string[]).filter((n) => !n.endsWith('/'))
-      this.keep(folder, new Run(files))
+      this.keep(folder, new Run(files, null, this.reach(folder)))
     } else if (name === 'read_tree' && answer[0] instanceof Map) {
       const rows = answer[0] as Map<string, FileStat>
       if (asked.level === true) {
-        this.keep(folder, listed(folder, rows))
+        const run = listed(folder, rows)
+        run.reach = this.reach(folder)
+        this.keep(folder, run)
       } else {
         this.trees.push({ root: folder, rows, run: null })
         if (this.trees.length > LISTINGS) this.trees.shift()
@@ -366,15 +380,11 @@ export class ReadAhead {
         : this.paced(run, at, pending !== undefined)
     const start = Math.max(run.sent, this.holding && pending === undefined ? at : at + 1)
     const ahead = this.holding ? Math.min(width, run.latest || width) : width
-    if (
-      this.kept &&
-      width > 0 &&
-      start < run.names.length &&
-      start - at <= Math.max(1, ahead >> 1)
-    ) {
+    const end = run.reach < 0 ? run.names.length : Math.min(run.names.length, run.reach)
+    if (this.kept && width > 0 && start < end && start - at <= Math.max(1, ahead >> 1)) {
       const found = new Map<string, FileStat>()
       let names: string[] = []
-      for (const name of run.names.slice(start, start + width)) {
+      for (const name of run.names.slice(start, Math.min(start + width, end))) {
         if (run.warming.has(name)) break
         names.push(name)
         const row = this.stats.get(name) ?? run.rows?.get(name)
@@ -507,11 +517,18 @@ export class ReadAhead {
         tree.run = new Run(
           below.map((key) => base + key),
           rows,
+          this.reach(tree.root),
         )
       }
       return tree.run
     }
     return undefined
+  }
+
+  // How many files of a listing or subtree answer at `folder` a walk of it can
+  // read: no more than the entries it lists there. Mirrors Python's `_reach`.
+  private reach(folder: string): number {
+    return this.walkLimit === null ? -1 : this.walkLimit(folder)
   }
 }
 
@@ -893,7 +910,8 @@ export function refuseReveal(src: PathSpec, dst: PathSpec, access?: SessionAcces
 export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): CommandFiles {
   const vfs = ctx.vfs
   if (vfs === undefined) throw new TypeError(`${ctx.spec?.name ?? ''}: no workspace files`)
-  const ahead = new ReadAhead(vfs.dispatch, paths)
+  const mounts = mountsOf(ctx)
+  const ahead = new ReadAhead(vfs.dispatch, paths, (folder) => mounts?.walkLimit?.(folder) ?? -1)
   const dispatch = ahead.dispatch
   const crossing = crossesMounts(ctx)
   const reading = crossing ? undefined : READINGS.get(ctx)
@@ -903,7 +921,6 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   // on another mount).
   const home = mountRoot(ctx)
   const anchor = `${home}/`
-  const mounts = mountsOf(ctx)
   let declined: { path: string; text: string; wholeWord: boolean; ignoreCase: boolean } | null =
     null
   const call = (

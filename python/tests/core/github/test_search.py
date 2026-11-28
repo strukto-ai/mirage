@@ -577,10 +577,12 @@ async def test_a_scope_cheaper_to_read_is_not_searched(repo):
 async def test_a_search_past_the_scope_cap_stops_there(
     repo, line, name, monkeypatch
 ):
+    # The walk reads the four files it reaches, by blob or in a batch the
+    # read-ahead sends, and none past them.
     got = await _on_github(repo, line, monkeypatch, limit=4)
     assert got == await _run(_ram(), line, 4)
     assert got[1:] == (f"{name}: /gh: ".encode() + STOPPED_AT_4, 2)
-    assert await repo.count("blob") == 4
+    assert await _read(repo) == sorted(REPO)[:4]
 
 
 @pytest.mark.asyncio
