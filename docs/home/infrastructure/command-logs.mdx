@@ -1,6 +1,6 @@
 ---
 title: Command Logs
-description: What Mirage records about each line a session runs, where it keeps it, and how to send it to an OpenTelemetry backend as traces.
+description: What Mirage records about each line a session runs, where it keeps it, and how to send it to an OpenTelemetry backend as traces and metrics.
 icon: clock-rotate-left
 ---
 
@@ -446,6 +446,33 @@ machine runs on another host sends no spans of its own.
 | --- | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_CONTENT_MAX_BYTES</code> | 16 KiB | How much of the output `mirage.stdout` and `mirage.stderr` each keep, as UTF-8 text. The default fits the 64 KB that a Cloudflare Workers span allows for all its attributes. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_TRACE_CAPTURE_CONTENT</code> | `true` | Set to `false` to keep output and mount calls out of traces. `shell` spans then carry no output, and Mirage sends no `vfs.<call>` spans. |
+
+## Metrics
+
+The workspace also records three metrics under the OpenTelemetry meter
+`mirage.observe`: one for each typed line its history records, two for each
+call to a mount. Like traces, nothing is sent until your process sets up an
+OpenTelemetry SDK with a meter provider: see
+[Configure metric collection](/home/access/http#metrics). In TypeScript,
+register the meter provider before the workspace runs its first line.
+
+| Metric | Kind | Unit | Labels | Value |
+| --- | --- | --- | --- | --- |
+| `mirage.shell.duration` | histogram | `s` | `mirage.exit_code` | How long each typed line ran. Its count is the number of lines. |
+| `mirage.vfs.duration` | histogram | `s` | `mirage.vfs.op`, `mirage.vfs.source` | How long each call to a mount took, from a line or from your own code. |
+| `mirage.vfs.io` | counter | `By` | `mirage.vfs.op`, `mirage.vfs.source` | The bytes those calls read or wrote. |
+
+`mirage.vfs.op` is the call, such as `read` or `write`, and `mirage.vfs.source`
+the backend that served it, such as `s3` or `ram`. The labels name no path,
+command, session or workspace, so the number of series stays small however
+many lines run. Calls are timed to the millisecond, so a call under 1 ms counts
+as 0 seconds.
+
+| To find | Query |
+| --- | --- |
+| Failed lines | The count of `mirage.shell.duration` where `mirage.exit_code` is not 0 |
+| Slow backends | `mirage.vfs.duration` by `mirage.vfs.source` |
+| Data read from S3 | `mirage.vfs.io` where `mirage.vfs.op` is `read` and `mirage.vfs.source` is `s3` |
 
 ## Next steps
 

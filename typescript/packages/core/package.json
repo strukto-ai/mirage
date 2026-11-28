@@ -125,6 +125,7 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/server": "^2.3.0",
+    "@opentelemetry/sdk-metrics": "^3.0.0",
     "@pydantic/monty": "1.6.0",
     "@qdrant/js-client-rest": "^1.18.0",
     "@types/node": "^22.0.0",

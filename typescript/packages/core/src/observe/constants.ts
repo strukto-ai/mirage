@@ -16,6 +16,17 @@ export const NAME_LIMIT = 200
 
 export const TRACER_NAME = 'mirage.observe'
 
+export const METER_NAME = 'mirage.observe'
+
+/**
+ * Bucket bounds, in seconds, of the duration histograms: OpenTelemetry's
+ * advice for a request's duration, 5 ms to 10 s, then up to 5 minutes for the
+ * long lines an agent runs.
+ */
+export const DURATION_BUCKETS: readonly number[] = [
+  0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 30, 60, 300,
+]
+
 /**
  * Set to `false` or `0` to keep what calls touched out of spans: no output on
  * `shell`, no `vfs.<call>` spans. Named after OpenTelemetry's
