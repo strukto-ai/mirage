@@ -22,6 +22,7 @@ from mirage.commands.config import Context
 from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
 from mirage.types import PathSpec
+from tests.fixtures.slack_workspace import COMPLETE
 
 ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
@@ -43,17 +44,12 @@ def _upload_ctx(vfs, **flags) -> Context:
 
 
 @pytest.mark.asyncio
-async def test_upload_file_shares_the_workspace_file(monkeypatch):
-    calls = []
-
-    async def fake_share(accessor, channel, filename, data, comment, thread):
-        calls.append((channel, filename, data, comment, thread))
-        return {"ok": True, "files": [{"id": "F1"}]}
-
-    monkeypatch.setitem(upload_file.__globals__, "share_file", fake_share)
+async def test_upload_file_shares_the_workspace_file(slack_workspace):
+    # The bytes come from the workspace's own file, shared in a thread.
+    lunch = "1762214460.000001"
     vfs = _Files({"/tmp/reply.wav": b"RIFF"})
     out, io = await upload_file(
-        ACCESSOR,
+        slack_workspace.accessor(),
         [],
         [],
         _upload_ctx(
@@ -61,15 +57,23 @@ async def test_upload_file_shares_the_workspace_file(monkeypatch):
             channel="C1",
             file=PathSpec.from_str_path("/tmp/reply.wav"),
             initial_comment="here",
-            thread_ts="9.9",
+            thread_ts=lunch,
         ),
     )
     assert io.exit_code == 0
-    assert json.loads(await materialize(out)) == {
-        "ok": True,
-        "files": [{"id": "F1"}],
-    }
-    assert calls == [("C1", "reply.wav", b"RIFF", "here", "9.9")]
+    [shared] = json.loads(await materialize(out))["files"]
+    assert await slack_workspace.run.bodies("POST", COMPLETE) == [
+        {
+            "files": [{"id": shared["id"], "title": "reply.wav"}],
+            "channel_id": "C1",
+            "initial_comment": "here",
+            "thread_ts": lunch,
+        }
+    ]
+    assert (
+        await slack_workspace.run.read(f"/files/download/{shared['id']}")
+        == b"RIFF"
+    )
 
 
 @pytest.mark.asyncio

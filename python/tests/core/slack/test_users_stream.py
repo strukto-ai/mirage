@@ -12,58 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import list_users_stream
+from tests.fixtures.slack_workspace import USERS
 
 
 @pytest.mark.asyncio
-async def test_list_users_stream_walks_pages_and_filters():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
-    pages = [
-        {
-            "members": [
-                {
-                    "id": "U1",
-                    "name": "alice",
-                    "deleted": False,
-                    "is_bot": False,
-                },
-                {"id": "U2", "name": "bot", "deleted": False, "is_bot": True},
-            ],
-            "response_metadata": {"next_cursor": "cur1"},
-        },
-        {
-            "members": [
-                {
-                    "id": "USLACKBOT",
-                    "name": "slackbot",
-                    "deleted": False,
-                    "is_bot": False,
-                },
-                {"id": "U3", "name": "bob", "deleted": False, "is_bot": False},
-            ],
-            "response_metadata": {"next_cursor": ""},
-        },
+async def test_list_users_stream_walks_pages_and_filters(slack_workspace):
+    # A first page of three, ana, ben and the bot, then the deactivated
+    # user and Slackbot: each page yields only its people.
+    await slack_workspace.first_page(USERS, 3)
+    seen = [
+        page async for page in list_users_stream(slack_workspace.accessor())
     ]
-    calls = []
-
-    async def fake_get(_acc, method, params=None):
-        assert method == "users.list"
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        seen = []
-        async for page in list_users_stream(acc):
-            seen.append(page)
-
-    assert len(seen) == 2
-    assert [u["name"] for u in seen[0]] == ["alice"]
-    assert [u["name"] for u in seen[1]] == ["bob"]
-    assert calls[0]["limit"] == 200
-    assert calls[1]["cursor"] == "cur1"
+    assert [[u["name"] for u in page] for page in seen] == [["ana", "ben"], []]
+    first, second = await slack_workspace.run.params("GET", USERS)
+    assert first["limit"] == "200"
+    assert second["cursor"] != ""

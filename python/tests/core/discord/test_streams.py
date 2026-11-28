@@ -12,93 +12,81 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds_stream
 from mirage.core.discord.history import snowflake_at, stream_messages_for_day
 from mirage.core.discord.members import list_members_stream
 from mirage.core.discord.search import search_guild_stream
 from mirage.core.time_range import TimeRange
-
-
-@pytest.fixture
-def accessor():
-    return DiscordAccessor(DiscordConfig(token="t"))
+from tests.fixtures.discord_guild import ALICE, DAY, GENERAL, GUILD, MEMBERS
 
 
 @pytest.mark.asyncio
-async def test_list_guilds_stream_walks_pages(accessor):
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        side_effect=[[{"id": "G1"}, {"id": "G2"}], [{"id": "G3"}]],
-    ):
-        collected = []
-        async for page in list_guilds_stream(accessor, page_size=2):
-            collected.append(page)
-    assert collected == [[{"id": "G1"}, {"id": "G2"}], [{"id": "G3"}]]
+async def test_list_guilds_stream_walks_pages(discord_guild):
+    # The bot is in two more servers than the unit world's own.
+    await discord_guild.run.execute(
+        "INSERT INTO DiscordGuild (tenant, id, seq, idNum, name) VALUES "
+        "('default', '222', 2, 222, 'Second'), "
+        "('default', '333', 3, 333, 'Third')"
+    )
+    collected = [
+        [g["id"] for g in page]
+        async for page in list_guilds_stream(
+            discord_guild.accessor(), page_size=2
+        )
+    ]
+    assert collected == [[GUILD, "222"], ["333"]]
 
 
 @pytest.mark.asyncio
-async def test_list_members_stream_walks_user_ids(accessor):
-    page1 = [{"user": {"id": "U1"}}, {"user": {"id": "U2"}}]
-    page2 = [{"user": {"id": "U3"}}]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        side_effect=[page1, page2],
-    ) as mock:
-        collected = []
-        async for page in list_members_stream(accessor, "G1", page_size=2):
-            collected.append(page)
-    assert collected == [page1, page2]
-    assert mock.call_args_list[1].kwargs["params"]["after"] == "U2"
+async def test_list_members_stream_walks_user_ids(discord_guild):
+    collected = [
+        [m["user"]["id"] for m in page]
+        async for page in list_members_stream(
+            discord_guild.accessor(), GUILD, page_size=2
+        )
+    ]
+    assert collected == [["311", "312"], ["911"]]
+    asked = await discord_guild.run.params("GET", MEMBERS)
+    assert asked[1]["after"] == "312"
 
 
 @pytest.mark.asyncio
-async def test_stream_messages_for_day_filters_by_date(accessor):
+async def test_stream_messages_for_day_filters_by_date(discord_guild):
+    # Two a page: the day's two, then the next day's morning, which is
+    # left out.
     before_int = snowflake_at(
         datetime(2024, 1, 16, tzinfo=timezone.utc).timestamp()
     )
-    in_range = [{"id": str(before_int - 1000), "content": "ok"}]
-    out_of_range = [{"id": str(before_int + 1000), "content": "next-day"}]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=in_range + out_of_range,
-    ):
-        pages = [
-            p
-            async for p in stream_messages_for_day(
-                accessor, "C1", "2024-01-15", TimeRange(), page_size=2
-            )
-        ]
+    pages = [
+        p
+        async for p in stream_messages_for_day(
+            discord_guild.accessor(), GENERAL, DAY, TimeRange(), page_size=2
+        )
+    ]
     flat = [m for page in pages for m in page]
-    assert all(int(m["id"]) <= before_int for m in flat)
-    assert any(m["content"] == "ok" for m in flat)
+    assert all(int(m["id"]) < before_int for m in flat)
+    assert sorted(m["content"] for m in flat) == ["files", "hello"]
 
 
 @pytest.mark.asyncio
-async def test_search_guild_stream_flattens_contexts(accessor):
-    p1 = {
-        "messages": [[{"id": "1"}], [{"id": "2"}]],
-        "total_results": 30,
-    }
-    p2 = {"messages": [[{"id": "3"}]], "total_results": 30}
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        side_effect=[p1, p2],
-    ):
-        collected = []
+async def test_search_guild_stream_flattens_contexts(discord_guild):
+    start = datetime(2024, 1, 20, tzinfo=timezone.utc)
+    await discord_guild.add_messages(
+        GENERAL,
+        ALICE,
+        [(start + timedelta(minutes=i), f"msg{i}") for i in range(30)],
+    )
+    collected = [
+        page
         async for page in search_guild_stream(
-            accessor, "G1", "x", max_pages=2
-        ):
-            collected.append(page)
-    flat = [m["id"] for page in collected for m in page]
-    assert flat == ["1", "2", "3"]
+            discord_guild.accessor(), GUILD, "msg", max_pages=2
+        )
+    ]
+    # Each hit comes in a context of its own; the stream yields the hits.
+    assert [len(page) for page in collected] == [25, 5]
+    flat = [m["content"] for page in collected for m in page]
+    assert sorted(flat) == sorted(f"msg{i}" for i in range(30))

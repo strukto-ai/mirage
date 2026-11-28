@@ -12,60 +12,32 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
 from mirage.types import MountMode
-from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
 from mirage.workspace.workspace import Workspace
 
 
-@pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test")
-
-
 @pytest.mark.asyncio
-async def test_ls_no_args_after_cd_returns_cwd_entries(config):
+async def test_ls_no_args_after_cd_returns_cwd_entries(slack_workspace):
     """Regression for bug: `ls` (no args) returned empty after `cd /slack/...`.
 
     Root cause: `slack/ls.py` rebuilt a fresh `PathSpec` from `cwd.virtual`
     without preserving the mount prefix, so readdir treated the mount prefix
     segment as a container name and returned [].
     """
-    vfs = SlackVFS(config)
+    vfs = SlackVFS(slack_workspace.config())
     ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
-    channels_page = {
-        "channels": [{"id": "C001", "name": "general", "created": 1700000000}],
-        "response_metadata": {"next_cursor": ""},
-    }
-    history_page = {
-        "messages": [{"ts": "1700050000.0", "text": "hi"}],
-        "has_more": False,
-    }
-
-    async def fake_get(_accessor, method, params=None):
-        if method == "conversations.list":
-            return channels_page
-        if method == "conversations.history":
-            return history_page
-        raise AssertionError(f"unexpected method: {method}")
-
-    with (
-        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
-        patch("mirage.core.slack.readdir.slack_get", new=fake_get),
-    ):
-        r = await ws.shell("cd /slack/channels/general__C001")
+    try:
+        r = await ws.shell("cd /slack/channels/general__C1")
         assert r.exit_code == 0
         r = await ws.shell("pwd")
-        assert (
-            await r.stdout_str()
-        ).strip() == "/slack/channels/general__C001"
-
+        assert (await r.stdout_str()).strip() == "/slack/channels/general__C1"
         r = await ws.shell("ls")
         out = (await r.stdout_str()).strip()
+    finally:
+        await ws.close()
     assert r.exit_code == 0
     assert out != "", "ls no-args after cd returned empty"
     first_line = out.splitlines()[0]

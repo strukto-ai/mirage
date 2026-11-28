@@ -12,92 +12,71 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DiscordGuild, GUILD, MEMBER_SEARCH, MEMBERS } from '../../../tests/core/discord/guild.ts'
 import { listMembers, searchMembers } from './members.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(private readonly responder: () => unknown = () => null) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder())
-  }
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
+
+function names(members: { user?: { username?: string } }[]): (string | undefined)[] {
+  return members.map((m) => m.user?.username)
 }
 
 describe('listMembers', () => {
   it('GETs /guilds/<id>/members with default page size', async () => {
-    const t = new FakeDiscordTransport(() => [{ user: { id: 'U1', username: 'alice' } }])
-    const out = await listMembers(new DiscordAccessor(t), 'G1')
-    expect(t.calls[0]?.method).toBe('GET')
-    expect(t.calls[0]?.endpoint).toBe('/guilds/G1/members')
-    expect(t.calls[0]?.params?.after).toBe('0')
-    expect(t.calls[0]?.params?.limit).toBe(1000)
-    expect(out).toEqual([{ user: { id: 'U1', username: 'alice' } }])
+    const out = await listMembers(guild.accessor(), GUILD)
+    const [params] = await guild.run.params('GET', MEMBERS)
+    expect([params?.after, params?.limit]).toEqual(['0', '1000'])
+    expect(names(out)).toEqual(['alice', 'bob', 'mirage-bot'])
   })
 
   it('honors custom page size', async () => {
-    const t = new FakeDiscordTransport(() => [])
-    await listMembers(new DiscordAccessor(t), 'G1', 50)
-    expect(t.calls[0]?.params?.limit).toBe(50)
+    await listMembers(guild.accessor(), GUILD, 50)
+    expect((await guild.run.params('GET', MEMBERS))[0]?.limit).toBe('50')
   })
 
   it('returns empty array on non-array response', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    const out = await listMembers(new DiscordAccessor(t), 'G1')
-    expect(out).toEqual([])
+    await guild.run.answerNext('GET', MEMBERS, 200, null)
+    expect(await listMembers(guild.accessor(), GUILD)).toEqual([])
   })
 })
 
 describe('searchMembers', () => {
   it('GETs /guilds/<id>/members/search with query and limit', async () => {
-    const t = new FakeDiscordTransport(() => [{ user: { id: 'U1', username: 'alice' } }])
-    const out = await searchMembers(new DiscordAccessor(t), 'G1', 'ali')
-    expect(t.calls[0]?.method).toBe('GET')
-    expect(t.calls[0]?.endpoint).toBe('/guilds/G1/members/search')
-    expect(t.calls[0]?.params).toEqual({ query: 'ali', limit: 100 })
-    expect(out).toEqual([{ user: { id: 'U1', username: 'alice' } }])
+    const out = await searchMembers(guild.accessor(), GUILD, 'ali')
+    expect(await guild.run.params('GET', MEMBER_SEARCH)).toEqual([{ query: 'ali', limit: '100' }])
+    expect(names(out)).toEqual(['alice'])
   })
 
   it('honors custom limit', async () => {
-    const t = new FakeDiscordTransport(() => [])
-    await searchMembers(new DiscordAccessor(t), 'G1', 'bob', 25)
-    expect(t.calls[0]?.params).toEqual({ query: 'bob', limit: 25 })
+    await searchMembers(guild.accessor(), GUILD, 'bob', 25)
+    expect(await guild.run.params('GET', MEMBER_SEARCH)).toEqual([{ query: 'bob', limit: '25' }])
   })
 
   it('returns empty array on non-array response', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    const out = await searchMembers(new DiscordAccessor(t), 'G1', 'x')
-    expect(out).toEqual([])
+    await guild.run.answerNext('GET', MEMBER_SEARCH, 200, null)
+    expect(await searchMembers(guild.accessor(), GUILD, 'x')).toEqual([])
   })
 })
 
 // Twin of test_list_members_pages_no_further_than_stop_at.
 it('pages members no further than stopAt', async () => {
-  let n = 0
-  const t = new FakeDiscordTransport(() => {
-    n += 1
-    return [{ user: { id: `U${String(n)}`, username: `user${String(n)}` } }]
-  })
-  const out = await listMembers(new DiscordAccessor(t), 'G1', 1, 1)
-  expect(out.map((m) => m.user?.username)).toEqual(['user1'])
-  expect(t.calls).toHaveLength(1)
+  const out = await listMembers(guild.accessor(), GUILD, 1, 1)
+  expect(names(out)).toEqual(['alice'])
+  expect(await guild.count(MEMBERS)).toBe(1)
 })

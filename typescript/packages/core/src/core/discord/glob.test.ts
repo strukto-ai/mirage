@@ -12,15 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { PathSpec } from '../../types.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DiscordGuild } from '../../../tests/core/discord/guild.ts'
 import { mountDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { readdir as discordReaddir } from './readdir.ts'
+
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 async function listedPaths(accessor: DiscordAccessor, path: PathSpec): Promise<string[]> {
   const base = path.virtual.replace(/\/$/, '')
@@ -30,20 +47,8 @@ async function listedPaths(accessor: DiscordAccessor, path: PathSpec): Promise<s
 const resolveDiscordGlob = (accessor: DiscordAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
   makeResolveGlob((path) => listedPaths(accessor, path))(paths)
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: { method: DiscordMethod; endpoint: string }[] = []
-  constructor(
-    private readonly responder: (method: DiscordMethod, endpoint: string) => unknown = () => null,
-  ) {}
-  call(method: DiscordMethod, endpoint: string): Promise<unknown> {
-    this.calls.push({ method, endpoint })
-    return Promise.resolve(this.responder(method, endpoint))
-  }
-}
-
 describe('resolveDiscordGlob', () => {
   it('passes through resolved PathSpec unchanged', async () => {
-    const t = new FakeDiscordTransport()
     const resolved = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1/2026-04-24.jsonl',
       directory: '/mnt/discord/My Server__G1/channels/general__C1/',
@@ -53,42 +58,48 @@ describe('resolveDiscordGlob', () => {
       ),
       resolved: true,
     })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [resolved])
+    const out = await resolveDiscordGlob(guild.accessor(), [resolved])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(resolved)
-    expect(t.calls).toHaveLength(0)
+    expect(await guild.run.requests()).toEqual([])
   })
 
   it('passes through unresolved PathSpec with no pattern unchanged', async () => {
-    const t = new FakeDiscordTransport()
     const noPattern = new PathSpec({
       virtual: '/mnt/discord/My Server__G1/channels/general__C1',
       directory: '/mnt/discord/My Server__G1/channels/general__C1',
       vfsPath: mountKey('/mnt/discord/My Server__G1/channels/general__C1', '/mnt/discord'),
       resolved: false,
     })
-    const out = await resolveDiscordGlob(new DiscordAccessor(t), [noPattern])
+    const out = await resolveDiscordGlob(guild.accessor(), [noPattern])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(noPattern)
-    expect(t.calls).toHaveLength(0)
+    expect(await guild.run.requests()).toEqual([])
   })
 })
 
 describe('a glob through a mount', () => {
   it("matches a channel's days by their names", async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/users/@me/guilds') return [{ id: 'G1', name: 'srv' }]
-      if (endpoint === '/guilds/G1/channels') {
-        return [{ id: 'C1', name: 'general', type: 0, last_message_id: '175928847299117056' }]
-      }
-      return null
-    })
-    const ws = mountDiscord(t)
+    // general's last message is 2024-01-16, so the window holds 2024-01-10
+    // through 01-16.
+    const ws = mountDiscord(guild.accessor())
     try {
-      const result = await ws.shell('echo /mnt/discord/srv__G1/channels/general__C1/2016-04-2*')
-      const days = result.stdoutText.split(/\s+/).filter((w) => w !== '')
-      expect(days).toHaveLength(10)
-      expect(days[0]).toBe('/mnt/discord/srv__G1/channels/general__C1/2016-04-20')
+      const result = await ws.shell(
+        'echo "/mnt/discord/My Server__111/channels/general__211/"2024-01-1*',
+      )
+      const days = result.stdoutText
+        .split('/mnt/discord/')
+        .filter((w) => w.trim() !== '')
+        .map((w) => w.trim().slice(-10))
+      expect(days).toEqual([
+        '2024-01-10',
+        '2024-01-11',
+        '2024-01-12',
+        '2024-01-13',
+        '2024-01-14',
+        '2024-01-15',
+        '2024-01-16',
+      ])
     } finally {
       await ws.close()
     }

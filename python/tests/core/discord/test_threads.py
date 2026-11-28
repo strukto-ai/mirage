@@ -12,45 +12,30 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.threads import create_thread
+from tests.fixtures.discord_guild import DAY, GENERAL, THREADS
 
-ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
-
-
-@pytest.mark.asyncio
-async def test_create_thread_from_message():
-    with patch(
-        "mirage.core.discord.threads.discord_request",
-        new_callable=AsyncMock,
-        return_value={"id": "T1"},
-    ) as post:
-        result = await create_thread(ACCESSOR, "C1", "topic", message_id="M1")
-    post.assert_awaited_once_with(
-        ACCESSOR,
-        "POST",
-        "/channels/C1/messages/M1/threads",
-        body={"name": "topic"},
-    )
-    assert result == {"id": "T1"}
+FROM_MESSAGE = "/api/v10/channels/:channel_id/messages/:message_id/threads"
 
 
 @pytest.mark.asyncio
-async def test_create_thread_standalone():
-    with patch(
-        "mirage.core.discord.threads.discord_request",
-        new_callable=AsyncMock,
-        return_value={"id": "T2"},
-    ) as post:
-        await create_thread(ACCESSOR, "C1", "topic")
-    post.assert_awaited_once_with(
-        ACCESSOR,
-        "POST",
-        "/channels/C1/threads",
-        body={"name": "topic", "type": 11},
+async def test_create_thread_from_message(discord_guild):
+    [hello, _] = await discord_guild.day(GENERAL, DAY)
+    result = await create_thread(
+        discord_guild.accessor(), GENERAL, "topic", message_id=hello["id"]
     )
+    assert await discord_guild.run.bodies("POST", FROM_MESSAGE) == [
+        {"name": "topic"}
+    ]
+    assert (result["name"], result["parent_id"]) == ("topic", GENERAL)
+
+
+@pytest.mark.asyncio
+async def test_create_thread_standalone(discord_guild):
+    result = await create_thread(discord_guild.accessor(), GENERAL, "topic")
+    assert await discord_guild.run.bodies("POST", THREADS) == [
+        {"name": "topic", "type": 11}
+    ]
+    assert (result["type"], result["parent_id"]) == (11, GENERAL)

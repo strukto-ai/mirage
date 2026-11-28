@@ -12,37 +12,54 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { FakeSlackTransport } from '../../../tests/vfs/slack/_test_util.ts'
-import { runSlack } from '../../../tests/workspace/fixtures/chat_fixture.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
+import { SlackVFS } from './slack.ts'
+
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// `line` over the workspace mounted at /mnt/slack.
+async function onSlack(line: string): Promise<string> {
+  const ws = new Workspace({ '/mnt/slack/': new SlackVFS({ accessor: workspace.accessor() }) })
+  try {
+    return new TextDecoder().decode((await ws.shell(line)).stdout)
+  } finally {
+    await ws.close()
+  }
+}
+
+function texts(out: string): string[] {
+  return out
+    .trimEnd()
+    .split('\n')
+    .map((line) => (JSON.parse(line) as { text: string }).text)
+}
 
 describe('slack cat', () => {
   it('concatenates multiple jsonl files in order (regression: previously only read the first)', async () => {
-    // FakeSlackTransport returns deterministic messages per call. We map each
-    // day's `oldest` (00:00 UTC) to a distinct message so we can assert order.
-    const day1Oldest = (Date.UTC(2024, 0, 1) / 1000).toFixed(6)
-    const day2Oldest = (Date.UTC(2024, 0, 2) / 1000).toFixed(6)
-    const day3Oldest = (Date.UTC(2024, 0, 3) / 1000).toFixed(6)
-    const transport = new FakeSlackTransport((endpoint, params) => {
-      if (endpoint === 'conversations.history') {
-        const oldest = params?.oldest
-        if (oldest === day1Oldest)
-          return { ok: true, messages: [{ ts: '1704067201.000000', text: 'day1' }] }
-        if (oldest === day2Oldest)
-          return { ok: true, messages: [{ ts: '1704153602.000000', text: 'day2' }] }
-        if (oldest === day3Oldest)
-          return { ok: true, messages: [{ ts: '1704240003.000000', text: 'day3' }] }
-        return { ok: true, messages: [] }
-      }
-      return { ok: true }
-    })
-    const dates = ['2024-01-01', '2024-01-02', '2024-01-03']
+    const dates = ['2025-11-03', '2025-11-04', '2025-11-06']
     const paths = dates.map((date) => `/mnt/slack/channels/general__C1/${date}/chat.jsonl`)
-    const out = await runSlack(transport, `cat ${paths.join(' ')}`, dates)
-    const lines = out.stdout.trimEnd().split('\n')
-    expect(lines).toHaveLength(3)
-    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1704067201.000000', text: 'day1' })
-    expect(JSON.parse(lines[1] ?? '')).toMatchObject({ ts: '1704153602.000000', text: 'day2' })
-    expect(JSON.parse(lines[2] ?? '')).toMatchObject({ ts: '1704240003.000000', text: 'day3' })
+    expect(texts(await onSlack(`cat ${paths.join(' ')}`))).toEqual([
+      'the deploy is done at acme',
+      'coffee is ready',
+      'lunch at noon',
+      'deploy again',
+    ])
   })
 })

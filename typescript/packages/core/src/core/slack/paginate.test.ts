@@ -12,83 +12,83 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { LISTING, SlackWorkspace, USERS } from '../../../tests/core/slack/workspace.ts'
 import { cursorPages } from './paginate.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(private readonly responder: (call: number) => SlackResponse) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length))
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+const TYPES = 'public_channel,private_channel'
 
 describe('cursorPages', () => {
   it('refuses a repeated cursor before fetching a third page', async () => {
-    const t = new FakeTransport((call) => {
-      if (call > 2) throw new Error('unexpected third request')
-      return { ok: true, members: [], response_metadata: { next_cursor: 'loop' } }
-    })
-    const pages = cursorPages(t, 'users.list', {}, 'members')
+    // A listing that answers the cursor it was asked with, twice running.
+    const loop = { ok: true, members: [], response_metadata: { next_cursor: 'loop' } }
+    await workspace.run.answerNext('GET', USERS, 200, loop, 2)
+    const pages = cursorPages(workspace.accessor().transport, 'users.list', {}, 'members')
     await pages.next()
     await pages.next()
     await expect(pages.next()).rejects.toThrow('pagination did not advance')
-    expect(t.calls).toHaveLength(2)
+    expect(await workspace.count(USERS)).toBe(2)
   })
 
   it('walks until empty cursor', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        items: [1, 2],
-        response_metadata: { next_cursor: 'cur1' },
-      },
-      {
-        ok: true,
-        items: [3],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const result: number[][] = []
-    for await (const page of cursorPages<number>(
-      t,
+    const result: string[][] = []
+    for await (const page of cursorPages<{ id: string }>(
+      workspace.accessor().transport,
       'conversations.list',
-      { types: 'x', limit: '100' },
-      'items',
+      { types: TYPES, limit: '1' },
+      'channels',
     )) {
-      result.push(page)
+      result.push(page.map((c) => c.id))
     }
-    expect(result).toEqual([[1, 2], [3]])
-    expect(t.calls[0]?.params).toEqual({ types: 'x', limit: '100' })
-    expect(t.calls[1]?.params).toEqual({ types: 'x', limit: '100', cursor: 'cur1' })
+    expect(result).toEqual([['C1'], ['C2']])
+    const [first, second] = await workspace.run.params('GET', LISTING)
+    expect(first).toEqual({ types: TYPES, limit: '1' })
+    expect(second).toEqual({ types: TYPES, limit: '1', cursor: second?.cursor })
+    expect(second?.cursor).not.toBe('')
   })
 
   it('terminates without further calls after caller breaks', async () => {
-    const pages: SlackResponse[] = [
-      { ok: true, items: [1], response_metadata: { next_cursor: 'cur1' } },
-      { ok: true, items: [2], response_metadata: { next_cursor: 'cur2' } },
-      { ok: true, items: [3], response_metadata: { next_cursor: '' } },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    for await (const page of cursorPages<number>(
-      t,
+    for await (const page of cursorPages<{ id: string }>(
+      workspace.accessor().transport,
       'conversations.list',
-      { limit: '1' },
-      'items',
+      { types: TYPES, limit: '1' },
+      'channels',
     )) {
-      expect(page).toEqual([1])
+      expect(page.map((c) => c.id)).toEqual(['C1'])
       break
     }
-    expect(t.calls).toHaveLength(1)
+    expect(await workspace.count(LISTING)).toBe(1)
   })
 
   it('yields an empty page when items key absent', async () => {
-    const t = new FakeTransport(() => ({ ok: true, response_metadata: { next_cursor: '' } }))
+    await workspace.run.answerNext('GET', USERS, 200, {
+      ok: true,
+      response_metadata: { next_cursor: '' },
+    })
     const result: unknown[][] = []
-    for await (const page of cursorPages(t, 'users.list', { limit: '10' }, 'members')) {
+    for await (const page of cursorPages(
+      workspace.accessor().transport,
+      'users.list',
+      { limit: '10' },
+      'members',
+    )) {
       result.push(page)
     }
     expect(result).toEqual([[]])

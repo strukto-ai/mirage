@@ -14,15 +14,33 @@
 
 import { onMount } from '../../test-utils.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { materialize } from '../../io/types.ts'
 import { PathSpec } from '../../types.ts'
-import { FakeSlackTransport, makeFakeVfs } from '../../../tests/vfs/slack/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
+import { SlackVFS } from './slack.ts'
 import { generic } from '../../commands/builtin/generic_bind/factory.ts'
 
 const SLACK_REALPATH = [generic('realpath')]
 
 const DEC = new TextDecoder()
+
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 async function runRealpath(
   paths: PathSpec[],
@@ -30,8 +48,7 @@ async function runRealpath(
 ): Promise<string> {
   const cmd = SLACK_REALPATH[0]
   if (cmd === undefined) throw new Error('realpath not registered')
-  const transport = new FakeSlackTransport()
-  const vfs = makeFakeVfs(transport)
+  const vfs = new SlackVFS({ accessor: workspace.accessor() })
   const result = await onMount(
     vfs,
     (files) =>

@@ -12,52 +12,53 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { REACT, REACTIONS, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { addReaction, getReactions } from './react.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
-    []
-  call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse> {
-    this.calls.push({
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve({ ok: true })
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// "lunch at noon" in general, which ana reacted to with a rocket.
+const LUNCH = '1762214460.000001'
 
 describe('addReaction', () => {
   it('POSTs to reactions.add with channel, timestamp, name', async () => {
-    const t = new FakeTransport()
-    const out = await addReaction(new SlackAccessor(t), 'C1', '1.0', 'thumbsup')
-    expect(t.calls[0]?.endpoint).toBe('reactions.add')
-    expect(t.calls[0]?.params).toBeUndefined()
-    expect(t.calls[0]?.body).toEqual({ channel: 'C1', timestamp: '1.0', name: 'thumbsup' })
+    const accessor = workspace.accessor()
+    const out = await addReaction(accessor, 'C1', LUNCH, 'thumbsup')
+    expect(await workspace.run.bodies('POST', REACT)).toEqual([
+      { channel: 'C1', timestamp: LUNCH, name: 'thumbsup' },
+    ])
+    expect(await workspace.run.params('POST', REACT)).toEqual([{}])
     expect(out).toMatchObject({ ok: true })
+    const message = (await getReactions(accessor, 'C1', LUNCH)) as { reactions: { name: string }[] }
+    expect(message.reactions.map((r) => r.name)).toEqual(['rocket', 'thumbsup'])
   })
 })
 
-class ReactionsFake {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve({
-      ok: true,
-      message: { ts: '1.0', reactions: [{ name: 'shipit', count: 2 }] },
-    })
-  }
-}
-
 describe('getReactions', () => {
   it('GETs reactions.get and returns the message item', async () => {
-    const t = new ReactionsFake()
-    const message = await getReactions(new SlackAccessor(t as SlackTransport), 'C1', '1.0')
-    expect(t.calls[0]?.endpoint).toBe('reactions.get')
-    expect(t.calls[0]?.params).toEqual({ channel: 'C1', timestamp: '1.0' })
-    expect(message).toEqual({ ts: '1.0', reactions: [{ name: 'shipit', count: 2 }] })
+    const message = await getReactions(workspace.accessor(), 'C1', LUNCH)
+    expect(await workspace.run.params('GET', REACTIONS)).toEqual([
+      { channel: 'C1', timestamp: LUNCH },
+    ])
+    expect(message).toMatchObject({
+      ts: LUNCH,
+      reactions: [{ name: 'rocket', users: ['U1'], count: 1 }],
+    })
   })
 })

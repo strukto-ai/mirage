@@ -12,64 +12,58 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { SlackApiError, type SlackResponse, type SlackTransport } from './client.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { HISTORY, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { read } from './read.ts'
 import { readdir } from './readdir.ts'
 
 // Mirrors python/tests/core/slack/test_readdir_soft_errors.py: a Slack history
 // refusal like `not_in_channel` / `missing_scope` is EACCES on the path, never
-// an empty conversation.
+// an empty conversation. Slack refuses in a 200 body, the way every refusal
+// comes.
+const CHANNEL = '/slack/channels/random__C2'
+const DAY = `${CHANNEL}/2025-11-04`
 
-const CHANNEL = '/slack/channels/private__C_INACCESSIBLE'
-const DAY = `${CHANNEL}/2026-05-10`
+let origin = ''
+let workspace: SlackWorkspace
 
-class FakeTransport implements SlackTransport {
-  constructor(private readonly responder: (endpoint: string) => SlackResponse | Error) {}
-  call(endpoint: string): Promise<SlackResponse> {
-    const result = this.responder(endpoint)
-    if (result instanceof Error) return Promise.reject(result)
-    return Promise.resolve(result)
-  }
-}
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, '/slack') })
 }
 
-function historyFails(code: string): FakeTransport {
-  return new FakeTransport((endpoint) => {
-    if (endpoint === 'conversations.list') {
-      return {
-        ok: true,
-        channels: [{ id: 'C_INACCESSIBLE', name: 'private', created: 1 }],
-        response_metadata: { next_cursor: '' },
-      }
-    }
-    if (endpoint === 'conversations.history') {
-      return new SlackApiError('conversations.history', code)
-    }
-    throw new Error(`unexpected ${endpoint}`)
-  })
+function row(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { channel_id: 'C2' } })
 }
 
-function row(name: string): FileStat {
-  return new FileStat({ name, type: FileType.DIRECTORY, extra: { channel_id: 'C_INACCESSIBLE' } })
+function mounted(): Workspace {
+  return new Workspace({ '/slack/': new SlackVFS({ accessor: workspace.accessor() }) })
 }
 
 describe('a channel Slack refuses', () => {
   it.each(['not_in_channel', 'channel_not_found', 'missing_scope', 'is_archived', 'not_authed'])(
     'is EACCES on %s',
     async (code) => {
-      const ws = new Workspace({
-        '/slack/': new SlackVFS({ accessor: new SlackAccessor(historyFails(code)) }),
-      })
+      const ws = mounted()
       await ws.dispatch('readdir', '/slack/channels')
+      await workspace.refuse(HISTORY, code)
       await expect(ws.dispatch('readdir', CHANNEL)).rejects.toMatchObject({
         code: 'EACCES',
         virtualPath: CHANNEL,
@@ -78,26 +72,28 @@ describe('a channel Slack refuses', () => {
   )
 
   it('propagates any other Slack error', async () => {
-    const ws = new Workspace({
-      '/slack/': new SlackVFS({ accessor: new SlackAccessor(historyFails('ratelimited')) }),
-    })
+    const ws = mounted()
     await ws.dispatch('readdir', '/slack/channels')
+    await workspace.refuse(HISTORY, 'ratelimited')
     await expect(ws.dispatch('readdir', CHANNEL)).rejects.toThrow(/ratelimited/)
   })
 })
 
 describe('a day Slack refuses', () => {
   it.each(['', '/files'])('lists as EACCES at %s', async (below) => {
-    const own = row(below === '' ? '2026-05-10' : 'files')
-    await expect(
-      readdir(new SlackAccessor(historyFails('not_in_channel')), spec(DAY + below), own),
-    ).rejects.toMatchObject({ code: 'EACCES', virtualPath: DAY + below })
+    await workspace.refuse(HISTORY, 'not_in_channel')
+    const own = row(below === '' ? '2025-11-04' : 'files')
+    await expect(readdir(workspace.accessor(), spec(DAY + below), own)).rejects.toMatchObject({
+      code: 'EACCES',
+      virtualPath: DAY + below,
+    })
   })
 
   it('reads chat.jsonl as EACCES', async () => {
+    await workspace.refuse(HISTORY, 'not_in_channel')
     const chat = `${DAY}/chat.jsonl`
     await expect(
-      read(new SlackAccessor(historyFails('not_in_channel')), spec(chat), null, row('2026-05-10')),
+      read(workspace.accessor(), spec(chat), null, row('2025-11-04')),
     ).rejects.toMatchObject({ code: 'EACCES', virtualPath: chat })
   })
 })

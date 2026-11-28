@@ -12,17 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { FileChangeKind, PathSpec, type JsonValue } from '../../types.ts'
-import { DiscordApiError, type DiscordTransport } from './client.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DiscordGuild } from '../../../tests/core/discord/guild.ts'
 import { snowflakeAt } from './history.ts'
 import { DiscordEventHook } from './events.ts'
 
 const { CREATE: C, UPDATE: U, UNKNOWN: X } = FileChangeKind
-const GUILD = { id: '900', name: "Ada's Server" }
-const GENERAL = { id: '100', name: 'general', type: 0, guild_id: '900' }
-const CHANNEL_DIR = "/d/Ada's Server__900/channels/general__100"
+const GUILD_DIR = '/d/My Server__111'
+const CHANNEL_DIR = `${GUILD_DIR}/channels/general__211`
 const ROOT = new PathSpec({ virtual: '/d', directory: '/d', vfsPath: '' })
 
 function id(year: number, month: number, day: number, hour = 12): string {
@@ -31,69 +30,83 @@ function id(year: number, month: number, day: number, hour = 12): string {
 
 const OLD = id(2026, 9, 20)
 const LATE = id(2026, 10, 1, 23)
+// A thread started from a message shares its id, so it names its starter's
+// day.
 const THREAD_ID = id(2026, 9, 28)
+const VOICE = '555'
+// A channel of a guild the bot's listing does not hold.
+const STRAY = '300'
 
-function fake(): {
-  hook: DiscordEventHook
-  calls: string[]
-  objects: Record<string, Record<string, unknown>>
-} {
-  const calls: string[] = []
-  const objects: Record<string, Record<string, unknown>> = {
-    '/guilds/900': GUILD,
-    '/channels/100': GENERAL,
-    [`/channels/${THREAD_ID}`]: { id: THREAD_ID, name: 'a thread', type: 11, parent_id: '100' },
-    '/channels/555': { id: '555', name: 'voice', type: 2 },
-  }
-  const transport: DiscordTransport = {
-    call(_method, endpoint) {
-      calls.push(endpoint)
-      const found = objects[endpoint]
-      if (found === undefined) {
-        return Promise.reject(new DiscordApiError(endpoint, 404, 'Unknown Channel'))
-      }
-      return Promise.resolve({ ...found })
-    },
-  }
-  return { hook: new DiscordEventHook(new DiscordAccessor(transport)), calls, objects }
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
+
+async function hook(): Promise<DiscordEventHook> {
+  // Channels the unit world does not hold, stored as another client would
+  // have made them, in one statement.
+  await guild.run.execute(
+    'INSERT INTO DiscordChannel (tenant, id, guildId, seq, name, type, position, parentId) VALUES ' +
+      "('default', ?, '111', 97, 'a thread', 11, 9, '211'), " +
+      "('default', ?, '111', 98, 'voice', 2, 9, NULL), " +
+      "('default', ?, '901', 99, 'elsewhere', 0, 9, NULL)",
+    THREAD_ID,
+    VOICE,
+    STRAY,
+  )
+  await guild.run.recordRequests()
+  return new DiscordEventHook(guild.accessor())
 }
 
 async function map(
-  hook: DiscordEventHook,
+  on: DiscordEventHook,
   eventType: string,
   payload: JsonValue,
 ): Promise<[FileChangeKind, string][]> {
-  const events = await hook.toEvents(ROOT, eventType, payload)
+  const events = await on.toEvents(ROOT, eventType, payload)
   return events.map((e) => [e.kind, e.path.virtual])
+}
+
+async function lookups(): Promise<string[]> {
+  return (await guild.run.requests()).map((r) => r.split(' ')[1] ?? '')
 }
 
 describe('DiscordEventHook', () => {
   it('updates the UTC day a message id was minted on', async () => {
-    const { hook } = fake()
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })).toEqual([
+    const on = await hook()
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211' })).toEqual([
       [U, `${CHANNEL_DIR}/2026-10-01/chat.jsonl`],
     ])
   })
 
   it("creates a new message's listed attachments", async () => {
-    const { hook } = fake()
+    const on = await hook()
     const attachments = [
       { id: '7', filename: 'plan.pdf', url: 'u', size: 3 },
       { id: '8', filename: 'gone.png' },
     ]
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100', attachments })).toEqual(
-      [
-        [U, `${CHANNEL_DIR}/2026-10-01/chat.jsonl`],
-        [C, `${CHANNEL_DIR}/2026-10-01/files/plan__7.pdf`],
-      ],
-    )
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211', attachments })).toEqual([
+      [U, `${CHANNEL_DIR}/2026-10-01/chat.jsonl`],
+      [C, `${CHANNEL_DIR}/2026-10-01/files/plan__7.pdf`],
+    ])
   })
 
   it('refreshes the day an edited or deleted message was posted', async () => {
-    const { hook } = fake()
+    const on = await hook()
     const day = `${CHANNEL_DIR}/2026-09-20`
     for (const kind of ['MESSAGE_UPDATE', 'MESSAGE_DELETE']) {
-      expect(await map(hook, kind, { id: OLD, channel_id: '100' })).toEqual([
+      expect(await map(on, kind, { id: OLD, channel_id: '211' })).toEqual([
         [U, `${day}/chat.jsonl`],
         [X, `${day}/files`],
       ])
@@ -101,10 +114,10 @@ describe('DiscordEventHook', () => {
   })
 
   it('names each day of a bulk delete once', async () => {
-    const { hook } = fake()
-    const found = await map(hook, 'MESSAGE_DELETE_BULK', {
+    const on = await hook()
+    const found = await map(on, 'MESSAGE_DELETE_BULK', {
       ids: [OLD, OLD, LATE],
-      channel_id: '100',
+      channel_id: '211',
     })
     expect(found.map(([, path]) => path)).toEqual([
       `${CHANNEL_DIR}/2026-09-20/chat.jsonl`,
@@ -115,16 +128,16 @@ describe('DiscordEventHook', () => {
   })
 
   it("updates a reaction's message day", async () => {
-    const { hook } = fake()
+    const on = await hook()
     expect(
-      await map(hook, 'MESSAGE_REACTION_ADD', { message_id: OLD, channel_id: '100', user_id: '1' }),
+      await map(on, 'MESSAGE_REACTION_ADD', { message_id: OLD, channel_id: '211', user_id: '1' }),
     ).toEqual([[U, `${CHANNEL_DIR}/2026-09-20/chat.jsonl`]])
   })
 
   it('refreshes a thread starter in the parent for a thread message', async () => {
-    const { hook } = fake()
+    const on = await hook()
     expect(
-      await map(hook, 'MESSAGE_CREATE', {
+      await map(on, 'MESSAGE_CREATE', {
         id: LATE,
         channel_id: THREAD_ID,
         attachments: [{ id: '7', filename: 'a.txt', url: 'u' }],
@@ -133,60 +146,63 @@ describe('DiscordEventHook', () => {
   })
 
   it('resolves ids once and maps unlisted channels to nothing', async () => {
-    const { hook, calls } = fake()
-    await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })
-    await map(hook, 'MESSAGE_UPDATE', { id: OLD, channel_id: '100' })
-    expect(calls).toEqual(['/channels/100', '/guilds/900'])
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '555' })).toEqual([])
+    const on = await hook()
+    await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211' })
+    await map(on, 'MESSAGE_UPDATE', { id: OLD, channel_id: '211' })
+    expect(await lookups()).toEqual(['/api/v10/channels/211', '/api/v10/guilds/111'])
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: VOICE })).toEqual([])
   })
 
   it('renames from a channel dispatch and lists again', async () => {
-    const { hook, calls } = fake()
-    expect(await map(hook, 'CHANNEL_UPDATE', { ...GENERAL, name: 'lobby' })).toEqual([
-      [X, "/d/Ada's Server__900/channels"],
+    const on = await hook()
+    const renamed = { id: '211', name: 'lobby', type: 0, guild_id: '111' }
+    expect(await map(on, 'CHANNEL_UPDATE', renamed)).toEqual([[X, `${GUILD_DIR}/channels`]])
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211' })).toEqual([
+      [U, `${GUILD_DIR}/channels/lobby__211/2026-10-01/chat.jsonl`],
     ])
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })).toEqual([
-      [U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl"],
-    ])
-    expect(calls).not.toContain('/channels/100')
+    expect(await lookups()).not.toContain('/api/v10/channels/211')
   })
 
   it('is UNKNOWN on the listing for member and guild dispatches', async () => {
-    const { hook } = fake()
-    expect(await map(hook, 'GUILD_MEMBER_ADD', { guild_id: '900', user: {} })).toEqual([
-      [X, "/d/Ada's Server__900/members"],
+    const on = await hook()
+    expect(await map(on, 'GUILD_MEMBER_ADD', { guild_id: '111', user: {} })).toEqual([
+      [X, `${GUILD_DIR}/members`],
     ])
-    expect(await map(hook, 'GUILD_CREATE', { id: '900', name: 'New' })).toEqual([[X, '/d']])
-    expect(await map(hook, 'GUILD_MEMBER_REMOVE', { guild_id: '900' })).toEqual([
-      [X, '/d/New__900/members'],
+    expect(await map(on, 'GUILD_CREATE', { id: '111', name: 'New' })).toEqual([[X, '/d']])
+    expect(await map(on, 'GUILD_MEMBER_REMOVE', { guild_id: '111' })).toEqual([
+      [X, '/d/New__111/members'],
     ])
   })
 
   it('maps a direct message and an unknown dispatch to nothing', async () => {
-    const { hook } = fake()
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE })).toEqual([])
-    expect(await map(hook, 'TYPING_START', { channel_id: '100' })).toEqual([])
-    expect(await map(hook, 'MESSAGE_CREATE', 'not an object')).toEqual([])
+    const on = await hook()
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE })).toEqual([])
+    expect(await map(on, 'TYPING_START', { channel_id: '211' })).toEqual([])
+    expect(await map(on, 'MESSAGE_CREATE', 'not an object')).toEqual([])
   })
 
   it("forgets a guild's channels on reconnect", async () => {
-    const { hook, calls, objects } = fake()
-    await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })
-    objects['/channels/100'] = { ...GENERAL, name: 'lobby' }
-    await map(hook, 'GUILD_CREATE', { id: '900', name: "Ada's Server" })
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '100' })).toEqual([
-      [U, "/d/Ada's Server__900/channels/lobby__100/2026-10-01/chat.jsonl"],
+    const on = await hook()
+    await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211' })
+    // general is renamed while the gateway is away; storing it reloads the
+    // run, so the lookups so far are kept before it.
+    const before = await lookups()
+    await guild.run.execute("UPDATE DiscordChannel SET name = 'lobby' WHERE id = '211'")
+    await guild.run.recordRequests()
+    await map(on, 'GUILD_CREATE', { id: '111', name: 'My Server' })
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '211' })).toEqual([
+      [U, `${GUILD_DIR}/channels/lobby__211/2026-10-01/chat.jsonl`],
     ])
-    expect(calls.filter((c) => c === '/channels/100')).toHaveLength(2)
+    const all = [...before, ...(await lookups())]
+    expect(all.filter((c) => c === '/api/v10/channels/211')).toHaveLength(2)
   })
 
   it('is UNKNOWN above a message from a deleted channel or guild', async () => {
-    const { hook, objects } = fake()
-    const gone = { id: OLD, channel_id: '404', guild_id: '900' }
-    expect(await map(hook, 'MESSAGE_DELETE', gone)).toEqual([[X, "/d/Ada's Server__900/channels"]])
-    expect(await map(hook, 'MESSAGE_DELETE', { ...gone, guild_id: '901' })).toEqual([[X, '/d']])
-    objects['/channels/300'] = { ...GENERAL, id: '300', guild_id: '901' }
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '300' })).toEqual([[X, '/d']])
-    expect(await map(hook, 'MESSAGE_CREATE', { id: LATE, channel_id: '404' })).toEqual([])
+    const on = await hook()
+    const gone = { id: OLD, channel_id: '404', guild_id: '111' }
+    expect(await map(on, 'MESSAGE_DELETE', gone)).toEqual([[X, `${GUILD_DIR}/channels`]])
+    expect(await map(on, 'MESSAGE_DELETE', { ...gone, guild_id: '901' })).toEqual([[X, '/d']])
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: STRAY })).toEqual([[X, '/d']])
+    expect(await map(on, 'MESSAGE_CREATE', { id: LATE, channel_id: '404' })).toEqual([])
   })
 })

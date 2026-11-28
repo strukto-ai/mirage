@@ -16,33 +16,26 @@ import json
 
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.commands.cli.builtin.slack.edit_message import edit_message
 from mirage.commands.config import Context
-from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
-
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
-async def test_edits_the_named_message(monkeypatch):
-    seen = []
-
-    async def fake(accessor, channel, ts, text):
-        seen.append((channel, ts, text))
-        return {"ok": True, "ts": ts}
-
-    monkeypatch.setitem(edit_message.__globals__, "edit_message_core", fake)
+async def test_edits_the_named_message(slack_workspace):
+    # A bot token may change only what the bot posted.
+    ts = await slack_workspace.post("C1", "old")
     spec = next(s for s in SLACK.spec.subcommands if s.name == "edit-message")
     out, _ = await edit_message(
-        ACCESSOR,
+        slack_workspace.accessor(),
         [],
         [],
-        Context(
-            flags={"channel": "C1", "ts": "1.5", "text": "new"}, spec=spec
-        ),
+        Context(flags={"channel": "C1", "ts": ts, "text": "new"}, spec=spec),
     )
-    assert seen == [("C1", "1.5", "new")]
-    assert json.loads(await materialize(out)) == {"ok": True, "ts": "1.5"}
+    answer = json.loads(await materialize(out))
+    assert (answer["ok"], answer["ts"]) == (True, ts)
+    [edited] = [
+        m for m in await slack_workspace.history("C1") if m["ts"] == ts
+    ]
+    assert edited["text"] == "new"

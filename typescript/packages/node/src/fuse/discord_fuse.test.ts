@@ -14,62 +14,41 @@
 
 import { constants as osConstants } from 'node:os'
 import { FileType, MountMode } from '@struktoai/mirage-core/types'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { classifyError } from '../mount/errors.ts'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
+import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
+import { DAY, DiscordGuild, GENERAL, MESSAGES } from '../../../core/tests/fixtures/discord_guild.ts'
 import { Workspace } from '../workspace.ts'
 import { MirageFS } from './fs.ts'
 
-const GUILD = { id: 'G1', name: 'TestGuild' }
-const CHANNEL = { id: 'C1', name: 'general', type: 0, last_message_id: '1196423538278400001' }
-const MESSAGES = [
-  { id: '1196423538278400000', content: 'hello', author: { username: 'alice' } },
-  { id: '1196423538278400001', content: 'world', author: { username: 'bob' } },
-]
-const FILE = '/discord/TestGuild__G1/channels/general__C1/2024-01-15/chat.jsonl'
-const BYTES = new TextEncoder().encode(
-  MESSAGES.map((message) => JSON.stringify(message)).join('\n') + '\n',
-)
+const FILE = `/discord/My Server__111/channels/general__211/${DAY}/chat.jsonl`
 
 type Adapter = 'core' | 'fuse'
+
 interface Reply<T> {
   code: number
   value?: T
   error?: unknown
 }
 
-class DiscordHTTP {
-  status = 200
-  readonly messageStatuses: number[] = []
-  readonly responses: Response[] = []
-  readonly fetch = vi.fn<typeof fetch>((input, init) => {
-    const url = new URL(
-      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
-    )
-    expect(url.origin).toBe('https://discord.test')
-    expect(init?.method).toBe('GET')
-    expect(new Headers(init?.headers).get('Authorization')).toBe('Bot test-token')
-    let body: unknown
-    let status = 200
-    if (url.pathname === '/users/@me/guilds') body = [GUILD]
-    else if (url.pathname === '/guilds/G1/channels') body = [CHANNEL]
-    else if (url.pathname === '/channels/C1/messages') {
-      expect(url.searchParams.get('limit')).toBe('100')
-      expect(url.searchParams.has('after')).toBe(true)
-      status = this.status
-      this.messageStatuses.push(status)
-      body = status === 200 ? [...MESSAGES].reverse() : { message: 'refused', retry_after: 0 }
-    } else throw new Error(`unexpected Discord request: ${url.pathname}`)
-    const response = new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    })
-    this.responses.push(response)
-    return Promise.resolve(response)
-  })
-}
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 async function captured<T>(pending: Promise<T>): Promise<Reply<T>> {
   try {
@@ -123,7 +102,7 @@ class Driver {
     return result.value
   }
 
-  async read(fd: number, offset = 0, size = BYTES.length + 10): Promise<Reply<Uint8Array>> {
+  async read(fd: number, offset = 0, size = 4096): Promise<Reply<Uint8Array>> {
     if (this.fs === null) return captured(this.core.read(FILE, fd, offset, size))
     const buffer = Buffer.alloc(size, 0xa5)
     const result = await callback<never>(this.fs, 'read', FILE, fd, buffer, size, offset)
@@ -150,57 +129,52 @@ class Driver {
   }
 }
 
-function world(kind: Adapter) {
-  const http = new DiscordHTTP()
-  vi.stubGlobal('fetch', http.fetch)
-  const vfs = new DiscordVFS({ token: 'test-token', baseUrl: 'https://discord.test' })
+async function world(kind: Adapter) {
+  // general's chat.jsonl for the day: Discord's own messages, oldest first.
+  const day = await guild.day(GENERAL, DAY)
+  const bytes = new TextEncoder().encode(day.map((m) => JSON.stringify(m)).join('\n') + '\n')
+  const vfs = new DiscordVFS(guild.config())
   const ws = new Workspace({ '/discord/': vfs }, { mode: MountMode.READ })
   const driver = new Driver(kind, ws)
   return {
     ws,
-    http,
     driver,
+    bytes,
     async close(): Promise<void> {
       try {
         await driver.close()
       } finally {
         await ws.close()
       }
-      expect(http.responses.every((response) => response.bodyUsed)).toBe(true)
     },
   }
 }
 
-async function listDay(ws: Workspace, http: DiscordHTTP): Promise<void> {
+async function listDay(ws: Workspace, bytes: Uint8Array): Promise<void> {
   const stat = await ws.vfs.stat(FILE)
   expect(stat.type).toBe(FileType.FILE)
-  expect(stat.size).toBe(BYTES.length)
-  expect(http.messageStatuses).toEqual([200])
+  expect(stat.size).toBe(bytes.length)
+  expect(await guild.count(MESSAGES)).toBe(1)
 }
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-  vi.restoreAllMocks()
-})
 
 describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
   it.each([false, true])(
     "serves a listed day's exact bytes and ranges (early close: %s)",
     async (earlyClose) => {
-      const fixture = world(kind)
-      const { driver, http, ws } = fixture
+      const fixture = await world(kind)
+      const { driver, ws, bytes } = fixture
       try {
-        await listDay(ws, http)
-        expect((await driver.getattr()).value?.size).toBe(BYTES.length)
+        await listDay(ws, bytes)
+        expect((await driver.getattr()).value?.size).toBe(bytes.length)
         const fd = await driver.open()
-        expect(http.messageStatuses).toEqual([200])
-        expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
-        expect((await driver.read(fd, 3, 9)).value).toEqual(BYTES.slice(3, 12))
+        expect(await guild.count(MESSAGES)).toBe(1)
+        expect((await driver.getattr(fd)).value?.size).toBe(bytes.length)
+        expect((await driver.read(fd, 3, 9)).value).toEqual(bytes.slice(3, 12))
         if (!earlyClose) {
-          expect((await driver.read(fd)).value).toEqual(BYTES)
-          expect((await driver.read(fd, BYTES.length, 9)).value).toEqual(new Uint8Array())
+          expect((await driver.read(fd)).value).toEqual(bytes)
+          expect((await driver.read(fd, bytes.length, 9)).value).toEqual(new Uint8Array())
         }
-        expect(http.messageStatuses).toEqual([200, 200])
+        expect(await guild.count(MESSAGES)).toBe(2)
         await driver.release(fd)
       } finally {
         await fixture.close()
@@ -215,15 +189,15 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
   ] as const)(
     'refuses a day Discord answers %i for and caches no empty answer',
     async (status, attempts, code) => {
-      const fixture = world(kind)
-      const { driver, http } = fixture
+      const fixture = await world(kind)
+      const { driver, bytes } = fixture
       try {
-        http.status = status
+        await guild.refuse(MESSAGES, status)
         expect((await driver.getattr()).code).toBe(code)
-        expect(http.messageStatuses).toEqual(Array<number>(attempts).fill(status))
-        http.status = 200
-        expect((await driver.getattr()).value?.size).toBe(BYTES.length)
-        expect(http.messageStatuses).toEqual([...Array<number>(attempts).fill(status), 200])
+        expect(await guild.count(MESSAGES)).toBe(attempts)
+        await guild.run.clearAnswers()
+        expect((await driver.getattr()).value?.size).toBe(bytes.length)
+        expect(await guild.count(MESSAGES)).toBe(attempts + 1)
       } finally {
         await fixture.close()
       }
@@ -231,22 +205,22 @@ describe.each(['core', 'fuse'] as const)('Discord through %s', (kind) => {
   )
 
   it('rechecks a warmed handle after a session hide and restores it', async () => {
-    const fixture = world(kind)
-    const { driver, http, ws } = fixture
+    const fixture = await world(kind)
+    const { driver, ws, bytes } = fixture
     try {
-      await listDay(ws, http)
+      await listDay(ws, bytes)
       const fd = await driver.open()
-      expect((await driver.read(fd)).value).toEqual(BYTES)
-      const calls = http.fetch.mock.calls.length
+      expect((await driver.read(fd)).value).toEqual(bytes)
+      const calls = (await guild.run.requests()).length
       await ws.setSessionProfile('reader', { paths: { hide: [FILE] } })
       expect((await driver.read(fd)).code).toBe(-osConstants.errno.ENOENT)
       expect((await driver.getattr(fd)).code).toBe(-osConstants.errno.ENOENT)
       expect((await driver.getattr()).code).toBe(-osConstants.errno.ENOENT)
-      expect(http.fetch.mock.calls).toHaveLength(calls)
+      expect(await guild.run.requests()).toHaveLength(calls)
       await ws.setSessionProfile('reader', {})
-      expect((await driver.read(fd)).value).toEqual(BYTES)
-      expect((await driver.getattr(fd)).value?.size).toBe(BYTES.length)
-      expect(http.fetch.mock.calls).toHaveLength(calls)
+      expect((await driver.read(fd)).value).toEqual(bytes)
+      expect((await driver.getattr(fd)).value?.size).toBe(bytes.length)
+      expect(await guild.run.requests()).toHaveLength(calls)
       await driver.release(fd)
     } finally {
       await fixture.close()

@@ -16,31 +16,36 @@ import json
 
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.cli.builtin.discord.reactions import reactions
 from mirage.commands.config import Context
-from mirage.core.discord.config import DiscordConfig
 from mirage.io.types import materialize
+from tests.fixtures.discord_guild import DAY, GENERAL
 
-ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
+
+async def _out(result) -> object:
+    out, _ = result
+    return json.loads(await materialize(out))
+
+
+def _spec(leaf: str):
+    return next(s for s in DISCORD.spec.subcommands if s.name == leaf)
 
 
 @pytest.mark.asyncio
-async def test_passes_the_flags_to_the_service(monkeypatch):
-    seen = []
-
-    async def fake(accessor, arg0, arg1):
-        seen.append((arg0, arg1))
-        return [{"emoji": "+1"}]
-
-    monkeypatch.setitem(reactions.__globals__, "message_reactions", fake)
-    spec = next(s for s in DISCORD.spec.subcommands if s.name == "reactions")
-    out, _ = await reactions(
-        ACCESSOR,
-        [],
-        [],
-        Context(flags={"channel": "C1", "message": "M1"}, spec=spec),
+async def test_passes_the_flags_to_the_service(discord_guild):
+    [hello, _] = await discord_guild.day(GENERAL, DAY)
+    reaction = (
+        f"/api/v10/channels/{GENERAL}/messages/{hello['id']}"
+        "/reactions/%F0%9F%91%8D/@me"
     )
-    assert seen == [("C1", "M1")]
-    assert json.loads(await materialize(out)) == [{"emoji": "+1"}]
+    await discord_guild.run.call("PUT", reaction)
+    flags = {"channel": GENERAL, "message": hello["id"]}
+    out = await reactions(
+        discord_guild.accessor(),
+        [],
+        [],
+        Context(flags=flags, spec=_spec("reactions")),
+    )
+    [found] = await _out(out)
+    assert found["emoji"]["name"] == "\U0001f44d"

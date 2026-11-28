@@ -12,56 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { DiscordTransport } from '../../../src/core/discord/client.ts'
+import type { DiscordAccessor } from '../../../src/accessor/discord.ts'
 import { MountMode } from '../../../src/types.ts'
-import {
-  makeFakeVfs as makeFakeDiscord,
-  seedChannel as seedDiscord,
-} from '../../vfs/discord/_test_util.ts'
-import {
-  makeFakeVfs as makeFakeSlack,
-  seedChannel as seedSlack,
-} from '../../vfs/slack/_test_util.ts'
-import type { FakeSlackTransport } from '../../vfs/slack/_test_util.ts'
+import { DiscordVFS } from '../../../src/vfs/discord/discord.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
 
-/** The workspace a test asks the fake through, mounted at /mnt/discord. */
-export function mountDiscord(transport: DiscordTransport): Workspace {
-  return new Workspace({ '/mnt/discord/': makeFakeDiscord(transport) }, { mode: MountMode.WRITE })
+/** The workspace a test asks the Discord fake through, mounted at /mnt/discord. */
+export function mountDiscord(accessor: DiscordAccessor): Workspace {
+  return new Workspace({ '/mnt/discord/': new DiscordVFS({ accessor }) }, { mode: MountMode.WRITE })
 }
 
-/**
- * Run `line` in a workspace with the fake mounted at /mnt/discord and
- * channel general__C1 of guild My Server__G1 listed with `dates`.
- */
+/** Run `line` in a workspace with the Discord fake mounted at /mnt/discord. */
 export async function runDiscord(
-  transport: DiscordTransport,
+  accessor: DiscordAccessor,
   line: string,
-  dates: string[],
 ): Promise<{ stdout: string; exitCode: number }> {
-  const ws = mountDiscord(transport)
+  const ws = mountDiscord(accessor)
   try {
-    const index = ws.mount('/mnt/discord').index
-    await seedDiscord(index, '/mnt/discord', 'My Server__G1', 'general__C1', 'C1', { dates })
-    const io = await ws.shell(line)
-    return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
-  } finally {
-    await ws.close()
-  }
-}
-
-/**
- * Run `line` in a workspace with the fake mounted at /mnt/slack and channel
- * general__C1 listed with `dates`.
- */
-export async function runSlack(
-  transport: FakeSlackTransport,
-  line: string,
-  dates: string[],
-): Promise<{ stdout: string; exitCode: number }> {
-  const ws = new Workspace({ '/mnt/slack/': makeFakeSlack(transport) })
-  try {
-    await seedSlack(ws.mount('/mnt/slack').index, '/mnt/slack', 'general__C1', 'C1', { dates })
     const io = await ws.shell(line)
     return { stdout: new TextDecoder().decode(io.stdout), exitCode: io.exitCode }
   } finally {

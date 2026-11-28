@@ -12,59 +12,52 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { CHANNELS, DiscordGuild, GUILD } from '../../../tests/core/discord/guild.ts'
 import { listChannels } from './channels.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(private readonly responder: () => unknown = () => null) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder())
-  }
-}
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('listChannels', () => {
   it('GETs /guilds/<id>/channels and filters to text-like types', async () => {
-    const t = new FakeDiscordTransport(() => [
-      { id: 'C1', name: 'general', type: 0 },
-      { id: 'C2', name: 'voice', type: 2 },
-      { id: 'C3', name: 'announcements', type: 5 },
-    ])
-    const out = await listChannels(new DiscordAccessor(t), 'G1')
-    expect(t.calls[0]?.method).toBe('GET')
-    expect(t.calls[0]?.endpoint).toBe('/guilds/G1/channels')
-    expect(out.map((c) => c.id)).toEqual(['C1', 'C3'])
+    // Discord's own channel list, with a voice and an announcement channel the
+    // unit world does not hold.
+    const own = await guild.run.call<Record<string, unknown>[]>(
+      'GET',
+      `/api/v10/guilds/${GUILD}/channels`,
+    )
+    await guild.run.answerNext('GET', CHANNELS, 200, [
+      ...own,
+      { id: '215', name: 'voice', type: 2 },
+      { id: '213', name: 'announcements', type: 5 },
+    ] as never)
+    const out = await listChannels(guild.accessor(), GUILD)
+    expect(await guild.run.requests()).toEqual([`GET /api/v10/guilds/${GUILD}/channels`])
+    expect(out.map((c) => c.id)).toEqual(['211', '212', '213'])
   })
 
   it('drops channels whose type is undefined', async () => {
-    const t = new FakeDiscordTransport(() => [{ id: 'C1', name: 'mystery' }])
-    const out = await listChannels(new DiscordAccessor(t), 'G1')
-    expect(out).toEqual([])
+    await guild.run.answerNext('GET', CHANNELS, 200, [{ id: '219', name: 'mystery' }])
+    expect(await listChannels(guild.accessor(), GUILD)).toEqual([])
   })
 
   it('returns empty array on non-array response', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    const out = await listChannels(new DiscordAccessor(t), 'G1')
-    expect(out).toEqual([])
+    await guild.run.answerNext('GET', CHANNELS, 200, null)
+    expect(await listChannels(guild.accessor(), GUILD)).toEqual([])
   })
 })

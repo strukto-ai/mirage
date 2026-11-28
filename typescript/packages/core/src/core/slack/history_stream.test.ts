@@ -12,67 +12,55 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { HISTORY, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { fetchMessagesForDay, streamMessagesForDay } from './history.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(private readonly responder: (call: number) => SlackResponse) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length))
-  }
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// general's first day: the deploy at 00:01, then ben's coffee at 01:00.
+const DEPLOY = '1762128060.000001'
+const COFFEE = '1762131600.000001'
+const DAY = {
+  channel: 'C1',
+  oldest: '1762128000.000000',
+  latest: '1762214400.000000',
+  inclusive: 'true',
 }
 
 describe('streamMessagesForDay', () => {
   it('paginates conversations.history for the channel/day', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        messages: [{ ts: '1775260801.0' }, { ts: '1775260802.0' }],
-        response_metadata: { next_cursor: 'cur' },
-      },
-      {
-        ok: true,
-        messages: [{ ts: '1775260803.0' }],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const result: { ts: string }[][] = []
-    for await (const page of streamMessagesForDay(new SlackAccessor(t), 'C1', '2026-04-04')) {
-      result.push(page as { ts: string }[])
+    // Slack's first page holds one message, newest first, so the day comes in
+    // two pages.
+    await workspace.firstPage(HISTORY, 1, DAY)
+    const result: string[][] = []
+    for await (const page of streamMessagesForDay(workspace.accessor(), 'C1', '2025-11-03')) {
+      result.push(page.map((m) => m.ts))
     }
-    expect(result.flat().map((m) => m.ts)).toEqual(['1775260801.0', '1775260802.0', '1775260803.0'])
-    expect(t.calls[0]?.endpoint).toBe('conversations.history')
-    expect(t.calls[0]?.params).toMatchObject({
-      channel: 'C1',
-      inclusive: 'true',
-      oldest: '1775260800.000000',
-      latest: '1775347200.000000',
-      limit: '200',
-    })
+    expect(result).toEqual([[COFFEE], [DEPLOY]])
+    expect((await workspace.run.params('GET', HISTORY))[0]).toMatchObject({ ...DAY, limit: '200' })
   })
 })
 
 describe('fetchMessagesForDay (eager + sort)', () => {
   it('sorts by ts ascending across pages', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        messages: [{ ts: '1775260803.0' }, { ts: '1775260801.0' }],
-        response_metadata: { next_cursor: 'cur' },
-      },
-      {
-        ok: true,
-        messages: [{ ts: '1775260802.0' }],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const msgs = await fetchMessagesForDay(new SlackAccessor(t), 'C1', '2026-04-04')
-    expect(msgs.map((m) => m.ts)).toEqual(['1775260801.0', '1775260802.0', '1775260803.0'])
+    await workspace.firstPage(HISTORY, 1, DAY)
+    const msgs = await fetchMessagesForDay(workspace.accessor(), 'C1', '2025-11-03')
+    expect(msgs.map((m) => m.ts)).toEqual([DEPLOY, COFFEE])
   })
 })

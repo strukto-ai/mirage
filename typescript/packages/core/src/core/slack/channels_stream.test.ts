@@ -12,81 +12,56 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { LISTING, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { listChannels, listChannelsStream } from './channels.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(private readonly responder: (call: number) => SlackResponse) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length))
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+const TYPES = 'public_channel,private_channel'
 
 describe('listChannelsStream', () => {
   it('yields one page per round-trip', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        channels: [{ id: 'C1', name: 'general' }],
-        response_metadata: { next_cursor: 'c2' },
-      },
-      {
-        ok: true,
-        channels: [{ id: 'C2', name: 'eng' }],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const collected: { id: string; name?: string }[][] = []
-    for await (const page of listChannelsStream(new SlackAccessor(t))) {
-      collected.push(page)
+    await workspace.firstPage(LISTING, 1, { types: TYPES })
+    const collected: string[][] = []
+    for await (const page of listChannelsStream(workspace.accessor())) {
+      collected.push(page.map((c) => c.id))
     }
-    expect(collected).toEqual([[{ id: 'C1', name: 'general' }], [{ id: 'C2', name: 'eng' }]])
-    expect(t.calls).toHaveLength(2)
-    expect(t.calls[0]?.params).toMatchObject({
-      types: 'public_channel,private_channel',
-      limit: '200',
-      exclude_archived: 'true',
-    })
+    expect(collected).toEqual([['C1'], ['C2']])
+    const asked = await workspace.run.params('GET', LISTING)
+    expect(asked).toHaveLength(2)
+    expect(asked[0]).toMatchObject({ types: TYPES, limit: '200', exclude_archived: 'true' })
   })
 
   it('caller can break early without further calls', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      channels: [{ id: 'C1', name: 'general' }],
-      response_metadata: { next_cursor: 'c2' },
-    }))
-    for await (const _page of listChannelsStream(new SlackAccessor(t))) {
+    await workspace.firstPage(LISTING, 1, { types: TYPES })
+    for await (const _page of listChannelsStream(workspace.accessor())) {
       void _page
       break
     }
-    expect(t.calls).toHaveLength(1)
+    expect(await workspace.count(LISTING)).toBe(1)
   })
 })
 
 describe('listChannels (eager wrapper)', () => {
   it('flattens all pages', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        channels: [
-          { id: 'C1', name: 'a' },
-          { id: 'C2', name: 'b' },
-        ],
-        response_metadata: { next_cursor: 'cur' },
-      },
-      {
-        ok: true,
-        channels: [{ id: 'C3', name: 'c' }],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const out = await listChannels(new SlackAccessor(t))
-    expect(out.map((c) => c.id)).toEqual(['C1', 'C2', 'C3'])
+    await workspace.firstPage(LISTING, 1, { types: TYPES })
+    const out = await listChannels(workspace.accessor())
+    expect(out.map((c) => c.id)).toEqual(['C1', 'C2'])
   })
 })

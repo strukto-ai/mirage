@@ -13,27 +13,32 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-from aioresponses import aioresponses
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.pins import list_pins
+from tests.fixtures.discord_guild import DAY, GENERAL, PINS
 
-PINS = "https://discord.com/api/v10/channels/c1/messages/pins"
+PIN_ONE = "/api/v10/channels/{channel}/messages/pins/{message}"
 
 
 @pytest.mark.asyncio
-async def test_list_pins_pages_back_from_the_oldest_pin_seen():
-    with aioresponses() as m:
-        m.get(
-            f"{PINS}?limit=50",
-            payload={"items": [{"pinned_at": "t2"}], "has_more": True},
+async def test_list_pins_pages_back_from_the_oldest_pin_seen(discord_guild):
+    hello, files = await discord_guild.day(GENERAL, DAY)
+    for message in (hello, files):
+        await discord_guild.run.call(
+            "PUT", PIN_ONE.format(channel=GENERAL, message=message["id"])
         )
-        m.get(
-            f"{PINS}?before=t2&limit=50",
-            payload={"items": [{"pinned_at": "t1"}], "has_more": False},
-        )
-        async with DiscordAccessor(DiscordConfig(token="t")) as accessor:
-            pins = await list_pins(accessor, "c1")
-
-    assert [pin["pinned_at"] for pin in pins] == ["t2", "t1"]
+    # Discord's own first page holds the newer pin and says there is more.
+    own = await discord_guild.run.call(
+        "GET",
+        f"/api/v10/channels/{GENERAL}/messages/pins",
+        params={"limit": "50"},
+    )
+    newest = own["items"][0]
+    await discord_guild.run.answer_next(
+        "GET", PINS, 200, {"items": [newest], "has_more": True}
+    )
+    pins = await list_pins(discord_guild.accessor(), GENERAL)
+    assert [pin["message"]["content"] for pin in pins] == ["files", "hello"]
+    first, second = await discord_guild.run.params("GET", PINS)
+    assert "before" not in first
+    assert second["before"] == newest["pinned_at"]

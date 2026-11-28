@@ -16,5 +16,13 @@ from tests.fixtures.google_account import google_account
 from tests.fixtures.graph_drive import onedrive, sharepoint
 from tests.fixtures.hf_bucket import bucket
 from tests.fixtures.hub_repo import hub
+from tests.fixtures.slack_workspace import slack_workspace
 
-__all__ = ["bucket", "google_account", "hub", "onedrive", "sharepoint"]
+__all__ = [
+    "bucket",
+    "google_account",
+    "hub",
+    "onedrive",
+    "sharepoint",
+    "slack_workspace",
+]

@@ -12,54 +12,33 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.react import add_reaction, get_reactions
+from tests.fixtures.slack_workspace import REACT, REACTIONS
 
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
-
-
-@pytest.mark.asyncio
-async def test_add_reaction_posts_reactions_add():
-    with patch(
-        "mirage.core.slack.react.slack_post",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as post:
-        await add_reaction(ACCESSOR, "C001", "111.222", "shipit")
-    post.assert_awaited_once_with(
-        ACCESSOR,
-        "reactions.add",
-        {
-            "channel": "C001",
-            "timestamp": "111.222",
-            "name": "shipit",
-        },
-    )
+# "lunch at noon" in general, which ana reacted to with a rocket.
+LUNCH = "1762214460.000001"
 
 
 @pytest.mark.asyncio
-async def test_get_reactions_returns_the_message_item():
-    message = {"ts": "111.222", "reactions": [{"name": "shipit", "count": 2}]}
-    with patch(
-        "mirage.core.slack.react.slack_get",
-        new_callable=AsyncMock,
-        return_value={
-            "ok": True,
-            "message": message,
-        },
-    ) as get:
-        result = await get_reactions(ACCESSOR, "C001", "111.222")
-    get.assert_awaited_once_with(
-        ACCESSOR,
-        "reactions.get",
-        {
-            "channel": "C001",
-            "timestamp": "111.222",
-        },
+async def test_add_reaction_posts_reactions_add(slack_workspace):
+    accessor = slack_workspace.accessor()
+    await add_reaction(accessor, "C1", LUNCH, "shipit")
+    assert await slack_workspace.run.bodies("POST", REACT) == [
+        {"channel": "C1", "timestamp": LUNCH, "name": "shipit"}
+    ]
+    message = await get_reactions(accessor, "C1", LUNCH)
+    assert [r["name"] for r in message["reactions"]] == ["rocket", "shipit"]
+
+
+@pytest.mark.asyncio
+async def test_get_reactions_returns_the_message_item(slack_workspace):
+    message = await get_reactions(slack_workspace.accessor(), "C1", LUNCH)
+    assert (message["ts"], message["reactions"]) == (
+        LUNCH,
+        [{"name": "rocket", "users": ["U1"], "count": 1}],
     )
-    assert result == message
+    assert await slack_workspace.run.params("GET", REACTIONS) == [
+        {"channel": "C1", "timestamp": LUNCH}
+    ]

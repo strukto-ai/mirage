@@ -16,28 +16,32 @@ import json
 
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
 from mirage.commands.cli.builtin.discord.list_pins import list_pins
 from mirage.commands.config import Context
-from mirage.core.discord.config import DiscordConfig
 from mirage.io.types import materialize
+from tests.fixtures.discord_guild import DAY, GENERAL
 
-ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
+
+async def _out(result) -> object:
+    out, _ = result
+    return json.loads(await materialize(out))
+
+
+def _spec(leaf: str):
+    return next(s for s in DISCORD.spec.subcommands if s.name == leaf)
 
 
 @pytest.mark.asyncio
-async def test_passes_the_flags_to_the_service(monkeypatch):
-    seen = []
-
-    async def fake(accessor, arg0):
-        seen.append((arg0,))
-        return [{"id": "M1"}]
-
-    monkeypatch.setitem(list_pins.__globals__, "list_pins_core", fake)
-    spec = next(s for s in DISCORD.spec.subcommands if s.name == "list-pins")
-    out, _ = await list_pins(
-        ACCESSOR, [], [], Context(flags={"channel": "C1"}, spec=spec)
+async def test_passes_the_flags_to_the_service(discord_guild):
+    [hello, _] = await discord_guild.day(GENERAL, DAY)
+    pin = f"/api/v10/channels/{GENERAL}/messages/pins/{hello['id']}"
+    await discord_guild.run.call("PUT", pin)
+    out = await list_pins(
+        discord_guild.accessor(),
+        [],
+        [],
+        Context(flags={"channel": GENERAL}, spec=_spec("list-pins")),
     )
-    assert seen == [("C1",)]
-    assert json.loads(await materialize(out)) == [{"id": "M1"}]
+    pins = await _out(out)
+    assert [p["message"]["id"] for p in pins] == [hello["id"]]

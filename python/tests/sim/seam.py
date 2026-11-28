@@ -29,9 +29,8 @@ import mirage.core.discord.read as discord_read
 import mirage.core.discord.readdir as discord_readdir
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.utils.dates import to_iso_z
-from tests.core.discord.conftest import FakeDiscordApi
-from tests.core.slack.conftest import USERS, FakeSlack
 from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
+from tests.sim.discord import FakeDiscordApi
 from tests.sim.dropbox import FakeDropbox
 from tests.sim.gdrive import (
     _FAKE_EXPIRES_IN,
@@ -48,6 +47,7 @@ from tests.sim.github import (
 )
 from tests.sim.loop import SimClock, SimLoop
 from tests.sim.rand import exponential
+from tests.sim.slack import USERS, FakeSlack
 from tests.sim.trace import (
     STEP,
     Change,

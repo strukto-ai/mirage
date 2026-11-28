@@ -12,136 +12,76 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.client import SlackApiError
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.vfs.slack import SlackVFS
 from tests.fixtures.mounted import Mounted
+from tests.fixtures.slack_workspace import HISTORY, LISTING
+
+# The day general holds three attachments: a PDF, a text file and one of
+# no type Slack names.
+DAY = "/channels/general__C1/2025-11-08"
+UNTIL_CLEARED = 1_000_000
 
 
-@pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test-token")
+def _mounted(workspace) -> Mounted:
+    return Mounted(SlackVFS, workspace.accessor())
 
 
-@pytest.fixture
-def accessor(config):
-    return SlackAccessor(config=config)
-
-
-DAY = "/channels/general__C001/2026-04-10"
-
-
-def _blob(file_id: str, name: str, mimetype: str, size: int) -> dict:
-    return {
-        "id": file_id,
-        "name": name,
-        "mimetype": mimetype,
-        "size": size,
-        "url_private_download": "u",
-    }
-
-
-MESSAGES = [
-    {
-        "ts": "1775800000.000100",
-        "text": "hi",
-        "files": [
-            _blob("F1", "report.pdf", "application/pdf", 4096),
-            _blob("F2", "notes.txt", "text/plain", 128),
-            _blob("F3", "data.bin", "application/octet-stream", 2048),
-        ],
-    }
-]
-
-
-@contextmanager
-def _workspace(messages=MESSAGES, history_error=None):
-    """The listings a walk of the workspace makes: one channel, one user,
-    a day of ``messages``.
-    """
-    latest = datetime(2026, 4, 10, 12, tzinfo=timezone.utc).timestamp()
-    with (
-        patch(
-            "mirage.core.slack.readdir.list_channels",
-            new_callable=AsyncMock,
-            return_value=[
-                {"id": "C001", "name": "general", "created": 1609459200}
-            ],
-        ),
-        patch(
-            "mirage.core.slack.readdir.list_users",
-            new_callable=AsyncMock,
-            return_value=[{"id": "U001", "name": "alice"}],
-        ),
-        patch(
-            "mirage.core.slack.readdir._latest_message_ts",
-            new_callable=AsyncMock,
-            return_value=latest,
-        ),
-        patch(
-            "mirage.core.slack.readdir.fetch_messages_for_day",
-            new_callable=AsyncMock,
-            return_value=messages,
-            side_effect=history_error,
-        ),
-    ):
-        yield
-
-
-async def _stat_at(accessor: SlackAccessor, path: str):
-    return await Mounted(SlackVFS, accessor).stat(path)
+async def _refuse_history(workspace) -> None:
+    await workspace.run.answer_next(
+        "GET",
+        HISTORY,
+        200,
+        {"ok": False, "error": "not_in_channel"},
+        times=UNTIL_CLEARED,
+    )
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor):
+async def test_stat_root(slack_workspace):
     result = await stat(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
+        slack_workspace.accessor(),
+        PathSpec(vfs_path="", virtual="/", directory="/"),
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_channel(accessor):
-    with _workspace():
-        result = await _stat_at(accessor, "/channels/general__C001")
+async def test_stat_channel(slack_workspace):
+    result = await _mounted(slack_workspace).stat("/channels/general__C1")
     assert result.type == FileType.DIRECTORY
-    assert result.extra["channel_id"] == "C001"
-    assert result.modified == "2021-01-01T00:00:00Z"
+    assert result.extra["channel_id"] == "C1"
+    # A channel is dated by its creation.
+    assert result.modified == "2025-11-03T00:00:00Z"
 
 
 @pytest.mark.asyncio
-async def test_stat_user(accessor):
-    with _workspace():
-        result = await _stat_at(accessor, "/users/alice__U001.json")
+async def test_stat_user(slack_workspace):
+    result = await _mounted(slack_workspace).stat("/users/ana__U1.json")
     assert result.content == ContentType.JSON
-    assert result.extra["user_id"] == "U001"
+    assert result.extra["user_id"] == "U1"
 
 
 @pytest.mark.asyncio
-async def test_stat_jsonl(accessor):
-    messages = [{"ts": "1775800000.000100", "text": "hello"}]
-    with _workspace(messages):
-        result = await _stat_at(accessor, f"{DAY}/chat.jsonl")
+async def test_stat_jsonl(slack_workspace):
+    mounted = _mounted(slack_workspace)
+    chat = "/channels/general__C1/2025-11-04/chat.jsonl"
+    result = await mounted.stat(chat)
     assert result.content == ContentType.TEXT
     assert result.name == "chat.jsonl"
-    assert result.size == len(b'{"ts":"1775800000.000100","text":"hello"}\n')
+    assert result.size == len(await mounted.read(chat))
 
 
 @pytest.mark.asyncio
-async def test_stat_not_found(accessor):
+async def test_stat_not_found(slack_workspace):
     with pytest.raises(FileNotFoundError):
         await stat(
-            accessor,
+            slack_workspace.accessor(),
             PathSpec(
                 vfs_path="nonexistent/path",
                 virtual="/nonexistent/path",
@@ -151,84 +91,74 @@ async def test_stat_not_found(accessor):
 
 
 @pytest.mark.asyncio
-async def test_stat_date_dir(accessor):
-    with _workspace():
-        s = await _stat_at(accessor, DAY)
+async def test_stat_date_dir(slack_workspace):
+    s = await _mounted(slack_workspace).stat(DAY)
     assert s.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_non_date_dir_not_found(accessor):
+async def test_stat_non_date_dir_not_found(slack_workspace):
     with pytest.raises(FileNotFoundError):
         await stat(
-            accessor,
+            slack_workspace.accessor(),
             PathSpec(
-                vfs_path="channels/general__C001/notadate",
-                virtual="/channels/general__C001/notadate",
-                directory="/channels/general__C001/notadate",
+                vfs_path="channels/general__C1/notadate",
+                virtual="/channels/general__C1/notadate",
+                directory="/channels/general__C1/notadate",
             ),
         )
 
 
-REFUSED = SlackApiError(
-    "Slack API error (conversations.history): not_in_channel",
-    slack_error="not_in_channel",
-)
-
-
 @pytest.mark.asyncio
-async def test_stat_chat_jsonl_in_a_refused_day_is_eacces(accessor):
+async def test_stat_chat_jsonl_in_a_refused_day_is_eacces(slack_workspace):
     # A day Slack will not show is not an empty day; stat must neither
     # fabricate a sizeless file nor call it absent.
-    with _workspace(history_error=REFUSED):
-        with pytest.raises(PermissionError):
-            await _stat_at(accessor, f"{DAY}/chat.jsonl")
+    mounted = _mounted(slack_workspace)
+    await mounted.readdir("/channels/general__C1")
+    await _refuse_history(slack_workspace)
+    with pytest.raises(PermissionError):
+        await mounted.stat(f"{DAY}/chat.jsonl")
 
 
 @pytest.mark.asyncio
-async def test_stat_files_dir(accessor):
-    with _workspace():
-        s = await _stat_at(accessor, f"{DAY}/files")
+async def test_stat_files_dir(slack_workspace):
+    s = await _mounted(slack_workspace).stat(f"{DAY}/files")
     assert s.type == FileType.DIRECTORY
 
 
 @pytest.mark.asyncio
-async def test_stat_files_in_a_refused_day_is_eacces(accessor):
-    with _workspace(history_error=REFUSED):
-        with pytest.raises(PermissionError):
-            await _stat_at(accessor, f"{DAY}/files")
+async def test_stat_files_in_a_refused_day_is_eacces(slack_workspace):
+    mounted = _mounted(slack_workspace)
+    await mounted.readdir("/channels/general__C1")
+    await _refuse_history(slack_workspace)
+    with pytest.raises(PermissionError):
+        await mounted.stat(f"{DAY}/files")
 
 
 @pytest.mark.asyncio
-async def test_stat_file_blob_pdf(accessor):
-    with _workspace():
-        s = await _stat_at(accessor, f"{DAY}/files/report__F1.pdf")
+async def test_stat_file_blob_pdf(slack_workspace):
+    s = await _mounted(slack_workspace).stat(f"{DAY}/files/report__F2.pdf")
     assert s.content == ContentType.PDF
-    assert s.size == 4096
+    assert s.size == len(b"%PDF-1.4 the report\n")
 
 
 @pytest.mark.asyncio
-async def test_stat_file_blob_text(accessor):
-    with _workspace():
-        s = await _stat_at(accessor, f"{DAY}/files/notes__F2.txt")
+async def test_stat_file_blob_text(slack_workspace):
+    s = await _mounted(slack_workspace).stat(f"{DAY}/files/notes__F3.txt")
     assert s.content == ContentType.TEXT
 
 
 @pytest.mark.asyncio
-async def test_stat_file_blob_unknown_mimetype_is_binary(accessor):
-    with _workspace():
-        s = await _stat_at(accessor, f"{DAY}/files/data__F3.bin")
+async def test_stat_file_blob_unknown_mimetype_is_binary(slack_workspace):
+    s = await _mounted(slack_workspace).stat(f"{DAY}/files/data__F4.bin")
     assert s.content == ContentType.BINARY
-    assert s.size == 2048
+    assert s.size == len(b"0101")
 
 
 @pytest.mark.asyncio
-async def test_stat_propagates_parent_refresh_failure(accessor):
-    failure = RuntimeError("slack unavailable")
-    with patch(
-        "mirage.core.slack.readdir.list_channels",
-        new_callable=AsyncMock,
-        side_effect=failure,
-    ):
-        with pytest.raises(RuntimeError, match="slack unavailable"):
-            await _stat_at(accessor, "/channels/missing__C999")
+async def test_stat_propagates_parent_refresh_failure(slack_workspace):
+    await slack_workspace.run.answer_next(
+        "GET", LISTING, 200, {"ok": False, "error": "fatal_error"}
+    )
+    with pytest.raises(SlackApiError, match="fatal_error"):
+        await _mounted(slack_workspace).stat("/channels/missing__C999")

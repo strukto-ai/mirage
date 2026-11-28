@@ -16,7 +16,7 @@ import json
 import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -40,7 +40,15 @@ from mirage.types import (
     ReadSpec,
 )
 from mirage.vfs.discord import DiscordVFS
-from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
+from tests.fixtures.discord_guild import (
+    ALICE,
+    ATTACHMENT,
+    DAY,
+    GENERAL,
+    GUILD_DIR,
+    MESSAGES,
+    DiscordGuild,
+)
 from tests.fixtures.handed import call, entry_at, parent_of
 from tests.fixtures.mounted import mounted
 
@@ -51,9 +59,9 @@ async def read(accessor: DiscordAccessor, path: PathSpec) -> bytes:
     return await mounted(DiscordVFS, accessor).read(path)
 
 
-GUILD_DIR = "My Server__G001"
-CHANNEL = f"{GUILD_DIR}/channels/general__C001"
+CHANNEL = f"{GUILD_DIR}/channels/general__211"
 CHAT = f"/{CHANNEL}/{DAY}/chat.jsonl"
+REFUSED_DAY = "2024-01-13"
 
 
 def spec(virtual: str) -> PathSpec:
@@ -62,43 +70,56 @@ def spec(virtual: str) -> PathSpec:
     )
 
 
-async def test_read_jsonl(api, accessor):
+async def _day_bytes(guild: DiscordGuild, day: str = DAY) -> bytes:
+    """general's chat.jsonl for ``day``: Discord's own messages, oldest
+    first."""
+    return jsonl_bytes(await guild.day(GENERAL, day))
+
+
+async def test_read_jsonl(discord_guild, accessor):
     # Cold: no prior listing is needed, the mount lists the chain down
     # to the day itself.
     result = await read(accessor, spec(CHAT))
-    assert result == jsonl_bytes(MESSAGES)
+    assert result == await _day_bytes(discord_guild)
 
 
 # The mount lists the day before it reads chat.jsonl, and the read takes
 # the messages that listing fetched instead of fetching the day again.
-async def test_a_read_takes_the_day_its_listing_fetched(api, accessor):
+async def test_a_read_takes_the_day_its_listing_fetched(
+    discord_guild, accessor
+):
     async with command_scope():
-        assert await read(accessor, spec(CHAT)) == jsonl_bytes(MESSAGES)
-    assert api.day_fetches == [("C001", DAY)]
+        assert await read(accessor, spec(CHAT)) == await _day_bytes(
+            discord_guild
+        )
+    assert await discord_guild.day_fetches() == [(GENERAL, DAY)]
 
 
 async def _read_chat(accessor: DiscordAccessor) -> bytes:
     chat = FileStat(
-        name="chat.jsonl", type=FileType.FILE, extra={"channel_id": "C001"}
+        name="chat.jsonl", type=FileType.FILE, extra={"channel_id": GENERAL}
     )
     return b"".join([c async for c in read_stream(accessor, spec(CHAT), chat)])
 
 
 # Only the last listed day is kept, and one read takes it: reading the
 # day again, or after another day was listed, fetches it.
-async def test_only_the_last_listed_day_is_kept_for_one_read(api, accessor):
+async def test_only_the_last_listed_day_is_kept_for_one_read(
+    discord_guild, accessor
+):
     m = mounted(DiscordVFS, accessor)
+    whole = await _day_bytes(discord_guild)
     async with command_scope():
         await m.readdir(f"/{CHANNEL}/{DAY}")
-        assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
-        assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
+        assert await _read_chat(accessor) == whole
+        assert await _read_chat(accessor) == whole
         await m.readdir(f"/{CHANNEL}/2024-01-14")
-        assert await m.read(CHAT) == jsonl_bytes(MESSAGES)
-    assert api.day_fetches == [
-        ("C001", DAY),
-        ("C001", DAY),
-        ("C001", "2024-01-14"),
-        ("C001", DAY),
+        assert await m.read(CHAT) == whole
+    assert await discord_guild.day_fetches() == [
+        (GENERAL, DAY),
+        (GENERAL, DAY),
+        (GENERAL, "2024-01-14"),
+        (GENERAL, DAY),
     ]
 
 
@@ -107,7 +128,7 @@ async def test_only_the_last_listed_day_is_kept_for_one_read(api, accessor):
 # counts as current, so each read fetches the day.
 @pytest.mark.parametrize("drop", ["forget", "fresh", "late"])
 async def test_a_dropped_or_expired_day_is_fetched_again(
-    api, accessor, drop, monkeypatch
+    discord_guild, accessor, drop, monkeypatch
 ):
     real = time.monotonic
     offset = [0.0]
@@ -122,8 +143,11 @@ async def test_a_dropped_or_expired_day_is_fetched_again(
             accessor.forget()
         if drop == "late":
             offset[0] = LISTING_TRUST_WINDOW
-        assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
-    assert api.day_fetches == [("C001", DAY), ("C001", DAY)]
+        assert await _read_chat(accessor) == await _day_bytes(discord_guild)
+    assert await discord_guild.day_fetches() == [
+        (GENERAL, DAY),
+        (GENERAL, DAY),
+    ]
 
 
 # The kept day serves only the command that listed it, so a read that
@@ -133,77 +157,85 @@ async def test_a_dropped_or_expired_day_is_fetched_again(
 @pytest.mark.parametrize(
     "scope", [command_scope, nullcontext], ids=["next command", "no command"]
 )
-async def test_only_the_listing_command_takes_the_day(api, accessor, scope):
+async def test_only_the_listing_command_takes_the_day(
+    discord_guild, accessor, scope
+):
     async with scope():
         await mounted(DiscordVFS, accessor).readdir(f"/{CHANNEL}/{DAY}")
     async with scope():
-        assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
-    assert api.day_fetches == [("C001", DAY), ("C001", DAY)]
+        assert await _read_chat(accessor) == await _day_bytes(discord_guild)
+    assert await discord_guild.day_fetches() == [
+        (GENERAL, DAY),
+        (GENERAL, DAY),
+    ]
 
 
-async def test_read_jsonl_bogus_channel_is_enoent(api, accessor):
+async def test_read_jsonl_bogus_channel_is_enoent(accessor):
     # The typed `name__id` is only trusted once the listing proves it, so
     # a fabricated channel id is ENOENT rather than a raw API error.
     with pytest.raises(FileNotFoundError):
         await read(
             accessor,
-            spec(f"/{GUILD_DIR}/channels/nope__C9/{DAY}/chat.jsonl"),
+            spec(f"/{GUILD_DIR}/channels/nope__9/{DAY}/chat.jsonl"),
         )
 
 
-async def test_read_not_found(api, accessor):
+async def test_read_not_found(accessor):
     with pytest.raises(FileNotFoundError):
         await read(accessor, spec("/no/such/path"))
 
 
-async def test_read_jsonl_window_is_sliced_locally(api, accessor):
+async def test_read_jsonl_window_is_sliced_locally(discord_guild, accessor):
     # A rendered branch has no remote range, so the window is taken after.
-    whole = jsonl_bytes(MESSAGES)
+    whole = await _day_bytes(discord_guild)
     result = await call(
         read_range, readdir, accessor, spec(CHAT), offset=1, size=4
     )
     assert result == whole[1:5]
 
 
-async def test_read_chat_on_a_refused_day_is_eacces(api, accessor):
+async def test_read_chat_on_a_refused_day_is_eacces(discord_guild, accessor):
+    await discord_guild.refuse(MESSAGES, 403)
     with pytest.raises(PermissionError):
-        await read(accessor, spec(f"/{CHANNEL}/{SEALED_DAY}/chat.jsonl"))
+        await read(accessor, spec(f"/{CHANNEL}/{REFUSED_DAY}/chat.jsonl"))
 
 
-async def test_read_member_json(api, accessor):
-    data = await read(accessor, spec(f"/{GUILD_DIR}/members/alice__U001.json"))
+async def test_read_member_json(accessor):
+    data = await read(accessor, spec(f"/{GUILD_DIR}/members/alice__311.json"))
     payload = json.loads(data)
-    assert payload["user"]["id"] == "U001"
+    assert payload["user"]["id"] == ALICE
 
 
-async def test_read_blob_pushes_the_range_to_the_source(api, accessor):
-    result = await call(
-        read_range,
-        readdir,
-        accessor,
-        spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt"),
-        offset=2,
-        size=3,
-    )
+async def test_read_blob_pushes_the_range_to_the_source(
+    discord_guild, accessor
+):
+    path = spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt")
+    handed = await entry_at(readdir, accessor, path)
+    await discord_guild.run.record_requests("range")
+    result = await read_range(accessor, path, offset=2, size=3, entry=handed)
     assert result == b"234"
-    assert api.downloads == [("https://cdn.example/kept.txt", 2, 3)]
+    assert await discord_guild.run.headers("GET", ATTACHMENT) == [
+        {"range": "bytes=2-4"}
+    ]
 
 
-async def test_read_dir_is_enoent_when_unproven(api, accessor):
+async def test_read_dir_is_enoent_when_unproven(accessor):
     # A matched shape alone is no existence proof: reading a directory
     # kind answers "No such file" unless the node exists by construction.
     with pytest.raises(FileNotFoundError):
-        await read(accessor, spec("/Nope__G9"))
+        await read(accessor, spec("/Nope__9"))
 
 
-async def test_read_tombstoned_attachment_is_enoent(api, accessor):
+async def test_read_tombstoned_attachment_is_enoent(accessor):
     with pytest.raises(FileNotFoundError):
         await read(
             accessor, spec(f"/{CHANNEL}/{DAY}/files/tombstoned__A2.txt")
         )
 
 
-async def test_attachment_stream_closes_before_fetching_tail(api, accessor):
+async def test_attachment_stream_closes_before_fetching_tail(accessor):
+    # The download is staged: over the wire, a read closed after its
+    # first chunk cannot be told from one that fetched the rest.
     path = spec(f"/{CHANNEL}/{DAY}/files/kept__A1.txt")
     closed = []
 
@@ -226,68 +258,55 @@ async def test_attachment_stream_closes_before_fetching_tail(api, accessor):
 
 
 async def test_follow_prints_the_last_lines_then_asks_after_the_last_seen(
-    api, accessor
+    discord_guild, accessor
 ):
-    added = [{"id": "1196242344345600900", "content": "later"}]
-    with patch(
-        "mirage.core.discord.read.list_messages_for_day",
-        new_callable=AsyncMock,
-        side_effect=[[dict(m) for m in MESSAGES], added, []],
-    ) as fetch:
-        stream = await follow(
-            accessor,
-            spec(CHAT),
-            1,
-            0.001,
-            entry=await entry_at(readdir, accessor, spec(CHAT)),
-            parent=await entry_at(readdir, accessor, parent_of(spec(CHAT))),
+    day = await discord_guild.day(GENERAL, DAY)
+    stream = await follow(
+        accessor,
+        spec(CHAT),
+        1,
+        0.001,
+        entry=await entry_at(readdir, accessor, spec(CHAT)),
+        parent=await entry_at(readdir, accessor, parent_of(spec(CHAT))),
+    )
+    try:
+        assert await anext(stream) == jsonl_bytes(day[-1:])
+        # The listing above the day fetched it too; the last look is the
+        # follow's own.
+        first = (await discord_guild.run.params("GET", MESSAGES))[-1]
+        added = await discord_guild.add_message(
+            GENERAL,
+            datetime(2024, 1, 15, 12, tzinfo=timezone.utc),
+            ALICE,
+            "later",
         )
-        try:
-            assert await anext(stream) == jsonl_bytes(MESSAGES[-1:])
-            assert await anext(stream) == jsonl_bytes(added)
-        finally:
-            await stream.aclose()
-    assert "after" not in fetch.await_args_list[0].kwargs
-    assert fetch.await_args_list[1].kwargs["after"] == MESSAGES[-1]["id"]
+        assert await anext(stream) == jsonl_bytes([added])
+    finally:
+        await stream.aclose()
+    # The first look starts at the day, the next after the last one seen.
+    start = datetime(2024, 1, 15, tzinfo=timezone.utc).timestamp()
+    assert int(first["after"]) == snowflake_at(start) - 1
+    later = await discord_guild.run.params("GET", MESSAGES)
+    assert later[0]["after"] == day[-1]["id"]
 
 
-async def test_only_a_chat_day_is_followed(api, accessor):
-    member = f"/{GUILD_DIR}/members/alice__U001.json"
+async def test_only_a_chat_day_is_followed(accessor):
+    member = f"/{GUILD_DIR}/members/alice__311.json"
     assert await follow(accessor, spec(member), 1, 1.0) is None
 
 
-async def _walk(*pages):
-    for page in pages:
-        yield page
-
-
-async def test_a_batch_walks_a_run_of_days_once(api, accessor):
+async def test_a_batch_walks_a_run_of_days_once(discord_guild, accessor):
+    # 2024-01-15 and 01-16 are one run of days, walked by one listing.
     nxt = "2024-01-16"
-    on_day, later = (
-        {
-            "id": str(
-                snowflake_at(datetime(*at, tzinfo=timezone.utc).timestamp())
-            ),
-            "content": text,
-        }
-        for at, text in (((2024, 1, 15, 10), "a"), ((2024, 1, 16, 1), "b"))
-    )
     chats = [CHAT, f"/{CHANNEL}/{nxt}/chat.jsonl"]
-    with patch(
-        "mirage.core.discord.read.stream_messages_for_day",
-        new_callable=MagicMock,
-        return_value=_walk([later], [on_day]),
-    ) as walk:
-        chat = FileStat(
-            name="chat.jsonl", type=FileType.FILE, extra={"channel_id": "C001"}
-        )
-        answers = await read_many(
-            accessor, [spec(c) for c in chats], 1 << 20, [chat] * 2, [None] * 2
-        )
+    chat = FileStat(
+        name="chat.jsonl", type=FileType.FILE, extra={"channel_id": GENERAL}
+    )
+    answers = await read_many(
+        accessor, [spec(c) for c in chats], 1 << 20, [chat] * 2, [None] * 2
+    )
     assert answers == {
-        chats[0]: jsonl_bytes([on_day]),
-        chats[1]: jsonl_bytes([later]),
+        chats[0]: await _day_bytes(discord_guild),
+        chats[1]: await _day_bytes(discord_guild, nxt),
     }
-    assert [
-        (call.args[2], call.kwargs["last_day"]) for call in walk.call_args_list
-    ] == [(DAY, nxt)]
+    assert await discord_guild.day_fetches() == [(GENERAL, DAY)]

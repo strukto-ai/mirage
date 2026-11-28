@@ -12,75 +12,79 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { COMPLETE, POST, SlackWorkspace, UPLOAD_URL } from '../../../tests/core/slack/workspace.ts'
 import { postMessage, replyToThread, uploadFile } from './post.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
-    []
-  constructor(private readonly responder: () => SlackResponse = () => ({ ok: true })) {}
-  call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse> {
-    this.calls.push({
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder())
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// "lunch at noon" in general, which ana reacted to with a rocket.
+const LUNCH = '1762214460.000001'
 
 describe('postMessage', () => {
   it('POSTs to chat.postMessage with channel and text', async () => {
-    const t = new FakeTransport(() => ({ ok: true, ts: '1.2' }))
-    const out = await postMessage(new SlackAccessor(t), 'C1', 'hello')
-    expect(t.calls[0]?.endpoint).toBe('chat.postMessage')
-    expect(t.calls[0]?.params).toBeUndefined()
-    expect(t.calls[0]?.body).toEqual({ channel: 'C1', text: 'hello' })
-    expect(out).toMatchObject({ ok: true, ts: '1.2' })
+    const out = await postMessage(workspace.accessor(), 'C1', 'hello')
+    expect(await workspace.run.bodies('POST', POST)).toEqual([{ channel: 'C1', text: 'hello' }])
+    expect(await workspace.run.params('POST', POST)).toEqual([{}])
+    const ts = String(out.ts)
+    expect(out).toMatchObject({ ok: true })
+    expect((await workspace.history('C1'))[0]).toMatchObject({ ts, text: 'hello' })
   })
 })
 
 describe('replyToThread', () => {
   it('POSTs with thread_ts to chat.postMessage', async () => {
-    const t = new FakeTransport(() => ({ ok: true, ts: '3.4' }))
-    const out = await replyToThread(new SlackAccessor(t), 'C1', '1.2', 'reply')
-    expect(t.calls[0]?.endpoint).toBe('chat.postMessage')
-    expect(t.calls[0]?.body).toEqual({ channel: 'C1', thread_ts: '1.2', text: 'reply' })
-    expect(out).toMatchObject({ ok: true, ts: '3.4' })
+    const out = await replyToThread(workspace.accessor(), 'C1', LUNCH, 'reply')
+    expect(await workspace.run.bodies('POST', POST)).toEqual([
+      { channel: 'C1', thread_ts: LUNCH, text: 'reply' },
+    ])
+    expect(out).toMatchObject({ ok: true, message: { thread_ts: LUNCH } })
   })
 })
 
 describe('uploadFile', () => {
   it('asks for an upload URL, sends the bytes, then completes into the channel', async () => {
-    const answers: SlackResponse[] = [
-      { ok: true, upload_url: 'https://files.example/u/1', file_id: 'F1' },
-      { ok: true, files: [{ id: 'F1', title: 'reply.wav' }] },
-    ]
-    const sent: [string, Uint8Array][] = []
-    class Uploading extends FakeTransport {
-      uploadBytes(url: string, data: Uint8Array): Promise<void> {
-        sent.push([url, data])
-        return Promise.resolve()
-      }
-    }
-    const t = new Uploading(() => answers.shift() ?? { ok: true })
     const data = new TextEncoder().encode('RIFF')
-    const out = await uploadFile(new SlackAccessor(t), 'C1', 'reply.wav', data, 'here', '9.9')
-    expect(t.calls).toEqual([
-      { endpoint: 'files.getUploadURLExternal', params: { filename: 'reply.wav', length: '4' } },
+    const out = (await uploadFile(
+      workspace.accessor(),
+      'C1',
+      'reply.wav',
+      data,
+      'here',
+      LUNCH,
+    )) as {
+      ok: boolean
+      files: { id: string; title: string }[]
+    }
+    const [shared] = out.files
+    expect([out.ok, shared?.title]).toEqual([true, 'reply.wav'])
+    expect(await workspace.run.params('GET', UPLOAD_URL)).toEqual([
+      { filename: 'reply.wav', length: '4' },
+    ])
+    expect(await workspace.run.bodies('POST', COMPLETE)).toEqual([
       {
-        endpoint: 'files.completeUploadExternal',
-        body: {
-          files: [{ id: 'F1', title: 'reply.wav' }],
-          channel_id: 'C1',
-          initial_comment: 'here',
-          thread_ts: '9.9',
-        },
+        files: [{ id: shared?.id, title: 'reply.wav' }],
+        channel_id: 'C1',
+        initial_comment: 'here',
+        thread_ts: LUNCH,
       },
     ])
-    expect(sent).toEqual([['https://files.example/u/1', data]])
-    expect(out).toMatchObject({ ok: true, files: [{ id: 'F1' }] })
+    // The bytes sent to the upload URL are the file's.
+    expect(await workspace.run.read(`/files/download/${shared?.id ?? ''}`)).toEqual(data)
   })
 })

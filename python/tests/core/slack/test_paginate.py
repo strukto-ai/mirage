@@ -12,84 +12,58 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.core.api.errors import PaginationStalledError
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.paginate import cursor_pages
+from tests.fixtures.slack_workspace import LISTING, USERS
+
+TYPES = "public_channel,private_channel"
 
 
 @pytest.mark.asyncio
-async def test_cursor_pages_walks_until_empty_cursor():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
+async def test_cursor_pages_walks_until_empty_cursor(slack_workspace):
     pages = [
-        {"items": [1, 2], "response_metadata": {"next_cursor": "cur1"}},
-        {"items": [3], "response_metadata": {"next_cursor": ""}},
-    ]
-    calls = []
-
-    async def fake_get(_acc, _method, params=None):
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        result = []
+        [channel["id"] for channel in page]
         async for page in cursor_pages(
-            acc,
+            slack_workspace.accessor(),
             "conversations.list",
-            base_params={"types": "x", "limit": 100},
-            items_key="items",
-        ):
-            result.append(page)
-    assert result == [[1, 2], [3]]
-    assert calls[0] == {"types": "x", "limit": 100}
-    assert calls[1] == {"types": "x", "limit": 100, "cursor": "cur1"}
-
-
-@pytest.mark.asyncio
-async def test_cursor_pages_propagates_cancellation():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
-    pages = [
-        {"items": [1], "response_metadata": {"next_cursor": "cur1"}},
-        {"items": [2], "response_metadata": {"next_cursor": "cur2"}},
-        {"items": [3], "response_metadata": {"next_cursor": ""}},
-    ]
-    calls = []
-
-    async def fake_get(_acc, _method, params=None):
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        gen = cursor_pages(
-            acc,
-            "conversations.list",
-            base_params={"limit": 1},
-            items_key="items",
+            base_params={"types": TYPES, "limit": 1},
+            items_key="channels",
         )
-        first = await gen.__anext__()
-        await gen.aclose()
-    assert first == [1]
-    assert len(calls) == 1
+    ]
+    assert pages == [["C1"], ["C2"]]
+    first, second = await slack_workspace.run.params("GET", LISTING)
+    assert first == {"types": TYPES, "limit": "1"}
+    assert second.pop("cursor") != ""
+    assert second == first
 
 
 @pytest.mark.asyncio
-async def test_repeated_cursor_fails_without_a_third_request():
+async def test_cursor_pages_propagates_cancellation(slack_workspace):
+    gen = cursor_pages(
+        slack_workspace.accessor(),
+        "conversations.list",
+        base_params={"types": TYPES, "limit": 1},
+        items_key="channels",
+    )
+    first = await gen.__anext__()
+    await gen.aclose()
+    assert [channel["id"] for channel in first] == ["C1"]
+    assert await slack_workspace.count(LISTING) == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_cursor_fails_without_a_third_request(slack_workspace):
+    # A listing that answers the cursor it was asked with, twice running.
     reply = {
         "ok": True,
         "members": [],
         "response_metadata": {"next_cursor": "loop"},
     }
-    async with SlackAccessor(SlackConfig(token="t")) as accessor:
-        with patch(
-            "mirage.core.slack.paginate.slack_get", side_effect=[reply, reply]
-        ) as get:
-            with pytest.raises(PaginationStalledError, match="loop"):
-                async for _ in cursor_pages(
-                    accessor, "users.list", {}, "members"
-                ):
-                    pass
-    assert get.await_count == 2
+    await slack_workspace.run.answer_next("GET", USERS, 200, reply, times=2)
+    async with slack_workspace.accessor() as accessor:
+        with pytest.raises(PaginationStalledError, match="loop"):
+            async for _ in cursor_pages(accessor, "users.list", {}, "members"):
+                pass
+    assert await slack_workspace.count(USERS) == 2

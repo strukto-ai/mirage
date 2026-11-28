@@ -12,30 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import type { SlackAccessor } from '../../accessor/slack.ts'
 import { PathSpec } from '../../types.ts'
 import { makeResolveGlob } from '../../utils/glob_walk.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { SlackVFS } from '../../vfs/slack/slack.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
 import { readdir as slackReaddir } from './readdir.ts'
 
-class FakeSlackTransport implements SlackTransport {
-  public readonly calls: string[] = []
-  constructor(
-    private readonly responder: (
-      endpoint: string,
-      params?: Record<string, string>,
-    ) => SlackResponse = () => ({ ok: true }),
-  ) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push(endpoint)
-    return Promise.resolve(this.responder(endpoint, params))
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 async function listedPaths(accessor: SlackAccessor, path: PathSpec): Promise<string[]> {
   const base = path.virtual.replace(/\/$/, '')
@@ -47,69 +50,40 @@ const resolveSlackGlob = (accessor: SlackAccessor, paths: PathSpec[]): Promise<P
 
 describe('resolveSlackGlob', () => {
   it('passes through resolved PathSpec unchanged', async () => {
-    const t = new FakeSlackTransport()
     const resolved = new PathSpec({
       virtual: '/mnt/slack/channels/general__C1/2026-04-24.jsonl',
       directory: '/mnt/slack/channels/general__C1/',
       vfsPath: mountKey('/mnt/slack/channels/general__C1/2026-04-24.jsonl', '/mnt/slack'),
       resolved: true,
     })
-    const out = await resolveSlackGlob(new SlackAccessor(t), [resolved])
+    const out = await resolveSlackGlob(workspace.accessor(), [resolved])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(resolved)
-    expect(t.calls).toHaveLength(0)
+    expect(await workspace.run.requests()).toEqual([])
   })
 
   it('passes through unresolved PathSpec with no pattern unchanged', async () => {
-    const t = new FakeSlackTransport()
     const noPattern = new PathSpec({
       virtual: '/mnt/slack/channels/general__C1',
       directory: '/mnt/slack/channels/general__C1',
       vfsPath: mountKey('/mnt/slack/channels/general__C1', '/mnt/slack'),
       resolved: false,
     })
-    const out = await resolveSlackGlob(new SlackAccessor(t), [noPattern])
+    const out = await resolveSlackGlob(workspace.accessor(), [noPattern])
     expect(out).toHaveLength(1)
     expect(out[0]).toBe(noPattern)
-    expect(t.calls).toHaveLength(0)
+    expect(await workspace.run.requests()).toEqual([])
   })
 })
 
-function blob(id: string, name: string, mimetype: string): Record<string, unknown> {
-  return { id, name, mimetype, size: 1, url_private_download: 'u' }
-}
-
 describe('a glob through a mount', () => {
   it("matches a day's files by their names", async () => {
-    const latest = Date.UTC(2026, 3, 10, 12) / 1000
-    const t = new FakeSlackTransport((endpoint, params) => {
-      if (endpoint === 'conversations.list') {
-        return {
-          ok: true,
-          channels: [{ id: 'C001', name: 'general', created: 1 }],
-          response_metadata: { next_cursor: '' },
-        }
-      }
-      if (endpoint === 'conversations.history') {
-        if (params?.limit === '1') return { ok: true, messages: [{ ts: latest.toFixed(6) }] }
-        return {
-          ok: true,
-          messages: [
-            {
-              ts: '1775800000.000100',
-              files: [blob('F1', 'a.pdf', 'application/pdf'), blob('F2', 'b.txt', 'text/plain')],
-            },
-          ],
-          response_metadata: { next_cursor: '' },
-        }
-      }
-      return { ok: true }
-    })
-    const ws = new Workspace({ '/slack/': new SlackVFS({ accessor: new SlackAccessor(t) }) }, {})
+    // 2025-11-08 in general holds report.pdf, notes.txt and data.bin.
+    const ws = new Workspace({ '/slack/': new SlackVFS({ accessor: workspace.accessor() }) }, {})
     try {
-      const result = await ws.shell('echo /slack/channels/general__C001/2026-04-10/files/*.pdf')
+      const result = await ws.shell('echo /slack/channels/general__C1/2025-11-08/files/*.pdf')
       expect(result.stdoutText.split(/\s+/).filter((w) => w !== '')).toEqual([
-        '/slack/channels/general__C001/2026-04-10/files/a__F1.pdf',
+        '/slack/channels/general__C1/2025-11-08/files/report__F2.pdf',
       ])
     } finally {
       await ws.close()

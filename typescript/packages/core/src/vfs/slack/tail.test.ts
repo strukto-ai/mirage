@@ -12,34 +12,49 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { FakeSlackTransport } from '../../../tests/vfs/slack/_test_util.ts'
-import { runSlack } from '../../../tests/workspace/fixtures/chat_fixture.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
+import { SlackVFS } from './slack.ts'
+
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// `line` over the workspace mounted at /mnt/slack.
+async function onSlack(line: string): Promise<string> {
+  const ws = new Workspace({ '/mnt/slack/': new SlackVFS({ accessor: workspace.accessor() }) })
+  try {
+    return new TextDecoder().decode((await ws.shell(line)).stdout)
+  } finally {
+    await ws.close()
+  }
+}
+
+function texts(out: string): string[] {
+  return out
+    .trimEnd()
+    .split('\n')
+    .map((line) => (JSON.parse(line) as { text: string }).text)
+}
 
 describe('slack tail', () => {
   it('returns last N lines with -n', async () => {
-    const transport = new FakeSlackTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
-        return {
-          ok: true,
-          messages: [
-            { ts: '1704067201.000000', text: 'a' },
-            { ts: '1704067202.000000', text: 'b' },
-            { ts: '1704067203.000000', text: 'c' },
-            { ts: '1704067204.000000', text: 'd' },
-          ],
-        }
-      }
-      return { ok: true }
-    })
-    const out = await runSlack(
-      transport,
-      'tail -n 2 /mnt/slack/channels/general__C1/2024-01-01/chat.jsonl',
-      ['2024-01-01'],
-    )
-    const lines = out.stdout.trimEnd().split('\n')
-    expect(lines).toHaveLength(2)
-    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1704067203.000000', text: 'c' })
-    expect(JSON.parse(lines[1] ?? '')).toMatchObject({ ts: '1704067204.000000', text: 'd' })
+    // The day holds two messages; the last one is ben's coffee.
+    const out = await onSlack('tail -n 1 /mnt/slack/channels/general__C1/2025-11-03/chat.jsonl')
+    expect(texts(out)).toEqual(['coffee is ready'])
   })
 })

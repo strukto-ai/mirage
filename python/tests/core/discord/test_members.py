@@ -12,77 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.members import list_members, search_members
-
-
-@pytest.fixture
-def accessor():
-    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
+from tests.fixtures.discord_guild import GUILD, MEMBER_SEARCH, MEMBERS
 
 
 @pytest.mark.asyncio
-async def test_list_members(accessor):
-    mock_data = [
-        {"user": {"id": "U001", "username": "alice"}},
-        {"user": {"id": "U002", "username": "bob"}},
+async def test_list_members(discord_guild):
+    result = await list_members(discord_guild.accessor(), GUILD)
+    assert [m["user"]["username"] for m in result] == [
+        "alice",
+        "bob",
+        "mirage-bot",
     ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ) as mock_get:
-        result = await list_members(accessor, "G001")
-
-    assert len(result) == 2
-    assert result[0]["user"]["username"] == "alice"
-    mock_get.assert_called_once()
-    args, kwargs = mock_get.call_args
-    assert args[1:] == ("GET", "/guilds/G001/members")
-    assert kwargs["params"]["after"] == "0"
-    assert kwargs["params"]["limit"] == 1000
+    [params] = await discord_guild.run.params("GET", MEMBERS)
+    assert (params["after"], params["limit"]) == ("0", "1000")
 
 
 @pytest.mark.asyncio
-async def test_search_members(accessor):
-    mock_data = [
-        {"user": {"id": "U001", "username": "alice"}},
+async def test_search_members(discord_guild):
+    result = await search_members(discord_guild.accessor(), GUILD, "ali")
+    assert [m["user"]["username"] for m in result] == ["alice"]
+    assert await discord_guild.run.params("GET", MEMBER_SEARCH) == [
+        {"query": "ali", "limit": "100"}
     ]
-    with patch(
-        "mirage.core.discord.members.discord_request",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ) as mock_get:
-        result = await search_members(accessor, "G001", "ali")
-
-    assert len(result) == 1
-    assert result[0]["user"]["username"] == "alice"
-    mock_get.assert_called_once_with(
-        accessor,
-        "GET",
-        "/guilds/G001/members/search",
-        params={"query": "ali", "limit": 100},
-    )
 
 
 # A walk's limit stops the paging at the page that brings that many.
 @pytest.mark.asyncio
-async def test_list_members_pages_no_further_than_stop_at(accessor):
-    pages = [
-        [{"user": {"id": "U001", "username": "alice"}}],
-        [{"user": {"id": "U002", "username": "bob"}}],
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as asked:
-        result = await list_members(accessor, "G001", page_size=1, stop_at=1)
-
+async def test_list_members_pages_no_further_than_stop_at(discord_guild):
+    result = await list_members(
+        discord_guild.accessor(), GUILD, page_size=1, stop_at=1
+    )
     assert [m["user"]["username"] for m in result] == ["alice"]
-    assert asked.await_count == 1
+    assert await discord_guild.count(MEMBERS) == 1

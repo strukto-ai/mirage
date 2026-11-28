@@ -34,9 +34,8 @@ from mirage.vfs.github.github import GitHubVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.slack import SlackConfig, SlackVFS
-from tests.core.discord.conftest import FakeDiscordApi
-from tests.core.slack.conftest import FakeSlack
 from tests.e2e.s3_mock import MultiBucketS3Client
+from tests.sim.discord import FakeDiscordApi
 from tests.sim.dropbox import FakeDropbox
 from tests.sim.gdrive import FakeGDrive
 from tests.sim.github import FakeGitHubApi
@@ -57,6 +56,7 @@ from tests.sim.seam import (
     route_s3,
     route_slack,
 )
+from tests.sim.slack import FakeSlack
 from tests.sim.trace import STEP, Intent, LineDone, StepRef, Trace
 
 T = TypeVar("T")

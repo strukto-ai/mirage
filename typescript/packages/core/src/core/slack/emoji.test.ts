@@ -12,29 +12,39 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { EMOJI, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { listEmoji } from './emoji.ts'
 
-class FakeTransport implements SlackTransport {
-  public endpoints: string[] = []
-  constructor(private readonly response: SlackResponse) {}
-  call(endpoint: string): Promise<SlackResponse> {
-    this.endpoints.push(endpoint)
-    return Promise.resolve(this.response)
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 describe('listEmoji', () => {
   it('GETs emoji.list and returns the mapping', async () => {
-    const t = new FakeTransport({ ok: true, emoji: { shipit: 'https://emoji/shipit.png' } })
-    expect(await listEmoji(new SlackAccessor(t))).toEqual({ shipit: 'https://emoji/shipit.png' })
-    expect(t.endpoints).toEqual(['emoji.list'])
+    // The workspace's custom emoji: one image, one alias.
+    expect(await listEmoji(workspace.accessor())).toEqual({
+      shipit: 'https://emoji.example/shipit.png',
+      partyparrot: 'alias:parrot',
+    })
+    expect(await workspace.count(EMOJI)).toBe(1)
   })
 
   it('tolerates a missing emoji key', async () => {
-    const t = new FakeTransport({ ok: true })
-    expect(await listEmoji(new SlackAccessor(t))).toEqual({})
+    await workspace.run.answerNext('GET', EMOJI, 200, { ok: true })
+    expect(await listEmoji(workspace.accessor())).toEqual({})
   })
 })

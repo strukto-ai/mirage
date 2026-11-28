@@ -16,7 +16,6 @@ import json
 
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.cli.builtin.discord import (
     DISCORD,
     delete_verb,
@@ -32,11 +31,15 @@ from mirage.commands.cli.builtin.discord import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
-from mirage.core.discord.config import DiscordConfig
 from mirage.io.types import materialize
 from mirage.types import PathSpec
-
-ACCESSOR = DiscordAccessor(DiscordConfig(token="bot-token"))
+from tests.fixtures.discord_guild import (
+    DAY,
+    GENERAL,
+    GUILD,
+    MESSAGES,
+    SEARCH,
+)
 
 
 def _ctx(leaf: str, **flags: FlagValue) -> Context:
@@ -48,22 +51,23 @@ async def _json(out):
     return json.loads(await materialize(out))
 
 
+async def _hello(guild) -> str:
+    [hello, _] = await guild.day(GENERAL, DAY)
+    return hello["id"]
+
+
 @pytest.mark.asyncio
-async def test_send_forwards_reply_to(monkeypatch):
-    calls = []
-
-    async def fake_send(accessor, channel, text, reply_to, file):
-        calls.append((accessor, channel, text, reply_to, file))
-        return {"id": "M1"}
-
-    monkeypatch.setitem(send.__globals__, "send_message", fake_send)
+async def test_send_forwards_reply_to(discord_guild):
+    hello = await _hello(discord_guild)
     await send(
-        ACCESSOR,
+        discord_guild.accessor(),
         [],
         [],
-        _ctx("send", channel="C1", text="hi", reply_to="M0"),
+        _ctx("send", channel=GENERAL, text="hi", reply_to=hello),
     )
-    assert calls == [(ACCESSOR, "C1", "hi", "M0", None)]
+    assert await discord_guild.run.bodies("POST", MESSAGES) == [
+        {"content": "hi", "message_reference": {"message_id": hello}}
+    ]
 
 
 class _Files:
@@ -74,153 +78,136 @@ class _Files:
 
 
 @pytest.mark.asyncio
-async def test_send_attaches_the_workspace_file(monkeypatch):
-    calls = []
-
-    async def fake_send(accessor, channel, text, reply_to, file):
-        calls.append(file)
-        return {"id": "M1"}
-
-    monkeypatch.setitem(send.__globals__, "send_message", fake_send)
+async def test_send_attaches_the_workspace_file(discord_guild):
     spec = next(s for s in DISCORD.spec.subcommands if s.name == "send")
     ctx = Context(
         flags={
-            "channel": "C1",
+            "channel": GENERAL,
             "text": "",
             "file": PathSpec.from_str_path("/tmp/reply.wav"),
         },
         spec=spec,
         vfs=_Files(),
     )
-    await send(ACCESSOR, [], [], ctx)
-    assert calls == [("reply.wav", b"RIFF")]
+    out, _io = await send(discord_guild.accessor(), [], [], ctx)
+    sent = await _json(out)
+    [attached] = (await discord_guild.message(GENERAL, sent["id"]))[
+        "attachments"
+    ]
+    assert attached["filename"] == "reply.wav"
+    path = attached["url"].split("/attachments/", 1)[1].split("?", 1)[0]
+    assert await discord_guild.run.read(f"/attachments/{path}") == b"RIFF"
 
 
 @pytest.mark.asyncio
-async def test_read_defaults_limit(monkeypatch):
-    async def fake_fetch(accessor, channel, limit):
-        return [{"id": "1", "content": f"{channel}:{limit}"}]
-
-    monkeypatch.setitem(read.__globals__, "fetch_recent_messages", fake_fetch)
-    out, _io = await read(ACCESSOR, [], [], _ctx("read", channel="C1"))
-    assert await _json(out) == [{"id": "1", "content": "C1:20"}]
+async def test_read_defaults_limit(discord_guild):
+    out, _io = await read(
+        discord_guild.accessor(), [], [], _ctx("read", channel=GENERAL)
+    )
+    assert [m["content"] for m in await _json(out)] == [
+        "hello",
+        "files",
+        "morning",
+    ]
+    [params] = await discord_guild.run.params("GET", MESSAGES)
+    assert params["limit"] == "20"
 
 
 @pytest.mark.asyncio
-async def test_edit_and_delete(monkeypatch):
-    async def fake_edit(accessor, channel, message, text):
-        return {"id": message, "content": text}
-
-    async def fake_delete(accessor, channel, message):
-        return None
-
-    monkeypatch.setitem(edit.__globals__, "edit_message", fake_edit)
-    monkeypatch.setitem(delete_verb.__globals__, "delete_message", fake_delete)
+async def test_edit_and_delete(discord_guild):
+    # A bot may edit and delete only what it posted.
+    mine = await discord_guild.post(GENERAL, "draft")
+    accessor = discord_guild.accessor()
     out, _io = await edit(
-        ACCESSOR,
+        accessor,
         [],
         [],
-        _ctx("edit", channel="C1", message="M1", text="new"),
+        _ctx("edit", channel=GENERAL, message=mine["id"], text="new"),
     )
     assert (await _json(out))["content"] == "new"
     out, _io = await delete_verb(
-        ACCESSOR, [], [], _ctx("delete", channel="C1", message="M1")
+        accessor, [], [], _ctx("delete", channel=GENERAL, message=mine["id"])
     )
     assert (await _json(out))["ok"] is True
+    gone = f"/api/v10/channels/{GENERAL}/messages/{mine['id']}"
+    async with discord_guild.run.http.get(discord_guild.run.url + gone) as r:
+        assert r.status == 404
 
 
 @pytest.mark.asyncio
-async def test_react_returns_ok(monkeypatch):
-    async def fake_react(accessor, channel, message, emoji):
-        return None
-
-    monkeypatch.setitem(react.__globals__, "add_reaction", fake_react)
+async def test_react_returns_ok(discord_guild):
+    hello = await _hello(discord_guild)
     out, _io = await react(
-        ACCESSOR,
+        discord_guild.accessor(),
         [],
         [],
-        _ctx("react", channel="C1", message="M1", emoji="x"),
+        _ctx("react", channel=GENERAL, message=hello, emoji="x"),
     )
     assert (await _json(out))["ok"] is True
+    reacted = await discord_guild.message(GENERAL, hello)
+    assert [r["emoji"]["name"] for r in reacted["reactions"]] == ["x"]
 
 
 @pytest.mark.asyncio
-async def test_search_forwards_channel_filter(monkeypatch):
-    calls = []
-
-    async def fake_search(accessor, guild, query, channel_id=None):
-        calls.append((guild, query, channel_id))
-        return [{"id": "M1"}]
-
-    monkeypatch.setitem(search.__globals__, "search_guild", fake_search)
+async def test_search_forwards_channel_filter(discord_guild):
     out, _io = await search(
-        ACCESSOR,
+        discord_guild.accessor(),
         [],
         [],
-        _ctx("search", guild="G1", query="q", channel="C1"),
+        _ctx("search", guild=GUILD, query="o", channel=GENERAL),
     )
-    assert calls == [("G1", "q", "C1")]
-    assert await _json(out) == [{"id": "M1"}]
+    [params] = await discord_guild.run.params("GET", SEARCH)
+    assert (params["content"], params["channel_id"]) == ("o", GENERAL)
+    # random's chatter matches too, outside the channel asked for.
+    assert [m["content"] for m in await _json(out)] == ["hello", "morning"]
 
 
 @pytest.mark.asyncio
-async def test_thread_create_and_poll(monkeypatch):
-    async def fake_thread(accessor, channel, name, message_id=None):
-        return {"id": "T1", "name": name, "from": message_id}
-
-    async def fake_poll(
-        accessor, channel, question, answers, duration_hours, multiselect
-    ):
-        return {"id": "M9", "answers": answers, "hours": duration_hours}
-
-    monkeypatch.setitem(
-        thread_create.__globals__, "create_thread", fake_thread
-    )
-    monkeypatch.setitem(poll.__globals__, "send_poll", fake_poll)
+async def test_thread_create_and_poll(discord_guild):
+    hello = await _hello(discord_guild)
+    accessor = discord_guild.accessor()
     out, _io = await thread_create(
-        ACCESSOR,
+        accessor,
         [],
         [],
-        _ctx("thread-create", channel="C1", name="topic", message="M1"),
+        _ctx("thread-create", channel=GENERAL, name="topic", message=hello),
     )
-    assert (await _json(out))["from"] == "M1"
+    thread = await _json(out)
+    assert (thread["name"], thread["parent_id"]) == ("topic", GENERAL)
     out, _io = await poll(
-        ACCESSOR,
+        accessor,
         [],
         [],
         _ctx(
             "poll",
-            channel="C1",
+            channel=GENERAL,
             question="Lunch?",
             answer=["Pizza", "Sushi"],
         ),
     )
-    data = await _json(out)
-    assert data["answers"] == ["Pizza", "Sushi"]
-    assert data["hours"] == 24
+    sent = (await _json(out))["poll"]
+    assert [a["poll_media"]["text"] for a in sent["answers"]] == [
+        "Pizza",
+        "Sushi",
+    ]
+    [body] = await discord_guild.run.bodies("POST", MESSAGES)
+    assert body["poll"]["duration"] == 24
 
 
 @pytest.mark.asyncio
-async def test_members_and_server_info(monkeypatch):
-    async def fake_list(accessor, guild):
-        return [{"user": {"id": "U1"}}]
-
-    async def fake_search(accessor, guild, query):
-        return [{"user": {"id": "U2"}}]
-
-    async def fake_get(accessor, method, endpoint):
-        return {"id": endpoint.rsplit("/", 1)[-1]}
-
-    monkeypatch.setitem(members.__globals__, "list_members", fake_list)
-    monkeypatch.setitem(members.__globals__, "search_members", fake_search)
-    monkeypatch.setitem(server_info.__globals__, "discord_request", fake_get)
-    out, _io = await members(ACCESSOR, [], [], _ctx("members", guild="G1"))
-    assert await _json(out) == [{"user": {"id": "U1"}}]
+async def test_members_and_server_info(discord_guild):
+    accessor = discord_guild.accessor()
+    out, _io = await members(accessor, [], [], _ctx("members", guild=GUILD))
+    assert [m["user"]["username"] for m in await _json(out)] == [
+        "alice",
+        "bob",
+        "mirage-bot",
+    ]
     out, _io = await members(
-        ACCESSOR, [], [], _ctx("members", guild="G1", query="al")
+        accessor, [], [], _ctx("members", guild=GUILD, query="al")
     )
-    assert await _json(out) == [{"user": {"id": "U2"}}]
+    assert [m["user"]["username"] for m in await _json(out)] == ["alice"]
     out, _io = await server_info(
-        ACCESSOR, [], [], _ctx("server-info", guild="G1")
+        accessor, [], [], _ctx("server-info", guild=GUILD)
     )
-    assert (await _json(out))["id"] == "G1"
+    assert (await _json(out))["id"] == GUILD

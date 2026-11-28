@@ -12,88 +12,38 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.channels import list_channels, list_dms
-from mirage.core.slack.config import SlackConfig
-
-
-@pytest.fixture
-def accessor():
-    return SlackAccessor(SlackConfig(token="xoxb-test-token"))
+from tests.fixtures.slack_workspace import LISTING
 
 
 @pytest.mark.asyncio
-async def test_list_channels(accessor):
-    mock_data = {
-        "ok": True,
-        "channels": [
-            {"id": "C001", "name": "general"},
-            {"id": "C002", "name": "random"},
-        ],
-        "response_metadata": {"next_cursor": ""},
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ) as mock_get:
-        result = await list_channels(accessor)
+async def test_list_channels(slack_workspace):
+    result = await list_channels(slack_workspace.accessor())
+    assert [(c["id"], c["name"]) for c in result] == [
+        ("C1", "general"),
+        ("C2", "random"),
+    ]
+    [params] = await slack_workspace.run.params("GET", LISTING)
+    assert params["types"] == "public_channel,private_channel"
 
-    assert len(result) == 2
-    assert result[0]["name"] == "general"
-    assert result[1]["id"] == "C002"
-    mock_get.assert_called_once()
-    call_kwargs = mock_get.call_args
-    assert (
-        call_kwargs.kwargs["params"]["types"]
-        == "public_channel,private_channel"
+
+@pytest.mark.asyncio
+async def test_list_channels_pagination(slack_workspace):
+    await slack_workspace.first_page(
+        LISTING, 1, types="public_channel,private_channel"
     )
+    result = await list_channels(slack_workspace.accessor())
+    assert [c["id"] for c in result] == ["C1", "C2"]
+    first, second = await slack_workspace.run.params("GET", LISTING)
+    assert "cursor" not in first
+    assert second["cursor"] != ""
 
 
 @pytest.mark.asyncio
-async def test_list_channels_pagination(accessor):
-    page1 = {
-        "ok": True,
-        "channels": [{"id": "C001", "name": "general"}],
-        "response_metadata": {"next_cursor": "cursor_abc"},
-    }
-    page2 = {
-        "ok": True,
-        "channels": [{"id": "C002", "name": "random"}],
-        "response_metadata": {"next_cursor": ""},
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        side_effect=[page1, page2],
-    ) as mock_get:
-        result = await list_channels(accessor)
-
-    assert len(result) == 2
-    assert mock_get.call_count == 2
-    second_call = mock_get.call_args_list[1]
-    assert second_call.kwargs["params"]["cursor"] == "cursor_abc"
-
-
-@pytest.mark.asyncio
-async def test_list_dms(accessor):
-    mock_data = {
-        "ok": True,
-        "channels": [{"id": "D001", "user": "U001"}],
-        "response_metadata": {"next_cursor": ""},
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ) as mock_get:
-        result = await list_dms(accessor)
-
-    assert len(result) == 1
-    assert result[0]["id"] == "D001"
-    call_kwargs = mock_get.call_args
-    assert call_kwargs.kwargs["params"]["types"] == "im,mpim"
+async def test_list_dms(slack_workspace):
+    result = await list_dms(slack_workspace.accessor())
+    assert [(c["id"], c["user"]) for c in result] == [("D1", "U1")]
+    [params] = await slack_workspace.run.params("GET", LISTING)
+    assert params["types"] == "im,mpim"

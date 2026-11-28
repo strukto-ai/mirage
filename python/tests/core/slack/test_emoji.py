@@ -12,37 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.emoji import list_emoji
-
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
-
-
-@pytest.mark.asyncio
-async def test_list_emoji_returns_mapping():
-    with patch(
-        "mirage.core.slack.emoji.slack_get",
-        new_callable=AsyncMock,
-        return_value={
-            "ok": True,
-            "emoji": {"shipit": "https://emoji/shipit.png"},
-        },
-    ) as get:
-        emoji = await list_emoji(ACCESSOR)
-    get.assert_awaited_once_with(ACCESSOR, "emoji.list")
-    assert emoji == {"shipit": "https://emoji/shipit.png"}
+from tests.fixtures.slack_workspace import EMOJI
 
 
 @pytest.mark.asyncio
-async def test_list_emoji_tolerates_missing_key():
-    with patch(
-        "mirage.core.slack.emoji.slack_get",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ):
-        assert await list_emoji(ACCESSOR) == {}
+async def test_list_emoji_returns_mapping(slack_workspace):
+    # The workspace's custom emoji: one image, one alias.
+    emoji = await list_emoji(slack_workspace.accessor())
+    assert emoji == {
+        "shipit": "https://emoji.example/shipit.png",
+        "partyparrot": "alias:parrot",
+    }
+    assert await slack_workspace.count(EMOJI) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_emoji_tolerates_missing_key(slack_workspace):
+    await slack_workspace.run.answer_next("GET", EMOJI, 200, {"ok": True})
+    assert await list_emoji(slack_workspace.accessor()) == {}

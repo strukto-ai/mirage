@@ -14,42 +14,33 @@
 
 import asyncio
 import errno
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from aiohttp import web
-from aiohttp.test_utils import TestServer
 
 from mirage import Workspace
 from mirage.core.api.errors import ApiError
-from mirage.core.discord.entry import (
-    channel_dirname,
-    channel_entry,
-    guild_dirname,
-    guild_entry,
-    history_entry,
-    member_entry,
-    member_filename,
-)
+from mirage.core.render.json import jsonl_bytes
 from mirage.fuse.fs import MirageFS
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.types import ContentType, FileStat, FileType, MountMode
-from mirage.vfs.discord import DiscordConfig, DiscordVFS
+from mirage.vfs.discord import DiscordVFS
 from mirage.workspace.files import Files
+from tests.fixtures.discord_guild import (
+    DAY,
+    GENERAL,
+    MESSAGES,
+    DiscordGuild,
+    discord_guild,
+)
 
-GUILD_PAYLOAD = {"id": "G1", "name": "TestGuild"}
-CHANNEL_PAYLOAD = {"id": "C1", "name": "general", "type": 0}
-MEMBER_PAYLOAD = {"user": {"id": "U1", "username": "alice"}, "roles": []}
+__all__ = ["discord_guild"]
 
-# Every dynamic level is a `name__id` dirname the tree itself mints, so
-# the fixture mints them the same way; a bare name is not a path the
-# classifier recognizes.
-GUILD = guild_dirname(GUILD_PAYLOAD)
-CHANNEL = channel_dirname(CHANNEL_PAYLOAD)
-MEMBER = member_filename(MEMBER_PAYLOAD)
-DATE = "2024-01-15"
+GUILD = "My Server__111"
+CHANNEL = "general__211"
+MEMBER = "alice__311.json"
+DATE = DAY
 FILE = "chat.jsonl"
 CHANNEL_PATH = f"{GUILD}/channels/{CHANNEL}"
 DATE_DIR_PATH = f"{CHANNEL_PATH}/{DATE}"
@@ -57,70 +48,22 @@ FILE_PATH = f"{DATE_DIR_PATH}/{FILE}"
 MEMBER_PATH = f"{GUILD}/members/{MEMBER}"
 
 PREFIX = "/discord"
-
-FAKE_JSONL = (
-    b'{"id":"1","content":"hello","author":{"username":"alice"}}\n'
-    b'{"id":"2","content":"world","author":{"username":"bob"}}\n'
-)
-
-# The day lister records chat.jsonl's exact rendered size; a sizeless
-# entry, which getattr reports 0 for, is only ever made by a test.
-CHAT_ENTRY = FileStat(
-    name=FILE,
-    type=FileType.FILE,
-    content=ContentType.TEXT,
-    fingerprint=f"{CHANNEL_PAYLOAD['id']}:{DATE}:chat",
-)
+HTTP_PATH = f"{PREFIX}/{FILE_PATH}"
 
 
-def _run(coro):
-    return asyncio.run(coro)
-
-
-def _make_world() -> tuple[DiscordVFS, Workspace]:
-    # Seeding happens after the mount: the index a driver runs under
-    # is the mount's, built when the VFS is placed.
-    config = DiscordConfig(token="test-token")
-    vfs = DiscordVFS(config=config)
+@pytest_asyncio.fixture
+async def world(discord_guild: DiscordGuild):
+    vfs = DiscordVFS(config=discord_guild.config())
     ws = Workspace({f"{PREFIX}/": vfs}, mode=MountMode.READ)
-    index = ws.mount(PREFIX).index_store
-    _run(index.set_dir(PREFIX, [(GUILD, guild_entry(GUILD_PAYLOAD))]))
-    _run(index.put(f"{PREFIX}/{CHANNEL_PATH}", channel_entry(CHANNEL_PAYLOAD)))
-    _run(
-        index.put(
-            f"{PREFIX}/{DATE_DIR_PATH}",
-            history_entry(CHANNEL_PAYLOAD["id"], DATE),
-        )
-    )
-    _run(index.put(f"{PREFIX}/{FILE_PATH}", CHAT_ENTRY))
-    _run(index.put(f"{PREFIX}/{MEMBER_PATH}", member_entry(MEMBER_PAYLOAD)))
-    # A seeded listing answers readdir without a lister, so the mount
-    # serves these directories without reaching the API.
-    _run(
-        index.set_dir(
-            f"{PREFIX}/{GUILD}/channels",
-            [(CHANNEL, channel_entry(CHANNEL_PAYLOAD))],
-        )
-    )
-    _run(
-        index.set_dir(
-            f"{PREFIX}/{CHANNEL_PATH}",
-            [(DATE, history_entry(CHANNEL_PAYLOAD["id"], DATE))],
-        )
-    )
-    _run(index.set_dir(f"{PREFIX}/{DATE_DIR_PATH}", [(FILE, CHAT_ENTRY)]))
-    _run(
-        index.set_dir(
-            f"{PREFIX}/{GUILD}/members",
-            [(MEMBER, member_entry(MEMBER_PAYLOAD))],
-        )
-    )
-    return vfs, ws
+    yield vfs, ws
+    await ws.close()
 
 
-@pytest.fixture
-def world():
-    return _make_world()
+@pytest_asyncio.fixture
+async def jsonl(discord_guild: DiscordGuild) -> bytes:
+    """general's chat.jsonl for the day: Discord's own messages, oldest
+    first."""
+    return jsonl_bytes(await discord_guild.day(GENERAL, DATE))
 
 
 @pytest.fixture
@@ -129,34 +72,45 @@ def ops(world) -> Files:
 
 
 @pytest.fixture
-def fs(ops):
-    return MirageFS(ops)
+def fs(world, ops):
+    fs = MirageFS(ops)
+    yield fs
+    # The accessor's connections were opened on the FUSE loop, so they
+    # are closed there before it stops.
+    asyncio.run_coroutine_threadsafe(
+        world[0].accessor.close(), fs._loop
+    ).result()
+    fs._loop.call_soon_threadsafe(fs._loop.stop)
 
 
 # ── ops.readdir ──────────────────────────────────
 
 
-def test_ops_readdir_guild(ops):
-    entries = _run(ops.readdir(f"{PREFIX}/{GUILD}/"))
+@pytest.mark.asyncio
+async def test_ops_readdir_guild(ops):
+    entries = await ops.readdir(f"{PREFIX}/{GUILD}/")
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert "channels" in names
     assert "members" in names
 
 
-def test_ops_readdir_channels(ops):
-    entries = _run(ops.readdir(f"{PREFIX}/{GUILD}/channels/"))
+@pytest.mark.asyncio
+async def test_ops_readdir_channels(ops):
+    entries = await ops.readdir(f"{PREFIX}/{GUILD}/channels/")
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert CHANNEL in names
 
 
-def test_ops_readdir_dates(ops):
-    entries = _run(ops.readdir(f"{PREFIX}/{CHANNEL_PATH}/"))
+@pytest.mark.asyncio
+async def test_ops_readdir_dates(ops):
+    entries = await ops.readdir(f"{PREFIX}/{CHANNEL_PATH}/")
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert DATE in names
 
 
-def test_ops_readdir_members(ops):
-    entries = _run(ops.readdir(f"{PREFIX}/{GUILD}/members/"))
+@pytest.mark.asyncio
+async def test_ops_readdir_members(ops):
+    entries = await ops.readdir(f"{PREFIX}/{GUILD}/members/")
     names = [e.rsplit("/", 1)[-1] for e in entries]
     assert MEMBER in names
 
@@ -164,18 +118,21 @@ def test_ops_readdir_members(ops):
 # ── ops.stat ─────────────────────────────────────
 
 
-def test_ops_stat_guild(ops):
-    s = _run(ops.stat(f"{PREFIX}/{GUILD}"))
+@pytest.mark.asyncio
+async def test_ops_stat_guild(ops):
+    s = await ops.stat(f"{PREFIX}/{GUILD}")
     assert s.type == FileType.DIRECTORY
 
 
-def test_ops_stat_channel(ops):
-    s = _run(ops.stat(f"{PREFIX}/{CHANNEL_PATH}"))
+@pytest.mark.asyncio
+async def test_ops_stat_channel(ops):
+    s = await ops.stat(f"{PREFIX}/{CHANNEL_PATH}")
     assert s.type == FileType.DIRECTORY
 
 
-def test_ops_stat_file(ops):
-    s = _run(ops.stat(f"{PREFIX}/{FILE_PATH}"))
+@pytest.mark.asyncio
+async def test_ops_stat_file(ops):
+    s = await ops.stat(f"{PREFIX}/{FILE_PATH}")
     assert s.content == ContentType.TEXT
     assert s.name == FILE
 
@@ -183,39 +140,29 @@ def test_ops_stat_file(ops):
 # ── ops.read ─────────────────────────────────────
 
 
-def test_ops_read_jsonl(ops):
-    with patch(
-        "mirage.core.discord.read.get_history_jsonl",
-        new_callable=AsyncMock,
-        return_value=FAKE_JSONL,
-    ):
-        data = _run(ops.read(f"{PREFIX}/{FILE_PATH}"))
-    assert data == FAKE_JSONL
+@pytest.mark.asyncio
+async def test_ops_read_jsonl(ops, jsonl):
+    data = await ops.read(f"{PREFIX}/{FILE_PATH}")
+    assert data == jsonl
     assert b"hello" in data
 
 
-def test_ops_read_member(ops):
-    with patch(
-        "mirage.core.discord.read.list_members",
-        new_callable=AsyncMock,
-        return_value=[{"user": {"id": "U1", "username": "alice"}}],
-    ):
-        data = _run(ops.read(f"{PREFIX}/{MEMBER_PATH}"))
+@pytest.mark.asyncio
+async def test_ops_read_member(ops):
+    data = await ops.read(f"{PREFIX}/{MEMBER_PATH}")
     assert b"alice" in data
 
 
 # ── ops.read prefix in index keys ────────────────
 
 
-def test_ops_read_uses_prefix_for_index(ops):
-    with patch(
-        "mirage.core.discord.read.get_history_jsonl",
-        new_callable=AsyncMock,
-        return_value=b"data",
-    ) as mock_get:
-        data = _run(ops.read(f"{PREFIX}/{FILE_PATH}"))
-    assert data == b"data"
-    mock_get.assert_called_once()
+@pytest.mark.asyncio
+async def test_ops_read_uses_prefix_for_index(ops, jsonl, discord_guild):
+    # The day's row is found under the mount's prefix, so the read fetches
+    # the day it names.
+    data = await ops.read(f"{PREFIX}/{FILE_PATH}")
+    assert data == jsonl
+    assert (GENERAL, DATE) in await discord_guild.day_fetches()
 
 
 # ── FUSE getattr ─────────────────────────────────
@@ -241,7 +188,16 @@ def test_fuse_getattr_file(fs):
     assert attr["st_mode"] & 0o170000 == 0o100000
 
 
-def test_fuse_getattr_unknown_size(fs):
+@pytest_asyncio.fixture
+async def sizeless(world):
+    # The day lister records chat.jsonl's exact rendered size; a sizeless
+    # entry, which getattr reports 0 for, is only ever made by a test.
+    index = world[1].mount(PREFIX).index_store
+    chat = FileStat(name=FILE, type=FileType.FILE, content=ContentType.TEXT)
+    await index.set_dir(f"{PREFIX}/{DATE_DIR_PATH}", [(FILE, chat)])
+
+
+def test_fuse_getattr_unknown_size(sizeless, fs):
     # Unknown size before open() — direct_io ensures read() still works
     attr = fs.getattr(f"{PREFIX}/{FILE_PATH}")
     assert attr["st_size"] == 0
@@ -274,98 +230,33 @@ def test_fuse_readdir_dates(fs):
 # ── FUSE open + read ─────────────────────────────
 
 
-def test_fuse_read_file(fs):
-    with patch(
-        "mirage.core.discord.read.get_history_jsonl",
-        new_callable=AsyncMock,
-        return_value=FAKE_JSONL,
-    ):
-        fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
-        data = fs.read(f"{PREFIX}/{FILE_PATH}", 4096, 0, fh)
-        fs.release(f"{PREFIX}/{FILE_PATH}", fh)
-    assert data == FAKE_JSONL
+def test_fuse_read_file(fs, jsonl):
+    fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
+    data = fs.read(f"{PREFIX}/{FILE_PATH}", 4096, 0, fh)
+    fs.release(f"{PREFIX}/{FILE_PATH}", fh)
+    assert data == jsonl
 
 
-def test_fuse_read_offset(fs):
-    with patch(
-        "mirage.core.discord.read.get_history_jsonl",
-        new_callable=AsyncMock,
-        return_value=FAKE_JSONL,
-    ):
-        fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
-        data = fs.read(f"{PREFIX}/{FILE_PATH}", 10, 0, fh)
-        fs.release(f"{PREFIX}/{FILE_PATH}", fh)
-    assert data == FAKE_JSONL[:10]
+def test_fuse_read_offset(fs, jsonl):
+    fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
+    data = fs.read(f"{PREFIX}/{FILE_PATH}", 10, 0, fh)
+    fs.release(f"{PREFIX}/{FILE_PATH}", fh)
+    assert data == jsonl[:10]
 
 
-def test_fuse_read_beyond_eof(fs):
-    with patch(
-        "mirage.core.discord.read.get_history_jsonl",
-        new_callable=AsyncMock,
-        return_value=FAKE_JSONL,
-    ):
-        fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
-        data = fs.read(f"{PREFIX}/{FILE_PATH}", 4096, len(FAKE_JSONL), fh)
-        fs.release(f"{PREFIX}/{FILE_PATH}", fh)
+def test_fuse_read_beyond_eof(fs, jsonl):
+    fh = fs.open(f"{PREFIX}/{FILE_PATH}", 0)
+    data = fs.read(f"{PREFIX}/{FILE_PATH}", 4096, len(jsonl), fh)
+    fs.release(f"{PREFIX}/{FILE_PATH}", fh)
     assert data == b""
 
 
-HTTP_MESSAGES = [
-    {
-        "id": "1196423538278400000",
-        "content": "hello",
-        "author": {"username": "alice"},
-    },
-    {
-        "id": "1196423538278400001",
-        "content": "world",
-        "author": {"username": "bob"},
-    },
-]
-HTTP_JSONL = (
-    b'{"id":"1196423538278400000","content":"hello",'
-    b'"author":{"username":"alice"}}\n'
-    b'{"id":"1196423538278400001","content":"world",'
-    b'"author":{"username":"bob"}}\n'
-)
-HTTP_PATH = f"{PREFIX}/{FILE_PATH}"
-
-
-class _DiscordHTTP:
-    def __init__(self):
-        self.status = 200
-        self.requests = []
-        self.history_calls = 0
-
-    async def request(self, request):
-        assert request.headers["Authorization"] == "Bot test-token"
-        self.requests.append(request.path)
-        if request.path == "/users/@me/guilds":
-            return web.json_response([GUILD_PAYLOAD])
-        if request.path == "/guilds/G1/channels":
-            return web.json_response(
-                [
-                    {
-                        **CHANNEL_PAYLOAD,
-                        "last_message_id": HTTP_MESSAGES[-1]["id"],
-                    }
-                ]
-            )
-        assert request.path == "/channels/C1/messages"
-        self.history_calls += 1
-        if self.status != 200:
-            return web.json_response(
-                {"message": "refused", "retry_after": 0},
-                status=self.status,
-            )
-        return web.json_response(list(reversed(HTTP_MESSAGES)))
-
-
 class _DiscordReader:
-    def __init__(self, backend, ws, http, use_fuse):
+    def __init__(self, backend, ws, guild, jsonl, use_fuse):
         self.backend = backend
         self.ws = ws
-        self.http = http
+        self.guild = guild
+        self.jsonl = jsonl
         session = ws.create_session("reader")
         self.fuse = MirageFS(ws.vfs, session=session) if use_fuse else None
         self.core = (
@@ -375,10 +266,13 @@ class _DiscordReader:
         )
         self.opened = []
 
+    async def history_calls(self) -> int:
+        return await self.guild.count(MESSAGES)
+
     async def list_day(self):
         stat = await self.ws.vfs.stat(HTTP_PATH)
-        assert stat.size == len(HTTP_JSONL)
-        assert self.http.history_calls > 0
+        assert stat.size == len(self.jsonl)
+        assert await self.history_calls() > 0
 
     async def size(self, fh=None):
         if self.fuse is not None:
@@ -436,22 +330,16 @@ class _DiscordReader:
 
 
 @pytest_asyncio.fixture(params=["core", "fuse"])
-async def http_reader(request):
-    http = _DiscordHTTP()
-    app = web.Application()
-    app.router.add_get("/{path:.*}", http.request)
-    async with TestServer(app) as server:
-        backend = DiscordVFS(
-            config=DiscordConfig(
-                token="test-token", base_url=str(server.make_url(""))
-            )
-        )
-        ws = Workspace({f"{PREFIX}/": backend}, mode=MountMode.READ)
-        reader = _DiscordReader(backend, ws, http, request.param == "fuse")
-        try:
-            yield reader
-        finally:
-            await reader.close()
+async def http_reader(request, discord_guild, jsonl):
+    backend = DiscordVFS(config=discord_guild.config())
+    ws = Workspace({f"{PREFIX}/": backend}, mode=MountMode.READ)
+    reader = _DiscordReader(
+        backend, ws, discord_guild, jsonl, request.param == "fuse"
+    )
+    try:
+        yield reader
+    finally:
+        await reader.close()
 
 
 @pytest.mark.asyncio
@@ -461,18 +349,18 @@ async def test_http_listed_day_reads_exact_bytes_and_releases(
 ):
     reader = http_reader
     await reader.list_day()
-    assert await reader.size() == len(HTTP_JSONL)
-    before = reader.http.history_calls
+    assert await reader.size() == len(reader.jsonl)
+    before = await reader.history_calls()
     fh = await reader.open()
-    assert reader.http.history_calls == before
-    assert await reader.size(fh) == len(HTTP_JSONL)
+    assert await reader.history_calls() == before
+    assert await reader.size(fh) == len(reader.jsonl)
     if early_close:
-        assert await reader.read(fh, 9, 3) == HTTP_JSONL[3:12]
+        assert await reader.read(fh, 9, 3) == reader.jsonl[3:12]
     else:
-        assert await reader.read(fh) == HTTP_JSONL
-        assert await reader.read(fh, 9, len(HTTP_JSONL)) == b""
+        assert await reader.read(fh) == reader.jsonl
+        assert await reader.read(fh, 9, len(reader.jsonl)) == b""
     await reader.release(fh)
-    assert reader.http.history_calls == before + 1
+    assert await reader.history_calls() == before + 1
 
 
 @pytest.mark.asyncio
@@ -484,14 +372,14 @@ async def test_http_refused_day_fails_getattr_and_does_not_cache_empty(
     http_reader, status, attempts, code
 ):
     reader = http_reader
-    reader.http.status = status
+    await reader.guild.refuse(MESSAGES, status)
     with pytest.raises((ApiError, OSError)) as failure:
         await reader.size()
     assert classify_error(failure.value) == code
-    assert reader.http.history_calls == attempts
-    reader.http.status = 200
-    assert await reader.size() == len(HTTP_JSONL)
-    assert reader.http.history_calls == attempts + 1
+    assert await reader.history_calls() == attempts
+    await reader.guild.run.clear_answers()
+    assert await reader.size() == len(reader.jsonl)
+    assert await reader.history_calls() == attempts + 1
 
 
 @pytest.mark.asyncio
@@ -501,8 +389,8 @@ async def test_http_hydrated_handle_obeys_new_policy_before_retained_bytes(
     reader = http_reader
     await reader.list_day()
     fh = await reader.open()
-    assert await reader.read(fh) == HTTP_JSONL
-    before = len(reader.http.requests)
+    assert await reader.read(fh) == reader.jsonl
+    before = len(await reader.guild.run.requests())
     await reader.ws.set_session_profile(
         "reader", {"paths": {"hide": [HTTP_PATH]}}
     )
@@ -512,8 +400,8 @@ async def test_http_hydrated_handle_obeys_new_policy_before_retained_bytes(
     with pytest.raises(OSError) as hidden:
         await reader.size(fh)
     assert hidden.value.errno == errno.ENOENT
-    assert len(reader.http.requests) == before
+    assert len(await reader.guild.run.requests()) == before
     await reader.ws.set_session_profile("reader", {})
-    assert await reader.read(fh) == HTTP_JSONL
-    assert len(reader.http.requests) == before
+    assert await reader.read(fh) == reader.jsonl
+    assert len(await reader.guild.run.requests()) == before
     await reader.release(fh)

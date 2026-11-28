@@ -13,50 +13,40 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { MountMode } from '@struktoai/mirage-core/types'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { DiscordGuild } from '../../../../core/tests/fixtures/discord_guild.ts'
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    headers: { 'content-type': 'application/json' },
-  })
-}
+let origin = ''
+let guild: DiscordGuild
 
-function urlOf(arg: unknown): string {
-  if (arg instanceof URL) return arg.href
-  if (arg instanceof Request) return arg.url
-  return String(arg)
-}
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('DiscordVFS integration', () => {
-  const originalFetch = globalThis.fetch
-
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(() => Promise.resolve(jsonResponse([]))) as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   it('ls /discord/ returns top-level guild directory names', async () => {
-    globalThis.fetch = vi.fn((url: string | URL | Request) => {
-      const u = urlOf(url)
-      if (u.includes('/users/@me/guilds')) {
-        return Promise.resolve(jsonResponse([{ id: 'G1', name: 'My Server' }]))
-      }
-      return Promise.resolve(jsonResponse([]))
-    }) as unknown as typeof fetch
-
-    const discord = new DiscordVFS({ token: 'bot-test' })
-    const ws = new Workspace({ '/discord': discord }, { mode: MountMode.READ })
+    const ws = new Workspace(
+      { '/discord': new DiscordVFS(guild.config()) },
+      { mode: MountMode.READ },
+    )
     try {
       const result = await ws.shell('ls /discord/')
       if (result.exitCode !== 0) {
         throw new Error(`ls failed: ${result.stderrText} | stdout: ${result.stdoutText}`)
       }
-      expect(result.stdoutText).toContain('My Server__G1')
+      expect(result.stdoutText).toContain('My Server__111')
     } finally {
       await ws.close()
     }
