@@ -154,7 +154,8 @@ impl Zone {
     }
 
     /// The offset east of UTC, in seconds, and the abbreviation in force
-    /// at instant `t`.
+    /// at instant `t`, which pdfinfo prints its dates in.
+    #[cfg(feature = "pdf")]
     pub(crate) fn local(&self, t: i64) -> (i64, String) {
         let fix = self.at(t);
         (fix.east, fix.name.as_str().to_string())

@@ -1,7 +1,7 @@
 use num_bigint::BigUint;
 use num_traits::{One, ToPrimitive, Zero};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Rendered {
     pub prefix: Vec<u8>,
     pub body: Vec<u8>,
@@ -405,25 +405,60 @@ fn sign(negative: bool, flags: &[u8]) -> Vec<u8> {
 }
 
 pub fn render_integer(value: i128, conv: u8, flags: &[u8], precision: Option<u64>) -> Rendered {
+    let mut rendered = Rendered::default();
+    render_integer_into(value, conv, flags, precision, &mut rendered);
+    rendered
+}
+
+/// `render_integer` into `rendered`, whose buffers it reuses, so a caller
+/// rendering many numbers allocates once.
+pub fn render_integer_into(
+    value: i128,
+    conv: u8,
+    flags: &[u8],
+    precision: Option<u64>,
+    rendered: &mut Rendered,
+) {
     let signed = matches!(conv, b'd' | b'i');
     let magnitude = value.unsigned_abs();
-    let mut prefix = if signed && value < 0 {
-        vec![b'-']
+    let prefix = &mut rendered.prefix;
+    prefix.clear();
+    if signed && value < 0 {
+        prefix.push(b'-');
     } else if signed && flag(flags, b'+') {
-        vec![b'+']
+        prefix.push(b'+');
     } else if signed && flag(flags, b' ') {
-        vec![b' ']
-    } else {
-        Vec::new()
-    };
-    let mut digits = match conv {
-        b'o' => format!("{magnitude:o}").into_bytes(),
-        b'x' => format!("{magnitude:x}").into_bytes(),
-        b'X' => format!("{magnitude:X}").into_bytes(),
-        _ => magnitude.to_string().into_bytes(),
-    };
-    if magnitude == 0 && precision == Some(0) {
-        digits.clear();
+        prefix.push(b' ');
+    }
+    let digits = &mut rendered.suffix;
+    digits.clear();
+    if magnitude != 0 || precision != Some(0) {
+        let (radix, letters): (u64, &[u8; 16]) = match conv {
+            b'o' => (8, b"0123456789abcdef"),
+            b'x' => (16, b"0123456789abcdef"),
+            b'X' => (16, b"0123456789ABCDEF"),
+            _ => (10, b"0123456789abcdef"),
+        };
+        match u64::try_from(magnitude) {
+            Ok(mut rest) => loop {
+                digits.push(letters[(rest % radix) as usize]);
+                rest /= radix;
+                if rest == 0 {
+                    break;
+                }
+            },
+            Err(_) => {
+                let mut rest = magnitude;
+                loop {
+                    digits.push(letters[(rest % u128::from(radix)) as usize]);
+                    rest /= u128::from(radix);
+                    if rest == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        digits.reverse();
     }
     let mut leading_zeroes = precision.unwrap_or(0).saturating_sub(digits.len() as u64);
     if flag(flags, b'#') {
@@ -434,13 +469,9 @@ pub fn render_integer(value: i128, conv: u8, flags: &[u8], precision: Option<u64
             leading_zeroes = 1;
         }
     }
-    Rendered {
-        prefix,
-        body: Vec::new(),
-        zero_tail: leading_zeroes,
-        suffix: digits,
-        allow_zero: precision.is_none(),
-    }
+    rendered.body.clear();
+    rendered.zero_tail = leading_zeroes;
+    rendered.allow_zero = precision.is_none();
 }
 
 /// A finite magnitude's decimal digits, the first of them at `10**point`.

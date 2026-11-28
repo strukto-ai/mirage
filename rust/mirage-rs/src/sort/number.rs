@@ -196,31 +196,44 @@ fn digit_run(field: &[u8], from: usize) -> usize {
 }
 
 pub(crate) fn leading_number(field: &[u8]) -> Number<'_> {
+    let (negative, integer, fraction) = number_spans(field);
+    Number {
+        negative,
+        integer: &field[integer.0..integer.1],
+        fraction: &field[fraction.0..fraction.1],
+    }
+}
+
+/// `leading_number`'s sign, and where in `field` its integer digits
+/// (without leading zeros) and fraction digits (without trailing zeros)
+/// are.
+pub(super) fn number_spans(field: &[u8]) -> (bool, (usize, usize), (usize, usize)) {
     let mut at = skip_blanks(field);
     let minus = field.get(at) == Some(&b'-');
     if minus {
         at += 1;
     }
     let end = digit_run(field, at);
-    let mut integer = &field[at..end];
-    integer = &integer[integer
-        .iter()
-        .position(|&d| d != b'0')
-        .unwrap_or(integer.len())..];
-    let mut fraction: &[u8] = &[];
+    let integer = (
+        field[at..end]
+            .iter()
+            .position(|&d| d != b'0')
+            .map_or(end, |zeros| at + zeros),
+        end,
+    );
+    let mut fraction = (end, end);
     if field.get(end) == Some(&b'.') {
         let stop = digit_run(field, end + 1);
-        fraction = &field[end + 1..stop];
-        fraction = &fraction[..fraction
-            .iter()
-            .rposition(|&d| d != b'0')
-            .map_or(0, |at| at + 1)];
+        fraction = (
+            end + 1,
+            field[end + 1..stop]
+                .iter()
+                .rposition(|&d| d != b'0')
+                .map_or(end + 1, |last| end + 2 + last),
+        );
     }
-    Number {
-        negative: minus && !(integer.is_empty() && fraction.is_empty()),
-        integer,
-        fraction,
-    }
+    let empty = integer.0 == integer.1 && fraction.0 == fraction.1;
+    (minus && !empty, integer, fraction)
 }
 
 /// `-h`'s key: the unit's order (negated for a

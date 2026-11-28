@@ -15,8 +15,8 @@ use crate::{
     constants::{MAX_HELD, OUTPUT},
     parse_config,
 };
-use cost::{COST_BYTES, weight};
-use key::{Compare, Comparison};
+use cost::{COST_BYTES, cost, weight};
+use key::{Compare, Comparison, Found};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", tag = "mode")]
@@ -55,21 +55,26 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             compare,
             zero_terminated,
             run_bytes,
-        } => Box::new(Sorter {
+        } if compare.finds_keys() => {
+            let found_bytes = 2 * (size_of::<Keyed>() - size_of::<Bare>())
+                + compare.keys.len() * size_of::<Found>();
+            Box::new(Sorter::<Keyed>::new(
+                compare,
+                separator(zero_terminated),
+                run_bytes,
+                found_bytes,
+            ))
+        }
+        Config::Sort {
             compare,
-            separator: separator(zero_terminated),
+            zero_terminated,
             run_bytes,
-            data: Vec::new(),
-            spans: Vec::new(),
-            scratch: Vec::new(),
-            bounds: Vec::new(),
-            scanned: 0,
-            start: 0,
-            size: 0,
-            phase: Phase::Idle,
-            ended: false,
-            comparison: Comparison::default(),
-        }),
+        } => Box::new(Sorter::<Bare>::new(
+            compare,
+            separator(zero_terminated),
+            run_bytes,
+            0,
+        )),
         Config::Merge {
             compare,
             zero_terminated,
@@ -107,6 +112,117 @@ fn separator(zero_terminated: bool) -> u8 {
 }
 
 const RECORD_OVERHEAD: usize = 64;
+
+/// A record of a run, its bytes at `lo..hi` of the buffered data.
+trait Span: Copy + Default + Send + Sync + 'static {
+    /// Whether a run finds its records' keys.
+    const FINDS: bool;
+
+    fn new(lo: usize, hi: usize) -> Self;
+
+    fn lo(&self) -> usize;
+
+    fn hi(&self) -> usize;
+
+    /// Where its keys start in the run's found keys, `NOT_FOUND` when they
+    /// were not found.
+    fn found(&self) -> usize;
+
+    fn set_found(&mut self, at: usize);
+
+    fn bytes<'a>(&self, data: &'a [u8]) -> &'a [u8] {
+        &data[self.lo()..self.hi()]
+    }
+}
+
+const NOT_FOUND: usize = usize::MAX;
+
+/// A record of a sort with no keys to find, no larger than it was.
+#[derive(Clone, Copy, Default)]
+struct Bare {
+    lo: usize,
+    hi: usize,
+}
+
+impl Span for Bare {
+    const FINDS: bool = false;
+
+    fn new(lo: usize, hi: usize) -> Self {
+        Bare { lo, hi }
+    }
+
+    fn lo(&self) -> usize {
+        self.lo
+    }
+
+    fn hi(&self) -> usize {
+        self.hi
+    }
+
+    fn found(&self) -> usize {
+        NOT_FOUND
+    }
+
+    fn set_found(&mut self, _at: usize) {}
+}
+
+/// A record of a keyed sort and where its found keys start.
+#[derive(Clone, Copy, Default)]
+struct Keyed {
+    lo: usize,
+    hi: usize,
+    found: usize,
+}
+
+impl Span for Keyed {
+    const FINDS: bool = true;
+
+    fn new(lo: usize, hi: usize) -> Self {
+        Keyed {
+            lo,
+            hi,
+            found: NOT_FOUND,
+        }
+    }
+
+    fn lo(&self) -> usize {
+        self.lo
+    }
+
+    fn hi(&self) -> usize {
+        self.hi
+    }
+
+    fn found(&self) -> usize {
+        self.found
+    }
+
+    fn set_found(&mut self, at: usize) {
+        self.found = at;
+    }
+}
+
+/// The order of two records from their found keys alone, or None when
+/// either has none.
+fn by_found<S: Span>(
+    compare: &Compare,
+    data: &[u8],
+    found: &[Found],
+    a: S,
+    b: S,
+) -> Option<Ordering> {
+    let (at_a, at_b) = (a.found(), b.found());
+    if at_a == NOT_FOUND || at_b == NOT_FOUND {
+        return None;
+    }
+    let keys = compare.keys.len();
+    Some(compare.found(
+        a.bytes(data),
+        &found[at_a..at_a + keys],
+        b.bytes(data),
+        &found[at_b..at_b + keys],
+    ))
+}
 
 fn append(buffer: &mut Vec<u8>, input: &[u8]) -> Result<(), StreamError> {
     let needed = buffer.len().saturating_add(input.len());
@@ -152,7 +268,7 @@ const BLOCK: usize = 512;
 
 /// Where a run is: its records are sorted a block at a time, the blocks
 /// merged a step at a time, and the run then written a piece at a time.
-enum Phase {
+enum Phase<S> {
     Idle,
     Blocks {
         next: usize,
@@ -170,7 +286,7 @@ enum Phase {
     /// kept.
     Write {
         next: usize,
-        kept: Option<(usize, usize)>,
+        kept: Option<S>,
         offset: Option<usize>,
     },
 }
@@ -178,33 +294,58 @@ enum Phase {
 /// Records buffer until they fill a run; the stream is then busy and every
 /// `drain` does a bounded step of sorting or writes a piece, until the run
 /// is out. `feed` with no bytes starts the next run from what is already
-/// buffered, and after `finish` from whatever is left.
-struct Sorter {
+/// buffered, and after `finish` from whatever is left. Each block sort
+/// first finds the keys of its records of at most `COST_BYTES` when its
+/// spans are `Keyed`, so they are compared from then on without reading
+/// their fields again; a record counts `found_bytes` more for them.
+struct Sorter<S> {
     compare: Compare,
     separator: u8,
     run_bytes: usize,
+    found_bytes: usize,
     data: Vec<u8>,
-    spans: Vec<(usize, usize)>,
-    scratch: Vec<(usize, usize)>,
+    spans: Vec<S>,
+    scratch: Vec<S>,
+    found: Vec<Found>,
     /// Where each sorted run of `spans` starts, then where the last ends.
     bounds: Vec<usize>,
     /// `data[..scanned]` is split into records; the next starts at `start`.
     scanned: usize,
     start: usize,
     size: usize,
-    phase: Phase,
+    phase: Phase<S>,
     ended: bool,
     comparison: Comparison,
 }
 
-impl Sorter {
+impl<S: Span> Sorter<S> {
+    fn new(compare: Compare, separator: u8, run_bytes: usize, found_bytes: usize) -> Self {
+        Sorter {
+            compare,
+            separator,
+            run_bytes,
+            found_bytes,
+            data: Vec::new(),
+            spans: Vec::new(),
+            scratch: Vec::new(),
+            found: Vec::new(),
+            bounds: Vec::new(),
+            scanned: 0,
+            start: 0,
+            size: 0,
+            phase: Phase::Idle,
+            ended: false,
+            comparison: Comparison::default(),
+        }
+    }
+
     /// Split buffered bytes into records, stopping once they fill a run;
     /// true when they did.
     fn scan(&mut self) -> bool {
         while let Some(at) = memchr::memchr(self.separator, &self.data[self.scanned..]) {
             let end = self.scanned + at;
-            self.spans.push((self.start, end));
-            self.size += end - self.start + RECORD_OVERHEAD;
+            self.spans.push(S::new(self.start, end));
+            self.size += end - self.start + RECORD_OVERHEAD + self.found_bytes;
             self.start = end + 1;
             self.scanned = self.start;
             if self.size >= self.run_bytes {
@@ -227,7 +368,7 @@ impl Sorter {
             return;
         }
         if self.start < self.data.len() {
-            self.spans.push((self.start, self.data.len()));
+            self.spans.push(S::new(self.start, self.data.len()));
             self.start = self.data.len();
             self.scanned = self.start;
         }
@@ -248,13 +389,26 @@ impl Sorter {
         self.data = Vec::new();
         self.spans = Vec::new();
         self.scratch = Vec::new();
+        self.found = Vec::new();
         self.bounds = Vec::new();
         self.scanned = 0;
         self.start = 0;
     }
 
-    fn record(&self, span: (usize, usize)) -> &[u8] {
-        &self.data[span.0..span.1]
+    /// Two records' order, from their found keys when both have them,
+    /// else a bounded step of the comparison; None while it goes on.
+    fn order(&mut self, a: S, b: S, work: &mut usize, budget: usize) -> Option<Ordering> {
+        if let Some(order) = by_found(&self.compare, &self.data, &self.found, a, b) {
+            *work += cost(a.bytes(&self.data), b.bytes(&self.data));
+            return Some(order);
+        }
+        self.comparison.step(
+            &self.compare,
+            a.bytes(&self.data),
+            b.bytes(&self.data),
+            work,
+            budget,
+        )
     }
 
     /// One bounded step of sorting, or one piece of output.
@@ -280,7 +434,7 @@ impl Sorter {
         if next >= count {
             self.phase = if self.bounds.len() > 2 {
                 self.scratch.clear();
-                self.scratch.resize(count, (0, 0));
+                self.scratch.resize(count, S::default());
                 self.first_pair()
             } else {
                 Phase::Write {
@@ -294,24 +448,33 @@ impl Sorter {
         let mut end = next;
         let mut load = 0;
         while end < count && end - next < BLOCK && load < BLOCK {
-            let weight = weight(self.record(self.spans[end]));
+            let weight = weight(self.spans[end].bytes(&self.data));
             if end > next && load + weight > BLOCK {
                 break;
             }
             load += weight;
             end += 1;
         }
-        let data = &self.data;
-        let compare = &self.compare;
-        self.spans[next..end]
-            .sort_by(|&(a0, a1), &(b0, b1)| compare.records(&data[a0..a1], &data[b0..b1]));
+        if S::FINDS {
+            for span in &mut self.spans[next..end] {
+                if span.hi() - span.lo() <= COST_BYTES {
+                    span.set_found(self.found.len());
+                    self.compare.find(span.bytes(&self.data), &mut self.found);
+                }
+            }
+        }
+        let (data, compare, found) = (&self.data, &self.compare, &self.found);
+        self.spans[next..end].sort_by(|&a, &b| {
+            by_found(compare, data, found, a, b)
+                .unwrap_or_else(|| compare.records(a.bytes(data), b.bytes(data)))
+        });
         self.bounds.push(end);
         self.phase = Phase::Blocks { next: end };
-        // A record meets about log2(BLOCK) others.
-        load * 9
+        // A record has its keys found, then meets about log2(BLOCK) others.
+        load * 10
     }
 
-    fn first_pair(&self) -> Phase {
+    fn first_pair(&self) -> Phase<S> {
         Phase::Merge {
             pair: 0,
             left: 0,
@@ -368,15 +531,9 @@ impl Sorter {
             } else if right >= hi {
                 true
             } else {
-                let (a0, a1) = self.spans[right];
-                let (b0, b1) = self.spans[left];
-                let Some(order) = self.comparison.step(
-                    &self.compare,
-                    &self.data[a0..a1],
-                    &self.data[b0..b1],
-                    &mut work,
-                    budget,
-                ) else {
+                let Some(order) =
+                    self.order(self.spans[right], self.spans[left], &mut work, budget)
+                else {
                     break;
                 };
                 order != Ordering::Less
@@ -412,16 +569,10 @@ impl Sorter {
         let mut work = 0;
         let full = out.len() + OUTPUT - out.len() % OUTPUT;
         while next < self.spans.len() && out.len() < full && work < STEP {
-            let (lo, hi) = self.spans[next];
+            let span = self.spans[next];
             if offset.is_none() && self.compare.unique {
-                if let Some((k0, k1)) = kept {
-                    let Some(order) = self.comparison.step(
-                        &self.compare,
-                        &self.data[k0..k1],
-                        &self.data[lo..hi],
-                        &mut work,
-                        STEP,
-                    ) else {
+                if let Some(last) = kept {
+                    let Some(order) = self.order(last, span, &mut work, STEP) else {
                         break;
                     };
                     if order == Ordering::Equal {
@@ -432,12 +583,12 @@ impl Sorter {
             }
             if write_record(
                 &self.data,
-                offset.get_or_insert(lo),
-                hi,
+                offset.get_or_insert(span.lo()),
+                span.hi(),
                 self.separator,
                 out,
             ) {
-                kept = Some((lo, hi));
+                kept = Some(span);
                 offset = None;
                 next += 1;
             }
@@ -448,6 +599,7 @@ impl Sorter {
         }
         self.phase = Phase::Idle;
         self.spans.clear();
+        self.found.clear();
         self.size = 0;
         if self.ended {
             // Once input has ended no feed comes to start the next run, so
@@ -469,7 +621,7 @@ impl Sorter {
     }
 }
 
-impl Stream for Sorter {
+impl<S: Span> Stream for Sorter<S> {
     fn feed(&mut self, input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.idle()?;
         append(&mut self.data, input)?;

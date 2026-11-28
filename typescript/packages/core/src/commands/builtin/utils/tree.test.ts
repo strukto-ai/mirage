@@ -374,4 +374,21 @@ describe('WalkBudget', () => {
     expect(asked).toEqual([['/m', 3]])
     expect(budget.stopped).toEqual([`/m: ${stop(2)}`])
   })
+
+  it('asks the mount table once a listing', async () => {
+    const asked: string[] = []
+    const mounts = limits({ '/m/': 100 })
+    const walkLimit = (path: string): number => {
+      asked.push(path)
+      return mounts.walkLimit?.(path) ?? -1
+    }
+    const readdir = (path: PathSpec): Promise<string[]> =>
+      Promise.resolve(Array.from({ length: 40 }, (_, i) => `${path.virtual}/${String(i)}`))
+    const budget = new WalkBudget(at('/m'), { ...mounts, walkLimit })
+    for (const directory of ['/m', '/m/a']) {
+      expect(await budget.listing(readdir, at(directory))).toHaveLength(40)
+    }
+    expect(asked).toEqual(['/m', '/m/a'])
+    expect(budget.spent).toEqual(new Map([['/m', 80]]))
+  })
 })

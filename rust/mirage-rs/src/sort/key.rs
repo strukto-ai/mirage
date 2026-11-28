@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::cost::{COST_BYTES, cost};
 use super::modifiers::{Mods, Translated, kept};
-use super::number::{NumberScan, general_order, human_order, leading_number};
+use super::number::{Number, NumberScan, general_order, human_order, leading_number, number_spans};
 use super::random::RandomScan;
 use super::version::{VersionScan, version_cmp};
 use crate::number::is_blank;
@@ -46,6 +46,44 @@ pub(crate) struct Compare {
     pub salt: Vec<u8>,
 }
 
+/// Where one key of a record of at most `COST_BYTES` is, found once so a
+/// sort compares the record without reading its fields again: the key's
+/// bytes, or for a key read as a number alone (`reads_number`), its
+/// number's integer digits, fraction digits and sign.
+#[derive(Clone, Copy, Default)]
+pub(super) struct Found {
+    start: u16,
+    end: u16,
+    fraction: (u16, u16),
+    negative: bool,
+}
+
+impl Found {
+    fn number<'a>(&self, record: &'a [u8]) -> Number<'a> {
+        Number {
+            negative: self.negative,
+            integer: &record[usize::from(self.start)..usize::from(self.end)],
+            fraction: &record[usize::from(self.fraction.0)..usize::from(self.fraction.1)],
+        }
+    }
+}
+
+/// Whether `compare_keys` reads a key under `mods` as `-n`'s number and
+/// nothing else.
+fn reads_number(mods: &Mods) -> bool {
+    mods.numeric && !mods.random && !mods.month && !mods.human && !mods.version
+}
+
+impl Key {
+    /// Whether the key is the whole record.
+    fn whole(&self) -> bool {
+        self.start_field == 1
+            && self.start_char == 1
+            && !self.start_skip
+            && self.end_field.is_none()
+    }
+}
+
 const MONTHS: [&[u8; 3]; 12] = [
     b"JAN", b"FEB", b"MAR", b"APR", b"MAY", b"JUN", b"JUL", b"AUG", b"SEP", b"OCT", b"NOV", b"DEC",
 ];
@@ -53,20 +91,95 @@ const MONTHS: [&[u8; 3]; 12] = [
 impl Compare {
     pub(crate) fn records(&self, a: &[u8], b: &[u8]) -> Ordering {
         for key in &self.keys {
-            let ka = self.extract(a, key);
-            let kb = self.extract(b, key);
-            let mut order = if key.mods.random {
-                self.random(ka, kb, &key.mods)
-            } else {
-                compare_keys(ka, kb, &key.mods)
-            };
-            if key.mods.reverse {
-                order = order.reverse();
-            }
+            let order = self.keyed(self.extract(a, key), self.extract(b, key), key);
             if order != Ordering::Equal {
                 return order;
             }
         }
+        self.last_resort(a, b)
+    }
+
+    /// Whether a sort gains by finding each short record's keys once: a
+    /// key is some fields, or is read as a number, and any `-R` salt is
+    /// short. A whole record read as it is takes no finding.
+    pub(super) fn finds_keys(&self) -> bool {
+        self.keys
+            .iter()
+            .any(|key| !key.whole() || reads_number(&key.mods))
+            && self.salt.len() <= COST_BYTES
+    }
+
+    /// Add where each key of `record`, of at most `COST_BYTES`, is to
+    /// `found`, one `Found` a key.
+    pub(super) fn find(&self, record: &[u8], found: &mut Vec<Found>) {
+        let at = |offset: usize| u16::try_from(offset).expect("a short record");
+        for key in &self.keys {
+            let (start, end) = self.key_range(record, key);
+            found.push(if reads_number(&key.mods) {
+                let (negative, integer, fraction) = number_spans(&record[start..end]);
+                Found {
+                    start: at(start + integer.0),
+                    end: at(start + integer.1),
+                    fraction: (at(start + fraction.0), at(start + fraction.1)),
+                    negative,
+                }
+            } else {
+                Found {
+                    start: at(start),
+                    end: at(end),
+                    ..Found::default()
+                }
+            });
+        }
+    }
+
+    /// `records` for two records whose keys `find` found.
+    pub(super) fn found(
+        &self,
+        a: &[u8],
+        found_a: &[Found],
+        b: &[u8],
+        found_b: &[Found],
+    ) -> Ordering {
+        for (key, (ka, kb)) in self.keys.iter().zip(found_a.iter().zip(found_b)) {
+            let order = if reads_number(&key.mods) {
+                let order = ka.number(a).cmp(&kb.number(b));
+                if key.mods.reverse {
+                    order.reverse()
+                } else {
+                    order
+                }
+            } else {
+                self.keyed(
+                    &a[usize::from(ka.start)..usize::from(ka.end)],
+                    &b[usize::from(kb.start)..usize::from(kb.end)],
+                    key,
+                )
+            };
+            if order != Ordering::Equal {
+                return order;
+            }
+        }
+        self.last_resort(a, b)
+    }
+
+    /// Two keys' order under `key`'s modifiers.
+    fn keyed(&self, a: &[u8], b: &[u8], key: &Key) -> Ordering {
+        let order = if key.mods.random {
+            self.random(a, b, &key.mods)
+        } else {
+            compare_keys(a, b, &key.mods)
+        };
+        if key.mods.reverse {
+            order.reverse()
+        } else {
+            order
+        }
+    }
+
+    /// The order of two records whose keys tie: equal under `-s` or `-u`,
+    /// else by their bytes.
+    fn last_resort(&self, a: &[u8], b: &[u8]) -> Ordering {
         if self.stable || self.unique {
             return Ordering::Equal;
         }
@@ -107,9 +220,15 @@ impl Compare {
     /// bytes, a start past the record is empty, and an end before the start
     /// is the start.
     fn extract<'a>(&self, record: &'a [u8], key: &Key) -> &'a [u8] {
+        let (start, end) = self.key_range(record, key);
+        &record[start..end]
+    }
+
+    /// Where in `record` the bytes `extract` answers are.
+    fn key_range(&self, record: &[u8], key: &Key) -> (usize, usize) {
         let n = record.len();
         let Some((lead, content)) = self.field_start(record, key.start_field) else {
-            return &[];
+            return (n, n);
         };
         let base = if key.start_skip { content } else { lead };
         let start = base.saturating_add(key.start_char.saturating_sub(1)).min(n);
@@ -125,7 +244,7 @@ impl Compare {
                     })
             }
         };
-        &record[start..end.max(start)]
+        (start, end.max(start))
     }
 
     /// Where field `number` (from 1) starts, as (lead, content), reading no
@@ -480,10 +599,7 @@ impl Comparison {
         let whole = match compare.keys.as_slice() {
             [] if !compare.stable && !compare.unique => Some(compare.reverse),
             [key]
-                if key.start_field == 1
-                    && key.start_char == 1
-                    && !key.start_skip
-                    && key.end_field.is_none()
+                if key.whole()
                     && (Mods {
                         reverse: false,
                         ..key.mods

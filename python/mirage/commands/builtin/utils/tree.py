@@ -99,11 +99,26 @@ class WalkBudget:
     mounts: MountView | None
     spent: dict[str, int] = field(default_factory=dict)
     stopped: list[str] = field(default_factory=list)
+    _last: tuple[str, int, str] | None = field(default=None, repr=False)
 
-    def _limit(self, directory: str) -> int:
+    def _counted(self, directory: str) -> tuple[int, str]:
+        """The ``walk_limit`` of ``directory`` and the folder its entries
+        count under. The last directory asked is kept: a listing charges
+        each of its entries to the same one.
+
+        Args:
+            directory (str): virtual path of the directory.
+        """
+        last = self._last
+        if last is not None and last[0] == directory:
+            return last[1], last[2]
         if self.mounts is None or self.mounts.walk_limit is None:
-            return -1
-        return self.mounts.walk_limit(directory)
+            limit = -1
+        else:
+            limit = self.mounts.walk_limit(directory)
+        folder = self._folder(directory) if limit >= 0 else ""
+        self._last = (directory, limit, folder)
+        return limit, folder
 
     def _folder(self, directory: str) -> str:
         assert self.mounts is not None
@@ -136,10 +151,9 @@ class WalkBudget:
             bool: True if the walk may keep the entry, False once its
             folder's count is out, which records the stop.
         """
-        limit = self._limit(directory)
+        limit, folder = self._counted(directory)
         if limit < 0:
             return True
-        folder = self._folder(directory)
         used = self.spent.get(folder, 0)
         if used < limit:
             self.spent[folder] = used + 1
@@ -154,10 +168,9 @@ class WalkBudget:
         Args:
             directory (str): virtual path of the directory.
         """
-        limit = self._limit(directory)
+        limit, folder = self._counted(directory)
         if limit < 0:
             return True
-        folder = self._folder(directory)
         if self.spent.get(folder, 0) < limit:
             return True
         self._stop(folder, limit)
@@ -172,10 +185,10 @@ class WalkBudget:
         Args:
             directory (str): virtual path of the directory.
         """
-        limit = self._limit(directory)
+        limit, folder = self._counted(directory)
         if limit < 0:
             return None
-        used = self.spent.get(self._folder(directory), 0)
+        used = self.spent.get(folder, 0)
         return max(limit - used, 0) + 1
 
     async def listing(

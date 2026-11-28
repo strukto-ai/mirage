@@ -204,7 +204,7 @@ fn scaled_precision(typed: u64, shown: &str) -> Result<u64, StreamError> {
 /// digits (1 when there are none), then a unit letter, `i` after it for
 /// powers of 1024, and nothing more; zero, or past what 64 bits hold, is
 /// no size.
-fn unit_size(typed: &[u8]) -> Result<BigUint, StreamError> {
+fn unit_size(typed: &[u8]) -> Result<u64, StreamError> {
     let invalid = || refusal(format!("invalid unit size: '{}'", quoted(typed)));
     let lead = typed.iter().take_while(|b| b.is_ascii_whitespace()).count();
     let text = &typed[lead..];
@@ -217,14 +217,13 @@ fn unit_size(typed: &[u8]) -> Result<BigUint, StreamError> {
     };
     match &text[digits..] {
         [] => {}
-        [letter] => size *= pow(1000, unit_power(*letter).ok_or_else(invalid)? as usize),
-        [letter, b'i'] => size *= pow(1024, unit_power(*letter).ok_or_else(invalid)? as usize),
+        [letter] => size *= BigUint::from(1000_u32).pow(unit_power(*letter).ok_or_else(invalid)?),
+        [letter, b'i'] => {
+            size *= BigUint::from(1024_u32).pow(unit_power(*letter).ok_or_else(invalid)?);
+        }
         _ => return Err(invalid()),
     }
-    if size.is_zero() || size > BigUint::from(u64::MAX) {
-        return Err(invalid());
-    }
-    Ok(size)
+    size.to_u64().filter(|size| *size != 0).ok_or_else(invalid)
 }
 
 /// --padding as GNU reads it: blanks, a sign and digits, never zero; a
@@ -288,17 +287,193 @@ fn suffix_error(value: &[u8], junk: &[u8]) -> StreamError {
     ))
 }
 
+/// The whole numbers a value is worked out in, exactly: a `u128` while
+/// every step fits in one, which most fields do, and a `BigUint` for the
+/// field whose step does not. Each step of a `u128` answers None where it
+/// would overflow.
+trait Exact: Sized + Clone + Ord {
+    fn of(value: u64) -> Self;
+    /// `base` to the `exponent`.
+    fn power(base: u32, exponent: usize) -> Option<Self>;
+    /// The digits before a point and after it, as one whole number.
+    fn from_digits(whole: &[u8], fraction: &[u8]) -> Option<Self>;
+    fn times(&self, other: &Self) -> Option<Self>;
+    fn plus_one(self) -> Option<Self>;
+    fn over(&self, other: &Self) -> Self;
+    /// `self - other`, which is never below zero where it is asked.
+    fn minus(&self, other: &Self) -> Self;
+    fn doubled(&self) -> Option<Self>;
+    fn is_zero(&self) -> bool;
+    fn is_odd(&self) -> bool;
+    fn to_float(&self) -> Option<f64>;
+    /// The decimal digits, appended to `out`.
+    fn decimal(&self, out: &mut Vec<u8>);
+    fn decimal_len(&self) -> usize;
+}
+
+impl Exact for u128 {
+    fn of(value: u64) -> Self {
+        u128::from(value)
+    }
+
+    fn power(base: u32, exponent: usize) -> Option<Self> {
+        u128::from(base).checked_pow(u32::try_from(exponent).ok()?)
+    }
+
+    fn from_digits(whole: &[u8], fraction: &[u8]) -> Option<Self> {
+        whole
+            .iter()
+            .chain(fraction)
+            .try_fold(0_u128, |value, digit| {
+                value.checked_mul(10)?.checked_add(u128::from(digit - b'0'))
+            })
+    }
+
+    fn times(&self, other: &Self) -> Option<Self> {
+        self.checked_mul(*other)
+    }
+
+    fn plus_one(self) -> Option<Self> {
+        self.checked_add(1)
+    }
+
+    fn over(&self, other: &Self) -> Self {
+        self / other
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        self - other
+    }
+
+    fn doubled(&self) -> Option<Self> {
+        self.checked_mul(2)
+    }
+
+    fn is_zero(&self) -> bool {
+        *self == 0
+    }
+
+    fn is_odd(&self) -> bool {
+        self & 1 == 1
+    }
+
+    fn to_float(&self) -> Option<f64> {
+        BigUint::from(*self).to_f64()
+    }
+
+    fn decimal(&self, out: &mut Vec<u8>) {
+        let mut digits = [0_u8; 39];
+        let mut at = digits.len();
+        let mut rest = *self;
+        loop {
+            at -= 1;
+            digits[at] = b'0' + (rest % 10) as u8;
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
+        }
+        out.extend_from_slice(&digits[at..]);
+    }
+
+    fn decimal_len(&self) -> usize {
+        self.checked_ilog10().map_or(1, |log| log as usize + 1)
+    }
+}
+
+impl Exact for BigUint {
+    fn of(value: u64) -> Self {
+        BigUint::from(value)
+    }
+
+    fn power(base: u32, exponent: usize) -> Option<Self> {
+        Some(BigUint::from(base).pow(exponent as u32))
+    }
+
+    fn from_digits(whole: &[u8], fraction: &[u8]) -> Option<Self> {
+        BigUint::parse_bytes(&[whole, fraction].concat(), 10)
+    }
+
+    fn times(&self, other: &Self) -> Option<Self> {
+        Some(self * other)
+    }
+
+    fn plus_one(self) -> Option<Self> {
+        Some(self + 1_u8)
+    }
+
+    fn over(&self, other: &Self) -> Self {
+        self / other
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        self - other
+    }
+
+    fn doubled(&self) -> Option<Self> {
+        Some(self << 1_usize)
+    }
+
+    fn is_zero(&self) -> bool {
+        Zero::is_zero(self)
+    }
+
+    fn is_odd(&self) -> bool {
+        self.bit(0)
+    }
+
+    fn to_float(&self) -> Option<f64> {
+        self.to_f64()
+    }
+
+    fn decimal(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(self.to_str_radix(10).as_bytes());
+    }
+
+    fn decimal_len(&self) -> usize {
+        self.to_string().len()
+    }
+}
+
+/// A field as `parse` read it: its sign, its digits before and after the
+/// point, and the unit it is scaled by, as `(base, power)`.
+struct Typed<'a> {
+    negative: bool,
+    whole: &'a [u8],
+    fraction: &'a [u8],
+    unit: Option<(u32, u32)>,
+}
+
 /// A value held exactly, `numerator / denominator`, and the decimals an
 /// unscaled one was typed with, which `--to=none` prints it back at.
-struct Value {
+struct Value<E> {
     negative: bool,
-    numerator: BigUint,
-    denominator: BigUint,
+    numerator: E,
+    denominator: E,
     decimals: usize,
 }
 
-fn pow(base: u32, exponent: usize) -> BigUint {
-    BigUint::from(base).pow(exponent as u32)
+impl<E: Exact> Value<E> {
+    /// The value `typed` holds in units of `from_unit`, counted in units
+    /// of `to_unit`; None where a step does not fit in `E`.
+    fn of(typed: &Typed, from_unit: u64, to_unit: u64) -> Option<Self> {
+        let mut numerator = E::from_digits(typed.whole, typed.fraction)?;
+        if let Some((base, power)) = typed.unit {
+            numerator = numerator.times(&E::power(base, power as usize)?)?;
+        }
+        let numerator = numerator.times(&E::of(from_unit))?;
+        let denominator = E::power(10, typed.fraction.len())?.times(&E::of(to_unit))?;
+        Some(Value {
+            negative: typed.negative && !numerator.is_zero(),
+            numerator,
+            denominator,
+            decimals: if typed.unit.is_some() {
+                0
+            } else {
+                typed.fraction.len()
+            },
+        })
+    }
 }
 
 /// A unit suffix as `(base, power)` for `--from`: si and iec take the
@@ -333,7 +508,7 @@ fn scale_of(value: &[u8], suffix: &[u8], from: Scale) -> Result<(u32, u32), Stre
 /// is a number and the unknown suffix `e3`), then any unit. A real unit
 /// with no `--from` is pointed at it, so the letter is checked before the
 /// mode. A zero is unsigned, as GNU prints `-0` as `0`.
-fn parse(value: &[u8], from: Scale) -> Result<Value, StreamError> {
+fn parse(value: &[u8], from: Scale) -> Result<Typed<'_>, StreamError> {
     let invalid = || refusal(format!("invalid number: '{}'", quoted(value)));
     let negative = value.first() == Some(&b'-');
     let digits_at = |at: usize| {
@@ -367,13 +542,7 @@ fn parse(value: &[u8], from: Scale) -> Result<Value, StreamError> {
         )));
     }
     let rest = &rest[spaced..];
-    let digits: Vec<u8> = value[start..end]
-        .iter()
-        .copied()
-        .filter(|b| *b != b'.')
-        .collect();
-    let mut numerator = BigUint::parse_bytes(&digits, 10).expect("digits");
-    let mut decimals = fraction;
+    let mut unit = None;
     if !rest.is_empty() {
         if unit_power(rest[0]).is_none() {
             return Err(suffix_error(value, b""));
@@ -384,53 +553,54 @@ fn parse(value: &[u8], from: Scale) -> Result<Value, StreamError> {
                 quoted(value)
             )));
         }
-        let (base, power) = scale_of(value, rest, from)?;
-        numerator *= pow(base, power as usize);
-        decimals = 0;
+        unit = Some(scale_of(value, rest, from)?);
     }
-    Ok(Value {
-        negative: negative && !numerator.is_zero(),
-        numerator,
-        denominator: pow(10, fraction),
-        decimals,
+    Ok(Typed {
+        negative,
+        whole: &value[start..start + whole],
+        fraction: &value[end - fraction..end],
+        unit,
     })
 }
 
 /// `numerator / denominator` rounded half to even, as printf rounds.
-fn half_even(numerator: &BigUint, denominator: &BigUint) -> BigUint {
-    let kept = numerator / denominator;
-    let twice = (numerator - &kept * denominator) << 1_usize;
-    if twice > *denominator || twice == *denominator && kept.bit(0) {
-        kept + 1_u8
-    } else {
-        kept
-    }
+fn half_even<E: Exact>(numerator: &E, denominator: &E) -> Option<E> {
+    let kept = numerator.over(denominator);
+    let twice = numerator.minus(&kept.times(denominator)?).doubled()?;
+    Some(
+        if twice > *denominator || twice == *denominator && kept.is_odd() {
+            kept.plus_one()?
+        } else {
+            kept
+        },
+    )
 }
 
 /// The magnitude `numerator / denominator` of a value of sign `negative`,
 /// to a whole number as --round says.
-fn rounded(numerator: &BigUint, denominator: &BigUint, round: Round, negative: bool) -> BigUint {
-    let kept = numerator / denominator;
-    let rest = numerator - &kept * denominator;
+fn rounded<E: Exact>(numerator: &E, denominator: &E, round: Round, negative: bool) -> Option<E> {
+    let kept = numerator.over(denominator);
+    let rest = numerator.minus(&kept.times(denominator)?);
     let up = !rest.is_zero()
         && match round {
             Round::FromZero => true,
             Round::TowardsZero => false,
             Round::Up => !negative,
             Round::Down => negative,
-            Round::Nearest => rest << 1_usize >= *denominator,
+            Round::Nearest => rest.doubled()? >= *denominator,
         };
-    if up { kept + 1_u8 } else { kept }
+    if up { kept.plus_one() } else { Some(kept) }
 }
 
 /// GNU's refusal of a value printed with more digits than it holds.
-fn too_precise(
-    value: &Value,
-    numerator: &BigUint,
-    denominator: &BigUint,
+fn too_precise<E: Exact>(
+    value: &Value<E>,
+    numerator: &E,
+    denominator: &E,
     places: u64,
 ) -> StreamError {
-    let magnitude = numerator.to_f64().unwrap_or(f64::MAX) / denominator.to_f64().unwrap_or(1.0);
+    let magnitude =
+        numerator.to_float().unwrap_or(f64::MAX) / denominator.to_float().unwrap_or(1.0);
     let signed = if value.negative {
         -magnitude
     } else {
@@ -449,29 +619,33 @@ fn too_precise(
 /// than GNU prints. A whole number has none to refuse: mirage prints every
 /// digit of one, where GNU refuses to read one so long (`value too large
 /// to be converted`).
-fn within(
-    value: &Value,
-    numerator: &BigUint,
-    denominator: &BigUint,
+fn within<E: Exact>(
+    value: &Value<E>,
+    numerator: &E,
+    denominator: &E,
     places: u64,
 ) -> Result<usize, StreamError> {
-    let whole = (numerator / denominator).to_string().len();
+    let whole = numerator.over(denominator).decimal_len();
     match usize::try_from(places) {
         Ok(fits) if fits == 0 || fits <= DIGITS.saturating_sub(whole) => Ok(fits),
         _ => Err(too_precise(value, numerator, denominator, places)),
     }
 }
 
-fn fixed(negative: bool, scaled: &BigUint, places: usize, out: &mut Vec<u8>) {
-    let digits = format!("{scaled:0>width$}", width = places + 1);
+/// `scaled` with its last `places` digits after a point, zero-filled to
+/// one whole digit at least.
+fn fixed<E: Exact>(negative: bool, scaled: &E, places: usize, out: &mut Vec<u8>) {
     if negative {
         out.push(b'-');
     }
-    let (whole, fraction) = digits.split_at(digits.len() - places);
-    out.extend_from_slice(whole.as_bytes());
+    let start = out.len();
+    scaled.decimal(out);
+    let shown = out.len() - start;
+    if shown <= places {
+        out.splice(start..start, std::iter::repeat_n(b'0', places + 1 - shown));
+    }
     if places > 0 {
-        out.push(b'.');
-        out.extend_from_slice(fraction.as_bytes());
+        out.insert(out.len() - places, b'.');
     }
 }
 
@@ -484,14 +658,14 @@ fn fixed(negative: bool, scaled: &BigUint, places: usize, out: &mut Vec<u8>) {
 /// 1.0k), and prints through printf, rounding half to even. GNU reads into
 /// a long double, so a value it cannot hold exactly may round up on the way
 /// out (`1.10` prints as `1.11`); mirage keeps the value exact, as printf
-/// does.
-fn format(
-    value: &Value,
+/// does. None where a step does not fit in `E`.
+fn format<E: Exact>(
+    value: &Value<E>,
     to: Scale,
     round: Round,
     precision: Option<u64>,
     out: &mut Vec<u8>,
-) -> Result<usize, StreamError> {
+) -> Option<Result<usize, StreamError>> {
     let Value {
         negative,
         numerator,
@@ -501,61 +675,65 @@ fn format(
     let start = out.len();
     if to == Scale::None {
         let typed = u64::try_from(*decimals).unwrap_or(u64::MAX);
-        let places = within(value, numerator, denominator, precision.unwrap_or(typed))?;
+        let places = match within(value, numerator, denominator, precision.unwrap_or(typed)) {
+            Ok(places) => places,
+            Err(refused) => return Some(Err(refused)),
+        };
         let scaled = rounded(
-            &(numerator * pow(10, places)),
+            &numerator.times(&E::power(10, places)?)?,
             denominator,
             round,
             *negative,
-        );
+        )?;
         fixed(*negative, &scaled, places, out);
-        return Ok(out.len() - start);
+        return Some(Ok(out.len() - start));
     }
     let (base, units) = match to {
-        Scale::Si => (BigUint::from(1000_u32), SI_UNITS),
-        _ => (BigUint::from(1024_u32), IEC_UNITS),
+        Scale::Si => (E::of(1000), SI_UNITS),
+        _ => (E::of(1024), IEC_UNITS),
     };
-    let ten = BigUint::from(10_u8);
+    let ten = E::of(10);
     let top = units.len() - 1;
     let mut power = 0;
     let mut denominator = denominator.clone();
-    while *numerator >= &base * &denominator && power < top {
-        denominator *= &base;
+    while *numerator >= base.times(&denominator)? && power < top {
+        denominator = denominator.times(&base)?;
         power += 1;
     }
-    let places = precision.map_or(usize::from(*numerator < &ten * &denominator), |typed| {
-        usize::try_from(typed).unwrap_or(WIDEST)
-    });
+    let places = match precision {
+        Some(typed) => usize::try_from(typed).unwrap_or(WIDEST),
+        None => usize::from(*numerator < ten.times(&denominator)?),
+    };
     let mut numerator = rounded(
-        &(numerator * pow(10, places)),
+        &numerator.times(&E::power(10, places)?)?,
         &denominator,
         round,
         *negative,
-    );
-    let mut denominator = pow(10, places);
-    if numerator >= &base * &denominator && power < top {
-        denominator *= &base;
+    )?;
+    let mut denominator = E::power(10, places)?;
+    if numerator >= base.times(&denominator)? && power < top {
+        denominator = denominator.times(&base)?;
         power += 1;
     }
     let places = match precision {
         Some(_) => places,
-        None => usize::from(power > 0 && numerator < &ten * &denominator),
+        None => usize::from(power > 0 && numerator < ten.times(&denominator)?),
     };
-    numerator *= pow(10, places);
-    let scaled = half_even(&numerator, &denominator);
+    numerator = numerator.times(&E::power(10, places)?)?;
+    let scaled = half_even(&numerator, &denominator)?;
     fixed(*negative, &scaled, places, out);
     let number = out.len() - start;
     out.extend_from_slice(units[power].as_bytes());
     if to == Scale::IecI && power > 0 {
         out.push(b'i');
     }
-    Ok(number)
+    Some(Ok(number))
 }
 
 struct Numfmt {
     config: Config,
-    from_unit: BigUint,
-    to_unit: BigUint,
+    from_unit: u64,
+    to_unit: u64,
     format: Option<Format>,
     /// The width a field is padded to, negative to pad on the right; 0 for
     /// none.
@@ -575,6 +753,10 @@ struct Numfmt {
     /// left to convert.
     again: bool,
     failed: bool,
+    /// The field being converted and, between blanks, the field converted,
+    /// kept from one field to the next.
+    field: Vec<u8>,
+    converted: Vec<u8>,
 }
 
 /// --header's count as GNU reads it: blanks, an optional `+` and digits
@@ -592,11 +774,7 @@ fn header_count(value: &[u8]) -> Result<u64, StreamError> {
 
 pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
-    let unit = |typed: &Option<Vec<u8>>| {
-        typed
-            .as_deref()
-            .map_or_else(|| Ok(BigUint::from(1_u8)), unit_size)
-    };
+    let unit = |typed: &Option<Vec<u8>>| typed.as_deref().map_or(Ok(1), unit_size);
     let from_unit = unit(&config.from_unit)?;
     let to_unit = unit(&config.to_unit)?;
     let padding = config.padding.as_deref().map_or(Ok(0), padding_of)?;
@@ -649,6 +827,8 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         next: 0,
         again: false,
         failed: false,
+        field: Vec::new(),
+        converted: Vec::new(),
     }))
 }
 
@@ -673,27 +853,51 @@ impl Numfmt {
         }
     }
 
+    /// `typed` in units of --from-unit, counted in --to-unit's and set
+    /// into `field` as `--to` says; None where a step does not fit in `E`.
+    fn formatted<E: Exact>(
+        &self,
+        typed: &Typed,
+        precision: Option<u64>,
+        field: &mut Vec<u8>,
+    ) -> Option<Result<usize, StreamError>> {
+        let value = Value::<E>::of(typed, self.from_unit, self.to_unit)?;
+        format(&value, self.config.to, self.config.round, precision, field)
+    }
+
     /// One field with `--suffix` cut off its end when there, scaled by the
     /// units, then the number with the suffix after it, padded and set in
     /// --format's text. A format's width stands in for --padding; with its
     /// zero flag the number is zero-filled to it before its unit, as printf
     /// fills it, and otherwise the whole field is padded with blanks.
-    fn convert(&self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn convert(&mut self, value: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let mut field = std::mem::take(&mut self.field);
+        field.clear();
+        let converted = self.convert_into(value, &mut field, out);
+        crate::release_capacity(&mut field);
+        self.field = field;
+        converted
+    }
+
+    fn convert_into(
+        &self,
+        value: &[u8],
+        field: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<(), StreamError> {
         let suffix = &self.config.suffix;
         let number = value.strip_suffix(suffix.as_slice()).unwrap_or(value);
-        let mut parsed = parse(number, self.config.from)?;
-        parsed.numerator *= &self.from_unit;
-        parsed.denominator *= &self.to_unit;
+        let typed = parse(number, self.config.from)?;
         let layout = self.format.as_ref();
         let precision = layout.and_then(|layout| layout.precision);
-        let mut field = Vec::new();
-        let digits = format(
-            &parsed,
-            self.config.to,
-            self.config.round,
-            precision,
-            &mut field,
-        )?;
+        let digits = match self.formatted::<u128>(&typed, precision, field) {
+            Some(digits) => digits,
+            None => {
+                field.clear();
+                self.formatted::<BigUint>(&typed, precision, field)
+                    .expect("a BigUint holds every step")
+            }
+        }?;
         let zero = layout.filter(|layout| layout.zero && !layout.left);
         if let Some(width) = zero.and_then(|layout| layout.width) {
             let sign = usize::from(field.first() == Some(&b'-'));
@@ -712,7 +916,7 @@ impl Numfmt {
         if !left {
             out.resize(out.len() + fill, b' ');
         }
-        out.extend_from_slice(&field);
+        out.extend_from_slice(field);
         if left {
             out.resize(out.len() + fill, b' ');
         }
@@ -756,13 +960,19 @@ impl Numfmt {
             let lead = line[at..].iter().take_while(|b| blank(**b)).count();
             let end = at + lead + line[at + lead..].iter().take_while(|b| !blank(**b)).count();
             if self.selected(index) {
-                let mut converted = Vec::new();
-                self.field(&line[at..end], lead, &mut converted)?;
-                if lead > 0 {
-                    let width = end - at;
-                    out.resize(out.len() + width.saturating_sub(converted.len()), b' ');
+                let mut converted = std::mem::take(&mut self.converted);
+                converted.clear();
+                let result = self.field(&line[at..end], lead, &mut converted);
+                if result.is_ok() {
+                    if lead > 0 {
+                        let width = end - at;
+                        out.resize(out.len() + width.saturating_sub(converted.len()), b' ');
+                    }
+                    out.extend_from_slice(&converted);
                 }
-                out.extend_from_slice(&converted);
+                crate::release_capacity(&mut converted);
+                self.converted = converted;
+                result?;
             } else {
                 out.extend_from_slice(&line[at..end]);
             }
@@ -917,6 +1127,95 @@ mod tests {
                 "{value} {to} {from}"
             );
         }
+    }
+
+    /// What `value` prints as in `E`: its number's length and the field,
+    /// a refusal's message, or None where a step does not fit.
+    fn formatted_in<E: super::Exact>(
+        typed: &super::Typed,
+        (from_unit, to_unit): (u64, u64),
+        to: super::Scale,
+        round: super::Round,
+        precision: Option<u64>,
+    ) -> Option<Result<(usize, Vec<u8>), String>> {
+        let value = super::Value::<E>::of(typed, from_unit, to_unit)?;
+        let mut field = Vec::new();
+        let result = super::format(&value, to, round, precision, &mut field)?;
+        Some(
+            result
+                .map(|digits| (digits, field))
+                .map_err(|err| err.message),
+        )
+    }
+
+    #[test]
+    fn a_u128_prints_every_value_it_holds_as_a_biguint_does() {
+        use super::{Round, Scale};
+        let values = [
+            "0",
+            "1",
+            "-1",
+            "-0.04",
+            "0.0015",
+            "999.95",
+            "1023.95",
+            "1000.00000001",
+            "18446744073709551615",
+            "18446744073709551616",
+            "170141183460469231731687303715884105727.5",
+            "340282366920938463463374607431768211455",
+            "340282366920938463463374607431768211456",
+            "1.5K",
+            "-2.25M",
+            "1Q",
+            "12345678901234567890.123456789",
+        ];
+        let (mut held, mut outgrown) = (0, 0);
+        for value in values {
+            for from in [Scale::None, Scale::Si, Scale::Iec, Scale::Auto] {
+                let Ok(typed) = super::parse(value.as_bytes(), from) else {
+                    continue;
+                };
+                for to in [Scale::None, Scale::Si, Scale::Iec, Scale::IecI] {
+                    for round in [
+                        Round::Up,
+                        Round::Down,
+                        Round::FromZero,
+                        Round::TowardsZero,
+                        Round::Nearest,
+                    ] {
+                        for precision in [None, Some(0), Some(1), Some(3), Some(30)] {
+                            for units in [(1, 1), (1024, 1), (1, 1000), (u64::MAX, 3)] {
+                                let big = formatted_in::<num_bigint::BigUint>(
+                                    &typed, units, to, round, precision,
+                                )
+                                .expect("a BigUint holds every step");
+                                match formatted_in::<u128>(&typed, units, to, round, precision) {
+                                    Some(small) => {
+                                        held += 1;
+                                        assert_eq!(small, big, "{value} {units:?} {precision:?}");
+                                    }
+                                    None => outgrown += 1,
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(held > 0 && outgrown > 0, "{held} held, {outgrown} outgrown");
+    }
+
+    #[test]
+    fn a_value_past_what_a_u128_holds_prints_whole() {
+        let past = "340282366920938463463374607431768211456";
+        assert_eq!(numfmt(past, "none", "none").as_deref(), Ok(past));
+        let (out, refusal) = records(
+            serde_json::json!({"to": "none", "from": "iec", "from_unit": "8Ei"}),
+            &[b"1Q\n"],
+        );
+        assert_eq!(refusal, None);
+        assert_eq!(out, b"11692013098647223345629478661730264157247460343808\n");
     }
 
     #[test]

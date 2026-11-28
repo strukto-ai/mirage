@@ -1274,3 +1274,126 @@ fn unique_output_stays_bounded_across_a_host_drain_batch() {
     }
     assert_eq!(output, [b"a\n".as_slice(), &long, b"z\n"].concat());
 }
+
+/// The comparison options read from `options` hold.
+fn compare_of(options: &Options) -> super::Compare {
+    let config: Json = serde_json::from_str(&engine(options, json!({"mode": "sort"}))).unwrap();
+    serde_json::from_value(config["compare"].clone()).unwrap()
+}
+
+const KEYED: &[&[(&str, &str)]] = &[
+    &[("key", "2,2n")],
+    &[("key", "1,1n"), ("key", "2r")],
+    &[("key", "1.2,1.3")],
+    &[("key", "2b"), ("numeric_sort", "")],
+    &[("key", "3,3n"), ("field_separator", ",")],
+    &[("key", "2,2nr"), ("stable", "")],
+    &[("key", "1,1n"), ("unique", "")],
+    &[("key", "1n"), ("reverse", "")],
+    &[("key", "2.2b,2.4n")],
+    &[("key", "1M")],
+    &[("key", "1h")],
+    &[("key", "1V")],
+    &[("key", "1g")],
+    &[("key", "1f"), ("key", "2d")],
+    &[("key", "1,1R")],
+];
+
+#[test]
+fn found_keys_order_records_as_reading_their_fields_does() {
+    let records = [
+        "",
+        " ",
+        "a",
+        "b 2 a",
+        "  -0.50 x",
+        "-0 y",
+        "0.0 z",
+        "007 q",
+        "7. r",
+        "-.5",
+        "1e3 k",
+        "1K 2M",
+        "Jan 3",
+        "feb 1",
+        "1.10 v",
+        "1.9 w",
+        "x\t-3,2",
+        "a,b,c",
+        ",,",
+        "10,-2.5,abc",
+        "  12  ",
+        "abc:12",
+        "12:abc",
+        "-000.000",
+        "-1.0000 1",
+        "2.5.1 x",
+    ];
+    for options in KEYED {
+        let compare = compare_of(options);
+        let mut found = Vec::new();
+        let at: Vec<usize> = records
+            .iter()
+            .map(|record| {
+                let at = found.len();
+                compare.find(record.as_bytes(), &mut found);
+                at
+            })
+            .collect();
+        let keys = compare.keys.len();
+        for (i, a) in records.iter().enumerate() {
+            for (j, b) in records.iter().enumerate() {
+                let (ka, kb) = (&found[at[i]..at[i] + keys], &found[at[j]..at[j] + keys]);
+                assert_eq!(
+                    compare.found(a.as_bytes(), ka, b.as_bytes(), kb),
+                    compare.records(a.as_bytes(), b.as_bytes()),
+                    "{options:?} {a:?} {b:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_keyed_sort_orders_short_and_long_records_as_the_comparison_does() {
+    let mut seed = 7_u64;
+    let mut next = move |bound: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % bound
+    };
+    let list: Vec<String> = (0..3000)
+        .map(|_| {
+            let sign = if next(3) == 0 { "-" } else { "" };
+            let mut record = format!(
+                "{} {sign}{:0>width$}.{} k{},{}",
+                ["Jan", "feb", "MAR"][next(3) as usize],
+                next(500),
+                next(100),
+                next(40),
+                next(7),
+                width = next(4) as usize,
+            );
+            if next(10) == 0 {
+                record.push_str(&"z".repeat(300));
+            }
+            record
+        })
+        .collect();
+    let list: Vec<&str> = list.iter().map(String::as_str).collect();
+    for options in [
+        &[("key", "2,2n"), ("key", "1M")][..],
+        &[("key", "3.2,3.3n"), ("key", "2r")],
+        &[("key", "2,2n"), ("unique", "")],
+        &[("key", "2n"), ("field_separator", ","), ("reverse", "")],
+    ] {
+        let compare = compare_of(options);
+        let mut expected = list.clone();
+        expected.sort_by(|a, b| compare.records(a.as_bytes(), b.as_bytes()));
+        if compare.unique {
+            expected.dedup_by(|b, a| compare.records(a.as_bytes(), b.as_bytes()).is_eq());
+        }
+        assert_eq!(sorted(options, &list), expected, "{options:?}");
+    }
+}

@@ -1,8 +1,6 @@
 // Adapted from nfsserve 0.11.0.
 // https://github.com/huggingface/nfsserve/tree/af4f1176dd709847f3dda4f1a7cd093edaadde63/src
 // Licensed under BSD-3-Clause. See licenses/third_party/nfsserve.txt.
-// this is just a complete enumeration of everything in the RFC
-#![allow(dead_code)]
 // And its nice to keep the original RFC names and case
 #![allow(non_camel_case_types)]
 
@@ -101,17 +99,6 @@ pub enum auth_flavor {
     AUTH_DES = 3, /* and more to be defined */
 }
 xdr_enum_serde!(auth_flavor);
-
-#[allow(non_camel_case_types)]
-#[derive(Clone, Debug, Default)]
-pub struct auth_unix {
-    stamp: u32,
-    machinename: Vec<u8>,
-    uid: u32,
-    gid: u32,
-    gids: Vec<u32>,
-}
-xdr_struct!(auth_unix, stamp, machinename, uid, gid, gids);
 
 ///Provisions for authentication of caller to service and vice-versa are
 ///provided as a part of the RPC protocol.  The call message has two
@@ -485,17 +472,6 @@ pub fn prog_mismatch_reply_message(xid: u32, accepted_ver: u32) -> rpc_msg {
         body: rpc_body::REPLY(reply),
     }
 }
-pub fn garbage_args_reply_message(xid: u32) -> rpc_msg {
-    let reply = reply_body::MSG_ACCEPTED(accepted_reply {
-        verf: opaque_auth::default(),
-        reply_data: accept_body::GARBAGE_ARGS,
-    });
-    rpc_msg {
-        xid,
-        body: rpc_body::REPLY(reply),
-    }
-}
-
 pub fn rpc_vers_mismatch(xid: u32) -> rpc_msg {
     let reply = reply_body::MSG_DENIED(rejected_reply::RPC_MISMATCH(mismatch_info::default()));
     rpc_msg {
