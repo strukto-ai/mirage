@@ -21,6 +21,7 @@ import {
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
+  PIPE_UNSENT_BYTES,
   PROCESS,
   STOP_GRACE_SECONDS,
   isRun,
@@ -451,12 +452,20 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
     const input = proc.stdin.getWriter()
     let sent: Promise<void> = Promise.resolve()
     let broken = false
+    let unsent = 0
+    let draining: (() => void)[] = []
+    const moved = (): void => {
+      const woken = draining
+      draining = []
+      for (const resolve of woken) resolve()
+    }
     // One write lands before the next is sent, and one that fails ends the command: bytes after a gap mean nothing.
     const send = (step: () => Promise<void>): void => {
       sent = sent
         .then(() => (broken ? undefined : step()))
         .catch((error: unknown) => {
           broken = true
+          moved()
           logger.debug?.(`cloudflare_container: ${command} took no input: ${String(error)}`)
           kill(15)
         })
@@ -479,7 +488,19 @@ export class ContainerMachine extends MachineHandle<ContainerConfig> implements 
       writer: {
         write: (data) => {
           const copy = data.slice()
-          send(() => input.write(copy))
+          unsent += copy.byteLength
+          send(async () => {
+            await input.write(copy)
+            unsent -= copy.byteLength
+            moved()
+          })
+        },
+        drain: async () => {
+          while (unsent > PIPE_UNSENT_BYTES && !broken) {
+            await new Promise<void>((resolve) => {
+              draining.push(resolve)
+            })
+          }
         },
         end: () => {
           send(() => input.close())

@@ -39,12 +39,15 @@ from mirage.utils.clock import ManualClock
 
 class Client:
     """A mirage-fuse end: requests go in, replies come back by id,
-    pushes queue apart."""
+    pushes queue apart. Its pipe takes what is written once ``room`` is
+    set, as a pipe a slow transport carries does."""
 
     def __init__(self) -> None:
         self.reader = asyncio.StreamReader()
         self.replies: dict[int, Frame] = {}
         self.pushes: list[Frame] = []
+        self.room = asyncio.Event()
+        self.room.set()
         self._got = asyncio.StreamReader()
         self._frames = FrameReader()
         self._next = 0
@@ -53,6 +56,9 @@ class Client:
 
     def write(self, data: bytes) -> None:
         self._got.feed_data(data)
+
+    async def drain(self) -> None:
+        await self.room.wait()
 
     def close(self) -> None:
         self._got.feed_eof()
@@ -195,6 +201,25 @@ async def test_a_read_only_open_carries_the_first_bytes_it_asks_for():
     ]
     for r in (some, whole, plain, writes):
         await end.call({"op": "release", "fh": r.head["fh"]})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_reply_the_pipe_has_not_taken_holds_back_the_next():
+    ws, server, end, serving = await served()
+    opened = await end.call({"op": "open", "path": "/notes/plan.txt"})
+    fh = opened.head["fh"]
+    end.room.clear()
+    end.send({"op": "read", "fh": fh, "offset": 0, "size": 2, "id": 101})
+    end.send({"op": "read", "fh": fh, "offset": 2, "size": 2, "id": 102})
+    await end.until(lambda: 101 in end.replies)
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert 102 not in end.replies
+    end.room.set()
+    await end.until(lambda: 102 in end.replies)
+    assert [end.replies[i].body for i in (101, 102)] == [b"pl", b"an"]
+    await end.call({"op": "release", "fh": fh})
     await end.end(serving)
 
 

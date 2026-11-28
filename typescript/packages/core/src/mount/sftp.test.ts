@@ -141,6 +141,9 @@ function client() {
         wake()
       })
     },
+    drain() {
+      return Promise.resolve()
+    },
     end() {
       return undefined
     },

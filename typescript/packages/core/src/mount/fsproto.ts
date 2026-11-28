@@ -310,6 +310,11 @@ export class FsprotoServer {
     this.send({ push: 'inval', paths })
   }
 
+  /**
+   * Answer a request behind the ones before it, each reply waiting for the
+   * pipe once the writer holds more unsent than it lets wait: a client that
+   * asks ahead never has the host hold every reply it asked for.
+   */
   private take(frame: Frame): void {
     const hid = num(frame.head.hid)
     if (hid !== null) {
@@ -332,6 +337,7 @@ export class FsprotoServer {
       }
       try {
         this.write(reply)
+        if (this.writer !== null && !this.ended) await this.writer.drain()
       } catch (err) {
         console.debug(`fsproto: answering ${String(id)} failed`, err)
       }

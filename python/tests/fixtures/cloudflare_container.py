@@ -53,13 +53,17 @@ def line_of(cmd: list[str]) -> str:
 
 
 class FakeInput:
-    """A process's stdin, kept."""
+    """A process's stdin, kept. A write lands once ``room`` is set, as a
+    slow container takes it."""
 
     def __init__(self) -> None:
         self.data = bytearray()
         self.closed = asyncio.Event()
+        self.room = asyncio.Event()
+        self.room.set()
 
     async def write(self, data: bytes) -> None:
+        await self.room.wait()
         if self.closed.is_set():
             raise BrokenPipeError("input closed")
         self.data.extend(data)

@@ -30,6 +30,7 @@ import {
   encodeOutput,
   isRun,
   notRunningHint,
+  PIPE_UNSENT_BYTES,
   PROCESS,
   runTag,
   stopSignal,
@@ -91,11 +92,15 @@ class LineDecoder {
  * has queued in one E2B call, in order: each call is a round trip, so a
  * reply split into many writes would otherwise cost one trip per write.
  * A send that fails hands its error to `fail` and sends nothing more.
+ * `drain` waits while more than PIPE_UNSENT_BYTES are queued or on their way.
  */
 class PtyWriter implements PipeWriter {
   private queue: Uint8Array[] = []
   private ended = false
+  private stopped = false
+  private unsent = 0
   private wake: (() => void) | null = null
+  private draining: (() => void)[] = []
 
   constructor(
     private readonly send: (data: Uint8Array) => Promise<void>,
@@ -105,8 +110,17 @@ class PtyWriter implements PipeWriter {
   }
 
   write(data: Uint8Array): void {
+    this.unsent += data.byteLength
     this.queue.push(data.slice())
     this.wake?.()
+  }
+
+  async drain(): Promise<void> {
+    while (this.unsent > PIPE_UNSENT_BYTES && !this.stopped) {
+      await new Promise<void>((resolve) => {
+        this.draining.push(resolve)
+      })
+    }
   }
 
   end(): void {
@@ -114,7 +128,22 @@ class PtyWriter implements PipeWriter {
     this.wake?.()
   }
 
+  private sent(): void {
+    const woken = this.draining
+    this.draining = []
+    for (const resolve of woken) resolve()
+  }
+
   private async loop(): Promise<void> {
+    try {
+      await this.sendQueued()
+    } finally {
+      this.stopped = true
+      this.sent()
+    }
+  }
+
+  private async sendQueued(): Promise<void> {
     for (;;) {
       if (this.queue.length === 0) {
         if (this.ended) return
@@ -124,14 +153,16 @@ class PtyWriter implements PipeWriter {
         this.wake = null
         continue
       }
-      const chunks = this.queue
+      const batch = concat(this.queue)
       this.queue = []
       try {
-        await this.send(concat(chunks))
+        await this.send(batch)
       } catch (err) {
         await this.fail(err)
         return
       }
+      this.unsent -= batch.byteLength
+      this.sent()
     }
   }
 }

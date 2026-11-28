@@ -39,6 +39,7 @@ import { answerOf } from '@struktoai/mirage-core/runtime/binding'
 import type { OutputFn, RunAnswer, RunResult } from '@struktoai/mirage-core/runtime/types'
 import {
   MOUNT_GUARD,
+  PIPE_UNSENT_BYTES,
   PROCESS,
   RUN_WRAPPER,
   encodeOutput,
@@ -205,9 +206,13 @@ class FakeCommands {
   }
 }
 
-/** E2B's pty API: the shell echoes its line, then the command speaks. */
+/**
+ * E2B's pty API: the shell echoes its line, then the command speaks. A send
+ * returns once `room` settles, as a slow sandbox answers.
+ */
 class FakePty {
   readonly sent: Uint8Array[] = []
+  room: Promise<void> = Promise.resolve()
   created: [number, number, number | undefined] | null = null
   private onData: (data: Uint8Array) => void = () => undefined
   private end: () => void = () => undefined
@@ -241,7 +246,7 @@ class FakePty {
       )
       this.onData(new Uint8Array([...PTY_MARK.slice(3), 0, 115, 102, 116, 112]))
     }
-    return Promise.resolve()
+    return this.room
   }
 
   kill(pid: number): Promise<boolean> {
@@ -667,6 +672,32 @@ describe('E2BMachine', () => {
     await pipe.stop()
     expect(pty.ended).toBe(true)
     expect((await chunks.read()).done).toBe(true)
+  })
+  it('drains once what the pipe holds unsent is within what it lets wait', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const pty = FakeMachine.last.pty
+    const pipe = await runtime.openPipe('exec sshfs x y')
+    const chunks = pipe.reader.getReader()
+    await chunks.read()
+    let release: () => void = () => undefined
+    pty.room = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    pipe.writer.write(new Uint8Array([97]))
+    await pipe.writer.drain()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    pipe.writer.write(new Uint8Array(PIPE_UNSENT_BYTES))
+    let drained = false
+    const draining = pipe.writer.drain().then(() => {
+      drained = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(drained).toBe(false)
+    expect(pty.sent.slice(1).map((d) => [...d])).toEqual([[97]])
+    release()
+    await draining
+    await pipe.stop()
   })
   it('ends the pipe with the error of a reply it cannot send', async () => {
     const runtime = makeRuntime()
@@ -1109,7 +1140,7 @@ class MountingE2BMachine extends FakedE2BMachine {
     })
     return Promise.resolve({
       reader,
-      writer: { write: () => undefined, end: () => undefined },
+      writer: { write: () => undefined, drain: () => Promise.resolve(), end: () => undefined },
       stop: () => {
         end()
         return Promise.resolve()

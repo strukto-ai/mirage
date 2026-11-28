@@ -25,7 +25,11 @@ import { type Frame, FrameReader, FsprotoServer, bounded, encodeFrame } from './
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-/** A mirage-fuse end: requests go in, replies come back by id, pushes queue apart. */
+/**
+ * A mirage-fuse end: requests go in, replies come back by id, pushes queue apart.
+ * Between `hold` and `release` its pipe takes nothing more, as a pipe a slow
+ * transport carries does.
+ */
 function client() {
   let feed: ReadableStreamDefaultController<Uint8Array> | null = null
   const reader = new ReadableStream<Uint8Array>({
@@ -46,8 +50,11 @@ function client() {
       }
       for (const wake of waiting.splice(0)) wake()
     },
+    drain: () => room,
     end: () => undefined,
   }
+  let room: Promise<void> = Promise.resolve()
+  let release: () => void = () => undefined
   let next = 0
   async function until(test: () => boolean): Promise<void> {
     while (!test()) await new Promise<void>((resolve) => waiting.push(resolve))
@@ -55,8 +62,18 @@ function client() {
   return {
     reader,
     writer,
+    replies,
     pushes,
     until,
+    hold() {
+      room = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    },
+    release() {
+      release()
+      room = Promise.resolve()
+    },
     send(head: Record<string, unknown>, body?: Uint8Array) {
       feed?.enqueue(encodeFrame(head, body))
     },
@@ -215,6 +232,24 @@ describe('FsprotoServer', () => {
       [undefined, ''],
     ])
     for (const r of [some, whole, plain, writes]) await end.call({ op: 'release', fh: r.head.fh })
+    end.close()
+    await serving
+  })
+
+  it('holds back the next reply until the pipe takes the one before', async () => {
+    const { end, serving } = await served()
+    const opened = await end.call({ op: 'open', path: '/notes/plan.txt' })
+    const fh = opened.head.fh
+    end.hold()
+    end.send({ op: 'read', fh, offset: 0, size: 2, id: 101 })
+    end.send({ op: 'read', fh, offset: 2, size: 2, id: 102 })
+    await end.until(() => end.replies.has(101))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(end.replies.has(102)).toBe(false)
+    end.release()
+    await end.until(() => end.replies.has(102))
+    expect([101, 102].map((id) => DEC.decode(end.replies.get(id)?.body))).toEqual(['pl', 'an'])
+    await end.call({ op: 'release', fh })
     end.close()
     await serving
   })

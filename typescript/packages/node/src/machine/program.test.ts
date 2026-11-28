@@ -26,6 +26,7 @@ import {
 } from 'node:fs'
 import { constants, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
   SERVED,
@@ -34,6 +35,7 @@ import {
   closeChildren,
   scanHost,
   openProgramPipe,
+  pipeWriter,
   stopHostRun,
   runProgram,
   systemTimeEnv,
@@ -919,3 +921,43 @@ it.skipIf(process.platform === 'win32')(
     }
   },
 )
+
+describe('pipeWriter', () => {
+  it('drains once the stream holds no more than its high-water mark', async () => {
+    let landed: () => void = () => undefined
+    const stream = new Writable({
+      highWaterMark: 4,
+      write(_chunk, _encoding, callback) {
+        landed = () => {
+          callback()
+        }
+      },
+    })
+    const writer = pipeWriter(stream)
+    await writer.drain()
+    writer.write(new Uint8Array(8))
+    let drained = false
+    const draining = writer.drain().then(() => {
+      drained = true
+    })
+    await delay(10)
+    expect(drained).toBe(false)
+    landed()
+    await draining
+  })
+
+  it('holds no one waiting on a stream that went away', async () => {
+    const stream = new Writable({
+      highWaterMark: 4,
+      write() {
+        return undefined
+      },
+    })
+    stream.on('error', () => undefined)
+    const writer = pipeWriter(stream)
+    writer.write(new Uint8Array(8))
+    const draining = writer.drain()
+    stream.destroy()
+    await draining
+  })
+})

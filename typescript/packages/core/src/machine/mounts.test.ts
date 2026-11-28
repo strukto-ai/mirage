@@ -287,7 +287,7 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     this.ends.set(prefix, end)
     return Promise.resolve({
       reader,
-      writer: { write: () => undefined, end: () => undefined },
+      writer: { write: () => undefined, drain: () => Promise.resolve(), end: () => undefined },
       stop: () => {
         this.stopped.push(prefix)
         end()
