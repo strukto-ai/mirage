@@ -293,11 +293,7 @@ describe('FsprotoServer', () => {
   it('reads nothing with an open while a policy judges file calls', async () => {
     const { end, serving } = await watched(() => Promise.resolve(true))
     const opened = await end.call({ op: 'open', path: '/notes/plan.txt', first: 100 })
-    expect([opened.head.first, opened.head.w, opened.body.byteLength]).toEqual([
-      undefined,
-      true,
-      0,
-    ])
+    expect([opened.head.first, opened.head.w, opened.body.byteLength]).toEqual([undefined, true, 0])
     end.close()
     await serving
   })
