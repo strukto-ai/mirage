@@ -43,6 +43,10 @@ def test_modified_treats_small_int_as_epoch_milliseconds():
     assert modified_to_iso(1000) == "1970-01-01T00:00:01Z"
 
 
+def test_modified_drops_the_milliseconds_http_dates_cannot_name():
+    assert modified_to_iso(1_700_000_000_750) == "2023-11-14T22:13:20Z"
+
+
 def test_name_from_backend_path_file():
     assert (
         _name_from_backend_path(
@@ -101,6 +105,25 @@ async def test_a_listed_file_row_matches_its_stat(
     assert await _listed(accessor, "latest.md") == await stat(
         accessor, spec("/volume/reports/latest.md")
     )
+
+
+@pytest.mark.asyncio
+async def test_a_listed_row_matches_its_stat_between_whole_seconds(
+    accessor, volume, remote_root
+):
+    path = f"{remote_root}/reports/latest.md"
+    await volume.put(path, b"abcdef")
+    await volume.set_modified(path, 1_700_000_000_750)
+    # The listing names the write to the millisecond, HEAD only to the
+    # second, so a row that kept the milliseconds would differ from the
+    # stat of the same file.
+    listed = await volume.listing(f"{remote_root}/reports")
+    assert [entry["last_modified"] for entry in listed["contents"]] == [
+        1_700_000_000_750
+    ]
+    row = await _listed(accessor, "latest.md")
+    assert row.modified == "2023-11-14T22:13:20Z"
+    assert row == await stat(accessor, spec("/volume/reports/latest.md"))
 
 
 @pytest.mark.asyncio

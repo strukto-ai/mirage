@@ -196,8 +196,7 @@ async def volume(databricks_origin: str) -> AsyncIterator[DatabricksVolume]:
         databricks_origin (str): the fake's origin.
     """
     made = DatabricksVolume(databricks_origin)
-    # A whole second, so a listing's millisecond times and HEAD's HTTP
-    # dates to the second name the same instants.
+    # A fixed epoch, so a test's times are the same on every run.
     await made.run.call(
         "POST", "/reset", json={"epoch": EPOCH, "tenants": [TENANT]}
     )

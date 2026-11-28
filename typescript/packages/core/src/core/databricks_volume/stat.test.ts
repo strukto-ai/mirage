@@ -52,6 +52,19 @@ describe('a listed row', () => {
     expect(row).toEqual(await stat(volume.accessor(), spec('/volume/reports/a.txt')))
   })
 
+  it('matches the stat of a file written between whole seconds', async () => {
+    await volume.put(`${ROOT}/reports/a.txt`, 'abcdef')
+    await volume.setModified(`${ROOT}/reports/a.txt`, 1_700_000_000_750)
+    // The listing names the write to the millisecond, HEAD only to the
+    // second, so a row that kept the milliseconds would differ from the
+    // stat of the same file.
+    const listed = await volume.listing(`${ROOT}/reports`)
+    expect(listed.contents.map((entry) => entry.last_modified)).toEqual([1_700_000_000_750])
+    const [row] = (await readdir(volume.accessor(), spec('/volume/reports'))) as FileStat[]
+    expect(row?.modified).toBe('2023-11-14T22:13:20Z')
+    expect(row).toEqual(await stat(volume.accessor(), spec('/volume/reports/a.txt')))
+  })
+
   it('matches the stat of a directory', async () => {
     await volume.mkdir(`${ROOT}/reports/sub`)
     const [row] = (await readdir(volume.accessor(), spec('/volume/reports'))) as FileStat[]

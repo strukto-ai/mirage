@@ -29,10 +29,20 @@ from mirage.utils.filetype import content_type_for_path
 
 
 def modified_to_iso(value: str | int | None) -> str | None:
+    """A Databricks time as ISO UTC to the second.
+
+    A listing names a file's time in milliseconds and its HEAD as an HTTP
+    date to the second, so the listing's value drops its milliseconds and
+    a listed row reports the instant a stat of the same file does.
+
+    Args:
+        value (str | int | None): milliseconds since the epoch from a
+            listing, or a ``Last-Modified`` HTTP date.
+    """
     if value is None or value == "":
         return None
     if isinstance(value, int):
-        return to_iso_z(datetime.fromtimestamp(value / 1000, timezone.utc))
+        return to_iso_z(datetime.fromtimestamp(value // 1000, timezone.utc))
     try:
         parsed = parsedate_to_datetime(str(value))
     except (TypeError, ValueError):

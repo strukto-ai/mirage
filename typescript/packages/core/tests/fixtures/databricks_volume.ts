@@ -25,8 +25,7 @@ export const FILES = '/api/2.0/fs/files/*tail'
 export const DIRS = '/api/2.0/fs/directories/*tail'
 export const FILES_PREFIX = '/api/2.0/fs/files'
 export const DIRS_PREFIX = '/api/2.0/fs/directories'
-// A whole second, so a listing's millisecond times and HEAD's HTTP dates to
-// the second name the same instants.
+// A fixed epoch, so a test's times are the same on every run.
 const EPOCH = '2023-11-14T22:13:20Z'
 const TENANT = 'volume'
 
@@ -57,7 +56,7 @@ export class DatabricksVolume {
     this.run = new KitRun(origin, { Authorization: `Bearer ${this.token}` }, name)
   }
 
-  /** Start the run afresh, its clock on a whole second. */
+  /** Start the run afresh, its clock at a fixed epoch. */
   async reset(): Promise<void> {
     await this.run.call('POST', '/reset', { json: { epoch: EPOCH, tenants: [TENANT] } })
   }
