@@ -45,18 +45,17 @@ async def _moves(account) -> list[tuple[str, str]]:
 
 @pytest.mark.asyncio
 async def test_rename_replaces_existing_destination_file(account):
-    # Dropbox refuses a move onto a file; mv replaces it, so the move lands
-    # beside the file under a staged name, the file goes, and the moved
-    # file takes its name.
+    # Dropbox refuses a move onto a file; mv replaces it, so the file moves
+    # aside under a staged name, the moved file takes its name, and the
+    # file set aside goes.
     await account.put("/a.txt", b"mine")
     await account.put("/b.txt", b"theirs")
     await account.run.record_requests()
     await _rename(account, "/a.txt", "/b.txt")
-    assert await _deleted(account) == ["/b.txt"]
-    tried, landed, named = await _moves(account)
-    assert tried == ("/a.txt", "/b.txt")
-    assert landed[0] == "/a.txt" and landed[1].startswith("/b.txt.mirage-")
-    assert named == (landed[1], "/b.txt")
+    tried, aside, landed = await _moves(account)
+    assert tried == landed == ("/a.txt", "/b.txt")
+    assert aside[0] == "/b.txt" and aside[1].startswith("/b.txt.mirage-")
+    assert await _deleted(account) == [aside[1]]
     assert await account.names() == ["b.txt"]
     assert await account.read("/b.txt") == b"mine"
 
@@ -67,16 +66,17 @@ async def test_rename_conflict_replaces_empty_dir_destination(account):
     await account.mkdir("/dst")
     await account.run.record_requests()
     await _rename(account, "/src", "/dst")
-    assert await _deleted(account) == ["/dst"]
-    assert len(await _moves(account)) == 3
+    _, aside, _ = await _moves(account)
+    assert aside[0] == "/dst" and aside[1].startswith("/dst.mirage-")
+    assert await _deleted(account) == [aside[1]]
     assert await account.names() == ["dst"]
     assert await account.names("/dst") == ["x.txt"]
 
 
 @pytest.mark.asyncio
-async def test_rename_refused_landing_keeps_the_destination(account):
-    # The move meets the taken name first, then the staged move is refused
-    # (a view-only source, say): nothing was deleted yet.
+async def test_rename_refused_set_aside_keeps_the_destination(account):
+    # The move meets the taken name first, then moving the file aside is
+    # refused: nothing moved, so nothing is put back.
     await account.put("/a.txt", b"mine")
     await account.put("/b.txt", b"theirs")
     await account.run.answer_next(

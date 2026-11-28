@@ -12,10 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, TypeVar
-from uuid import uuid4
 
 from mirage.accessor.dropbox import DropboxAccessor
 from mirage.cache.context import (
@@ -25,6 +23,7 @@ from mirage.cache.context import (
     write_condition,
 )
 from mirage.cache.types import WriteCondition
+from mirage.core.api.replace import aside_name, land_then_retire, set_aside
 from mirage.core.dropbox.api import (
     copy_path,
     delete_path,
@@ -36,18 +35,18 @@ from mirage.core.dropbox.api import (
 )
 from mirage.core.dropbox.client import DropboxApiError, DropboxTokenManager
 from mirage.core.dropbox.constants import (
+    CONTENT_HASH,
     MISSING_SOURCE,
+    REV,
     TAKEN,
     TAKEN_BY_FOLDER,
 )
-from mirage.core.dropbox.fingerprint import live_of
+from mirage.core.dropbox.fingerprint import live_of, token_of
 from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.errors.fs import enoent, enotempty
 from mirage.errors.types import StaleWriteError
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import PathSpec
-
-logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -69,32 +68,71 @@ async def _retaken(
     return await stale(dst, version=condition_version(cond))
 
 
-async def _clear(
+async def _move_aside(
     tm: DropboxTokenManager,
     dst: PathSpec,
     to_path: str,
-    rev: str | None,
-    existing: dict[str, Any] | None,
-) -> None:
-    """Delete what holds the destination name, once the op landed beside it.
+    aside: str,
+    folder: bool,
+    content: str | None,
+) -> dict[str, Any]:
+    """Move what holds the destination aside, refusing one that changed.
 
-    A folder is asked for a child again first, so one written while the
-    op landed is not deleted with it: mv's "Directory not empty".
+    Dropbox moves on no condition, so what moved is checked after: a
+    file must still carry the content read, a folder must still be one.
+    A refusal here comes after the move, so ``set_aside`` moves it back.
+
+    Args:
+        tm (DropboxTokenManager): the account's token manager.
+        dst (PathSpec): the destination, for the refusal.
+        to_path (str): its Dropbox path.
+        aside (str): where it moves.
+        folder (bool): whether it was a folder.
+        content (str | None): the content token a file was read with.
+
+    Returns:
+        dict[str, Any]: what moved aside, as the move answered it.
+    """
+    moved = await move_path(tm, to_path, aside)
+    if folder:
+        kept = moved.get(".tag") == "folder"
+    else:
+        kept = moved.get(".tag") == "file" and (
+            content is None or token_of(moved.get(CONTENT_HASH)) == content
+        )
+    if not kept:
+        raise await stale(dst)
+    return moved
+
+
+async def _retire(
+    tm: DropboxTokenManager,
+    dst: PathSpec,
+    aside: str,
+    moved: Mapping[str, Any],
+    cond: WriteCondition | None,
+) -> None:
+    """Delete what was set aside: a file held to the rev its move
+    answered, a folder only while it lists no child, so one written while
+    the op landed is not deleted with it: mv's "Directory not empty".
 
     Args:
         tm (DropboxTokenManager): the account's token manager.
         dst (PathSpec): the destination, for ENOTEMPTY.
-        to_path (str): its Dropbox path.
-        rev (str | None): the rev the delete is held to.
-        existing (dict[str, Any] | None): what the lookup found there.
+        aside (str): where it was set aside.
+        moved (dict[str, Any]): what moved there, as the move answered it.
+        cond (WriteCondition | None): the op's condition.
     """
-    if (
-        existing is not None
-        and existing.get(".tag") == "folder"
-        and await list_folder(tm, to_path, limit=1)
-    ):
-        raise enotempty(dst)
-    await delete_path(tm, to_path, rev)
+    if moved.get(".tag") == "folder":
+        if await list_folder(tm, aside, limit=1):
+            raise enotempty(dst)
+        await delete_path(tm, aside)
+        return
+    rev = token_of(moved.get(REV))
+    try:
+        await delete_path(tm, aside, rev)
+    except DropboxApiError as exc:
+        raise (await refused(dst, exc, cond, rev)) or exc
 
 
 async def replace_onto(
@@ -103,18 +141,18 @@ async def replace_onto(
     dst: PathSpec,
     to_path: str,
     op: Callable[[str], Awaitable[T]],
-    undo: Callable[[str], Awaitable[Any]],
+    undo: Callable[[str, T], Awaitable[Any]],
     empty_folder: bool,
 ) -> tuple[T, dict[str, Any] | None]:
-    """Run a copy or move, replacing a file that holds the destination name.
+    """Run a copy or move, replacing what holds the destination name.
 
     The op goes first, since Dropbox answers a missing source before a
-    taken name. A held destination is measured before the op, cleared with
-    its rev on a taken name, and refused as gone when a folder took it. On
-    a taken name the op lands under a staged name beside the destination,
-    what holds the name goes next, and the landed entry takes the name
-    last: a refused op leaves the destination as it was, and a refused
-    delete hands the landed entry to ``undo``.
+    taken name. On a taken name, what holds it (a file, or an empty
+    folder where ``empty_folder``) moves aside under a staged name, the
+    op lands on the name, and what moved aside is deleted last. A held
+    destination is measured before the op and refused as gone when a
+    folder took it. A refused or lost step puts both back
+    (``land_then_retire``), handing a landing to ``undo``.
 
     Args:
         tm (DropboxTokenManager): the account's token manager.
@@ -122,8 +160,8 @@ async def replace_onto(
         dst (PathSpec): the destination.
         to_path (str): the destination's Dropbox path.
         op (Callable[[str], Awaitable[T]]): the copy or move to a path.
-        undo (Callable[[str], Awaitable[Any]]): what takes back an entry
-            the op landed at a path.
+        undo (Callable[[str, T], Awaitable[Any]]): what takes back an
+            entry the op landed at a path, handed the op's reply.
         empty_folder (bool): whether an empty folder there gives way too.
 
     Returns:
@@ -132,10 +170,10 @@ async def replace_onto(
     """
     cond = await write_condition(dst, "copy")
     rev = None
+    live = None
     if cond is not None and condition_version(cond):
         live = live_of(await lookup(tm, to_path))
         rev = await native_condition(dst, cond, live, "copy")
-    existing: dict[str, Any] | None = None
     try:
         return await op(to_path), None
     except DropboxApiError as exc:
@@ -143,52 +181,47 @@ async def replace_onto(
             raise enoent(src.virtual) from exc
         if not exc.summary.startswith(TAKEN):
             raise
-        if rev is None:
-            existing = await get_metadata(tm, to_path)
-            if existing.get(".tag") == "folder" and not (
-                empty_folder and not await list_folder(tm, to_path, limit=1)
-            ):
-                raise
-        elif exc.summary.startswith(TAKEN_BY_FOLDER):
+        if rev is not None and exc.summary.startswith(TAKEN_BY_FOLDER):
             raise await stale(dst) from exc
-    staged = f"{to_path}.mirage-{uuid4().hex}"
+        existing = await get_metadata(tm, to_path)
+        folder = existing.get(".tag") == "folder"
+        if folder and not (
+            empty_folder and not await list_folder(tm, to_path, limit=1)
+        ):
+            raise
+    content = (
+        live.content
+        if live is not None
+        else token_of(existing.get(CONTENT_HASH))
+    )
+    aside = aside_name(to_path)
     try:
-        landed = await op(staged)
-    except DropboxApiError as again:
-        if again.summary.startswith(MISSING_SOURCE):
-            raise enoent(src.virtual) from again
-        raise
-    try:
-        await _clear(tm, dst, to_path, rev, existing)
-    except Exception as err:
-        await _take_back(undo, staged)
-        if isinstance(err, DropboxApiError):
-            raise (await refused(dst, err, cond, rev)) or err
-        raise
-    try:
-        await move_path(tm, staged, to_path)
-    except Exception as again:
-        await _take_back(undo, staged)
-        if isinstance(again, DropboxApiError):
-            raise (await _retaken(again, cond, dst)) or again
-        raise
+        moved = await set_aside(
+            lambda: _move_aside(tm, dst, to_path, aside, folder, content),
+            lambda: move_path(tm, aside, to_path),
+        )
+        landed = await land_then_retire(
+            lambda: op(to_path),
+            lambda landed: undo(to_path, landed),
+            lambda: _retire(tm, dst, aside, moved, cond),
+            lambda: _absent(tm, aside),
+            lambda: move_path(tm, aside, to_path),
+        )
+    except DropboxApiError as err:
+        if err.summary.startswith(MISSING_SOURCE):
+            raise enoent(src.virtual) from err
+        raise (await _retaken(err, cond, dst)) or err
     return landed, existing
 
 
-async def _take_back(
-    undo: Callable[[str], Awaitable[Any]], staged: str
-) -> None:
-    """Hand an entry the op landed to ``undo``; a refusal is logged, so
-    the error that called for it stays the one raised.
+async def _absent(tm: DropboxTokenManager, path: str) -> bool:
+    """Whether nothing is at ``path`` any more.
 
     Args:
-        undo (Callable[[str], Awaitable[Any]]): what takes it back.
-        staged (str): where the op landed it.
+        tm (DropboxTokenManager): the account's token manager.
+        path (str): the Dropbox path.
     """
-    try:
-        await undo(staged)
-    except Exception as exc:
-        logger.debug("could not take back %s: %s", staged, exc)
+    return await lookup(tm, path) is None
 
 
 async def copy(
@@ -215,7 +248,7 @@ async def copy(
         dst,
         to_path,
         lambda to: copy_path(tm, from_path, to),
-        lambda staged: delete_path(tm, staged),
+        lambda landed, made: delete_path(tm, landed, token_of(made.get(REV))),
         empty_folder=False,
     )
     record("copy", dst.virtual, "dropbox", 0, timer)

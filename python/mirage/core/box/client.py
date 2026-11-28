@@ -336,12 +336,13 @@ async def box_put_json(
     tm: BoxTokenManager,
     url: str,
     body: dict[str, Any],
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = await api_request(
         "PUT",
         url,
         error_of=partial(_error_of, label="PUT", url=url),
-        headers=await box_auth_headers(tm),
+        headers={**await box_auth_headers(tm), **(headers or {})},
         json_body=body,
         session=tm.pool,
     )

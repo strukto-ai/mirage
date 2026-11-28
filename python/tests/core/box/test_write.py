@@ -369,8 +369,9 @@ async def test_rename_replaces_empty_folder_destination(account):
 
 @pytest.mark.asyncio
 async def test_rename_refuses_nonempty_folder_destination(account):
-    # Box decides the emptiness, not us: recursive=false 409s on a folder
-    # with children, and that is mv's "Directory not empty".
+    # The folder is asked for a child before anything moves, and the
+    # delete goes with recursive=false, which 409s on one written since:
+    # either is mv's "Directory not empty".
     ids = await _data(account)
     await account.put("x.txt", b"x", ids["dst"])
     with pytest.raises(OSError) as caught:
@@ -636,6 +637,46 @@ async def test_rename_refused_delete_moves_the_file_back(account):
     assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
     assert (await account.child(ids["sub"], "c.txt"))["id"] == moving
     assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_landing_puts_the_destination_back(account):
+    # The file there moves aside, then the move onto the freed name is
+    # refused: the file set aside takes its name back.
+    ids = await _data(account)
+    await account.put("b.txt", b"other", ids["data"])
+    await account.run.answer_next(
+        "PUT", FILE_ROUTE, 403, path=f"/2.0/files/{ids['a.txt']}"
+    )
+    with pytest.raises(BoxApiError):
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/a.txt"),
+            dst=_spec("/data/b.txt"),
+        )
+    assert await account.names(ids["data"]) == ["a.txt", "b.txt", "dst", "sub"]
+    assert await account.content("data/b.txt") == b"other"
+
+
+@pytest.mark.asyncio
+async def test_rename_refuses_a_folder_holding_only_the_item_itself(account):
+    # mv -T d/c d: moving the only child out would leave the folder empty
+    # for its delete, so it is asked for a child before anything moves.
+    ids = await _data(account)
+    inner = await account.mkdir("c", ids["dst"])
+    with pytest.raises(OSError) as caught:
+        await call(
+            rename,
+            readdir,
+            account.accessor(),
+            _spec("/data/dst/c"),
+            dst=_spec("/data/dst"),
+        )
+    assert caught.value.errno == errno.ENOTEMPTY
+    assert await account.names(ids["data"]) == ["a.txt", "dst", "sub"]
+    assert (await account.child(ids["dst"], "c"))["id"] == inner
 
 
 @pytest.mark.asyncio

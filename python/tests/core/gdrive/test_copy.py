@@ -205,3 +205,49 @@ async def test_copy_onto_the_same_item_does_nothing(google_account):
     assert await google_account.asked("POST", COPY) == []
     assert await google_account.asked("DELETE", FILE) == []
     assert len(await google_account.items()) == 1
+
+
+@pytest.mark.asyncio
+async def test_copy_leaves_a_destination_another_client_renamed(
+    google_account,
+):
+    # The file is renamed away while the copy lands: it no longer holds the
+    # destination, and Drive deletes by id wherever an item went, so the
+    # copy takes the name and that file is left as it is.
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("POST", COPY)], lambda: google_account.patch(dst_id, name="kept.txt")
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    names = sorted(item["name"] for item in await google_account.items())
+    assert names == ["dst.txt", "kept.txt", "src.txt"]
+    assert await google_account.content(dst_id) == b"old"
+
+
+@pytest.mark.asyncio
+async def test_copy_whose_delete_went_through_keeps_the_copy(google_account):
+    # The delete lands, but its answer is an error (a relay's 502, say):
+    # the file it named is gone, so dropping the copy would leave nothing.
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("DELETE", FILE)], lambda: google_account.delete(dst_id), status=502
+    )
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert sorted(item["name"] for item in items) == ["dst.txt", "src.txt"]
+    (made,) = [item for item in items if item["name"] == "dst.txt"]
+    assert await google_account.content(made["id"]) == b"new"

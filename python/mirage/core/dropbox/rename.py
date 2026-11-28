@@ -25,12 +25,12 @@ async def rename(
 ) -> None:
     """move_v2 rejects an existing destination, but rename(2) replaces
     one: a file outright, and a directory when it is empty. So on a
-    conflict the source moves beside the target and takes its name once
-    the target is deleted, except for a folder that still lists a child,
-    where the original error propagates and the generic mv reports
-    "Directory not empty" (mirrors msgraph's rename_replace). The source
-    moves whole, so only a destination it replaces is held to its
-    version (``replace_onto``).
+    conflict the target moves aside, the source takes its name, and the
+    target is deleted last, except for a folder that still lists a
+    child, where the original error propagates and the generic mv
+    reports "Directory not empty" (mirrors msgraph's rename_replace).
+    The source moves whole, so only a destination it replaces is held to
+    its version (``replace_onto``).
 
     Args:
         accessor (DropboxAccessor): Dropbox accessor.
@@ -51,7 +51,7 @@ async def rename(
         dst,
         to_path,
         lambda to: move_path(tm, from_path, to),
-        lambda staged: move_path(tm, staged, from_path),
+        lambda landed, _: move_path(tm, landed, from_path),
         empty_folder=True,
     )
     folder = moved.get(".tag") != "file"

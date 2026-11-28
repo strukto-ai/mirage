@@ -238,3 +238,25 @@ async def test_rename_onto_the_same_item_does_nothing(google_account):
     assert await google_account.asked("PATCH", FILE) == []
     assert await google_account.asked("DELETE", FILE) == []
     assert await google_account.content(file_id) == b"data"
+
+
+@pytest.mark.asyncio
+async def test_rename_whose_delete_went_through_keeps_the_move(google_account):
+    # The delete lands, but its answer is an error: the file it named is
+    # gone, so moving the item back would leave nothing at the name.
+    src_id = await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.run.before_next(
+        [("DELETE", FILE)], lambda: google_account.delete(dst_id), status=502
+    )
+    await call(
+        rename,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
+    )
+    items = await google_account.items()
+    assert [(item["id"], item["name"]) for item in items] == [
+        (src_id, "dst.txt")
+    ]

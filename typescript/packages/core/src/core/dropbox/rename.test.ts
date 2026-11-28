@@ -66,7 +66,7 @@ function renamed(src: string, dst: string): Promise<void> {
 }
 
 describe('dropbox rename onto a taken name', () => {
-  it('lands beside the file, deletes it, then takes its name', async () => {
+  it('sets the file aside, takes its name, then deletes it', async () => {
     await account.put('/a.txt', ENC.encode('mine'))
     await account.put('/b.txt', ENC.encode('theirs'))
     await account.run.recordRequests()
@@ -75,16 +75,20 @@ describe('dropbox rename onto a taken name', () => {
       from_path: string
       to_path: string
     }[]
-    expect(moves.map((m) => [m.from_path, m.to_path])[0]).toEqual(['/a.txt', '/b.txt'])
-    expect(moves[1]?.to_path).toMatch(/^\/b\.txt\.mirage-[0-9a-f]{32}$/)
-    expect(moves[2]).toMatchObject({ from_path: moves[1]?.to_path, to_path: '/b.txt' })
+    const pairs = moves.map((m) => [m.from_path, m.to_path])
+    expect(pairs[0]).toEqual(['/a.txt', '/b.txt'])
+    expect(pairs[1]?.[0]).toBe('/b.txt')
+    expect(pairs[1]?.[1]).toMatch(/^\/b\.txt\.mirage-[0-9a-f]{32}$/)
+    expect(pairs[2]).toEqual(['/a.txt', '/b.txt'])
+    const deleted = (await account.run.bodies('POST', DELETE)) as { path: string }[]
+    expect(deleted.map((body) => body.path)).toEqual([pairs[1]?.[1]])
     expect(await account.names()).toEqual(['b.txt'])
     expect(new TextDecoder().decode(await account.read('/b.txt'))).toBe('mine')
   })
 
-  it('keeps the destination when the staged move is refused', async () => {
-    // The move meets the taken name first, then the staged move is refused
-    // (a view-only source, say): nothing was deleted yet.
+  it('keeps the destination when moving it aside is refused', async () => {
+    // The move meets the taken name first, then moving the file aside is
+    // refused: nothing moved, so nothing is put back.
     await account.put('/a.txt', ENC.encode('mine'))
     await account.put('/b.txt', ENC.encode('theirs'))
     await account.run.answerNext('POST', MOVE, 409, { error_summary: 'to/conflict/file/..' })

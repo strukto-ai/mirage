@@ -14,9 +14,13 @@ _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 _CONFLICT = {"error": {"code": "nameAlreadyExists", "message": "x"}}
 
 
-def _staged(name: str) -> re.Pattern[str]:
+def _staged(name: str, action: str = "") -> re.Pattern[str]:
     return re.compile(
-        "^" + re.escape(f"{_BASE}/root:/{name}.mirage-") + "[0-9a-f]{32}$"
+        "^"
+        + re.escape(f"{_BASE}/root:/{name}.mirage-")
+        + "[0-9a-f]{32}"
+        + re.escape(action)
+        + "$"
     )
 
 
@@ -62,7 +66,7 @@ async def test_rename_same_parent_omits_parent_reference():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_lands_beside_then_deletes_file_destination(
+async def test_rename_conflict_sets_the_file_aside_then_deletes_it(
     exact_cloud_paths,
 ):
     staged = _staged("b.txt")
@@ -72,9 +76,9 @@ async def test_rename_conflict_lands_beside_then_deletes_file_destination(
             _BASE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
+        m.patch(_BASE + "/root:/b.txt", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/a.txt", status=200, payload={"id": "1"})
-        m.delete(_BASE + "/root:/b.txt", status=204)
-        m.patch(staged, status=200, payload={"id": "1", "name": "b.txt"})
+        m.delete(staged, status=204)
         await rename(
             _accessor(),
             PathSpec.from_str_path("/a.txt"),
@@ -82,14 +86,14 @@ async def test_rename_conflict_lands_beside_then_deletes_file_destination(
         )
         # aioresponses' __exit__ only calls stop(), so registering the
         # DELETE proves nothing on its own: without these the test passes
-        # when rename swallows the 409 and does neither the delete nor
-        # the move that lands beside it.
-        assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
+        # when rename swallows the 409 and neither sets the file aside nor
+        # deletes it.
+        (aside,) = m.requests[("PATCH", URL(_BASE + "/root:/b.txt"))]
+        assert aside.kwargs["json"]["name"].startswith("b.txt.mirage-")
         moves = m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]
-        assert len(moves) == 2
-        assert moves[1].kwargs["json"]["name"].startswith("b.txt.mirage-")
-        named = [u for verb, u in m.requests if staged.match(str(u))]
-        assert len(named) == 1
+        assert [mv.kwargs["json"]["name"] for mv in moves] == ["b.txt"] * 2
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and staged.match(str(deleted[0]))
 
 
 @pytest.mark.asyncio
@@ -103,20 +107,26 @@ async def test_rename_conflict_replaces_empty_dir_destination(
             payload={"id": "2", "name": "dst", "folder": {"childCount": 0}},
         )
         m.get(_BASE + "/root:/dst:/children", payload={"value": []})
+        m.patch(_BASE + "/root:/dst", status=200, payload={"id": "2"})
         m.patch(_BASE + "/root:/src", status=200, payload={"id": "1"})
-        m.get(_BASE + "/root:/dst:/children", payload={"value": []})
-        m.delete(_BASE + "/root:/dst", status=204)
-        m.patch(_staged("dst"), status=200, payload={"id": "1"})
+        m.get(_staged("dst", ":/children"), payload={"value": []})
+        m.delete(_staged("dst"), status=204)
         await rename(
             _accessor(),
             PathSpec.from_str_path("/src"),
             PathSpec.from_str_path("/dst"),
         )
-        # The folder is asked for children twice: before the source moves
-        # beside it, and again just before its delete.
-        probes = m.requests[("GET", URL(_BASE + "/root:/dst:/children"))]
-        assert len(probes) == 2
-        assert ("DELETE", URL(_BASE + "/root:/dst")) in m.requests
+        # The folder is asked for children twice: before it moves aside,
+        # and again, where it was set aside, just before its delete.
+        probes = [
+            u
+            for verb, u in m.requests
+            if verb == "GET" and str(u).endswith(":/children")
+        ]
+        assert str(probes[0]) == _BASE + "/root:/dst:/children"
+        assert _staged("dst", ":/children").match(str(probes[1]))
+        deleted = [u for verb, u in m.requests if verb == "DELETE"]
+        assert len(deleted) == 1 and _staged("dst").match(str(deleted[0]))
         assert len(m.requests[("PATCH", URL(_BASE + "/root:/src"))]) == 2
 
 

@@ -22,11 +22,11 @@ import { checkPath, dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination, but rename(2) replaces one:
 // a file outright, and a directory when it is empty. So on a conflict the
-// source moves beside the target and takes its name once the target is
-// deleted, except for a folder that still lists a child, where the
-// original error propagates and the generic mv reports
-// "Directory not empty" (mirrors msgraph's renameReplace). The source moves
-// whole, so only a destination it replaces is held to its version.
+// target moves aside, the source takes its name, and the target is deleted
+// last, except for a folder that still lists a child, where the original
+// error propagates and the generic mv reports "Directory not empty"
+// (mirrors msgraph's renameReplace). The source moves whole, so only a
+// destination it replaces is held to its version (`replaceOnto`).
 export async function rename(
   accessor: DropboxAccessor,
   src: PathSpec,
@@ -45,7 +45,7 @@ export async function rename(
     dst,
     to,
     (at) => movePath(tm, from, at),
-    (staged) => movePath(tm, staged, from),
+    (landed) => movePath(tm, landed, from),
     true,
   )
   const folder = moved['.tag'] !== 'file'

@@ -182,6 +182,42 @@
         "b",
         "n"
       ]
+    },
+    {
+      "id": "mv_T_refuses_the_folder_its_only_child_moves_onto",
+      "seq": 46100200,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/rr_T/c && printf 'x\\n' > /data/rr_T/c/x && mv -T /data/rr_T/c /data/rr_T; echo \" exit=$?\"; ls /data/rr_T; cat /data/rr_T/c/x; rm -r /data/rr_T",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nc\nx\n",
+        "stderr": "mv: cannot overwrite '/data/rr_T': Directory not empty\n"
+      },
+      "flags": [
+        "T"
+      ]
     }
   ]
 }

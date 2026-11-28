@@ -102,6 +102,18 @@ class Drive:
             return await self.account.content(key)
         return await self.account.content(f"/{key}")
 
+    async def names(self) -> list[str]:
+        """What the drive's root holds, by name."""
+        if isinstance(self.account, BoxAccount):
+            return await self.account.names("0")
+        return await self.account.names()
+
+    async def aside(self, key: str) -> str:
+        """The staged name what held ``key`` waits under."""
+        (name,) = [n for n in await self.names() if n.startswith(f"{key}.")]
+        assert ".mirage-" in name
+        return name
+
     async def count(self, kind: str) -> int:
         """How many requests of ``kind`` Mirage has made."""
         listed = await self.account.run.call("GET", "/_kit/requests")
@@ -185,6 +197,41 @@ def _refusal(drive: Drive, verb: str) -> str:
     if verb == "cp":
         return f"cp: cannot create regular file '{r}/g': {STALE}\n"
     return f"mv: cannot move '{r}/f' to '{r}/g': '{r}/g' {STALE}\n"
+
+
+# Which request moves what holds g aside, and which lands the source on g
+# once it is free: a kind of request, and which one of that kind it is. A
+# Dropbox op tries g's name once before anything moves.
+SET_ASIDE = {
+    ("box", "cp"): ("update", 1),
+    ("box", "mv"): ("update", 1),
+    ("dropbox", "cp"): ("move", 1),
+    ("dropbox", "mv"): ("move", 2),
+}
+LANDING = {
+    ("box", "cp"): ("copy", 1),
+    ("box", "mv"): ("update", 2),
+    ("dropbox", "cp"): ("copy", 2),
+    ("dropbox", "mv"): ("move", 3),
+}
+
+
+async def _before(
+    drive: Drive,
+    step: dict[tuple[str, str], tuple[str, int]],
+    verb: str,
+    change: Callable[[], Awaitable[None] | None],
+) -> None:
+    """Run ``change`` just before ``verb``'s request for ``step`` acts."""
+    kind, nth = step[(drive.kind, verb)]
+
+    async def arm(left: int) -> None:
+        if left == 1:
+            await drive.before(kind, change)
+        else:
+            await drive.before(kind, lambda: arm(left - 1))
+
+    await arm(nth)
 
 
 async def _refused_until_read(ws: Workspace, path: str) -> None:
@@ -337,13 +384,15 @@ async def test_rm_r_stopped_partway_keeps_the_changed_files_version(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_destination_changed_during_its_clear_is_refused(
+async def test_a_destination_changed_before_it_moves_aside_is_refused(
     drive, workspace, verb
 ):
+    # Box moves g aside held to the version read; Dropbox checks what it
+    # moved against it, and moves it back.
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-    await drive.before("delete", lambda: drive.put("g", b"theirs\n"))
+    await _before(drive, SET_ASIDE, verb, lambda: drive.put("g", b"theirs\n"))
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (
         1,
         "",
@@ -357,46 +406,38 @@ async def test_a_destination_changed_during_its_clear_is_refused(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_destination_recreated_after_its_clear_stays_refused(
+async def test_a_destination_recreated_while_set_aside_stays_refused(
     drive, workspace, verb
 ):
-    # The source lands beside g under a staged name and takes g's name once
-    # g is deleted, for cp as for mv: the name taken in between refuses
-    # that rename, and the landed item goes back (cp's copy is deleted).
+    # g moves aside under a staged name and the source lands on g, for cp
+    # as for mv: g taken in between refuses the landing, nothing is
+    # deleted, and the g read keeps its staged name, since g is not free.
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-
-    async def take_name_after_the_clear() -> None:
-        await drive.before(drive.move, lambda: drive.put("g", b"new\n"))
-
-    await drive.before("delete", take_name_after_the_clear)
-    deletes = 2 if verb == "cp" else 1
+    await _before(drive, LANDING, verb, lambda: drive.put("g", b"new\n"))
     for _ in range(2):
         assert await _run(ws, f"{verb} {r}/f {r}/g") == (
             1,
             "",
             _refusal(drive, verb),
         )
-        assert await drive.count("delete") == deletes
+        assert await drive.count("delete") == 0
     assert await drive.read("g") == b"new\n"
     assert await drive.read("f") == b"one\n"
+    assert await drive.read(await drive.aside("g")) == b"gee\n"
     assert await _run(ws, f"echo x > {r}/f") == (0, "", "")
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_destination_a_folder_retook_after_its_clear_keeps_its_version(
+async def test_a_destination_a_folder_took_while_set_aside_keeps_its_version(
     drive, workspace, verb
 ):
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-
-    async def fold_after_the_clear() -> None:
-        await drive.before(drive.move, lambda: drive.put("g/x", b"x\n"))
-
-    await drive.before("delete", fold_after_the_clear)
+    await _before(drive, LANDING, verb, lambda: drive.put("g/x", b"x\n"))
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (
         1,
         "",
@@ -618,11 +659,7 @@ async def test_a_box_destination_a_web_link_retook_keeps_its_version(
 ):
     ws = workspace()
     await _run(ws, "cat /box/g")
-
-    async def link_after_the_clear() -> None:
-        await drive.before("update", lambda: drive.box.web_link("g"))
-
-    await drive.before("delete", link_after_the_clear)
+    await _before(drive, LANDING, verb, lambda: drive.box.web_link("g"))
     assert await _run(ws, f"{verb} /box/f /box/g") == (
         1,
         "",
@@ -700,16 +737,21 @@ async def test_a_box_cp_that_changed_nothing_keeps_the_held_version(
 
 @pytest.mark.asyncio
 @BOX
-async def test_a_box_cp_whose_delete_landed_but_failed_serves_no_stale_bytes(
+async def test_a_box_cp_whose_delete_landed_but_failed_serves_the_copy(
     drive, workspace
 ):
+    # The delete of the g set aside lands but answers 500: that g is gone,
+    # so the copy stands, and g serves its bytes, not the ones read.
     ws = workspace()
     await _run(ws, "cat /box/g")
-    await drive.before("delete", lambda: drive.drop("g"), status=500)
-    code, _, _ = await _run(ws, "cp /box/f /box/g")
-    assert code == 1
-    code, out, _ = await _run(ws, "cat /box/g")
-    assert (code, out) == (1, "")
+
+    async def drop_aside() -> None:
+        await drive.drop(await drive.aside("g"))
+
+    await drive.before("delete", drop_aside, status=500)
+    assert await _run(ws, "cp /box/f /box/g") == (0, "", "")
+    assert await _run(ws, "cat /box/g") == (0, "one\n", "")
+    assert await drive.names() == ["d", "f", "g"]
 
 
 @pytest.mark.asyncio
@@ -778,11 +820,12 @@ async def test_a_dropbox_destination_a_folder_took_is_refused_with_no_delete(
 @pytest.mark.asyncio
 @DROPBOX
 @pytest.mark.parametrize("verb, route", [("cp", "copy"), ("mv", "move")])
-async def test_a_dropbox_source_gone_before_its_staged_landing_is_named(
+async def test_a_dropbox_source_gone_before_its_landing_is_named(
     drive, workspace, verb, route
 ):
-    # The first op meets g's name; the source goes before the op that lands
-    # it beside g, so g is never deleted.
+    # The first op meets g's name; the source goes before the next op of
+    # its kind (mv's moves g aside, cp's lands), so g is never deleted and
+    # takes its name back.
     ws = workspace()
     await _run(ws, "cat /dbx/g")
 
@@ -809,14 +852,10 @@ async def test_a_dropbox_source_gone_before_its_staged_landing_is_named(
 async def test_an_unread_dropbox_destination_retaken_is_refused_once(
     drive, workspace, verb
 ):
-    # After the clear, the staged entry takes g's name with a move, for cp
+    # g moves aside, and g is taken before the source lands on it, for cp
     # as for mv.
     ws = workspace()
-
-    async def take_name_after_the_clear() -> None:
-        await drive.before("move", lambda: drive.put("g", b"new\n"))
-
-    await drive.before("delete", take_name_after_the_clear)
+    await _before(drive, LANDING, verb, lambda: drive.put("g", b"new\n"))
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (
         1,
         "",

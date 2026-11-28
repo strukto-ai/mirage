@@ -17,14 +17,12 @@ import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
+import { eisdir, enoent, enotdir, enotempty } from '../../errors/fs.ts'
 import { uploadStat } from '../../utils/upload.ts'
-import { updateFile, updateFolder, type BoxFileInfo, type BoxItem } from './api.ts'
-import type { BoxTokenManager } from './client.ts'
-import { clearFile, heldFile, replaceFile, retaken } from './copy.ts'
+import { listFolderItems, type BoxFileInfo, type BoxItem } from './api.ts'
+import { heldFile, place, replaceFile, replaceItem, retaken } from './copy.ts'
 import { statFromItem } from './readdir.ts'
 import { liveItemOf, parentFolder, pathParts } from './resolve.ts'
-import { deleteEmptyFolder } from './rmdir.ts'
 
 /**
  * Refuse a type mismatch with rename(2)'s own errnos. A mismatch outranks
@@ -40,17 +38,6 @@ function refuseMismatch(dst: PathSpec, existing: BoxItem, src: BoxItem): void {
   }
 }
 
-// Give `item` a name, and a folder unless `folderId` is undefined.
-async function place(
-  tm: BoxTokenManager,
-  item: BoxItem,
-  name: string,
-  folderId: string | undefined,
-): Promise<BoxItem> {
-  const opts = folderId === undefined ? { name } : { name, parentId: folderId }
-  return item.type === 'folder' ? updateFolder(tm, item.id, opts) : updateFile(tm, item.id, opts)
-}
-
 // The folder an item sits in, from a listing's `parent` or a lookup's
 // `path_collection`. Mirrors Python's `_folder_of`.
 function folderOf(
@@ -62,12 +49,10 @@ function folderOf(
 
 /**
  * Move `item` onto what holds `dst`'s name. A stale destination file is
- * refused before anything is sent. Box refuses a taken name, so the item lands
- * beside it under a staged name first, what it replaces goes next (a file held
- * to the version read, only an empty folder, which recursive=false gets from
- * Box for free, as rmdir does), and the item takes the name last: a refused
- * move leaves both as they were, and a refused delete or rename puts the item
- * back where it was. Mirrors Python's `_replace`.
+ * refused before anything is sent, and so is a folder that holds anything, the
+ * item itself included (`mv -T d/c d`). The rest is `replaceItem`, whose undo
+ * for a landed item moves it back to its folder and name. Mirrors Python's
+ * `_replace_onto`.
  */
 async function replaceOnto(
   accessor: BoxAccessor,
@@ -80,32 +65,32 @@ async function replaceOnto(
   const tm = accessor.tokenManager
   const dstParts = pathParts(dst)
   const newName = dstParts[dstParts.length - 1] ?? ''
-  const folder = existing.type === 'folder'
   let cond: WriteCondition | null = null
   let etag: string | null = null
   let live: BoxItem | null = existing
-  if (!folder) [cond, live, etag] = await heldFile(accessor, dst, existing)
-  const name =
-    live === null ? newName : `${newName}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
-  let landed: BoxItem
-  try {
-    landed = await place(tm, item, name, folderId)
-  } catch (err) {
-    throw (await retaken(err, cond, dst)) ?? err
-  }
-  if (live === null) return landed
-  try {
-    if (folder) await deleteEmptyFolder(tm, live.id, dst)
-    else await clearFile(accessor, dst, live, cond, etag)
-    return await place(tm, landed, newName, undefined)
-  } catch (err) {
-    try {
-      await place(tm, landed, item.name, folderOf(item))
-    } catch (undo) {
-      console.debug(`could not move ${item.name} back: ${String(undo)}`)
+  if (existing.type === 'folder') {
+    if ((await listFolderItems(tm, existing.id, { limit: 1 })).length > 0) {
+      throw enotempty(dst.virtual)
     }
-    throw (await retaken(err, cond, dst)) ?? err
+  } else {
+    ;[cond, live, etag] = await heldFile(accessor, dst, existing)
   }
+  if (live === null) {
+    try {
+      return await place(tm, item, newName, folderId)
+    } catch (err) {
+      throw (await retaken(err, cond, dst)) ?? err
+    }
+  }
+  return replaceItem(
+    accessor,
+    dst,
+    live,
+    cond,
+    etag,
+    () => place(tm, item, newName, folderId),
+    (landed) => place(tm, landed, item.name, folderOf(item)),
+  )
 }
 
 /**

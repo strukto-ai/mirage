@@ -166,4 +166,14 @@ describe('gdrive rename', () => {
     expect(await account.asked('DELETE', FILE)).toEqual([])
     expect(await account.content(id)).toBe('data')
   })
+
+  it('keeps the move when its delete went through but answered an error', async () => {
+    // The file it named is gone, so moving the item back would leave nothing
+    // at the name.
+    const src = await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.run.beforeNext([['DELETE', FILE]], () => account.delete(dst), 502)
+    await renamed('/src.txt', '/dst.txt')
+    expect((await account.items()).map((item) => [item.id, item.name])).toEqual([[src, 'dst.txt']])
+  })
 })

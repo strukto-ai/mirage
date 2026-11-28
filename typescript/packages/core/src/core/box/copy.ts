@@ -22,21 +22,26 @@ import { uploadStat } from '../../utils/upload.ts'
 import { eisdir, enoent, enotdir } from '../../errors/fs.ts'
 import { liftLost, lostCount, record, startOp, type OpTimer } from '../../observe/context.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
-import { BoxApiError } from './client.ts'
-import { CONFLICT_STATUS } from './constants.ts'
+import { asideName, landThenRetire, setAside } from '../api/replace.ts'
+import { BoxApiError, type BoxTokenManager } from './client.ts'
+import { CONFLICT_STATUS, GONE_STATUS } from './constants.ts'
 import {
   absentOn404,
   copyFile,
   copyFolder,
   deleteFile,
+  getFileInfo,
+  getFolderInfo,
   listFolderItems,
   refused,
   updateFile,
+  updateFolder,
   type BoxItem,
 } from './api.ts'
 import { liveOf } from './fingerprint.ts'
 import { statFromItem } from './readdir.ts'
 import { itemOf, liveItem, liveItemOf, parentFolder, pathParts } from './resolve.ts'
+import { deleteEmptyFolder } from './rmdir.ts'
 
 /**
  * What a copy or move onto `dst` is held to, refusing a stale one: the op's
@@ -115,17 +120,84 @@ function landed(dst: PathSpec, whole: boolean, timer: OpTimer, upto: number): vo
 }
 
 /**
- * Copy `item` to `dst`, merging a folder into a folder: `folderId` is the
- * folder `dst` lands in, `existing` what is at `dst`. Answers the copy's stat,
- * null for a merge or a reply that names none. Mirrors Python's `_copy_into`.
+ * Give `item` a name, and a folder unless `folderId` is undefined, the move
+ * held to `etag` when one is given. Mirrors Python's `place`.
  */
+export async function place(
+  tm: BoxTokenManager,
+  item: BoxItem,
+  name: string,
+  folderId: string | undefined,
+  etag: string | null = null,
+): Promise<BoxItem> {
+  const opts = folderId === undefined ? { name, etag } : { name, parentId: folderId, etag }
+  return item.type === 'folder' ? updateFolder(tm, item.id, opts) : updateFile(tm, item.id, opts)
+}
+
+/** Whether a file or folder is gone from Box, or sits in its trash. Mirrors Python's `gone`. */
+export async function gone(tm: BoxTokenManager, item: BoxItem): Promise<boolean> {
+  let info: BoxItem & { item_status?: string }
+  try {
+    info =
+      item.type === 'folder' ? await getFolderInfo(tm, item.id) : await getFileInfo(tm, item.id)
+  } catch (err) {
+    if (err instanceof BoxApiError && err.status === GONE_STATUS) return true
+    throw err
+  }
+  return info.item_status === 'trashed'
+}
+
+/**
+ * Land an item on the name `existing` holds, replacing it, answering what the
+ * landing answered. Box refuses a taken name, so `existing` moves aside under a
+ * staged name first, a file held to `etag`, then the item lands on the name,
+ * and what moved aside is deleted last: a file held to the version its move
+ * answered, a folder only while it is empty. A refused or lost step puts both
+ * back (`landThenRetire`). Mirrors Python's `replace_item`.
+ */
+export async function replaceItem(
+  accessor: BoxAccessor,
+  dst: PathSpec,
+  existing: BoxItem,
+  cond: WriteCondition | null,
+  etag: string | null,
+  land: () => Promise<BoxItem>,
+  takeBack: (landed: BoxItem) => Promise<unknown>,
+): Promise<BoxItem> {
+  const tm = accessor.tokenManager
+  const parts = pathParts(dst)
+  const name = parts[parts.length - 1] ?? ''
+  let moved: BoxItem
+  try {
+    moved = await setAside(
+      () => place(tm, existing, asideName(name), undefined, etag),
+      () => place(tm, existing, name, undefined),
+    )
+  } catch (err) {
+    throw (await refused(dst, err, cond, etag)) ?? err
+  }
+  const retire = async (): Promise<void> => {
+    if (existing.type === 'folder') await deleteEmptyFolder(tm, existing.id, dst)
+    else await clearFile(accessor, dst, moved, cond, moved.etag ?? null)
+  }
+  try {
+    return await landThenRetire(
+      land,
+      takeBack,
+      retire,
+      () => gone(tm, existing),
+      () => place(tm, existing, name, undefined),
+    )
+  } catch (err) {
+    throw (await retaken(err, cond, dst)) ?? err
+  }
+}
+
 /**
  * Copy a file onto the file that holds `dst`'s name. A stale destination is
- * refused before anything is sent. Box refuses a taken name, so the copy lands
- * beside it under a staged name first, the file it replaces goes next, held to
- * the version read, and the copy takes the name last: a refused copy leaves
- * the file as it was, and a refused delete or rename drops the copy again.
- * Mirrors Python's `_copy_over`.
+ * refused before anything is sent; the rest is `replaceItem`, whose undo for a
+ * landed copy is its delete, held to the version it landed as, so a write onto
+ * it since is kept. Mirrors Python's `_copy_over`.
  */
 async function copyOver(
   accessor: BoxAccessor,
@@ -138,28 +210,29 @@ async function copyOver(
   const dstParts = pathParts(dst)
   const newName = dstParts[dstParts.length - 1] ?? ''
   const [cond, live, etag] = await heldFile(accessor, dst, existing)
-  const name =
-    live === null ? newName : `${newName}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
-  let made: BoxItem
-  try {
-    made = await copyFile(tm, item.id, folderId, name)
-  } catch (err) {
-    throw (await retaken(err, cond, dst)) ?? err
-  }
-  if (live === null) return made
-  try {
-    await clearFile(accessor, dst, live, cond, etag)
-    return await updateFile(tm, made.id, { name: newName })
-  } catch (err) {
+  if (live === null) {
     try {
-      await deleteFile(tm, made.id)
-    } catch (undo) {
-      console.debug(`could not drop the copy at ${dst.virtual}: ${String(undo)}`)
+      return await copyFile(tm, item.id, folderId, newName)
+    } catch (err) {
+      throw (await retaken(err, cond, dst)) ?? err
     }
-    throw (await retaken(err, cond, dst)) ?? err
   }
+  return replaceItem(
+    accessor,
+    dst,
+    live,
+    cond,
+    etag,
+    () => copyFile(tm, item.id, folderId, newName),
+    (made) => deleteFile(tm, made.id, made.etag ?? null),
+  )
 }
 
+/**
+ * Copy `item` to `dst`, merging a folder into a folder: `folderId` is the
+ * folder `dst` lands in, `existing` what is at `dst`. Answers the copy's stat,
+ * null for a merge or a reply that names none. Mirrors Python's `_copy_into`.
+ */
 async function copyInto(
   accessor: BoxAccessor,
   item: BoxItem,

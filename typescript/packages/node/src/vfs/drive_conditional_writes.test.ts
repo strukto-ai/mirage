@@ -112,6 +112,27 @@ class Drive {
     return data === undefined ? undefined : DEC.decode(data)
   }
 
+  /** What the drive's root holds, by name. */
+  async names(): Promise<string[]> {
+    if (this.account instanceof BoxAccount) {
+      return (await this.account.entries('0')).map((row) => row.name).sort()
+    }
+    const listed = await this.account.run.call<{ entries: { name: string }[] }>(
+      'POST',
+      '/2/files/list_folder',
+      { json: { path: '' } },
+    )
+    return listed.entries.map((entry) => entry.name).sort()
+  }
+
+  /** The staged name what held `key` waits under. */
+  async aside(key: string): Promise<string> {
+    const named = (await this.names()).filter((name) => name.startsWith(`${key}.`))
+    expect(named).toHaveLength(1)
+    expect(named[0]).toContain('.mirage-')
+    return named[0] ?? ''
+  }
+
   /** How many requests of `kind` Mirage has made. */
   async count(kind: string): Promise<number> {
     let n = 0
@@ -209,6 +230,36 @@ function refusal(verb: string): string {
   const r = drive.root
   if (verb === 'cp') return `cp: cannot create regular file '${r}/g': ${STALE}\n`
   return `mv: cannot move '${r}/f' to '${r}/g': '${r}/g' ${STALE}\n`
+}
+
+// Which request moves what holds g aside, and which lands the source on g once
+// it is free: a kind of request, and which one of that kind it is. A Dropbox op
+// tries g's name once before anything moves.
+const SET_ASIDE: Record<string, [string, number]> = {
+  'box cp': ['update', 1],
+  'box mv': ['update', 1],
+  'dropbox cp': ['move', 1],
+  'dropbox mv': ['move', 2],
+}
+const LANDING: Record<string, [string, number]> = {
+  'box cp': ['copy', 1],
+  'box mv': ['update', 2],
+  'dropbox cp': ['copy', 2],
+  'dropbox mv': ['move', 3],
+}
+
+// Run `change` just before `verb`'s request for `step` acts.
+async function before(
+  step: Record<string, [string, number]>,
+  verb: string,
+  change: () => unknown,
+): Promise<void> {
+  const [kind, nth] = step[`${drive.kind} ${verb}`] ?? ['', 0]
+  const arm = async (left: number): Promise<void> => {
+    if (left === 1) await drive.before(kind, change)
+    else await drive.before(kind, () => arm(left - 1))
+  }
+  await arm(nth)
 }
 
 async function refusedUntilRead(ws: Workspace, path: string): Promise<void> {
@@ -443,44 +494,48 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     expect(await drive.text('d/s/x')).toBe('theirs\n')
   })
 
-  it.each(['cp', 'mv'])('refuses %s onto a destination changed during its clear', async (verb) => {
-    const r = drive.root
-    const ws = await workspace()
-    await run(ws, `cat ${r}/g`)
-    await drive.before('delete', () => drive.put('g', 'theirs\n'))
-    expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
-    expect([await drive.text('f'), await drive.text('g')]).toEqual(['one\n', 'theirs\n'])
-  })
-
   it.each(['cp', 'mv'])(
-    '%s stays refused on a destination recreated after its clear',
+    'refuses %s onto a destination changed before it moves aside',
     async (verb) => {
-      // The source lands beside g under a staged name and takes g's name
-      // once g is deleted, for cp as for mv: the name taken in between
-      // refuses that rename, and the landed item goes back (cp's copy is
-      // deleted).
+      // Box moves g aside held to the version read; Dropbox checks what it moved
+      // against it, and moves it back.
       const r = drive.root
       const ws = await workspace()
       await run(ws, `cat ${r}/g`)
-      await drive.before('delete', () => drive.before(drive.move, () => drive.put('g', 'new\n')))
-      const deletes = verb === 'cp' ? 2 : 1
+      await before(SET_ASIDE, verb, () => drive.put('g', 'theirs\n'))
+      expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
+      expect([await drive.text('f'), await drive.text('g')]).toEqual(['one\n', 'theirs\n'])
+    },
+  )
+
+  it.each(['cp', 'mv'])(
+    '%s stays refused on a destination recreated while set aside',
+    async (verb) => {
+      // g moves aside under a staged name and the source lands on g, for cp as
+      // for mv: g taken in between refuses the landing, nothing is deleted,
+      // and the g read keeps its staged name, since g is not free.
+      const r = drive.root
+      const ws = await workspace()
+      await run(ws, `cat ${r}/g`)
+      await before(LANDING, verb, () => drive.put('g', 'new\n'))
       for (let i = 0; i < 2; i++) {
         expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
-        expect(await drive.count('delete')).toBe(deletes)
+        expect(await drive.count('delete')).toBe(0)
       }
       expect(await drive.text('g')).toBe('new\n')
       expect(await drive.text('f')).toBe('one\n')
+      expect(await drive.text(await drive.aside('g'))).toBe('gee\n')
       expect(await run(ws, `echo x > ${r}/f`)).toEqual([0, '', ''])
     },
   )
 
   it.each(['cp', 'mv'])(
-    "keeps its version when a folder retakes %s's destination after its clear",
+    "keeps its version when a folder takes %s's destination while set aside",
     async (verb) => {
       const r = drive.root
       const ws = await workspace()
       await run(ws, `cat ${r}/g`)
-      await drive.before('delete', () => drive.before(drive.move, () => drive.put('g/x', 'x\n')))
+      await before(LANDING, verb, () => drive.put('g/x', 'x\n'))
       expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
       await drive.drop('g')
       await refusedUntilRead(ws, `${r}/g`)
@@ -888,7 +943,7 @@ describe('conditional writes only Box has', () => {
     async (verb) => {
       const ws = await workspace()
       await run(ws, 'cat /box/g')
-      await drive.before('delete', () => drive.before('update', () => drive.box.webLink('g')))
+      await before(LANDING, verb, () => drive.box.webLink('g'))
       expect(await run(ws, `${verb} /box/f /box/g`)).toEqual([1, '', refusal(verb)])
       await drive.drop('g')
       await refusedUntilRead(ws, '/box/g')
@@ -915,14 +970,15 @@ describe('conditional writes only Box has', () => {
     expect(await drive.text('g')).toBe('theirs\n')
   })
 
-  it('a cp whose delete landed but failed serves no stale bytes', async () => {
+  it('a cp whose delete landed but failed serves the copy', async () => {
+    // The delete of the g set aside lands but answers 500: that g is gone, so
+    // the copy stands, and g serves its bytes, not the ones read.
     const ws = await workspace()
     await run(ws, 'cat /box/g')
-    await drive.before('delete', () => drive.drop('g'), 500)
-    const [code] = await run(ws, 'cp /box/f /box/g')
-    expect(code).toBe(1)
-    const [catCode, out] = await run(ws, 'cat /box/g')
-    expect([catCode, out]).toEqual([1, ''])
+    await drive.before('delete', async () => drive.drop(await drive.aside('g')), 500)
+    expect(await run(ws, 'cp /box/f /box/g')).toEqual([0, '', ''])
+    expect(await run(ws, 'cat /box/g')).toEqual([0, 'one\n', ''])
+    expect(await drive.names()).toEqual(['d', 'f', 'g'])
   })
 })
 
@@ -1006,9 +1062,10 @@ describe('conditional writes only Dropbox has', () => {
   it.each([
     ['cp', 'copy'],
     ['mv', 'move'],
-  ])('names a source gone before its staged landing for %s', async (verb, route) => {
-    // The first op meets g's name; the source goes before the op that lands
-    // it beside g, so g is never deleted.
+  ])('names a source gone before its landing for %s', async (verb, route) => {
+    // The first op meets g's name; the source goes before the next op of its
+    // kind (mv's moves g aside, cp's lands), so g is never deleted and takes
+    // its name back.
     const ws = await workspace()
     await run(ws, 'cat /dbx/g')
     await drive.before(route, () => drive.before(route, () => drive.drop('f')))
@@ -1026,12 +1083,12 @@ describe('conditional writes only Dropbox has', () => {
   })
 
   it.each(['cp', 'mv'])(
-    'refuses once %s onto an unread destination retaken after its clear',
+    'refuses once %s onto an unread destination retaken while set aside',
     async (verb) => {
-      // After the clear, the staged entry takes g's name with a move, for cp as
+      // g moves aside, and g is taken before the source lands on it, for cp as
       // for mv.
       const ws = await workspace()
-      await drive.before('delete', () => drive.before('move', () => drive.put('g', 'new\n')))
+      await before(LANDING, verb, () => drive.put('g', 'new\n'))
       expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([1, '', refusal(verb)])
       expect(await drive.text('g')).toBe('new\n')
       expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([0, '', ''])

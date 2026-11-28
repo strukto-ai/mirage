@@ -13,9 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
-from uuid import uuid4
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
@@ -25,17 +24,21 @@ from mirage.cache.context import (
     write_condition,
 )
 from mirage.cache.types import WriteCondition
+from mirage.core.api.replace import aside_name, land_then_retire, set_aside
 from mirage.core.box.api import (
     absent_on_404,
     copy_file,
     copy_folder,
     delete_file,
+    get_file_info,
+    get_folder_info,
     list_folder_items,
     refused,
     update_file,
+    update_folder,
 )
-from mirage.core.box.client import BoxApiError
-from mirage.core.box.constants import CONFLICT_STATUS
+from mirage.core.box.client import BoxApiError, BoxTokenManager
+from mirage.core.box.constants import CONFLICT_STATUS, GONE_STATUS
 from mirage.core.box.fingerprint import live_of
 from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import (
@@ -45,6 +48,7 @@ from mirage.core.box.resolve import (
     parent_folder,
     path_parts,
 )
+from mirage.core.box.rmdir import delete_empty_folder
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.errors.types import StaleWriteError
 from mirage.observe.context import (
@@ -164,6 +168,111 @@ async def _landed(
     lift_lost(dst, upto, subtree=whole)
 
 
+async def place(
+    tm: BoxTokenManager,
+    item: Mapping[str, Any],
+    name: str,
+    folder_id: str | None,
+    etag: str | None = None,
+) -> dict[str, Any]:
+    """Give ``item`` a name, and a folder unless ``folder_id`` is None.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        item (dict[str, Any]): the file or folder.
+        name (str): its new name.
+        folder_id (str | None): the folder it moves into.
+        etag (str | None): the version the move is held to, None to go
+            plain.
+    """
+    if item.get("type") == "folder":
+        return await update_folder(
+            tm, item["id"], name=name, parent_id=folder_id, etag=etag
+        )
+    return await update_file(
+        tm, item["id"], name=name, parent_id=folder_id, etag=etag
+    )
+
+
+async def gone(tm: BoxTokenManager, item: Mapping[str, Any]) -> bool:
+    """Whether a file or folder is gone from Box, or sits in its trash.
+
+    Args:
+        tm (BoxTokenManager): token manager.
+        item (dict[str, Any]): the item.
+    """
+    info: Mapping[str, Any]
+    try:
+        if item.get("type") == "folder":
+            info = await get_folder_info(tm, item["id"])
+        else:
+            info = await get_file_info(tm, item["id"])
+    except BoxApiError as exc:
+        if exc.status == GONE_STATUS:
+            return True
+        raise
+    return info.get("item_status") == "trashed"
+
+
+async def replace_item(
+    accessor: BoxAccessor,
+    dst: PathSpec,
+    existing: Mapping[str, Any],
+    cond: WriteCondition | None,
+    etag: str | None,
+    land: Callable[[], Awaitable[dict[str, Any]]],
+    take_back: Callable[[dict[str, Any]], Awaitable[Any]],
+) -> dict[str, Any]:
+    """Land an item on the name ``existing`` holds, replacing it.
+
+    Box refuses a taken name, so ``existing`` moves aside under a staged
+    name first, a file held to ``etag``, then the item lands on the name,
+    and what moved aside is deleted last: a file held to the version its
+    move answered, a folder only while it is empty. A refused or lost
+    step puts both back (``land_then_retire``).
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        dst (PathSpec): the destination.
+        existing (dict[str, Any]): what holds its name.
+        cond (WriteCondition | None): the op's condition.
+        etag (str | None): the version ``existing`` is held to.
+        land (Callable[[], Awaitable[dict[str, Any]]]): the copy or move
+            onto the name.
+        take_back (Callable[[dict[str, Any]], Awaitable[Any]]): what
+            undoes a landing.
+
+    Returns:
+        dict[str, Any]: what the landing answered.
+    """
+    tm = accessor.token_manager
+    name = path_parts(dst)[-1]
+    try:
+        moved = await set_aside(
+            lambda: place(tm, existing, aside_name(name), None, etag),
+            lambda: place(tm, existing, name, None),
+        )
+    except BoxApiError as exc:
+        raise (await refused(dst, exc, cond, etag)) or exc
+
+    async def retire() -> None:
+        if existing.get("type") == "folder":
+            await delete_empty_folder(tm, existing["id"], dst)
+        else:
+            await clear_file(accessor, dst, moved, cond, moved.get("etag"))
+
+    try:
+        return await land_then_retire(
+            land,
+            take_back,
+            retire,
+            lambda: gone(tm, existing),
+            lambda: place(tm, existing, name, None),
+        )
+    except BoxApiError as exc:
+        raise (await retaken(exc, cond, dst)) or exc
+
+
 async def _copy_over(
     accessor: BoxAccessor,
     item: Mapping[str, Any],
@@ -173,11 +282,9 @@ async def _copy_over(
 ) -> dict[str, Any]:
     """Copy a file onto the file that holds ``dst``'s name.
 
-    A stale destination is refused before anything is sent. Box refuses a
-    taken name, so the copy lands beside it under a staged name first, the
-    file it replaces goes next, held to the version read, and the copy
-    takes the name last: a refused copy leaves the file as it was, and a
-    refused delete or rename drops the copy again.
+    A stale destination is refused before anything is sent; the rest is
+    ``replace_item``, whose undo for a landed copy is its delete, held to
+    the version it landed as, so a write onto it since is kept.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -189,26 +296,20 @@ async def _copy_over(
     tm = accessor.token_manager
     new_name = path_parts(dst)[-1]
     cond, live, etag = await held_file(accessor, dst, existing)
-    name = new_name if live is None else f"{new_name}.mirage-{uuid4().hex}"
-    try:
-        made = await copy_file(tm, item["id"], folder_id, name=name)
-    except BoxApiError as exc:
-        raise (await retaken(exc, cond, dst)) or exc
     if live is None:
-        return made
-    try:
-        await clear_file(accessor, dst, live, cond, etag)
-        return await update_file(tm, made["id"], name=new_name)
-    except Exception as exc:
         try:
-            await delete_file(tm, made["id"])
-        except Exception as undo:
-            logger.debug(
-                "could not drop the copy at %s: %s", dst.virtual, undo
-            )
-        if isinstance(exc, BoxApiError):
+            return await copy_file(tm, item["id"], folder_id, name=new_name)
+        except BoxApiError as exc:
             raise (await retaken(exc, cond, dst)) or exc
-        raise
+    return await replace_item(
+        accessor,
+        dst,
+        live,
+        cond,
+        etag,
+        lambda: copy_file(tm, item["id"], folder_id, name=new_name),
+        lambda made: delete_file(tm, made["id"], made.get("etag")),
+    )
 
 
 async def _copy_into(

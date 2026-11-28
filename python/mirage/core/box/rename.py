@@ -12,33 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 from collections.abc import Mapping
 from typing import Any
-from uuid import uuid4
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.types import WriteCondition
-from mirage.core.box.api import (
-    update_file,
-    update_folder,
-)
-from mirage.core.box.client import BoxApiError, BoxTokenManager
+from mirage.core.box.api import list_folder_items
+from mirage.core.box.client import BoxApiError
 from mirage.core.box.copy import (
-    clear_file,
     held_file,
+    place,
     replace_file,
+    replace_item,
     retaken,
 )
 from mirage.core.box.readdir import stat_from_item
 from mirage.core.box.resolve import live_item_of, parent_folder, path_parts
-from mirage.core.box.rmdir import delete_empty_folder
-from mirage.errors.fs import eisdir, enoent, enotdir
+from mirage.errors.fs import eisdir, enoent, enotdir, enotempty
 from mirage.observe.context import lift_lost, lost_count, record, start_op
 from mirage.types import FileStat, PathSpec
 from mirage.utils.upload import upload_stat
-
-logger = logging.getLogger(__name__)
 
 
 def _refuse_mismatch(
@@ -59,27 +52,6 @@ def _refuse_mismatch(
             raise enotdir(dst.virtual)
     elif src.get("type") != "folder":
         raise eisdir(dst.virtual)
-
-
-async def _place(
-    tm: BoxTokenManager,
-    item: Mapping[str, Any],
-    name: str,
-    folder_id: str | None,
-) -> dict[str, Any]:
-    """Give ``item`` a name, and a folder unless ``folder_id`` is None.
-
-    Args:
-        tm (BoxTokenManager): token manager.
-        item (dict[str, Any]): the file or folder.
-        name (str): its new name.
-        folder_id (str | None): the folder it moves into.
-    """
-    if item.get("type") == "folder":
-        return await update_folder(
-            tm, item["id"], name=name, parent_id=folder_id
-        )
-    return await update_file(tm, item["id"], name=name, parent_id=folder_id)
 
 
 def _folder_of(item: Mapping[str, Any]) -> str | None:
@@ -105,13 +77,10 @@ async def _replace_onto(
 ) -> dict[str, Any]:
     """Move ``item`` onto what holds ``dst``'s name.
 
-    A stale destination file is refused before anything is sent. Box
-    refuses a taken name, so the item lands beside it under a staged name
-    first, what it replaces goes next (a file held to the version read,
-    only an empty folder, which recursive=false gets from Box for free, as
-    rmdir does), and the item takes the name last: a refused move leaves
-    both as they were, and a refused delete or rename puts the item back
-    where it was.
+    A stale destination file is refused before anything is sent, and so
+    is a folder that holds anything, the item itself included (``mv -T
+    d/c d``). The rest is ``replace_item``, whose undo for a landed item
+    moves it back to its folder and name.
 
     Args:
         accessor (BoxAccessor): Box accessor.
@@ -123,33 +92,28 @@ async def _replace_onto(
     _refuse_mismatch(dst, existing, item)
     tm = accessor.token_manager
     new_name = path_parts(dst)[-1]
-    folder = existing.get("type") == "folder"
     cond: WriteCondition | None = None
     etag: str | None = None
     live: Mapping[str, Any] | None = existing
-    if not folder:
+    if existing.get("type") == "folder":
+        if await list_folder_items(tm, existing["id"], limit=1):
+            raise enotempty(dst.virtual)
+    else:
         cond, live, etag = await held_file(accessor, dst, existing)
-    name = new_name if live is None else f"{new_name}.mirage-{uuid4().hex}"
-    try:
-        landed = await _place(tm, item, name, folder_id)
-    except BoxApiError as exc:
-        raise (await retaken(exc, cond, dst)) or exc
     if live is None:
-        return landed
-    try:
-        if folder:
-            await delete_empty_folder(tm, live["id"], dst)
-        else:
-            await clear_file(accessor, dst, live, cond, etag)
-        return await _place(tm, landed, new_name, None)
-    except Exception as exc:
         try:
-            await _place(tm, landed, item["name"], _folder_of(item))
-        except Exception as undo:
-            logger.debug("could not move %s back: %s", item["name"], undo)
-        if isinstance(exc, BoxApiError):
+            return await place(tm, item, new_name, folder_id)
+        except BoxApiError as exc:
             raise (await retaken(exc, cond, dst)) or exc
-        raise
+    return await replace_item(
+        accessor,
+        dst,
+        live,
+        cond,
+        etag,
+        lambda: place(tm, item, new_name, folder_id),
+        lambda landed: place(tm, landed, item["name"], _folder_of(item)),
+    )
 
 
 async def rename(
@@ -195,7 +159,7 @@ async def rename(
         if existing is None and item.get("type") == "file":
             cond = await replace_file(accessor, dst, None)
         try:
-            moved = await _place(tm, item, new_name, folder_id)
+            moved = await place(tm, item, new_name, folder_id)
         except BoxApiError as exc:
             raise (await retaken(exc, cond, dst)) or exc
     # Only a folder has a subtree to drop, and only a positive "file"

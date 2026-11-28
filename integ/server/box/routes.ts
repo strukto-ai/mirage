@@ -336,12 +336,15 @@ function deleteOf(kind: string, param: string) {
 }
 
 // PUT on an item is the vendor's rename AND its move: both are stated as a
-// name and/or a new parent on the same call.
+// name and/or a new parent on the same call. It honours If-Match as uploads
+// and deletes do (the vendor's reference for updating a file and a folder).
 function updateOf(kind: string, param: string) {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     if (!authed(ctx)) return unauthorized()
     const item = await typedItem(ctx.sql, ctx.tenant, ctx.params[param] ?? '', kind)
     if (item === null) return notFound(kind)
+    const refused = staleIfMatch(ctx, item)
+    if (refused !== null) return refused
     const body = obj(ctx.json())
     const name = str(body.name, item.name)
     const parentId = str(obj(body.parent).id, item.parentId ?? '')

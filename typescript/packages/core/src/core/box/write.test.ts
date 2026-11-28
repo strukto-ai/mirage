@@ -370,8 +370,9 @@ describe('box write ops', () => {
   })
 
   it('rename refuses a non-empty folder destination with ENOTEMPTY', async () => {
-    // Box decides the emptiness, not us: recursive=false 409s on a folder
-    // with children, and that is mv's "Directory not empty".
+    // The folder is asked for a child before anything moves, and the delete
+    // goes with recursive=false, which 409s on one written since: either is
+    // mv's "Directory not empty".
     const ids = await data()
     await account.put('x.txt', ENC.encode('x'), ids.dst)
     const accessor = account.accessor()
@@ -574,6 +575,35 @@ describe('box write ops', () => {
     expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
     expect((await account.child(ids.sub, 'c.txt')).id).toBe(moving)
     expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('a refused move onto the freed name puts the destination back', async () => {
+    // The file there moves aside, then the move onto the freed name is
+    // refused: the file set aside takes its name back.
+    const ids = await data()
+    const other = await account.put('b.txt', ENC.encode('other'), ids.data)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/a.txt'), spec('/data/b.txt'))
+    await account.run.answerNext('PUT', FILE_ROUTE, 403, undefined, 1, `/2.0/files/${ids.a}`)
+    await expect(
+      rename(accessor, spec('/data/a.txt'), spec('/data/b.txt'), h),
+    ).rejects.toBeInstanceOf(BoxApiError)
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'b.txt', 'dst', 'sub'])
+    expect(text(await account.read(other))).toBe('other')
+  })
+
+  it('refuses a folder holding only the item itself', async () => {
+    // mv -T d/c d: moving the only child out would leave the folder empty for
+    // its delete, so it is asked for a child before anything moves.
+    const ids = await data()
+    const inner = await account.mkdir('c', ids.dst)
+    const accessor = account.accessor()
+    const h = await handed(accessor, spec('/data/dst/c'), spec('/data/dst'))
+    await expect(rename(accessor, spec('/data/dst/c'), spec('/data/dst'), h)).rejects.toMatchObject(
+      { code: 'ENOTEMPTY' },
+    )
+    expect(await account.names(ids.data)).toEqual(['a.txt', 'dst', 'sub'])
+    expect((await account.child(ids.dst, 'c')).id).toBe(inner)
   })
 
   it('a rename onto its own name sends and records nothing', async () => {

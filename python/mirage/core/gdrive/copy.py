@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import logging
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.api.replace import land_then_retire
 from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import (
@@ -29,8 +29,6 @@ from mirage.core.gdrive.resolve import (
 from mirage.core.google.client import GoogleApiError
 from mirage.errors.fs import eacces, eisdir, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
-
-logger = logging.getLogger(__name__)
 
 
 async def copy_children(
@@ -53,6 +51,49 @@ async def copy_children(
             await drive.copy_file(child.id, child.name, dst_folder_id)
 
 
+async def delete_replaced(drive: DriveApi, row: FileStat) -> None:
+    """Delete the item a move or copy replaced, while it is still there.
+
+    Drive deletes by id wherever the item went, so it is read again
+    first: one another writer trashed, renamed or moved while the
+    replacement landed no longer holds the destination and is left as it
+    is. Drive has no conditional delete; reading it just before leaves
+    one request for another writer's move to land in.
+
+    Args:
+        drive (DriveApi): the Drive client.
+        row (FileStat): the item as the destination's row read it.
+    """
+    file_id = row.extra["file_id"]
+    live = await drive.get_file(file_id)
+    if live.get("trashed"):
+        return
+    there = stat_from_item(live)
+    parents = row.extra.get("parents")
+    if there.name != row.name or (
+        parents is not None
+        and set(there.extra.get("parents", [])) != set(parents)
+    ):
+        return
+    await drive.delete_file(file_id)
+
+
+async def gone(drive: DriveApi, file_id: str) -> bool:
+    """Whether an item is gone from Drive, or sits in its trash.
+
+    Args:
+        drive (DriveApi): the Drive client.
+        file_id (str): the item's id.
+    """
+    try:
+        live = await drive.get_file(file_id, "id,trashed")
+    except GoogleApiError as exc:
+        if exc.status == 404:
+            return True
+        raise
+    return bool(live.get("trashed"))
+
+
 @eacces_on_denied
 async def copy(
     accessor: GDriveAccessor,
@@ -67,9 +108,9 @@ async def copy(
     ``cp -r`` merges into an existing folder and creates a missing one,
     mirroring the msgraph copy_tree. A file it replaces is deleted only
     once the copy has landed beside it, which Drive's two items of one
-    name in a folder allow, so a refused copy leaves it as it was, and a
-    refused delete drops the copy again and names the destination, as
-    cp's refused create does. Both paths naming one item
+    name in a folder allow (``delete_replaced``): a refused copy leaves it
+    as it was, and a refused delete drops the copy again and names the
+    destination, as cp's refused create does. Both paths naming one item
     (Drive lists a legacy item under each of its parents) leaves nothing
     to copy; GNU cp refuses it by inode, which a Drive row lacks.
 
@@ -113,18 +154,23 @@ async def copy(
     name = drive_target_name(
         posixpath.basename(dst.vfs_path), src_node.mime_type
     )
-    item = await drive.copy_file(src_node.id, name, dst_parent_id)
-    if dst_entry is not None:
+    if dst_entry is None:
+        item = await drive.copy_file(src_node.id, name, dst_parent_id)
+        return stat_from_item(item) if isinstance(item, dict) else None
+    replaced = dst_entry
+
+    async def retire() -> None:
         try:
-            await drive.delete_file(dst_entry.extra["file_id"])
-        except Exception as err:
-            try:
-                await drive.delete_file(item["id"])
-            except Exception as exc:
-                logger.debug(
-                    "could not drop the copy at %s: %s", dst.virtual, exc
-                )
-            if isinstance(err, GoogleApiError) and err.status == 403:
+            await delete_replaced(drive, replaced)
+        except GoogleApiError as err:
+            if err.status == 403:
                 raise eacces(dst.virtual) from err
             raise
+
+    item = await land_then_retire(
+        lambda: drive.copy_file(src_node.id, name, dst_parent_id),
+        lambda made: drive.delete_file(made["id"]),
+        retire,
+        lambda: gone(drive, replaced.extra["file_id"]),
+    )
     return stat_from_item(item) if isinstance(item, dict) else None

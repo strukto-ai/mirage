@@ -75,6 +75,8 @@ interface DrawOwner {
 }
 
 const KEPT_ON_PROCESS_RANDOMNESS: Record<string, string> = {
+  'core/api/replace.ts crypto.randomUUID':
+    "a replaced destination waits under a staged name in the service, so a seeded name would collide with an earlier run's leftover",
   'core/machine/write.ts crypto.randomUUID':
     "a staged or atomic upload's temp name lives on the machine, so a seeded name would collide with an earlier run's leftover",
   'execution/job/table.ts crypto.randomUUID':

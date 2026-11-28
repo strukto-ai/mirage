@@ -148,7 +148,7 @@ async def test_copy_raises_the_provider_code_when_the_monitor_fails(
 
 
 @pytest.mark.asyncio
-async def test_copy_lands_beside_a_conflicting_file_then_deletes_it(
+async def test_copy_sets_a_conflicting_file_aside_then_deletes_it(
     exact_cloud_paths,
 ):
     monitor = "https://monitor.example/op/3"
@@ -166,18 +166,18 @@ async def test_copy_lands_beside_a_conflicting_file_then_deletes_it(
             _url("b.txt"),
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
+        m.patch(_url("b.txt"), payload={"id": "2", "file": {}})
         m.post(_url("a.txt", "/copy"), status=202, headers={"Location": retry})
         m.get(retry, payload={"status": "completed"})
-        m.delete(_url("b.txt"), status=204)
-        m.patch(_STAGED, payload={"id": "3", "name": "b.txt", "file": {}})
+        m.delete(_STAGED, status=204)
         await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
-        assert ("DELETE", URL(_url("b.txt"))) in m.requests
+        (aside,) = m.requests[("PATCH", URL(_url("b.txt")))]
+        assert _STAGED.match(_url(aside.kwargs["json"]["name"]))
         copies = m.requests[("POST", URL(_url("a.txt", "/copy")))]
-        assert len(copies) == 2
-        assert _STAGED.match(_url(copies[1].kwargs["json"]["name"]))
+        assert [c.kwargs["json"]["name"] for c in copies] == ["b.txt"] * 2
         assert ("GET", URL(retry)) in m.requests
-        named = [url for method, url in m.requests if method == "PATCH"]
-        assert len(named) == 1 and _STAGED.match(str(named[0]))
+        deleted = [url for method, url in m.requests if method == "DELETE"]
+        assert len(deleted) == 1 and _STAGED.match(str(deleted[0]))
 
 
 @pytest.mark.asyncio
@@ -185,13 +185,15 @@ async def test_copy_lands_beside_a_conflicting_file_then_deletes_it(
 async def test_copy_normalizes_a_failed_replacement_retry(
     exact_cloud_paths, transport
 ):
-    # The staged copy is the retry: refused, it leaves the file it would
-    # have replaced untouched.
+    # The copy onto the freed name is the retry: refused, the file set
+    # aside takes its name back and nothing is deleted.
     retry = "https://monitor.example/op/retry-failed"
     with aioresponses() as m:
         m.post(_url("a.txt", "/copy"), status=409, payload=_CONFLICT)
         m.get(_url("a.txt"), payload={"id": "1", "file": {}})
         m.get(_url("b.txt"), payload={"id": "2", "file": {}})
+        m.patch(_url("b.txt"), payload={"id": "2", "file": {}})
+        m.patch(_STAGED, payload={"id": "2", "name": "b.txt", "file": {}})
         if transport == "monitor":
             m.post(
                 _url("a.txt", "/copy"), status=202, headers={"Location": retry}
@@ -208,6 +210,13 @@ async def test_copy_normalizes_a_failed_replacement_retry(
         assert str(exc.value).endswith(": x")
         assert not [k for k in m.requests if k[0] == "DELETE"]
         assert len(m.requests[("POST", URL(_url("a.txt", "/copy")))]) == 2
+        restored = [
+            call.kwargs["json"]
+            for (method, url), calls in m.requests.items()
+            if method == "PATCH" and _STAGED.match(str(url))
+            for call in calls
+        ]
+        assert restored == [{"name": "b.txt"}]
         if transport == "monitor":
             assert ("GET", URL(retry)) in m.requests
 
@@ -857,7 +866,7 @@ async def _replace(onedrive, op, src: str, dst: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("op", [rename_replace, copy_tree])
-async def test_a_replace_lands_beside_and_leaves_no_staged_name(onedrive, op):
+async def test_a_replace_leaves_no_staged_name(onedrive, op):
     await onedrive.write("a.txt", b"mine")
     await onedrive.write("b.txt", b"theirs")
     await _replace(onedrive, op, "a.txt", "b.txt")
@@ -867,9 +876,9 @@ async def test_a_replace_lands_beside_and_leaves_no_staged_name(onedrive, op):
 
 
 @pytest.mark.asyncio
-async def test_rename_refused_landing_keeps_the_destination(onedrive):
-    # The move meets the taken name, then the staged move is refused (a
-    # view-only source, say): nothing was deleted yet.
+async def test_rename_refused_set_aside_keeps_the_destination(onedrive):
+    # The move meets the taken name, then moving the file aside is refused:
+    # nothing moved.
     await onedrive.write("a.txt", b"mine")
     await onedrive.write("b.txt", b"theirs")
     await onedrive.run.answer_next("PATCH", ITEM_ROUTE, 409, _CONFLICT)
@@ -878,6 +887,61 @@ async def test_rename_refused_landing_keeps_the_destination(onedrive):
         await _replace(onedrive, rename_replace, "a.txt", "b.txt")
     assert await _names(onedrive) == ["a.txt", "b.txt"]
     assert await onedrive.content("b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_landing_puts_the_destination_back(onedrive):
+    # The move meets the taken name, the file moves aside, then the move
+    # onto the freed name is refused (a view-only source, say): the file
+    # takes its name back.
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await onedrive.run.before_next(
+        [("PATCH", ITEM_ROUTE)],
+        lambda: onedrive.run.before_next(
+            [("PATCH", ITEM_ROUTE)],
+            lambda: onedrive.run.answer_next(
+                "PATCH", ITEM_ROUTE, 403, _DENIED
+            ),
+        ),
+    )
+    with pytest.raises(GraphError):
+        await _replace(onedrive, rename_replace, "a.txt", "b.txt")
+    assert await _names(onedrive) == ["a.txt", "b.txt"]
+    assert await onedrive.content("b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_landing_puts_the_destination_back(onedrive):
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await onedrive.run.answer_next("POST", ITEM_ROUTE, 409, _CONFLICT)
+    await onedrive.run.answer_next("POST", ITEM_ROUTE, 403, _DENIED)
+    with pytest.raises(GraphError):
+        await _replace(onedrive, copy_tree, "a.txt", "b.txt")
+    assert await _names(onedrive) == ["a.txt", "b.txt"]
+    assert await onedrive.content("b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [rename_replace, copy_tree])
+async def test_a_delete_that_went_through_keeps_the_replace(onedrive, op):
+    # The delete of what moved aside lands, but its answer is an error (a
+    # relay's 502, say): the item it named is gone, so the replace stands.
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+
+    async def delete_it() -> None:
+        (aside,) = [n for n in await _names(onedrive) if ".mirage-" in n]
+        await onedrive.remove(aside)
+
+    await onedrive.run.before_next(
+        [("DELETE", ITEM_ROUTE)], delete_it, status=502
+    )
+    await _replace(onedrive, op, "a.txt", "b.txt")
+    kept = ["a.txt"] if op is copy_tree else []
+    assert await _names(onedrive) == [*kept, "b.txt"]
+    assert await onedrive.content("b.txt") == b"mine"
 
 
 @pytest.mark.asyncio
@@ -895,10 +959,10 @@ async def test_a_refused_delete_takes_the_landed_item_back(onedrive, op):
 
 @pytest.mark.asyncio
 async def test_rename_keeps_a_folder_given_a_child_while_moving(onedrive):
-    # Another client writes into the empty folder while the source moves
-    # beside it (the move after the one that met the name): the probe made
-    # just before the delete sees the child, so the folder stays and the
-    # source goes back.
+    # Another client writes into the empty folder just as it moves aside
+    # (the move after the one that met the name): the probe made just
+    # before the delete sees the child, so the source goes back and the
+    # folder takes its name again.
     await onedrive.write("src/x.txt", b"x")
     await _mkdir(onedrive, "dst")
     await onedrive.run.before_next(

@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": "mv_refused_landing_keeps_destination_box",
+      "id": "mv_refused_set_aside_keeps_destination_box",
       "seq": 46100002,
       "targets": [
         "box"
@@ -121,7 +121,7 @@
       }
     },
     {
-      "id": "mv_refused_landing_keeps_destination_dropbox",
+      "id": "mv_refused_set_aside_keeps_destination_dropbox",
       "seq": 46100004,
       "targets": [
         "dropbox",
@@ -177,7 +177,7 @@
       }
     },
     {
-      "id": "mv_refused_landing_keeps_destination_onedrive",
+      "id": "mv_refused_set_aside_keeps_destination_onedrive",
       "seq": 46100006,
       "targets": [
         "onedrive"
@@ -240,7 +240,7 @@
       }
     },
     {
-      "id": "mv_refused_landing_keeps_destination_sharepoint",
+      "id": "mv_refused_set_aside_keeps_destination_sharepoint",
       "seq": 46100008,
       "targets": [
         "sharepoint",
