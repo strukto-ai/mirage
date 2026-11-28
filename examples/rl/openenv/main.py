@@ -1,0 +1,100 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import argparse
+import asyncio
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from examples.rl.constants import DEFAULT_BENCH_ROLLOUTS, DEFAULT_DATA_DIR
+from examples.rl.openenv.config import OpenEnvRunConfig
+from examples.rl.openenv.constants import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_EVAL_MODEL,
+    DEFAULT_MAX_STEPS,
+    DEFAULT_TRIALS,
+    HERE,
+)
+from examples.rl.openenv.runners import run_bench, run_eval
+from examples.rl.server import parse_endpoints
+
+
+def parse_config() -> OpenEnvRunConfig:
+    """Parse CLI arguments into a validated OpenEnvRunConfig.
+
+    Returns:
+        OpenEnvRunConfig: Validated configuration for the selected mode.
+    """
+    load_dotenv(HERE / ".env.development")
+
+    parser = argparse.ArgumentParser(
+        description="MirageOpenEnv benchmark and evaluation harness."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["bench", "eval"],
+        default="bench",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=DEFAULT_DATA_DIR,
+    )
+    parser.add_argument(
+        "--endpoint",
+        action="append",
+        default=[],
+        help="Optional pre-running backend origin as service=http://host:port",
+    )
+    parser.add_argument("--rollouts", type=int, default=DEFAULT_BENCH_ROLLOUTS)
+    parser.add_argument(
+        "--model", default=os.getenv("OPENAI_MODEL") or DEFAULT_EVAL_MODEL
+    )
+    parser.add_argument(
+        "--base-url", default=os.getenv("OPENAI_BASE_URL") or None
+    )
+    parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
+    parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
+    args = parser.parse_args()
+    return OpenEnvRunConfig(
+        mode=args.mode,
+        data_dir=args.data_dir,
+        endpoints=parse_endpoints(args.endpoint),
+        rollouts=args.rollouts,
+        model=args.model,
+        base_url=args.base_url,
+        api_key=os.getenv("OPENAI_API_KEY") or None,
+        trials=args.trials,
+        concurrency=args.concurrency,
+        max_steps=args.max_steps,
+    )
+
+
+async def run(config: OpenEnvRunConfig) -> None:
+    """Dispatch the selected execution mode.
+
+    Args:
+        config (OpenEnvRunConfig): Validated runtime configuration.
+    """
+    if config.mode == "bench":
+        await run_bench(config)
+    elif config.mode == "eval":
+        await run_eval(config)
+
+
+if __name__ == "__main__":
+    asyncio.run(run(parse_config()))

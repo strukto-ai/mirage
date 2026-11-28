@@ -18,10 +18,14 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from constants import DEFAULT_PROFILE, SYSTEM_PROMPT, VERIFIER_PROFILE
-from schemas import MirageTask
-from server import ServerPool
-
+from examples.rl.constants import (
+    DEFAULT_PROFILE,
+    SYSTEM_PROMPT,
+    VERIFIER_PROFILE,
+    VERIFIER_SESSION_ID,
+)
+from examples.rl.schemas import MirageTask
+from examples.rl.server import ServerPool
 from mirage import Workspace
 from mirage.config import load_config
 
@@ -65,10 +69,20 @@ async def _seed_tree(
         )
         parent = str(Path(target).parent)
         if parent and parent != "/":
-            await ws.shell(f"mkdir -p {shlex.quote(parent)}")
-        await ws.vfs.write(target, file_path.read_bytes())
+            await ws.shell(
+                f"mkdir -p {shlex.quote(parent)}",
+                session_id=VERIFIER_SESSION_ID,
+            )
+        await ws.vfs.write(
+            target,
+            file_path.read_bytes(),
+            session_id=VERIFIER_SESSION_ID,
+        )
         if file_path.suffix == ".sh":
-            await ws.shell(f"chmod +x {shlex.quote(target)}")
+            await ws.shell(
+                f"chmod +x {shlex.quote(target)}",
+                session_id=VERIFIER_SESSION_ID,
+            )
 
 
 async def create_mirage_rollout(
@@ -78,6 +92,8 @@ async def create_mirage_rollout(
 
     Each backend declared in ``task.backends`` receives its own isolated
     ``/_run/<run_id>`` endpoint interpolated directly into ``workspace.yaml``.
+    The default session keeps ``profiles.default`` while an internal
+    ``_verifier`` session seeds files and executes ``/tests/test.sh``.
 
     Args:
         task (MirageTask): Task definition pointing at ``environment/`` and
@@ -98,7 +114,7 @@ async def create_mirage_rollout(
 
     ws = Workspace(**ws_kwargs, env=merged_env)
     ws.set_profile(VERIFIER_PROFILE, {"cwd": "/workspace"})
-    await ws.set_session_profile(ws.default_session_id, VERIFIER_PROFILE)
+    ws.create_session(VERIFIER_SESSION_ID, profile=VERIFIER_PROFILE)
     await _seed_tree(ws, env_dir / "files", dest_prefix="/")
     await _seed_tree(ws, task.task_dir / "tests", dest_prefix="/tests")
     await ws.set_session_profile(ws.default_session_id, DEFAULT_PROFILE)
@@ -108,3 +124,20 @@ async def create_mirage_rollout(
         endpoints=endpoints,
         workspace=ws,
     )
+
+
+async def create_episode_workspace(
+    task: MirageTask, servers: ServerPool
+) -> Workspace:
+    """Allocate per-run backend endpoints and return the episode Workspace.
+
+    Args:
+        task (MirageTask): Task definition pointing at ``environment/`` and
+            ``tests/``.
+        servers (ServerPool): Shared pool of ``integ/server`` backends.
+
+    Returns:
+        Workspace: Seeded Mirage workspace ready for ``MirageOpenEnv``.
+    """
+    rollout = await create_mirage_rollout(task, servers)
+    return rollout.workspace

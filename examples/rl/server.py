@@ -13,14 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 import os
 import shutil
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import aiohttp
-from constants import (
+
+from examples.rl.constants import (
     ANNOUNCE_RE,
     DEFAULT_FIXTURE,
     DEFAULT_HEALTH_POLL_INTERVAL,
@@ -30,6 +32,8 @@ from constants import (
     RESET_PATH,
     RUN_PATH_PREFIX,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def announce_token(service: str) -> str:
@@ -44,12 +48,32 @@ def announce_token(service: str) -> str:
     return f"{service.upper().replace('-', '_')}_URL"
 
 
+def parse_endpoints(entries: Sequence[str]) -> dict[str, str]:
+    """Parse ``service=http://host:port`` CLI overrides into an endpoint map.
+
+    Args:
+        entries (Sequence[str]): Raw ``--endpoint`` flag strings.
+
+    Returns:
+        dict[str, str]: Mapping of service name to origin URL.
+    """
+    endpoints: dict[str, str] = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --endpoint {entry!r}; expected service=http://..."
+            )
+        service, url = entry.split("=", 1)
+        endpoints[service.strip()] = url.strip()
+    return endpoints
+
+
 class ServerPool:
     """Pool of ``integ/server`` backends allocating isolated per-run endpoints.
 
-    Supports multiple backend services within a single rollout. When a
+    Supports multiple backend services within a single episode. When a
     service is not open yet, callers wait for it to boot (or become healthy
-    if configured externally); once open, each rollout immediately receives
+    if configured externally); once open, each episode immediately receives
     its own run-scoped endpoint ``{origin}/_run/{run_id}`` via ``POST /reset``.
 
     Args:
@@ -123,6 +147,9 @@ class ServerPool:
                     if resp.status < 500:
                         return
             except aiohttp.ClientError as exc:
+                logger.debug(
+                    "Health check probe failed for %s: %s", origin, exc
+                )
                 last_err = exc
             await asyncio.sleep(DEFAULT_HEALTH_POLL_INTERVAL)
         raise RuntimeError(

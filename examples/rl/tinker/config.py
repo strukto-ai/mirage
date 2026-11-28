@@ -14,9 +14,10 @@
 
 from pathlib import Path
 
-from constants import (
-    DEFAULT_BENCH_ROLLOUTS,
-    DEFAULT_DATA_DIR,
+from pydantic import BaseModel, ConfigDict, Field
+
+from examples.rl.constants import DEFAULT_BENCH_ROLLOUTS, DEFAULT_DATA_DIR
+from examples.rl.tinker.constants import (
     DEFAULT_GROUP_SIZE,
     DEFAULT_LEARNING_RATE,
     DEFAULT_LORA_RANK,
@@ -27,8 +28,7 @@ from constants import (
     DEFAULT_TEMPERATURE,
     DEFAULT_TINKER_MODEL,
 )
-from pydantic import BaseModel, ConfigDict, Field
-from schemas import RunMode
+from examples.rl.tinker.schemas import RunMode
 
 
 class TinkerRunConfig(BaseModel):

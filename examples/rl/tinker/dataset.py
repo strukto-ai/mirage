@@ -12,70 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import tomllib
 from collections.abc import Sequence
-from pathlib import Path
 
 import chz
-from constants import (
-    DEFAULT_FIXTURE,
-    DEFAULT_MAX_TRAJECTORY_TOKENS,
-    DEFAULT_MAX_TURNS,
-)
-from environment import MirageEnvGroupBuilder
-from schemas import MirageTask
-from server import ServerPool
 from tinker_cookbook.rl.types import (
     EnvGroupBuilder,
     RLDataset,
     RLDatasetBuilder,
 )
 
-from mirage.types import JsonValue
-
-
-def _parse_backends(cfg: dict[str, JsonValue]) -> dict[str, str]:
-    raw = cfg.get("backends")
-    if not isinstance(raw, dict):
-        return {}
-    backends: dict[str, str] = {}
-    for service, spec in raw.items():
-        if isinstance(spec, dict):
-            backends[str(service)] = str(spec.get("fixture", DEFAULT_FIXTURE))
-        elif isinstance(spec, str):
-            backends[str(service)] = spec
-    return backends
-
-
-def load_mirage_tasks(data_dir: Path) -> list[MirageTask]:
-    """Load Harbor-compatible Mirage tasks from ``data_dir / 'tasks'``.
-
-    Args:
-        data_dir (Path): Root data directory holding ``tasks/<name>/``.
-
-    Returns:
-        list[MirageTask]: Sorted list of discovered tasks.
-    """
-    tasks_root = data_dir / "tasks"
-    tasks: list[MirageTask] = []
-    for task_dir in sorted(tasks_root.iterdir()):
-        if not task_dir.is_dir():
-            continue
-        instruction = (task_dir / "instruction.md").read_text().strip()
-        toml_path = task_dir / "task.toml"
-        cfg = (
-            tomllib.loads(toml_path.read_text()) if toml_path.exists() else {}
-        )
-        tasks.append(
-            MirageTask(
-                task_name=task_dir.name,
-                instruction=instruction,
-                task_dir=task_dir,
-                backends=_parse_backends(cfg),
-                config=cfg,
-            )
-        )
-    return tasks
+from examples.rl.schemas import MirageTask
+from examples.rl.server import ServerPool
+from examples.rl.tinker.constants import (
+    DEFAULT_MAX_TRAJECTORY_TOKENS,
+    DEFAULT_MAX_TURNS,
+)
+from examples.rl.tinker.environment import MirageEnvGroupBuilder
 
 
 class MirageDataset(RLDataset):
