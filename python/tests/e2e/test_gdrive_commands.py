@@ -15,6 +15,7 @@
 import pytest
 import pytest_asyncio
 
+from mirage.cache.file.config import CacheConfig
 from mirage.types import MountMode, ReadPolicy, ReadSpec
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
@@ -115,7 +116,7 @@ async def test_a_stat_that_relists_the_parent_cleans_up_a_dropped_sibling(
     # it cannot if the old listing is thrown out before warming.
     b_txt = await _dir_with_two(google_account)
     vfs = GoogleDriveVFS(google_account.config(GoogleDriveConfig))
-    ws = Workspace({"/gd": vfs}, mode=MountMode.READ)
+    ws = Workspace({"/gd": vfs}, mode=MountMode.READ, cache=CacheConfig())
     try:
         await ws.shell("ls /gd/dir")
         cat = await ws.shell("cat /gd/dir/b.txt")
