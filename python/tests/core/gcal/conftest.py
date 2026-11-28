@@ -16,14 +16,15 @@ import pytest
 
 from mirage.accessor.gcal import GCalAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from tests.fixtures.gcal_api import gcal_api, make_accessor
+from tests.fixtures.gcal_seed import calendar, make_accessor
+from tests.fixtures.google_account import GoogleAccount
 
-__all__ = ["gcal_api"]
+__all__ = ["calendar"]
 
 
 @pytest.fixture
-def accessor() -> GCalAccessor:
-    return make_accessor()
+def accessor(calendar: GoogleAccount) -> GCalAccessor:
+    return make_accessor(calendar)
 
 
 @pytest.fixture

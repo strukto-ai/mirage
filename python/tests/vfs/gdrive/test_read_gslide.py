@@ -13,17 +13,15 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
-from tests.fixtures.google_api import offline_token_manager, serve
-from tests.fixtures.gslides_api import StubSlides
 from tests.fixtures.vfs_io import call_over
+
+MIME = "application/vnd.google-apps.presentation"
 
 
 def _op(name: str):
@@ -41,30 +39,30 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDriveAccessor(config=None, token_manager=offline_token_manager())
-
-
 @pytest.mark.asyncio
-async def test_read_gslide_renders_presentation_json(accessor):
+async def test_read_gslide_renders_presentation_json(google_account):
+    made = await google_account.create("deck", MIME)
     row = FileStat(
         name="deck.gslide.json",
         type=FileType.FILE,
         modified="2026-04-01T00:00:00Z",
-        extra={"file_id": "slide123", "resource_type": "gdrive/gslide"},
+        extra={"file_id": made, "resource_type": "gdrive/gslide"},
     )
-    slide_json = json.dumps({"presentationId": "slide123"}).encode()
-    mock = AsyncMock(return_value=slide_json)
-    with serve(slides=StubSlides(read_presentation=mock)):
-        result = await read(
-            accessor, _scope("/slides/deck.gslide.json"), entry=row
-        )
-        mock.assert_called_once_with("slide123")
-        assert json.loads(result)["presentationId"] == "slide123"
+    await google_account.run.record_requests()
+    result = await read(
+        google_account.drive_accessor(),
+        _scope("/slides/deck.gslide.json"),
+        entry=row,
+    )
+    assert [path for _, path in await google_account.log()] == [
+        f"/v1/presentations/{made}"
+    ]
+    assert json.loads(result)["presentationId"] == made
 
 
 @pytest.mark.asyncio
-async def test_read_gslide_not_found(accessor):
+async def test_read_gslide_not_found(google_account):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, _scope("/nonexistent.gslide.json"))
+        await read(
+            google_account.drive_accessor(), _scope("/nonexistent.gslide.json")
+        )

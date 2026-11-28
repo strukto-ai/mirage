@@ -15,7 +15,7 @@
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 import { einval } from '../../errors/fs.ts'
@@ -48,7 +48,7 @@ export async function truncate(
   const out = new Uint8Array(length)
   out.set(existing.subarray(0, Math.min(existing.byteLength, length)))
   accessor.store.files.set(p, out)
-  const now = nowIso()
+  const now = stampIso(accessor.stamped())
   accessor.store.modified.set(p, now)
   if (made) touchParent(accessor.store, p, now)
   record('truncate', path.virtual, VFSName.RAM, 0, timer)

@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { makeMockAccessor, spec } from '../../../tests/test-utils.ts'
-import { read } from './read.ts'
+import { read, readMany } from './read.ts'
 import { mkdir } from './mkdir.ts'
 import { write } from './write.ts'
 
@@ -63,5 +64,75 @@ describe('opfs/read tells a file in the chain from a directory leaf', () => {
     expect(await codeOf('/plain/x/y')).toBe('ENOTDIR')
     expect(await codeOf('/d')).toBe('EISDIR')
     expect(await codeOf('/nope/x')).toBe('ENOENT')
+  })
+})
+
+describe('opfs/readMany', () => {
+  it('resolves each folder once and answers only what its own reads would', async () => {
+    // A directory, a file gone or longer than the limit, and a folder that
+    // is not there are left for their own reads; each folder handle is taken
+    // once for the whole batch, /a once for both folders in it too, and a
+    // file named twice is read and recorded once.
+    const enc = new TextEncoder()
+    await mkdir(accessor, spec('/a'))
+    await mkdir(accessor, spec('/a/sub'))
+    await mkdir(accessor, spec('/a/p'))
+    await mkdir(accessor, spec('/a/r'))
+    await mkdir(accessor, spec('/b'))
+    await write(accessor, spec('/a/x'), enc.encode('x\n'))
+    await write(accessor, spec('/a/y'), enc.encode('y\n'))
+    await write(accessor, spec('/a/long'), enc.encode('z'.repeat(9)))
+    await write(accessor, spec('/a/p/q'), enc.encode('q\n'))
+    await write(accessor, spec('/a/r/s'), enc.encode('s\n'))
+    await write(accessor, spec('/b/c'), enc.encode('c\n'))
+    const proto = Object.getPrototypeOf(await accessor.root()) as FileSystemDirectoryHandle
+    const folders = vi.spyOn(proto, 'getDirectoryHandle')
+    const keys = [
+      '/a/x',
+      '/a/sub',
+      '/a/gone',
+      '/a/long',
+      '/gone/x',
+      '/a/p/q',
+      '/a/r/s',
+      '/a/y',
+      '/b/c',
+      '/a/x',
+    ]
+    const [got, records] = await recordingScope(() => readMany(accessor, keys.map(spec), 8))
+    expect(got).toEqual(
+      new Map([
+        ['/a/x', enc.encode('x\n')],
+        ['/a/p/q', enc.encode('q\n')],
+        ['/a/r/s', enc.encode('s\n')],
+        ['/a/y', enc.encode('y\n')],
+        ['/b/c', enc.encode('c\n')],
+      ]),
+    )
+    expect(folders.mock.calls.map(([name]) => name).sort()).toEqual(['a', 'b', 'gone', 'p', 'r'])
+    expect(records.map((r) => [r.path, r.bytes, r.complete])).toEqual([
+      ['/a/x', 2, true],
+      ['/a/p/q', 2, true],
+      ['/a/r/s', 2, true],
+      ['/a/y', 2, true],
+      ['/b/c', 2, true],
+    ])
+    folders.mockRestore()
+  })
+
+  it('keeps the files that fit its room', async () => {
+    // A file that would take the batch past its room is left out before its
+    // bytes are read, and a smaller one after it still fits.
+    for (const [p, size] of [
+      ['/f', 16],
+      ['/g', 16],
+      ['/h', 4],
+    ] as const) {
+      await write(accessor, spec(p), new Uint8Array(size))
+    }
+    const files = ['/f', '/g', '/h'].map(spec)
+    expect([...(await readMany(accessor, files, 64, 20)).keys()]).toEqual(['/f', '/h'])
+    expect((await readMany(accessor, files, 64, -1)).size).toBe(0)
+    expect((await readMany(accessor, files, 64)).size).toBe(3)
   })
 })

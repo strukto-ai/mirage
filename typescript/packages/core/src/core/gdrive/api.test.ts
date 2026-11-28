@@ -27,9 +27,12 @@ vi.mock('../google/drive.ts', async (importOriginal) => {
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 import * as drive from '../google/drive.ts'
-import { TOKEN_MANAGER } from '../../../tests/core/gdrive/_test_util.ts'
+import { TokenManager } from '../google/client.ts'
 import { DriveClient, type DriveApi } from './api.ts'
 
+// Each call is checked by the wire function it hands this manager to; none
+// is sent, so nothing signs in.
+const TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
 const WINDOW: ByteWindow = { offset: 2, size: 4 }
 const REVISION_WINDOW: ByteWindow = { offset: 7, size: null }
 const BYTES = new Uint8Array([1, 2, 3])

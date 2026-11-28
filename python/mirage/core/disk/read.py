@@ -13,12 +13,33 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
+import os
+import posixpath
+import stat
+from pathlib import Path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside_sync
-from mirage.observe.context import record, start_op
+from mirage.core.disk.utils import (
+    exact_name,
+    inside_path,
+    resolve_inside_sync,
+)
+from mirage.observe.context import record, record_stream, start_op
 from mirage.types import PathSpec
+from mirage.utils.path import norm
+
+logger = logging.getLogger(__name__)
+
+# How a batch opens a file it checked: never through a link, and never
+# waiting on a FIFO that replaced it since. Where the open cannot refuse a
+# link (no ``O_NOFOLLOW``, as on Windows), the batch looks at the name
+# first and proves the open reached the very file it saw.
+_OPEN_REFUSES_LINK = hasattr(os, "O_NOFOLLOW")
+_OPEN_CHECKED = (
+    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+)
 
 
 async def read(
@@ -50,3 +71,164 @@ async def read(
     data = await asyncio.to_thread(take)
     record("read", virtual, "disk", len(data), timer)
     return data
+
+
+async def read_many(
+    accessor: DiskAccessor,
+    paths: list[PathSpec],
+    limit: int,
+    room: int | None = None,
+) -> dict[str, bytes]:
+    """Several whole files in one trip off the event loop, by virtual
+    path, each checked as its own read checks it (``resolve_inside_sync``):
+    no link on the way and every name spelled as its entry is, each folder
+    above the files proven once for the batch. A file is read only while
+    it is the regular file its check saw; one longer than ``limit``, one
+    that does not fit in ``room`` beside the files read before it, and
+    one whose check or read fails is left out for its own read to meet.
+    A path named twice is read once. Each file read is recorded as a whole
+    streamed read records it.
+
+    Args:
+        accessor (DiskAccessor): the mount's disk handle.
+        paths (list[PathSpec]): the files, all on this mount.
+        limit (int): the most bytes worth reading for one file.
+        room (int | None): the most bytes the files read may come to
+            together, None for no bound.
+    """
+    root = accessor.root
+
+    def take() -> list[tuple[PathSpec, bytes]]:
+        opened: set[str] = set()
+        folders: dict[str, tuple[str, os.stat_result] | None] = {}
+        out: list[tuple[PathSpec, bytes]] = []
+        total = 0
+        for spec in {p.virtual: p for p in paths}.values():
+            folder, name = posixpath.split(norm(spec.mount_path))
+            if folder not in folders:
+                folders[folder] = _folder_inside(root, spec, folder, opened)
+            proven = folders[folder]
+            most = limit if room is None else min(limit, room - total)
+            if proven is None or not name or most < 0:
+                continue
+            try:
+                data = _read_checked(*proven, name, most, opened)
+            except (OSError, ValueError) as exc:
+                logger.debug(
+                    "batch read leaves %s to its own read: %s",
+                    spec.virtual,
+                    exc,
+                )
+                continue
+            if data is not None:
+                total += len(data)
+                out.append((spec, data))
+        return out
+
+    read: dict[str, bytes] = {}
+    for spec, data in await asyncio.to_thread(take):
+        rec = record_stream("read", spec.virtual, "disk")
+        if rec is not None:
+            rec.bytes = len(data)
+            rec.complete = True
+        read[spec.virtual] = data
+    return read
+
+
+def _folder_inside(
+    root: Path, spec: PathSpec, folder: str, opened: set[str]
+) -> tuple[str, os.stat_result] | None:
+    """The host directory a batch's ``folder`` names, checked as a read of
+    a file in it checks it, with the stat it was proven as, or None when
+    it is no directory there. The stat follows a link, as the mount root
+    itself may be one. It is taken before the folder is proven, never
+    after: a stat taken after the proof could land on a folder swapped for
+    a link to a directory outside the mount since, and the batch would keep
+    that directory's identity; one taken before is of what the proof then
+    finds no link on the way to.
+
+    Args:
+        root (Path): the mount root on the host.
+        spec (PathSpec): a file in the folder, for the check's errors.
+        folder (str): the folder, a mount-relative path.
+        opened (set[str]): the parents the batch has proven readable.
+    """
+    try:
+        host = inside_path(root, spec, folder)
+        info = os.stat(host)
+        if stat.S_ISDIR(info.st_mode):
+            resolve_inside_sync(root, spec, folder, opened)
+            return str(host), info
+    except (OSError, ValueError) as exc:
+        logger.debug("batch read leaves %s to its own read: %s", folder, exc)
+    return None
+
+
+def _read_checked(
+    parent: str,
+    proven: os.stat_result,
+    name: str,
+    most: int,
+    opened: set[str],
+) -> bytes | None:
+    """The bytes of the regular file ``name`` in the checked host folder
+    ``parent``, or None when it is no regular file spelled so, is longer
+    than ``most`` bytes, or grew past its stat while it was read. The file
+    is opened before its name is proven, so the proof is of the file that
+    is read; a link refuses the open, or where it cannot, the name's own
+    lstat must show a regular file and the open reach that very file. The
+    folder was proven once for the batch, so once the file is open the
+    folder's path must still name the directory proven: an ancestor
+    swapped for a link since then leads elsewhere and is refused, which
+    keeps the batch's window to a single read's. It reads up to the size
+    its stat gives and one byte more (``_read_upto``), never ``most``, so
+    no buffer outgrows the file, and that one byte more tells a file that
+    grew.
+
+    Args:
+        parent (str): the checked host folder.
+        proven (os.stat_result): the stat ``parent`` was proven as.
+        name (str): the file's name in it.
+        most (int): the most bytes worth reading.
+        opened (set[str]): the parents the batch has proven readable.
+    """
+    host = os.path.join(parent, name)
+    seen = None if _OPEN_REFUSES_LINK else os.lstat(host)
+    if seen is not None and not stat.S_ISREG(seen.st_mode):
+        return None
+    fd = os.open(host, _OPEN_CHECKED)
+    try:
+        info = os.fstat(fd)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_size > most
+            or (seen is not None and not os.path.samestat(seen, info))
+            or not os.path.samestat(os.stat(parent), proven)
+            or not exact_name(parent, name, info, opened)
+        ):
+            return None
+        data = _read_upto(fd, info.st_size + 1)
+    finally:
+        os.close(fd)
+    return data if len(data) <= info.st_size else None
+
+
+def _read_upto(fd: int, want: int) -> bytes:
+    """The bytes of ``fd`` from where it stands to its end, or its first
+    ``want`` bytes when it holds more. A read may answer fewer bytes than
+    it was asked for before the end, so it reads again until one answers
+    none or ``want`` have come.
+
+    Args:
+        fd (int): the open file.
+        want (int): the most bytes to read.
+    """
+    parts: list[bytes] = []
+    got = 0
+    while got < want:
+        part = os.read(fd, want - got)
+        if not part:
+            break
+        parts.append(part)
+        got += len(part)
+    return b"".join(parts)

@@ -291,9 +291,15 @@ waits for that run's requests, as a reset does, and a load fires the fake's
 same run prefix and tenant selectors as an API call. `POST {"plans": [...]}`
 appends plans; each names a `method` and a declared `route` (`/drive/v3/files`,
 `/v1/documents/:id`) and answers the next `times` (default 1) matching requests
-with `status`, optional `headers` and `body`, after `delay_ms`. A plan with no
-`status` never answers: the socket closes after `delay_ms`, which is a hang past
-the client's timeout or a reset connection. `GET` lists the plans with how many
+with `status`, optional `headers` and `body`, after `delay_ms`. A `text` in
+place of `body` is sent as written, as `application/json` unless the plan's
+`headers` name another type, for a body JSON cannot carry (a number past
+2^53). A `path` (no run prefix) narrows the plan to requests to that one path,
+so it answers for one item rather than every item the route serves, and a
+`query` (no `?`, `""` for none) to requests asked with exactly that query
+string, so one path asked two ways is faulted one of them. A plan
+with no `status` never answers: the socket closes after `delay_ms`, which is a
+hang past the client's timeout or a reset connection. `GET` lists the plans with how many
 requests each served; `DELETE` disarms them and returns that list. Each waits
 for the run's pending requests, so a plan armed after a reset or a load is armed
 on the run it leaves. A reset of the tenant disarms them too. A case's
@@ -311,6 +317,24 @@ the `path` the client sent (no run prefix), its `query` string, the named
 (null otherwise); `DELETE` stops the list and returns it. Nothing is kept before a start, a faulted request is
 listed, a request to `/_kit/` is not, and a reset of the tenant stops the
 list. A snapshot does not carry it.
+
+`/_kit/holds` makes another client's write land between the lookup a client
+made and the request it acts on, under the same run prefix and tenant
+selectors. `POST {"routes": [[method, route], ...]}` arms a hold and answers
+`{"hold": n}`; the next request to one of those routes waits, ahead of the
+fault plans, the run's queue and the handler. A `query` in the body, as a
+fault plan's, catches only a request asked with exactly that query string.
+`GET /_kit/holds/<n>` waits until
+the hold catches a request and answers its `method`, `route` and `path`, or 404
+once the hold is gone. `DELETE /_kit/holds/<n>` releases it: with no body the
+request is served, so it meets whatever the test changed meanwhile, and with
+`{"status", "body"}` it is answered with them instead; it answers
+`{"caught": bool}`. A reset, a drop or a load of the run leaves held requests
+unanswered.
+
+A request that carries `X-Kit-Setup` is a test's own: it is never listed, held
+or faulted, so a test arranges and reads the world through the same routes as
+the client under test without touching what that client is measured by.
 
 `gridfs_trash.py` and `gridfs_trash.ts` probe what the battery cannot: a
 GridFS `rm` moves the file's revisions to the trash instead of deleting

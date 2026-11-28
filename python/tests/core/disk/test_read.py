@@ -12,13 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+from pathlib import Path
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.read import read
+from mirage.core.disk import read as disk_read
+from mirage.core.disk.read import read, read_many
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
+
+
+def _on_d(key: str) -> PathSpec:
+    """The file ``key`` names on a mount at ``/d``."""
+    return PathSpec(
+        virtual="/d" + key,
+        directory="/d" + key.rsplit("/", 1)[0] + "/",
+        vfs_path=key.lstrip("/"),
+    )
 
 
 @pytest.mark.asyncio
@@ -158,3 +171,199 @@ async def test_read_bytes_under_a_plain_file_is_not_a_directory(tmp_path):
         await read(DiskAccessor(tmp_path), spec)
     assert exc.value.filename == "/a.txt/x"
     assert str(tmp_path) not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_answers_only_the_files_their_own_reads_would(
+    tmp_path,
+):
+    # Each file is checked as its own read checks it, so a link, a folder
+    # reached through one, a name spelled unlike its entry, a directory, a
+    # FIFO (whose open would wait for a writer) and a file gone or longer
+    # than the limit are left for that read; the rest are recorded once
+    # each, as their own reads record them, a file named twice too.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "sub").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    (tmp_path / "a" / "y").write_bytes(b"y\n")
+    (tmp_path / "a" / "long").write_bytes(b"z" * 9)
+    (tmp_path / "b" / "c").write_bytes(b"c\n")
+    (tmp_path / "a" / "link").symlink_to(tmp_path / "a" / "x")
+    (tmp_path / "linked").symlink_to(tmp_path / "a")
+    os.mkfifo(tmp_path / "a" / "pipe")
+    keys = [
+        "/a/x",
+        "/a/link",
+        "/linked/y",
+        "/a/X",
+        "/a/sub",
+        "/a/pipe",
+        "/a/gone",
+        "/a/long",
+        "/gone/x",
+        "/a/y",
+        "/b/c",
+        "/a/x",
+    ]
+    scope = RecordingScope()
+    try:
+        got = await read_many(
+            DiskAccessor(tmp_path), [_on_d(k) for k in keys], 8
+        )
+    finally:
+        scope.close()
+    assert got == {"/d/a/x": b"x\n", "/d/a/y": b"y\n", "/d/b/c": b"c\n"}
+    assert [(r.path, r.bytes, r.complete) for r in scope.records] == [
+        ("/d/a/x", 2, True),
+        ("/d/a/y", 2, True),
+        ("/d/b/c", 2, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_keeps_the_files_that_fit_its_room(tmp_path):
+    # A file that would take the batch past its room is left out before
+    # it is read, and a smaller one after it still fits.
+    for name, size in (("f", 16), ("g", 16), ("h", 4)):
+        (tmp_path / name).write_bytes(b"x" * size)
+    accessor = DiskAccessor(tmp_path)
+    files = [_on_d("/f"), _on_d("/g"), _on_d("/h")]
+    assert sorted(await read_many(accessor, files, 64, 20)) == [
+        "/d/f",
+        "/d/h",
+    ]
+    assert await read_many(accessor, files, 64, -1) == {}
+    assert len(await read_many(accessor, files, 64)) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_reads_on_past_a_short_read(tmp_path, monkeypatch):
+    # A read may answer fewer bytes than it was asked for before the end of
+    # the file, so the batch reads again until a read answers none.
+    (tmp_path / "f").write_bytes(b"0123456789")
+    calls: list[int] = []
+    real = os.read
+
+    def short(fd: int, n: int) -> bytes:
+        calls.append(n)
+        return real(fd, min(n, 3))
+
+    monkeypatch.setattr(os, "read", short)
+    got = await read_many(DiskAccessor(tmp_path), [_on_d("/f")], 64)
+    monkeypatch.undo()
+    assert got == {"/d/f": b"0123456789"}
+    assert len(calls) > 1
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_proves_a_leaf_is_no_link_where_the_open_cannot(
+    tmp_path, monkeypatch
+):
+    # Without O_NOFOLLOW (Windows) the open would follow a link at the
+    # leaf, so the batch looks at the name first and keeps a file only when
+    # the open reached the very file it saw.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    (tmp_path / "a" / "link").symlink_to(tmp_path / "a" / "x")
+    monkeypatch.setattr(disk_read, "_OPEN_REFUSES_LINK", False)
+    monkeypatch.setattr(
+        disk_read, "_OPEN_CHECKED", os.O_RDONLY | os.O_NONBLOCK
+    )
+    got = await read_many(
+        DiskAccessor(tmp_path), [_on_d("/a/x"), _on_d("/a/link")], 8
+    )
+    assert got == {"/d/a/x": b"x\n"}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_refuses_a_folder_swapped_for_a_link_mid_batch(
+    tmp_path, monkeypatch
+):
+    # The batch proves /a once, so a file opened after /a was swapped for
+    # a link to a folder outside the mount would come from outside; once
+    # each file is open the folder's path must still name the directory
+    # proven, so /a/y is left for its own read, which refuses the link.
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "x").write_bytes(b"x\n")
+    (root / "a" / "y").write_bytes(b"y\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "y").write_bytes(b"outside\n")
+    real = disk_read.exact_name
+    swapped: list[bool] = []
+
+    def swapping(
+        parent: str,
+        part: str,
+        info: os.stat_result,
+        opened: set[str] | None = None,
+    ) -> bool:
+        exact = real(parent, part, info, opened)
+        if not swapped:
+            swapped.append(True)
+            os.rename(root / "a", tmp_path / "moved")
+            os.symlink(outside, root / "a")
+        return exact
+
+    monkeypatch.setattr(disk_read, "exact_name", swapping)
+    got = await read_many(
+        DiskAccessor(root), [_on_d("/a/x"), _on_d("/a/y")], 8
+    )
+    assert got == {"/d/a/x": b"x\n"}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_a_name_the_host_cannot_open(tmp_path):
+    # A name holding a NUL passes its folder's check but no host call takes
+    # it; that file is left for its own read, and the rest of the batch is
+    # still read and recorded.
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "x").write_bytes(b"x\n")
+    scope = RecordingScope()
+    try:
+        got = await read_many(
+            DiskAccessor(tmp_path), [_on_d("/a/n\x00ul"), _on_d("/a/x")], 8
+        )
+    finally:
+        scope.close()
+    assert got == {"/d/a/x": b"x\n"}
+    assert [r.path for r in scope.records] == ["/d/a/x"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_refuses_a_folder_swapped_right_after_its_proof(
+    tmp_path, monkeypatch
+):
+    # The batch keeps a folder's identity to check each file's folder
+    # against; taken after the proof, it could be of a folder swapped for a
+    # link to one outside the mount in between, and every file would then
+    # come from outside. It is taken before the proof, so a swap right
+    # after it is caught when the file's folder is checked.
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "x").write_bytes(b"x\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x").write_bytes(b"outside\n")
+    real = disk_read.resolve_inside_sync
+    swapped: list[bool] = []
+
+    def swapping(
+        root_: Path,
+        spec: PathSpec,
+        path: str | None = None,
+        opened: set[str] | None = None,
+    ) -> Path:
+        host = real(root_, spec, path, opened)
+        if not swapped:
+            swapped.append(True)
+            os.rename(root / "a", tmp_path / "moved")
+            os.symlink(outside, root / "a")
+        return host
+
+    monkeypatch.setattr(disk_read, "resolve_inside_sync", swapping)
+    got = await read_many(DiskAccessor(root), [_on_d("/a/x")], 8)
+    assert swapped
+    assert got == {}

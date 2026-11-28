@@ -23,14 +23,11 @@ from mirage.core.redis.mkdir import mkdir as redis_mkdir
 from mirage.core.redis.write import write as redis_write
 from mirage.types import MountMode, PathSpec
 from mirage.workspace import Workspace
-from tests.e2e.gdrive_mock import patch_gdrive
-from tests.e2e.mounts import REDIS_URL, MountState, build_mount
+from tests.e2e.mounts import REDIS_URL, MountState, build_mount, close_mount
 from tests.e2e.s3_mock import patch_s3_multi
 
-# gdrive_mock answers uploads but not deletes, so a gdrive destination
-# takes a write while a gdrive source cannot be removed by mv.
 WRITABLE = {"ram", "disk", "redis", "s3", "gdrive"}
-DELETABLE = {"ram", "disk", "redis", "s3"}
+DELETABLE = {"ram", "disk", "redis", "s3", "gdrive"}
 
 _PAIRS = [
     ("ram", "s3"),
@@ -97,7 +94,8 @@ def _populate_file(
     elif state.ptype == "s3":
         buckets.setdefault(state.s3_bucket, {})[name] = content
     elif state.ptype == "gdrive":
-        state.gdrive.add_file(name, content)
+        assert state.thread is not None and state.gdrive is not None
+        state.thread.run(state.gdrive.put(name, content))
 
 
 async def _ls_for_index(ws: Workspace, state: MountState, name: str) -> None:
@@ -174,8 +172,11 @@ def cross(request, tmp_path):
     pair = request.param
     p1_type, p2_type = pair
 
-    m1 = build_mount(p1_type, "/m1", tmp_path, 1)
-    m2 = build_mount(p2_type, "/m2", tmp_path, 2)
+    origin = (
+        request.getfixturevalue("gws_origin") if "gdrive" in pair else None
+    )
+    m1 = build_mount(p1_type, "/m1", tmp_path, 1, origin)
+    m2 = build_mount(p2_type, "/m2", tmp_path, 2, origin)
 
     ws = Workspace(
         {
@@ -197,19 +198,14 @@ def cross(request, tmp_path):
     stack = ExitStack()
     if "s3" in pair:
         stack.enter_context(patch_s3_multi(buckets))
-    if "gdrive" in pair:
-        gd_pairs = []
-        if m1.ptype == "gdrive":
-            gd_pairs.append((m1.vfs.accessor.token_manager, m1.gdrive))
-        if m2.ptype == "gdrive":
-            gd_pairs.append((m2.vfs.accessor.token_manager, m2.gdrive))
-        stack.enter_context(patch_gdrive(*gd_pairs))
 
     with stack:
         try:
             yield env
         finally:
             env.cleanup_redis()
+            close_mount(m1)
+            close_mount(m2)
 
 
 def test_cat_cross(cross):

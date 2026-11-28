@@ -26,6 +26,9 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.e2e.s3_mock import S3_SESSION
+from tests.fixtures.google_account import google_account
+
+__all__ = ["google_account"]
 
 LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
 

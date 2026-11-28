@@ -23,17 +23,8 @@ import pytest
 from mirage.types import PathSpec
 from mirage.vfs.github import GitHubVFS
 from mirage.workspace import Workspace
-from tests.fixtures.github_mock import MOCK_BLOBS
 from tests.fixtures.mount_commands import run_on_mount
 from tests.fixtures.vfs_io import vfs_over
-
-
-@pytest.fixture(autouse=True)
-def _patch_read(monkeypatch):
-    async def _fetch_blob(config, owner, repo, sha):
-        return MOCK_BLOBS[sha]
-
-    monkeypatch.setattr("mirage.core.github.read.fetch_blob", _fetch_blob)
 
 
 def _scope(path: str) -> PathSpec:
@@ -47,17 +38,17 @@ def _scope(path: str) -> PathSpec:
     )
 
 
-async def _run(accessor, index, path, expr, **kwargs):
+async def _run(accessor, path, expr, **kwargs):
     ws = Workspace({"/": vfs_over(GitHubVFS, accessor)})
     out, io = await run_on_mount(ws, "sed", [_scope(path)], [expr], kwargs)
     return out.decode(errors="replace"), io
 
 
 @pytest.mark.asyncio
-async def test_sed_inplace_rejected(mock_github_api, github_env):
-    accessor, index = github_env
+async def test_sed_inplace_rejected(repo):
+    await repo.create({"src/main.py": b"import os\nimport sys\n"})
     text, io = await _run(
-        accessor, index, "src/main.py", "s/import/X/", in_place=True
+        repo.accessor(), "src/main.py", "s/import/X/", in_place=True
     )
     assert text == ""
     assert io.exit_code == 1

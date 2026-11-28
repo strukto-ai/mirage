@@ -80,6 +80,7 @@ async function* listChildren(conn: GridFSAccessor, pfx: string): AsyncIterable<C
         kind: 'f',
         size: doc.length,
         modified: toIsoZ(doc.uploadDate),
+        fingerprint: doc._id.toString(),
       }
     } else {
       // A deeper filename or a "seg/" directory marker both imply an
@@ -91,7 +92,12 @@ async function* listChildren(conn: GridFSAccessor, pfx: string): AsyncIterable<C
 
 async function* listSubtree(conn: GridFSAccessor, stem: string): AsyncIterable<TreeEntry> {
   for await (const doc of iterLatest(conn, subtreeQuery(stem))) {
-    yield { key: doc.filename, size: doc.length, modified: toIsoZ(doc.uploadDate) }
+    yield {
+      key: doc.filename,
+      size: doc.length,
+      modified: toIsoZ(doc.uploadDate),
+      fingerprint: doc._id.toString(),
+    }
   }
 }
 

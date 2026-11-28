@@ -15,7 +15,7 @@
 import { record, startOp } from '../../observe/context.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { nowIso } from '../../utils/dates.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 
 import { checkDestParents, touchParent } from './dest.ts'
@@ -28,7 +28,7 @@ export async function create(accessor: RAMAccessor, path: PathSpec): Promise<voi
   const p = norm(path.mountPath)
   checkDestParents(accessor, path, p)
   const made = !accessor.store.files.has(p)
-  const now = nowIso()
+  const now = stampIso(accessor.stamped())
   accessor.store.files.set(p, new Uint8Array())
   accessor.store.modified.set(p, now)
   if (made) touchParent(accessor.store, p, now)

@@ -47,9 +47,17 @@ function settles<T>(pending: Promise<T>): Promise<T> {
 /**
  * Start a name's probes at once: its lstat, the lstat of its spelling with one
  * letter's case flipped, and the parent's open. All stay inside a parent the
- * walk has already proved is no link.
+ * walk has already proved is no link. A batch of checks hands `opened`, the
+ * opens of the parents it has proved readable, so each parent opens once for
+ * all of them, and `known`, a stat of the entry it already holds, which takes
+ * the place of the lstat.
  */
-function probeName(parent: string, part: string) {
+export function probeName(
+  parent: string,
+  part: string,
+  opened?: Map<string, Promise<void>>,
+  known?: Stats,
+) {
   const at = path.join(parent, part)
   const index = part.search(/[A-Za-z]/)
   let alternate: string | undefined
@@ -58,14 +66,19 @@ function probeName(parent: string, part: string) {
     const flipped = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
     alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
   }
+  let parentOpen = opened?.get(parent)
+  if (parentOpen === undefined) {
+    parentOpen = settles(openParent(parent))
+    opened?.set(parent, parentOpen)
+  }
   return {
     parent,
     part,
     at,
-    info: settles(lstat(at)),
+    info: known === undefined ? settles(lstat(at)) : Promise.resolve(known),
     alternate,
     alias: alternate === undefined ? undefined : settles(lstat(alternate)),
-    opened: settles(openParent(parent)),
+    opened: parentOpen,
   }
 }
 
@@ -78,10 +91,13 @@ function probeName(parent: string, part: string) {
  * when the flipped, non-link spelling converges on the same full path whose
  * leaf is exactly the requested name. A name past ASCII may also fold or
  * normalize in ways one probe cannot see. Every proof that skips the listing
- * still opens the parent, so permissions stay uniform; no name cache. Mirrors
- * Python's exact_name.
+ * still opens the parent, so permissions stay uniform, once for a batch that
+ * shares its opens (`probeName`); no name cache. Mirrors Python's exact_name.
  */
-async function exactName(probe: ReturnType<typeof probeName>, info: Stats): Promise<boolean> {
+export async function exactName(
+  probe: ReturnType<typeof probeName>,
+  info: Stats,
+): Promise<boolean> {
   const { parent, part, alternate } = probe
   let folds = false
   if (probe.alias !== undefined) {
@@ -138,6 +154,21 @@ async function openParent(parent: string): Promise<void> {
 }
 
 /**
+ * The host path a mount-relative key names below `root`, worked out from the
+ * key alone: nothing on the way is looked at, so it is no proof
+ * (`resolveInside` is). A key that leads out of the root throws. Mirrors
+ * Python's `inside_path`.
+ */
+export function insidePath(root: string, virtual: string): string {
+  const base = path.resolve(root)
+  const full = path.resolve(base, lstripSlash(virtual))
+  if (full !== base && !full.startsWith(base.endsWith(path.sep) ? base : base + path.sep)) {
+    throw new Error(`path escapes root: ${virtual}`)
+  }
+  return full
+}
+
+/**
  * The host path for a mount path, refused as absent when a component below
  * the root is a symlink. A VFS never stores a symlink, so a host link is not
  * an entry of the mount: following it would let a path the root admits
@@ -157,21 +188,21 @@ async function openParent(parent: string): Promise<void> {
  * @param root - the mount root on the host.
  * @param spec - the operand, the path any refusal names.
  * @param virtual - the mount-relative path, when not `spec.mountPath`.
+ * @param opened - the opens of the parents a batch of checks has proved
+ *   readable, shared across its calls (`probeName`).
  */
 export async function resolveInside(
   root: string,
   spec: PathSpec,
   virtual: string = spec.mountPath,
+  opened?: Map<string, Promise<void>>,
 ): Promise<string> {
   const base = path.resolve(root)
-  const full = path.resolve(base, lstripSlash(virtual))
+  const full = insidePath(root, virtual)
   if (full === base) return full
-  if (!full.startsWith(base.endsWith(path.sep) ? base : base + path.sep)) {
-    throw new Error(`path escapes root: ${virtual}`)
-  }
   const parts = path.relative(base, full).split(path.sep)
   const end = parts.includes('') ? parts.indexOf('') : parts.length
-  let probe = end > 0 ? probeName(base, parts[0] ?? '') : null
+  let probe = end > 0 ? probeName(base, parts[0] ?? '', opened) : null
   for (let i = 0; probe !== null; i++) {
     const current = probe
     probe = null
@@ -181,7 +212,9 @@ export async function resolveInside(
       info = await current.info
       // The next name's probes start once this one is proved no link, so
       // none of them walks through a host link out of the root.
-      if (!info.isSymbolicLink() && i + 1 < end) probe = probeName(current.at, parts[i + 1] ?? '')
+      if (!info.isSymbolicLink() && i + 1 < end) {
+        probe = probeName(current.at, parts[i + 1] ?? '', opened)
+      }
       exact = info.isSymbolicLink() ? false : await exactName(current, info)
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code

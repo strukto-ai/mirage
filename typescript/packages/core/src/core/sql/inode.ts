@@ -14,13 +14,13 @@
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { FileStat, FileType } from '../../types.ts'
-import { systemDate } from '../../utils/clock.ts'
 import { isoToEpoch } from '../../utils/dates.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename } from '../../utils/path.ts'
 import type { SqlRow, SqlStatement, SqlValue } from '../../vfs/sql/types.ts'
 import type { INODE_COLUMNS } from './constants.ts'
 import { DIR, FILE, LAST_INO, MAX_PARAMS, SQL, subdirsOf } from './constants.ts'
+import { tokenOf } from './fingerprint.ts'
 
 /** One `fs_inode` row. Mirrors Python's `Inode`. */
 export interface Inode {
@@ -61,11 +61,18 @@ export function isFile(node: Inode): boolean {
   return node.mode === FILE
 }
 
-/** Now, as `fs_inode` keeps a time. */
-export function nowStamp(): Stamp {
-  const ms = systemDate().getTime()
-  const seconds = Math.floor(ms / 1000)
-  return [seconds, (ms - seconds * 1000) * 1_000_000]
+/**
+ * Now, as `fs_inode` keeps a time: past every time the mount's driver gave a
+ * write before, and past `after`'s own, so a rewrite always moves its file's
+ * time, whichever driver or process last wrote it.
+ *
+ * @param accessor the mount whose database is written
+ * @param after the inode the write lands on, as read
+ */
+export function nowStamp(accessor: SqlAccessor, after: Inode | null = null): Stamp {
+  const floor = after === null ? 0n : BigInt(after.mtime) * 1_000_000_000n + BigInt(after.mtimeNsec)
+  const ns = accessor.stamped(floor)
+  return [Number(ns / 1_000_000_000n), Number(ns % 1_000_000_000n)]
 }
 
 /** The stamp an ISO time names, to the nanosecond its fraction gives; one
@@ -97,6 +104,7 @@ export function inodeStat(p: string, node: Inode, subdirs = 0): FileStat {
     ...common,
     type: FileType.FILE,
     size: node.size,
+    fingerprint: tokenOf(node.ino, node.mtime, node.mtimeNsec),
     content: contentTypeForPath(p),
     nlink: 1,
   })
@@ -183,18 +191,11 @@ export function touched(ino: InoRef, [seconds, nanoseconds]: Stamp): SqlStatemen
   }
 }
 
-/** Set the inode's size, and its mtime to `stamp`. */
-export function resized(ino: InoRef, size: number, [seconds, nanoseconds]: Stamp): SqlStatement {
-  return {
-    sql: `UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ? WHERE ino = ${ino.sql}`,
-    params: [size, seconds, nanoseconds, ...ino.params],
-  }
-}
-
 /**
- * `resized`, landing only on the inode as `node` read it: a size or mtime
- * another writer changed since leaves the size NULL, which its column
- * refuses, so the batch fails whole and the caller reads the file again.
+ * Set the inode's size, and its mtime to `stamp`, landing only on the inode as
+ * `node` read it: a size or mtime another writer changed since leaves the size
+ * NULL, which its column refuses, so the batch fails whole and the caller reads
+ * the file again.
  */
 export function resizedFrom(
   node: Inode,

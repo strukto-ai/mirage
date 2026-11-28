@@ -159,6 +159,7 @@ class RAMVFS(BaseVFS):
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),
             "attrs": {k: dict(v) for k, v in self._store.attrs.items()},
+            "stamp": str(self._store.stamp),
         }
         if self.usage is not None:
             state["config"] = {"capacity": self.usage.limit}
@@ -174,6 +175,7 @@ class RAMVFS(BaseVFS):
         self._store.attrs = {
             k: v.copy() for k, v in state.get("attrs", {}).items()
         }
+        self._store.stamp = int(state.get("stamp", "0"))
 
     async def capacity(self) -> CapacityResult:
         """df's QUOTA row for a capped store; the base UNKNOWN otherwise."""

@@ -140,6 +140,7 @@ async def _list_children(conn: S3Conn, pfx: str) -> AsyncIterator[ChildEntry]:
                     kind="f",
                     size=obj.get("Size"),
                     modified=_iso_of(obj.get("LastModified")),
+                    fingerprint=_etag_of(obj) or None,
                 )
             else:
                 yield ChildEntry(key=obj["Key"], kind="marker")
@@ -159,6 +160,7 @@ async def _list_subtree(conn: S3Conn, stem: str) -> AsyncIterator[TreeEntry]:
                 key=okey,
                 size=obj.get("Size", 0),
                 modified=_iso_of(obj.get("LastModified")),
+                fingerprint=_etag_of(obj) or None,
             )
 
 

@@ -18,6 +18,7 @@ import { contentTypeForPath } from '../../utils/filetype.ts'
 import { gnuBasename, norm } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { lookupError } from './dest.ts'
+import { tokenOf } from './fingerprint.ts'
 import { RAMDirs, type RAMStore } from '../../vfs/ram/store.ts'
 
 /** How many folders sit directly in the folder at key `p`. Mirrors
@@ -56,6 +57,7 @@ export function keyStat(store: RAMStore, p: string): FileStat | null {
     name: gnuBasename(p),
     size: data.byteLength,
     modified: store.modified.get(p) ?? null,
+    fingerprint: tokenOf(store, p),
     type: FileType.FILE,
     content: contentTypeForPath(p),
     mode: attrs.mode ?? null,

@@ -12,16 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable
-
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
-from tests.fixtures.gdrive_api import StubDrive, install_drive
-from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
 
@@ -32,23 +27,6 @@ def _op(name: str):
 read = _op("read")
 
 
-def _downloads(
-    data: bytes, calls: list[str]
-) -> Callable[[str], AsyncIterator[bytes]]:
-    """A stream download answering ``data``, each file id it is asked for
-    kept in ``calls``."""
-
-    def download(file_id: str) -> AsyncIterator[bytes]:
-        calls.append(file_id)
-        return _yielded(data)
-
-    return download
-
-
-async def _yielded(data: bytes) -> AsyncIterator[bytes]:
-    yield data
-
-
 def _scope(path: str, prefix: str = "") -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, prefix),
@@ -57,30 +35,26 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GDriveAccessor(config=None, token_manager=offline_token_manager())
-
-
 @pytest.mark.asyncio
-async def test_read_downloads_plain_file(accessor, monkeypatch):
+async def test_read_downloads_plain_file(google_account):
+    made = await google_account.upload(
+        "readme.txt", b"file content", await google_account.folder("docs")
+    )
     row = FileStat(
         name="readme.txt",
         type=FileType.FILE,
         modified="2026-04-01T00:00:00Z",
-        extra={"file_id": "file123", "resource_type": "gdrive/file"},
+        extra={"file_id": made, "resource_type": "gdrive/file"},
     )
-    calls: list[str] = []
-    install_drive(
-        monkeypatch,
-        StubDrive(download_file_stream=_downloads(b"file content", calls)),
+    await google_account.run.record_requests()
+    result = await read(
+        google_account.drive_accessor(), _scope("/docs/readme.txt"), entry=row
     )
-    result = await read(accessor, _scope("/docs/readme.txt"), entry=row)
-    assert calls == ["file123"]
+    assert await google_account.log() == [("media", made)]
     assert result == b"file content"
 
 
 @pytest.mark.asyncio
-async def test_read_not_found(accessor):
+async def test_read_not_found(google_account):
     with pytest.raises(FileNotFoundError):
-        await read(accessor, _scope("/nonexistent.txt"))
+        await read(google_account.drive_accessor(), _scope("/nonexistent.txt"))

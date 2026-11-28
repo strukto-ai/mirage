@@ -1,9 +1,7 @@
-import { Buffer } from 'node:buffer'
-import { Readable } from 'node:stream'
-import { abortable } from '@struktoai/mirage-core/utils/abort'
+import { concat } from '@struktoai/mirage-core/utils/bytes'
 import { RAW_BODIES } from '../constants.ts'
 import { HttpError } from '../errors.ts'
-import type { RouteReply, RouteRequest } from '../routes.ts'
+import type { RouteRequest } from '../routes.ts'
 
 export async function* bodyChunks(
   request: RouteRequest,
@@ -11,28 +9,29 @@ export async function* bodyChunks(
 ): AsyncGenerator<Uint8Array> {
   signal.throwIfAborted()
   const { raw } = request
-  const source: AsyncIterator<Uint8Array> =
-    raw instanceof Readable ? raw.iterator({ destroyOnReturn: false }) : raw[Symbol.asyncIterator]()
-  try {
-    for (;;) {
-      const chunk = await abortable(source.next(), signal)
-      if (chunk.done === true) return
-      yield chunk.value
-    }
-  } catch (error) {
-    signal.throwIfAborted()
-    throw error
-  } finally {
-    // A pending read unwinds when the response closes the connection.
-    void source.return?.().catch((error: unknown) => {
-      console.debug('sandbox request body closed', error)
+  if (!(raw instanceof ReadableStream)) throw new TypeError('E2B request body is not a web stream')
+  const reader = (raw as ReadableStream<Uint8Array>).getReader()
+  const cancel = (): void => {
+    reader.cancel(signal.reason).catch((error: unknown) => {
+      console.debug('sandbox request body cancel failed', error)
     })
   }
-}
-
-export function closeUnreadBody(request: RouteRequest, reply: RouteReply): void {
-  if (request.raw instanceof Readable && !request.raw.readableEnded) {
-    reply.header('connection', 'close')
+  signal.addEventListener('abort', cancel, { once: true })
+  let ended = false
+  try {
+    for (;;) {
+      const chunk = await reader.read()
+      signal.throwIfAborted()
+      if (chunk.done) {
+        ended = true
+        return
+      }
+      yield chunk.value
+    }
+  } finally {
+    signal.removeEventListener('abort', cancel)
+    if (ended) reader.releaseLock()
+    else cancel()
   }
 }
 
@@ -52,7 +51,7 @@ export async function readBody(
     if (size > limit) throw new HttpError('too_large', limitMessage)
     chunks.push(chunk)
   }
-  return Buffer.concat(chunks, size)
+  return concat(chunks)
 }
 
 export function unaryContentType(request: RouteRequest, streamMedia: string): string {
@@ -68,7 +67,11 @@ export async function readJsonBody(
   signal: AbortSignal,
   limit: number,
 ): Promise<unknown> {
-  const bytes = await readBody(request, signal, limit)
+  return parseJson(await readBody(request, signal, limit))
+}
+
+/** A JSON body, refusing a key that would reach an object's prototype; none when empty. */
+export function parseJson(bytes: Uint8Array): unknown {
   if (bytes.byteLength === 0) return undefined
   try {
     const value: unknown = JSON.parse(new TextDecoder().decode(bytes))

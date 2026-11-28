@@ -13,12 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
-from mirage.accessor.github import GitHubAccessor, GitHubAccount
-from mirage.core.github.config import GhConfig
+from mirage.accessor.github import GitHubAccessor
 from mirage.core.github.repo import (
     ensure_ref,
     fetch_default_branch,
@@ -26,30 +24,22 @@ from mirage.core.github.repo import (
 )
 
 
-@pytest.fixture
-def account():
-    return GitHubAccount(GhConfig(token="ghp_test"))
-
-
 @pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get")
-async def test_fetch_default_branch_main(mock_get, account):
-    mock_get.return_value = {"default_branch": "main"}
-    result = await fetch_default_branch(account, "acme", "proj")
+async def test_fetch_default_branch_main(repo):
+    await repo.create({"a.txt": b"a"})
+    account = repo.accessor().account
+    result = await fetch_default_branch(account, repo.owner, repo.name)
     assert result == "main"
-    mock_get.assert_awaited_once_with(
-        account,
-        "/repos/{owner}/{repo}",
-        owner="acme",
-        repo="proj",
-    )
+    assert await repo.log() == [("repo", "")]
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get")
-async def test_fetch_default_branch_master(mock_get, account):
-    mock_get.return_value = {"default_branch": "master"}
-    result = await fetch_default_branch(account, "acme", "proj")
+async def test_fetch_default_branch_master(repo):
+    await repo.create({"a.txt": b"a"})
+    await repo.branch("master")
+    await repo.set_default_branch("master")
+    account = repo.accessor().account
+    result = await fetch_default_branch(account, repo.owner, repo.name)
     assert result == "master"
 
 
@@ -89,12 +79,13 @@ def test_parse_repo_refuses_a_spec_that_is_not_the_format(spec, message):
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get")
 async def test_ensure_ref_resolves_the_default_branch_when_none_was_named(
-    mock_get, account
+    repo,
 ):
-    mock_get.return_value = {"default_branch": "master"}
-    accessor = GitHubAccessor(account, "acme", "proj")
+    await repo.create({"a.txt": b"a"})
+    await repo.branch("master")
+    await repo.set_default_branch("master")
+    accessor = GitHubAccessor(repo.accessor().account, repo.owner, repo.name)
     assert await ensure_ref(accessor) == "master"
     # Settled on the accessor, so the next reader neither refetches nor
     # disagrees with the ref this one read.
@@ -102,22 +93,18 @@ async def test_ensure_ref_resolves_the_default_branch_when_none_was_named(
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get")
-async def test_ensure_ref_keeps_a_pinned_ref_without_a_request(
-    mock_get, account
-):
-    accessor = GitHubAccessor(account, "acme", "proj", "release-2")
-    assert await ensure_ref(accessor) == "release-2"
-    mock_get.assert_not_awaited()
+async def test_ensure_ref_keeps_a_pinned_ref_without_a_request(repo):
+    await repo.create({"a.txt": b"a"})
+    assert await ensure_ref(repo.accessor("release-2")) == "release-2"
+    assert await repo.log() == []
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.repo.github_get")
-async def test_ensure_ref_resolves_once_for_concurrent_readers(
-    mock_get, account
-):
-    mock_get.return_value = {"default_branch": "trunk"}
-    accessor = GitHubAccessor(account, "acme", "proj")
+async def test_ensure_ref_resolves_once_for_concurrent_readers(repo):
+    await repo.create({"a.txt": b"a"})
+    await repo.branch("trunk")
+    await repo.set_default_branch("trunk")
+    accessor = GitHubAccessor(repo.accessor().account, repo.owner, repo.name)
     refs = await asyncio.gather(*(ensure_ref(accessor) for _ in range(4)))
     assert refs == ["trunk"] * 4
-    assert mock_get.await_count == 1
+    assert await repo.count("repo") == 1

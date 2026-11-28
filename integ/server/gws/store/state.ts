@@ -20,6 +20,8 @@ import type {
   DriveEntry,
   DriveItem,
   FormDoc,
+  GmailChange,
+  GmailChangeKind,
   GmailDraft,
   GmailLabel,
   GmailMessage,
@@ -73,6 +75,8 @@ export class GwsState {
   forms = new Map<string, FormDoc>()
   counters = new Map<string, number>()
   changes: [number, string][] = []
+  gmailChanges: GmailChange[] = []
+  calendarChanges: [number, string, string][] = []
   readonly epochMs: number
   ticks: number
 
@@ -84,6 +88,25 @@ export class GwsState {
   // Record that a Drive file was made, changed or removed, for changes.list.
   noteChange(fileId: string): void {
     this.changes.push([this.next('change'), fileId])
+  }
+
+  // Record a change to a mailbox, for history.list; its seq is the history id
+  // the profile then reports.
+  noteGmail(kind: GmailChangeKind, msg: GmailMessage, labelIds: string[] = []): void {
+    if ((kind === 'labelsAdded' || kind === 'labelsRemoved') && labelIds.length === 0) return
+    this.gmailChanges.push({
+      seq: this.next('history'),
+      kind,
+      messageId: msg.id,
+      threadId: msg.threadId,
+      labelIds,
+    })
+  }
+
+  // Record that an event was made, changed or deleted, for an events listing
+  // asked with a sync token.
+  noteCalendarChange(calendarId: string, eventId: string): void {
+    this.calendarChanges.push([this.next('calendarChange'), calendarId, eventId])
   }
 
   // Per kind, so a new Doc does not advance the next file id.

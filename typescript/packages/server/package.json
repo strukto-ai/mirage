@@ -134,6 +134,10 @@
       "types": "./dist/auth/middleware.d.ts",
       "import": "./dist/auth/middleware.js"
     },
+    "./e2b": {
+      "types": "./dist/routers/e2b.d.ts",
+      "import": "./dist/routers/e2b.js"
+    },
     "./package.json": "./package.json",
     "./bin/daemon": "./dist/bin/daemon.js"
   },

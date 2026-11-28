@@ -18,12 +18,14 @@ import re
 from collections.abc import Generator, Mapping
 from contextlib import closing
 from datetime import datetime, timedelta, timezone, tzinfo
+from time import time_ns
 
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue
 from mirage.utils.clock import system_date, system_now
+from mirage.utils.constants import RACY_WINDOW_NS
 from mirage.utils.timezone import posix_transitions, resolve_tz
 
 logger = logging.getLogger(__name__)
@@ -267,6 +269,63 @@ def to_iso_z(dt: datetime) -> str:
 
 def now_iso() -> str:
     return to_iso_z(system_date())
+
+
+def stamp_after(last: int) -> int:
+    """Now in nanoseconds since the epoch, or ``last + 1`` when the clock
+    has not moved past ``last``.
+
+    A store Mirage keeps stamps each write with this, past the stamp it
+    gave the write before, so no two writes to it share a time. A clock
+    that stands still (a Durable Object's stops for a whole request) or
+    one too coarse to part two writes would otherwise give a rewrite the
+    time its file already had, and a reader that compares times would take
+    the file for unchanged.
+
+    Args:
+        last (int): the stamp the store gave its previous write, 0 for none.
+    """
+    now = system_date()
+    ns = math.floor(now.timestamp()) * 1_000_000_000 + now.microsecond * 1000
+    return max(ns, last + 1)
+
+
+def wall_ns() -> int:
+    """The host's wall clock in nanoseconds: the clock a file's times are
+    judged against, not the workspace's."""
+    return time_ns()
+
+
+def settled(
+    changed_ns: int, now_ns: int, window: int = RACY_WINDOW_NS
+) -> bool:
+    """Whether an entry last changed at ``changed_ns`` is old enough that
+    a second change could not have kept its time.
+
+    A clock ticks coarser than the changes it dates, so two writes inside
+    one tick share a time, and a fingerprint built from it would not
+    move. git calls such an entry racy and reads it rather than trust its
+    stat; a backend whose fingerprint is a time gives none until the
+    entry is ``window`` old.
+
+    Args:
+        changed_ns (int): when the entry last changed, in nanoseconds.
+        now_ns (int): the wall clock, read before the entry's stat.
+        window (int): how old it must be: ``REMOTE_RACY_WINDOW_NS``
+            for a time another host's clock gave.
+    """
+    return now_ns - changed_ns >= window
+
+
+def stamp_iso(ns: int) -> str:
+    """A stamp as ISO text in UTC, to the nanosecond.
+
+    Args:
+        ns (int): nanoseconds since the epoch, as ``stamp_after`` gives.
+    """
+    seconds, nanoseconds = divmod(ns, 1_000_000_000)
+    at = datetime.fromtimestamp(seconds, tz=timezone.utc)
+    return f"{at:%Y-%m-%dT%H:%M:%S}.{nanoseconds:09d}Z"
 
 
 def ns_to_iso(ns: int) -> str:

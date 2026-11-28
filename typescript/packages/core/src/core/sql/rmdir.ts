@@ -39,7 +39,7 @@ export async function rmdir(accessor: SqlAccessor, path: PathSpec): Promise<void
       params: [parent.ino, leaf(w)],
     },
     ...dropInodes([node.ino]),
-    touched(byIno(parent.ino), nowStamp()),
+    touched(byIno(parent.ino), nowStamp(accessor)),
   ])
   if ((await accessor.query(SQL.hasEntry, [parent.ino, leaf(w)])).length > 0) {
     throw enotempty(path)

@@ -392,7 +392,13 @@ export async function mv(
         const entry: IndexEntry | undefined = state.entries.get(path)
         if (entry === undefined) continue
         removed.push(path)
-        staged.set(movedPath(move, path), { oid: entry.oid, mode: entry.mode, size: entry.size })
+        staged.set(movedPath(move, path), {
+          oid: entry.oid,
+          mode: entry.mode,
+          size: entry.size,
+          dev: entry.dev ?? 0,
+          ino: entry.ino ?? 0,
+        })
       }
     }
     await updateIndex(repo, staged, removed)

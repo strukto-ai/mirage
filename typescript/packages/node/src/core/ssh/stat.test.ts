@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileType, PathSpec } from '@struktoai/mirage-core/types'
+import { wallNs } from '@struktoai/mirage-core/utils/dates'
 import {
   RunAccessor,
   makeFakeAccessor,
@@ -69,12 +70,12 @@ describe('attrsToFileStat', () => {
     [0o060660, FileType.BLOCK_DEVICE],
     [0o140755, FileType.SOCKET],
   ] as const)('preserves special file kind for mode %i', (mode, type) => {
-    const row = attrsToFileStat('entry', { mode })
+    const row = attrsToFileStat('entry', { mode }, wallNs())
     expect(row.type).toBe(type)
     expect(row.content).toBeNull()
   })
   it('returns DIRECTORY type for a directory mode', () => {
-    const s = attrsToFileStat('mydir', { mode: DIR_MODE, size: 0 })
+    const s = attrsToFileStat('mydir', { mode: DIR_MODE, size: 0 }, wallNs())
     expect(s.type).toBe(FileType.DIRECTORY)
     expect(s.name).toBe('mydir')
     expect(s.size).toBeNull()
@@ -86,27 +87,31 @@ describe('attrsToFileStat', () => {
     ['foo.bin', ContentType.BINARY],
     ['weird-name.parquet', ContentType.BINARY],
   ])('types %s by its name', (name, content) => {
-    const s = attrsToFileStat(name, { mode: FILE_MODE, size: 7 })
+    const s = attrsToFileStat(name, { mode: FILE_MODE, size: 7 }, wallNs())
     expect(s.name).toBe(name)
     expect(s.content).toBe(content)
   })
 
-  it('formats modified as ISO 8601 and fingerprints by it', () => {
-    const s = attrsToFileStat('foo.txt', { mode: FILE_MODE, mtime: 0 })
+  it('formats modified as ISO 8601 and fingerprints a settled file by size and second', () => {
+    const s = attrsToFileStat('foo.txt', { mode: FILE_MODE, size: 3, mtime: 0 }, wallNs())
     expect(s.modified).toBe('1970-01-01T00:00:00Z')
-    expect(s.fingerprint).toBe(s.modified)
-    expect(attrsToFileStat('foo.txt', { mode: FILE_MODE, mtime: 1 }).fingerprint).not.toBe(
-      s.fingerprint,
-    )
-    const d = attrsToFileStat('mydir', { mode: DIR_MODE, mtime: 0 })
-    expect(d.fingerprint).toBe(d.modified)
+    expect(s.fingerprint).toBe('3:0')
+    const later = attrsToFileStat('foo.txt', { mode: FILE_MODE, size: 3, mtime: 1 }, wallNs())
+    expect(later.fingerprint).not.toBe(s.fingerprint)
+    expect(attrsToFileStat('mydir', { mode: DIR_MODE, mtime: 0 }, wallNs()).fingerprint).toBeNull()
+  })
+
+  it('gives no fingerprint to a file written inside the racy window', () => {
+    const now = Math.floor(Date.now() / 1000)
+    const s = attrsToFileStat('foo.txt', { mode: FILE_MODE, size: 3, mtime: now }, wallNs())
+    expect(s.fingerprint).toBeNull()
   })
 
   it('leaves modified and fingerprint null when mtime is omitted', () => {
-    const s = attrsToFileStat('foo.txt', { mode: FILE_MODE })
+    const s = attrsToFileStat('foo.txt', { mode: FILE_MODE }, wallNs())
     expect(s.modified).toBeNull()
     expect(s.fingerprint).toBeNull()
-    expect(attrsToFileStat('mydir', { mode: DIR_MODE }).fingerprint).toBeNull()
+    expect(attrsToFileStat('mydir', { mode: DIR_MODE }, wallNs()).fingerprint).toBeNull()
   })
 })
 
@@ -134,13 +139,18 @@ describe('tree', () => {
     expect(accessor.sent).toEqual([treeCommand('data/in')])
     expect([...(rows?.keys() ?? [])].sort()).toEqual(['a.txt', 'sub', 'sub/b b.md'])
     expect(rows?.get('a.txt')).toEqual(
-      attrsToFileStat('a.txt', {
-        mode: FILE_MODE,
-        size: 5,
-        atime: 1700000002,
-        mtime: 1700000000,
-      }),
+      attrsToFileStat(
+        'a.txt',
+        {
+          mode: FILE_MODE,
+          size: 5,
+          atime: 1700000002,
+          mtime: 1700000000,
+        },
+        wallNs(),
+      ),
     )
+    expect(rows?.get('a.txt')?.fingerprint).toBe('5:1700000000')
     expect(rows?.get('sub')?.type).toBe(FileType.DIRECTORY)
     expect(rows?.get('sub')?.size).toBeNull()
     expect(rows?.get('sub/b b.md')?.name).toBe('b b.md')

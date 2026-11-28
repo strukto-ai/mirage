@@ -12,21 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
-import { FakeDrive, makeGDriveAccessor } from '../../../tests/core/gdrive/_test_util.ts'
 import { rmR } from './rm.ts'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function spec(virtual: string): PathSpec {
@@ -35,14 +41,16 @@ function spec(virtual: string): PathSpec {
 
 describe('gdrive rm -r', () => {
   it('removes a tree', async () => {
-    const d = fake.folder('d')
-    const s = fake.folder('s', d)
-    fake.add('f.txt', s, undefined, ENC.encode('x'))
+    const d = await account.folder('d')
+    const s = await account.folder('s', d)
+    await account.upload('f.txt', 'x', s)
+    const accessor = account.driveAccessor()
     await rmR(accessor, spec('/d'), await handedAt(readdir, accessor, spec('/d')))
-    expect(fake.items.size).toBe(0)
+    expect(await account.items()).toEqual([])
   })
 
   it('missing target raises ENOENT', async () => {
+    const accessor = account.driveAccessor()
     await expect(
       rmR(accessor, spec('/missing'), await handedAt(readdir, accessor, spec('/missing'))),
     ).rejects.toMatchObject({ code: 'ENOENT' })

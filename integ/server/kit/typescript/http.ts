@@ -31,6 +31,8 @@ import {
 } from './errors.ts'
 import { FAULTS_PATH, parseFaultBody } from './fault.ts'
 import type { Faults } from './fault.ts'
+import { HOLDS_PATH, HoldsBodyError, parseHoldsBody, parseReleaseBody } from './hold.ts'
+import type { Holds } from './hold.ts'
 import { REQUESTS_PATH, RequestsBodyError, parseRequestsBody } from './request.ts'
 import type { Requests } from './request.ts'
 import { Router } from './route.ts'
@@ -46,6 +48,11 @@ import type { JsonValue, Reply } from './types.ts'
 
 export const HEALTH_PATH = '/_kit/health'
 export const RESET_PATH = '/reset'
+// A request a test sends to set its world up rather than one from the code
+// under test: it is served like any other, and no request list, hold or
+// fault plan counts it.
+export const SETUP_HEADER = 'x-kit-setup'
+const HOLD_PATH = new RegExp(`^${HOLDS_PATH}/([1-9][0-9]*)$`)
 // A run's snapshot, load and clone, each with the method it answers.
 const RUN_OP = /^\/_kit\/runs\/([^/]+)\/(snapshot|load|clone)$/
 const RUN_OP_METHOD: Record<string, string> = { snapshot: 'GET', load: 'POST', clone: 'POST' }
@@ -108,6 +115,7 @@ export function makeRuntime<C extends MinimalClient>(
     const db = await pool.load(run, taken.db)
     const st = makeState(fake)
     loadState(st, taken.tenants)
+    states.get(run)?.clearHolds()
     states.set(run, st)
     fixtures.set(run, taken.fixture)
     const tenants = [...taken.tenants.keys()]
@@ -163,6 +171,7 @@ export function makeRuntime<C extends MinimalClient>(
       checkName('run', run)
       return router.enqueue(run, async () => {
         await pool.drop(run)
+        states.get(run)?.clearHolds()
         states.delete(run)
         fixtures.delete(run)
       })
@@ -328,17 +337,63 @@ function requestsEndpoint(requests: Requests, method: string, raw: Buffer): Repl
   return { status: 200, body: { requests: [] } }
 }
 
+// The holds every kit fake has, on the tenant the request resolves to exactly
+// as an API request would. POST arms one on the routes its body names and
+// answers its number; GET /_kit/holds/<n> waits until that hold has caught a
+// request and answers which; DELETE /_kit/holds/<n> lets the request go, run
+// as it would have been or, with a status in the body, answered with that
+// instead, and answers whether it had caught one. None of the three waits on
+// the run's queue: a test waiting for a hold, or a request held, must not
+// keep the test's own writes from running.
+async function holdsEndpoint<C extends MinimalClient>(
+  router: Router<C>,
+  holds: Holds,
+  method: string,
+  path: string,
+  raw: Buffer,
+): Promise<Reply> {
+  try {
+    if (path === HOLDS_PATH) {
+      if (method !== 'POST') {
+        return { status: 405, body: { error: 'method_not_allowed', method, path } }
+      }
+      const plan = parseHoldsBody(raw, (m, r) => router.declares(m, r))
+      return { status: 200, body: { hold: holds.arm(plan) } }
+    }
+    const id = Number(HOLD_PATH.exec(path)?.[1])
+    if (method === 'GET') {
+      const caught = await holds.caught(id)
+      if (caught === null) return { status: 404, body: { error: 'no_hold', hold: id } }
+      return { status: 200, body: caught }
+    }
+    if (method === 'DELETE') {
+      const released = holds.release(id, parseReleaseBody(raw))
+      if (released === null) return { status: 404, body: { error: 'no_hold', hold: id } }
+      return { status: 200, body: { caught: released } }
+    }
+    return { status: 405, body: { error: 'method_not_allowed', method, path } }
+  } catch (err: unknown) {
+    if (err instanceof HoldsBodyError) {
+      return { status: 400, body: { error: 'bad_holds', message: err.message } }
+    }
+    throw err
+  }
+}
+
 function send(res: ServerResponse, reply: Reply, head: boolean): void {
   const headers: Record<string, string | string[]> = { ...(reply.headers ?? {}) }
+  // A reply's own type in any case stands: a default under another spelling
+  // would be sent beside it.
+  const typed = Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
   let payload: Buffer
   if (reply.body === undefined) {
     payload = Buffer.alloc(0)
   } else if (Buffer.isBuffer(reply.body)) {
     payload = reply.body
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/octet-stream'
+    if (!typed) headers['Content-Type'] = 'application/octet-stream'
   } else {
     payload = Buffer.from(JSON.stringify(reply.body), 'utf8')
-    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json'
+    if (!typed) headers['Content-Type'] = 'application/json'
   }
   // RFC 7230 forbids Content-Length on a 204 or a 304, and every aiohttp fake
   // this kit replaces omitted it there, so a caller diffing the two sees the
@@ -489,19 +544,29 @@ async function answer<C extends MinimalClient>(
       requestsEndpoint(rt.state(run).of(tenant).requests, method, raw),
     )
   }
+  if (path === HOLDS_PATH || HOLD_PATH.test(path)) {
+    return holdsEndpoint(router, rt.state(run).of(tenant).holds, method, path, raw)
+  }
   const hit = router.match(method, path)
   if (hit === null) return unrouted(service, method, path)
-  // Before the fault and the handler, so a request is listed whatever
-  // answered it.
-  rt.state(run)
-    .peek(tenant)
-    ?.requests.note(arrived, method, hit.spec.path, path, url.search.slice(1), headers, raw)
+  const watched = headers[SETUP_HEADER] === undefined ? rt.state(run).peek(tenant) : undefined
+  // Before the hold, the fault and the handler, so a request is listed
+  // whatever answered it.
+  watched?.requests.note(arrived, method, hit.spec.path, path, url.search.slice(1), headers, raw)
+  // Ahead of the faults, so a test that changed the world while it held a
+  // request can still arm the answer that request meets.
+  const held = watched?.holds.take(method, hit.spec.path, path, url.search.slice(1)) ?? null
+  if (held !== null) {
+    const how = await held
+    if (how === undefined) return null
+    if (how !== null) return how
+  }
   // Ahead of the run's queue and of the handler: a faulted request touches
   // no row, so it neither waits behind a write nor holds one up while it
   // hangs, and a write route faulted with a 5xx has provably not applied.
   // The request's own method, not the route's: a HEAD answered by a GET
   // route must not spend a plan armed for the GET.
-  const fault = rt.state(run).peek(tenant)?.faults.take(method, hit.spec.path) ?? null
+  const fault = watched?.faults.take(method, hit.spec.path, path, url.search.slice(1)) ?? null
   if (fault !== null) {
     // Unreferenced, so a hang still pending when the server closes does not
     // keep the process alive past its own teardown.

@@ -25,10 +25,9 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_exists(fake_drive, gdrive_accessor):
-    fake_drive.add("f.txt", content=b"x")
-    assert await call(exists, readdir, gdrive_accessor, spec("/"))
-    assert await call(exists, readdir, gdrive_accessor, spec("/f.txt"))
-    assert not await call(
-        exists, readdir, gdrive_accessor, spec("/missing.txt")
-    )
+async def test_exists(google_account):
+    await google_account.upload("f.txt", b"x")
+    accessor = google_account.drive_accessor()
+    assert await call(exists, readdir, accessor, spec("/"))
+    assert await call(exists, readdir, accessor, spec("/f.txt"))
+    assert not await call(exists, readdir, accessor, spec("/missing.txt"))

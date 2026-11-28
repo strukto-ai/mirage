@@ -14,6 +14,7 @@
 
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import type { PathSpec, SetAttrFields } from '../../types.ts'
+import { stampIso } from '../../utils/dates.ts'
 import { norm } from '../../utils/path.ts'
 import { lookupError } from './dest.ts'
 
@@ -37,6 +38,9 @@ export function setAttrs(
   if (fields.gid !== undefined) entry.gid = fields.gid
   if (fields.atime !== undefined) entry.atime = fields.atime
   store.attrs.set(p, entry)
-  if (fields.mtime !== undefined) store.modified.set(p, fields.mtime)
+  if (fields.mtime !== undefined) {
+    store.modified.set(p, fields.mtime)
+    entry.retimed = stampIso(accessor.stamped())
+  }
   return Promise.resolve({})
 }

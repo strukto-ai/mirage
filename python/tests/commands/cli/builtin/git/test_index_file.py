@@ -17,7 +17,12 @@ from pathlib import Path
 import pytest
 from dulwich.index import ConflictedIndexEntry, Index, IndexEntry
 
-from mirage.commands.cli.builtin.git.index_file import read_index
+from mirage.commands.cli.builtin.git.index_file import (
+    read_index,
+    unchanged,
+    with_fingerprint,
+)
+from mirage.types import FileStat, FileType
 
 from .conftest import GITDIR
 
@@ -72,3 +77,42 @@ async def test_conflicted_paths_are_carried_apart(workspace, repo_path: Path):
     state = await read_index(workspace.vfs, GITDIR)
     assert b"a.txt" not in state.entries
     assert b"a.txt" in state.conflicts
+
+
+ENTRY = IndexEntry(
+    ctime=0,
+    mtime=0,
+    dev=0,
+    ino=0,
+    mode=0o100644,
+    uid=0,
+    gid=0,
+    size=3,
+    sha=b"0" * 40,
+)
+
+
+def _stat(fingerprint: str | None) -> FileStat:
+    return FileStat(
+        name="a.txt", size=3, type=FileType.FILE, fingerprint=fingerprint
+    )
+
+
+def test_an_entry_keeping_a_fingerprint_finds_the_file_unchanged_by_it():
+    kept = with_fingerprint(ENTRY, _stat("1:100.000000001"))
+    assert (kept.dev, kept.ino) != (0, 0)
+    assert unchanged(kept, _stat("1:100.000000001"))
+    assert not unchanged(kept, _stat("1:100.000000002"))
+
+
+def test_a_file_the_mount_fingerprints_not_is_never_unchanged_unread():
+    assert with_fingerprint(ENTRY, _stat(None)) == ENTRY
+    assert not unchanged(ENTRY, _stat("1:100.000000001"))
+    assert not unchanged(with_fingerprint(ENTRY, _stat("x")), _stat(None))
+
+
+def test_an_entry_keeps_the_same_two_numbers_typescript_keeps():
+    # An index one host writes, the other reads: both take the first eight
+    # bytes of the fingerprint's SHA-1 as dev and ino.
+    kept = with_fingerprint(ENTRY, _stat("1:100.000000001"))
+    assert (kept.dev, kept.ino) == (0x1C236B98, 0x703AC08A)

@@ -161,12 +161,21 @@ function nextPosition(data: EventsResponse): string | null {
   return value === undefined || value === null || value === '' ? null : String(value)
 }
 
+// Box spells a stream position as a JSON number near 1.15e18, past the 2**53
+// a JavaScript number holds exactly, so the position is kept as the digits
+// Box sent rather than parsed into one. Mirrors Python's `_events_page`.
+async function eventsPage(
+  tm: BoxTokenManager,
+  params: Record<string, string | number>,
+): Promise<EventsResponse> {
+  const text = (await boxGet(tm, `${tm.apiBase}/events`, params, 'text')) as string
+  const quoted = text.replace(/("next_stream_position"\s*:\s*)(-?\d+)/g, '$1"$2"')
+  return JSON.parse(quoted) as EventsResponse
+}
+
 /** The current head of the user's event stream. */
 export async function eventsNow(tm: BoxTokenManager, streamType: string): Promise<string> {
-  const data = (await boxGet(tm, `${tm.apiBase}/events`, {
-    stream_type: streamType,
-    stream_position: 'now',
-  })) as EventsResponse
+  const data = await eventsPage(tm, { stream_type: streamType, stream_position: 'now' })
   const position = nextPosition(data)
   if (position === null) throw new Error('Box GET /events returned no next_stream_position')
   return position
@@ -190,11 +199,11 @@ export async function eventsSince(
   const out: BoxEvent[] = []
   let position = streamPosition
   for (;;) {
-    const data = (await boxGet(tm, `${tm.apiBase}/events`, {
+    const data = await eventsPage(tm, {
       stream_type: streamType,
       stream_position: position,
       limit,
-    })) as EventsResponse
+    })
     const entries = data.entries ?? []
     const advanced = nextPosition(data)
     if (entries.length === 0) return { entries: out, position: advanced ?? position }

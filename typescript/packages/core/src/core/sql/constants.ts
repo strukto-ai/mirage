@@ -44,6 +44,13 @@ export const READ_BYTES = 64 * 1024
 /** The bytes a streamed write gathers before it lands them. */
 export const FLUSH_BYTES = 1024 * 1024
 
+/**
+ * The most file bytes one query of a batch read asks for the rows of. The
+ * rows a query answers stay alive beside the files built from them until the
+ * driver lets them go, so a batch fetches its rows a run at a time.
+ */
+export const READ_RUN_BYTES = 256 * 1024
+
 /** The columns of `fs_inode` the ops read. */
 export const INODE_COLUMNS = ['ino', 'mode', 'size', 'mtime', 'mtime_nsec'] as const
 
@@ -200,6 +207,28 @@ export function subdirsOf(count: number): string {
     FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
     WHERE d.parent_ino IN (${slots}) AND i.mode = ${String(DIR)}
     GROUP BY d.parent_ino`
+}
+
+/** The entries of one folder that a batch of names names, with their inode rows. */
+export function entriesNamed(count: number): string {
+  const slots = Array<string>(count).fill('?').join(', ')
+  return `SELECT d.name, ${columns('i')}
+    FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+    WHERE d.parent_ino = ? AND d.name IN (${slots})`
+}
+
+/**
+ * The `fs_data` rows of a batch of files, in order within each, a file's only
+ * up to the chunk its checked size ends in, so a file that grew since is
+ * fetched no further: two parameters a file, its inode and that last chunk's
+ * index. Each row carries its file's size as the same statement sees it, so
+ * rows a write changed after the size was checked are told apart.
+ */
+export function rowsOf(count: number): string {
+  const files = Array<string>(count).fill('(ino = ? AND chunk_index <= ?)').join(' OR ')
+  return `SELECT ino, chunk_index, data,
+    (SELECT i.size FROM fs_inode i WHERE i.ino = fs_data.ino) AS size
+    FROM fs_data WHERE ${files} ORDER BY ino, chunk_index`
 }
 
 /** Direct children of a bounded batch of parents, with their inode rows. */

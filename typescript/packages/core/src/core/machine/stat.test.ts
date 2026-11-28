@@ -34,7 +34,7 @@ describe('entryStat', () => {
       blocks: 8,
       rel: '',
     }
-    const got = entryStat('x.py', entry)
+    const got = entryStat('x.py', entry, 'box')
     expect([got.type, got.size, got.mode, got.uid, got.gid]).toEqual([
       FileType.FILE,
       12,
@@ -54,20 +54,24 @@ describe('entryStat', () => {
     ['l', FileType.FILE, 7],
     ['s', FileType.FILE, 7],
   ])('maps %s', (kind, want, size) => {
-    const got = entryStat('n', {
-      kind,
-      mode: 0o755,
-      size: 7,
-      mtime: 0,
-      atime: 0,
-      mtimeMs: 0,
-      atimeMs: 0,
-      uid: 0,
-      gid: 0,
-      nlink: 1,
-      blocks: 0,
-      rel: '',
-    })
+    const got = entryStat(
+      'n',
+      {
+        kind,
+        mode: 0o755,
+        size: 7,
+        mtime: 0,
+        atime: 0,
+        mtimeMs: 0,
+        atimeMs: 0,
+        uid: 0,
+        gid: 0,
+        nlink: 1,
+        blocks: 0,
+        rel: '',
+      },
+      'box',
+    )
     expect([got.type, got.size]).toEqual([want, size])
   })
 })

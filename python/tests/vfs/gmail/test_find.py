@@ -12,64 +12,46 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
+import pytest_asyncio
 
-from mirage.accessor.gmail import GmailAccessor
 from mirage.vfs.gmail import GmailVFS
-from mirage.vfs.gmail.config import GmailConfig
 from mirage.workspace import Workspace
-from tests.fixtures.gmail_api import StubGmail
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_account import GoogleAccount
 from tests.fixtures.vfs_io import vfs_over
 
-LABELS = [{"id": "INBOX", "type": "system"}]
 
-RAW_MESSAGE = {
-    "id": "m1",
-    "internalDate": "1754300000000",
-    "payload": {
-        "mimeType": "multipart/mixed",
-        "headers": [{"name": "Subject", "value": "Report"}],
-        "parts": [
-            {"mimeType": "text/plain", "body": {"data": "text"}},
-            {
-                "filename": "report.pdf",
-                "body": {"attachmentId": "att1", "size": 1024},
-            },
-        ],
-    },
-}
+@pytest_asyncio.fixture
+async def report(google_account: GoogleAccount) -> str:
+    """One message in INBOX, on 2025-08-04, with a PDF attached; its id."""
+    await google_account.reset()
+    return await google_account.message(
+        "Report",
+        "text",
+        date="Mon, 4 Aug 2025 09:33:20 +0000",
+        attachments=(("report.pdf", "application/pdf", b"%PDF-1.4"),),
+    )
 
 
-async def _run(line: str) -> list[str]:
-    accessor = GmailAccessor(GmailConfig(access_token="t"), AsyncMock())
-    ws = Workspace({"/gmail/": vfs_over(GmailVFS, accessor)})
-    with (
-        serve(
-            gmail=StubGmail(
-                list_labels=AsyncMock(return_value=LABELS),
-                list_messages=AsyncMock(return_value=[{"id": "m1"}]),
-                get_message_raw=AsyncMock(return_value=RAW_MESSAGE),
-            )
-        ),
-    ):
-        result = await ws.shell(line)
-        data = await result.stdout_str()
+async def _run(account: GoogleAccount, line: str) -> list[str]:
+    ws = Workspace({"/gmail/": vfs_over(GmailVFS, account.gmail_accessor())})
+    result = await ws.shell(line)
+    data = await result.stdout_str()
     return [line.removeprefix("/gmail") for line in data.splitlines()]
 
 
 @pytest.mark.asyncio
-async def test_type_f_lists_attachments():
-    lines = await _run("find /gmail -type f")
-    assert "/INBOX/2025-08-04/Report__m1.gmail.json" in lines
-    assert "/INBOX/2025-08-04/Report__m1/report.pdf" in lines
-    assert "/INBOX/2025-08-04/Report__m1" not in lines
+async def test_type_f_lists_attachments(google_account, report):
+    lines = await _run(google_account, "find /gmail -type f")
+    assert f"/INBOX/2025-08-04/Report__{report}.gmail.json" in lines
+    assert f"/INBOX/2025-08-04/Report__{report}/report.pdf" in lines
+    assert f"/INBOX/2025-08-04/Report__{report}" not in lines
 
 
 @pytest.mark.asyncio
-async def test_type_d_lists_attachment_dir_not_attachment():
-    lines = await _run("find /gmail -type d")
-    assert "/INBOX/2025-08-04/Report__m1" in lines
-    assert "/INBOX/2025-08-04/Report__m1/report.pdf" not in lines
+async def test_type_d_lists_attachment_dir_not_attachment(
+    google_account, report
+):
+    lines = await _run(google_account, "find /gmail -type d")
+    assert f"/INBOX/2025-08-04/Report__{report}" in lines
+    assert f"/INBOX/2025-08-04/Report__{report}/report.pdf" not in lines

@@ -71,7 +71,12 @@ def native_realpath(path: str) -> str:
         libc.free(resolved)
 
 
-def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
+def exact_name(
+    parent: str,
+    part: str,
+    info: os.stat_result,
+    opened: set[str] | None = None,
+) -> bool:
     """Prove the requested spelling is the entry's own, listing the
     parent's names only when nothing cheaper proves it.
 
@@ -83,13 +88,17 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
     non-link spelling resolves to the identical full path whose leaf has
     exactly the requested name. A name past ASCII may also fold or
     normalize in ways one probe cannot see. Every proof that skips the
-    listing still opens the parent, so permissions stay uniform. No path
-    names or directory versions are cached.
+    listing still opens the parent, so permissions stay uniform, once for
+    a batch that hands ``opened``. No path names or directory versions are
+    cached.
 
     Args:
         parent (str): already checked host parent.
         part (str): requested component.
         info (os.stat_result): fresh lstat of that component.
+        opened (set[str] | None): the parents one batch of checks has
+            opened already, which are not opened again; None opens the
+            parent for this proof alone.
     """
     index = next(
         (i for i, c in enumerate(part) if c.isascii() and c.isalpha()), None
@@ -110,7 +119,7 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
             logger.debug("Disk spelling probe unavailable", exc_info=True)
             return part in os.listdir(parent)
     if part.isascii() and not folds:
-        _open_parent(parent)
+        _open_parent(parent, opened)
         return True
     if folds and alternate and sys.platform in ("darwin", "win32"):
         try:
@@ -119,7 +128,7 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
                 os.path.basename(canonical) == part
                 and native_realpath(alternate) == canonical
             ):
-                _open_parent(parent)
+                _open_parent(parent, opened)
                 return True
         except OSError:
             logger.debug(
@@ -128,7 +137,7 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
     return part in os.listdir(parent)
 
 
-def _open_parent(parent: str) -> None:
+def _open_parent(parent: str, opened: set[str] | None = None) -> None:
     """Prove a parent readable as listing it would: opening it read-only
     is the check opendir makes, without reading a batch of its entries.
     Windows cannot open a directory as a file, so there its first entry
@@ -136,16 +145,47 @@ def _open_parent(parent: str) -> None:
 
     Args:
         parent (str): the host directory.
+        opened (set[str] | None): the parents proven so in this batch,
+            which this adds to; one already in it is not opened again.
     """
+    if opened is not None and parent in opened:
+        return
     if sys.platform == "win32":
         with os.scandir(parent) as entries:
             next(entries, None)
-        return
-    os.close(os.open(parent, os.O_RDONLY | os.O_DIRECTORY))
+    else:
+        os.close(os.open(parent, os.O_RDONLY | os.O_DIRECTORY))
+    if opened is not None:
+        opened.add(parent)
+
+
+def inside_path(root: Path, spec: PathSpec, path: str | None = None) -> Path:
+    """The host path a mount-relative key names below ``root``, worked out
+    from the key alone: nothing on the way is looked at, so it is no proof
+    (``resolve_inside_sync`` is).
+
+    Args:
+        root (Path): mount root on the host.
+        spec (PathSpec): operand retained for virtual-path errors.
+        path (str | None): alternate mount-relative key, otherwise spec's.
+
+    Raises:
+        ValueError: the key leads out of the root.
+    """
+    key = spec.mount_path if path is None else path
+    base = os.path.abspath(root)
+    full = os.path.normpath(os.path.join(base, key.lstrip("/")))
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    if full != base and not full.startswith(prefix):
+        raise ValueError(f"path escapes root: {spec.virtual}")
+    return Path(full)
 
 
 def resolve_inside_sync(
-    root: Path, spec: PathSpec, path: str | None = None
+    root: Path,
+    spec: PathSpec,
+    path: str | None = None,
+    opened: set[str] | None = None,
 ) -> Path:
     """Resolve an exact host operand without following links below the root.
 
@@ -165,13 +205,11 @@ def resolve_inside_sync(
         root (Path): mount root on the host.
         spec (PathSpec): operand retained for virtual-path errors.
         path (str | None): alternate mount-relative key, otherwise spec's.
+        opened (set[str] | None): the parents a batch of checks has
+            proven readable, shared across its calls (``exact_name``).
     """
-    key = spec.mount_path if path is None else path
     base = os.path.abspath(root)
-    full = os.path.normpath(os.path.join(base, key.lstrip("/")))
-    prefix = base if base.endswith(os.sep) else base + os.sep
-    if full != base and not full.startswith(prefix):
-        raise ValueError(f"path escapes root: {spec.virtual}")
+    full = str(inside_path(root, spec, path))
     at = base
     for part in full[len(base) :].split(os.sep):
         if not part:
@@ -183,7 +221,7 @@ def resolve_inside_sync(
             exact = (
                 False
                 if stat.S_ISLNK(info.st_mode)
-                else exact_name(parent, part, info)
+                else exact_name(parent, part, info, opened)
             )
         except (FileNotFoundError, NotADirectoryError):
             return Path(full)

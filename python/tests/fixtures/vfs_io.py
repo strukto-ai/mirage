@@ -240,6 +240,18 @@ class BatchedRAM(RAMVFS):
         }
 
 
+class HeldRAM(BatchedRAM):
+    """A RAM mount that holds its data locally, as RAM does, so a
+    read-ahead reads its files for the command instead of warming a read
+    cache; it reads a batch in one call where ``batched``, counting both."""
+
+    local = True
+
+    def __init__(self, batched: bool = True) -> None:
+        super().__init__(batched)
+        self.caches_reads = False
+
+
 async def _missing_target_stat(path: str) -> None:
     return None
 

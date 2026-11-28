@@ -64,7 +64,7 @@ import {
 } from '../../core/generic/rewrite.ts'
 import { ebusy, enotdir, enotsup, isEnoent } from '../../errors/fs.ts'
 import { type Egress, withEgress } from '../../io/gateway.ts'
-import { checkMemory } from '../../io/memory.ts'
+import { checkMemory, memoryRoom } from '../../io/memory.ts'
 import type { ByteSpool } from '../../io/spool.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import { closeQuietly, OutputStream, rechunk } from '../../io/stream.ts'
@@ -96,6 +96,7 @@ import {
   WritePolicy,
 } from '../../types.ts'
 import { Activity } from '../../utils/activity.ts'
+import { concat } from '../../utils/bytes.ts'
 import type { Clock } from '../../utils/clock.ts'
 import { getExtension } from '../../utils/filetype.ts'
 import { pathVisible } from '../../utils/hidden.ts'
@@ -241,6 +242,34 @@ async function* asStream(
     return
   }
   yield* found
+}
+
+/**
+ * The files of a batch read that fit together, in `scopes`' order, in what
+ * the workspace's `max_memory` has left beside `heldBytes` now; one that does
+ * not fit is left out for its own read to meet, and a smaller one after it
+ * may still fit. Mirrors Python's `_in_room`.
+ *
+ * @param scopes the files the batch asked for, in order
+ * @param read what the batch read, by virtual path
+ * @param heldBytes the bytes the batch already holds
+ */
+function inRoom(
+  scopes: readonly PathSpec[],
+  read: Map<string, Uint8Array>,
+  heldBytes: number,
+): Map<string, Uint8Array> {
+  const room = memoryRoom()
+  if (room === null) return read
+  const kept = new Map<string, Uint8Array>()
+  let left = room - heldBytes
+  for (const scope of scopes) {
+    const data = read.get(scope.virtual)
+    if (data === undefined || kept.has(scope.virtual) || data.byteLength > left) continue
+    kept.set(scope.virtual, data)
+    left -= data.byteLength
+  }
+  return kept
 }
 
 /**
@@ -2402,17 +2431,28 @@ export class MountEntry {
   }
 
   /**
-   * Read several whole files on this mount in one request. For the
-   * dispatcher's read-ahead, once it has walked and
-   * followed each path; keyed by virtual path, a file left out is read on its
-   * own later. Mirrors Python's `read_many`.
+   * Read several whole files on this mount, in one request where its VFS reads
+   * a batch and one file after another otherwise. For the dispatcher's
+   * read-ahead, once it has walked and followed each path; keyed by virtual
+   * path, a file left out is read on its own later. Mirrors Python's
+   * `read_many`.
+   *
+   * @param paths the files, as virtual paths.
+   * @param limit the most bytes worth fetching for one file.
+   * @param heldBytes the bytes the batch this read is for already holds,
+   *   which what it builds must fit beside.
    */
-  async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
+  async readMany(
+    paths: readonly string[],
+    limit: number,
+    heldBytes = 0,
+  ): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
       this.framed(() =>
         this.batchRead(
           paths.map((p) => this.scope(p)),
           limit,
+          heldBytes,
         ),
       ),
     )
@@ -2433,12 +2473,30 @@ export class MountEntry {
 
   /**
    * The VFS's batch read, handed what is at each path and at its folder as
-   * the stored listings name them, where it declares them. Mirrors Python's
-   * `_read_many`.
+   * the stored listings name them, where it declares them, and the bytes the
+   * files may come to together (`room`: what the workspace's `max_memory` has
+   * left beside `heldBytes`); what it answers is kept only as far as it fits
+   * in what is left once it is done (`inRoom`), since the stores may have
+   * grown while it read. A VFS with no batch read has each file read as its
+   * own whole read reads it (`readEach`), and one longer than `limit`, one
+   * that does not fit in what is left, or one that fails is left out. Either
+   * way the index is observed once. Mirrors Python's `_read_many`.
    */
-  private async batchRead(scopes: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {
-    const wants = this.wants('readMany')
+  private async batchRead(
+    scopes: PathSpec[],
+    limit: number,
+    heldBytes: number,
+  ): Promise<Map<string, Uint8Array>> {
     const index = this.index
+    if (!this.vfs.supports('readMany')) {
+      const read = await this.readEach(scopes, limit, heldBytes)
+      await this.observe(
+        index,
+        scopes.filter((scope) => read.has(scope.virtual)),
+      )
+      return read
+    }
+    const wants = this.wants('readMany')
     const handed: Handed[] = []
     for (const scope of scopes) {
       const one: { -readonly [K in keyof Handed]: Handed[K] } = {}
@@ -2446,12 +2504,70 @@ export class MountEntry {
       if (wants.includes('parent')) one.parent = await this.entry(this.folder(scope), index)
       handed.push(one)
     }
-    const result = await this.vfs.readMany(scopes, limit, handed)
+    const free = memoryRoom()
+    const result = inRoom(
+      scopes,
+      await this.vfs.readMany(scopes, limit, handed, free === null ? null : free - heldBytes),
+      heldBytes,
+    )
     await this.observe(
       index,
       scopes.filter((scope) => result.has(scope.virtual)),
     )
     return result
+  }
+
+  /**
+   * Each file's whole bytes as its own whole read answers them, by virtual
+   * path. The bytes built for the batch must fit together, and beside what it
+   * already holds (`heldBytes`), in what the workspace's `max_memory` has left,
+   * as one file's must for its own read (`collected`), what a RAM store holds
+   * already counted; one longer than `limit` bytes, one that does not fit, or
+   * one whose read fails, is left out for its own read to meet. Mirrors
+   * Python's `_read_each`.
+   */
+  private async readEach(
+    scopes: readonly PathSpec[],
+    limit: number,
+    heldBytes: number,
+  ): Promise<Map<string, Uint8Array>> {
+    const counted = this.vfs instanceof RAMVFS
+    const read = new Map<string, Uint8Array>()
+    let built = heldBytes
+    for (const scope of scopes) {
+      const parts: Uint8Array[] = []
+      let size = 0
+      let source: AsyncIterable<Uint8Array> | null = null
+      try {
+        const found = await this.answer(this.vfs, this.index, scope)
+        if (found instanceof Uint8Array) {
+          if (found.byteLength <= limit) {
+            if (!counted) {
+              checkMemory(built + found.byteLength)
+              built += found.byteLength
+            }
+            read.set(scope.virtual, found)
+          }
+          continue
+        }
+        source = asStream(found)
+        for await (const chunk of source) {
+          size += chunk.byteLength
+          if (size > limit) break
+          checkMemory(built + size)
+          parts.push(chunk)
+        }
+        if (size <= limit) {
+          read.set(scope.virtual, concat(parts))
+          built += size
+        }
+      } catch (err) {
+        console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
+      } finally {
+        if (source !== null) await closeQuietly(source)
+      }
+    }
+    return read
   }
 
   /**

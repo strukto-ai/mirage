@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { FakeGitHub, blobSha } from '../../../tests/core/github/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GitHubRepo, TOKEN, blobSha } from '../../../tests/core/github/repo.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy } from '../../types.ts'
@@ -30,28 +31,35 @@ const OLD = 'version one\n'
 const NEW = 'version two, longer\n'
 const PATH = '/gh/docs/a.txt'
 
-let gh: FakeGitHub
+const FILES = { 'docs/a.txt': OLD, 'docs/b.txt': 'bravo', 'top.txt': 'top' }
 
-beforeEach(() => {
-  gh = new FakeGitHub({ 'docs/a.txt': OLD, 'docs/b.txt': 'bravo', 'top.txt': 'top' })
-  vi.stubGlobal('fetch', gh.fetch)
+let origin: string
+let repo: GitHubRepo
+
+beforeAll(async () => {
+  origin = await serve('github')
 })
 
-afterEach(() => {
+beforeEach(async () => {
+  repo = new GitHubRepo(origin)
+  await repo.create(FILES)
+})
+
+afterEach(async () => {
   vi.unstubAllGlobals()
+  await repo.run.close()
 })
 
-// create fetches the repository and its whole tree; the decisions count what
-// happens after that.
+// The decisions count what happens once the mount is made.
 async function vfsOf(): Promise<GitHubVFS> {
   const vfs = await GitHubVFS.create({
-    token: 't',
-    owner: 'o',
-    repo: 'r',
+    token: TOKEN,
+    owner: repo.owner,
+    repo: repo.name,
     ref: 'main',
-    baseUrl: gh.url,
+    baseUrl: repo.run.url,
   })
-  gh.log.length = 0
+  await repo.run.recordRequests()
   return vfs
 }
 
@@ -103,13 +111,12 @@ describe('github under read: fresh', () => {
   // cache never asks for, so the entry would carry no token.
   for (const prefix of ['/', '/gh', '/src']) {
     it(`leaves the read's sha on the cache entry (${prefix})`, async () => {
-      gh.files.clear()
-      gh.set('src/a.txt', OLD)
+      await repo.replace({ 'src/a.txt': OLD })
       const w = ws(await vfsOf(), ReadPolicy.FRESH, prefix)
       const path = `${prefix === '/' ? '' : prefix}/src/a.txt`
       try {
         expect(await out(w, `cat ${path}`)).toBe(OLD)
-        expect(await w.cache.isFresh(path, await blobSha(OLD))).toBe(true)
+        expect(await w.cache.isFresh(path, blobSha(OLD))).toBe(true)
       } finally {
         await w.close()
       }
@@ -131,9 +138,9 @@ describe('github under read: fresh', () => {
       const w = ws(await vfsOf())
       try {
         await out(w, `cat ${PATH}`)
-        gh.log.length = 0
+        await repo.run.recordRequests()
         await out(w, line)
-        expect(gh.counts()).toEqual(cost)
+        expect(await repo.counts()).toEqual(cost)
       } finally {
         await w.close()
       }
@@ -179,16 +186,16 @@ describe('github under read: fresh', () => {
     const w = ws(await vfsOf())
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
-      gh.set('docs/a.txt', NEW)
-      gh.log.length = 0
+      await repo.commit({ 'docs/a.txt': NEW })
+      await repo.run.recordRequests()
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
       // The probe finds a new sha; cat's own stat serves the probe's answer,
       // and the read is handed it and downloads.
-      expect(gh.counts()).toEqual([1, 0, 1])
-      gh.log.length = 0
+      expect(await repo.counts()).toEqual([1, 0, 1])
+      await repo.run.recordRequests()
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
       // Warm now: the operand probe, and nothing else.
-      expect(gh.counts()).toEqual([1, 0, 0])
+      expect(await repo.counts()).toEqual([1, 0, 0])
     } finally {
       await w.close()
     }
@@ -198,10 +205,10 @@ describe('github under read: fresh', () => {
     const w = ws(await vfsOf(), ReadPolicy.BOUNDED)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
-      gh.set('docs/a.txt', NEW)
-      gh.log.length = 0
+      await repo.commit({ 'docs/a.txt': NEW })
+      await repo.run.recordRequests()
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
-      expect(gh.counts()).toEqual([0, 0, 0])
+      expect(await repo.counts()).toEqual([0, 0, 0])
     } finally {
       await w.close()
     }
@@ -215,12 +222,12 @@ describe('github under read: fresh', () => {
       await out(w, 'ls /gh/docs')
       // create fetched the tree but seeded no index, so each stat asks one
       // directory until the listing fills it.
-      expect(gh.counts()).toEqual([2, 1, 0])
+      expect(await repo.counts()).toEqual([2, 1, 0])
       // The listing filled the index, but under fresh the next command
       // re-checks it once: one check of the head, which replaces the tree
       // refetch (Task 1.3).
       await out(w, `stat ${PATH}`)
-      expect(gh.counts()).toEqual([3, 1, 0])
+      expect(await repo.counts()).toEqual([3, 1, 0])
     } finally {
       await w.close()
     }
@@ -232,11 +239,11 @@ describe('github under read: fresh', () => {
     const w = ws(await vfsOf(), ReadPolicy.BOUNDED)
     try {
       await out(w, `stat ${PATH}`)
-      expect(gh.counts()).toEqual([0, 1, 0])
+      expect(await repo.counts()).toEqual([0, 1, 0])
       await out(w, `stat ${PATH}`)
       await out(w, 'ls /gh/docs')
       await out(w, `stat ${PATH}`)
-      expect(gh.counts()).toEqual([0, 1, 0])
+      expect(await repo.counts()).toEqual([0, 1, 0])
     } finally {
       await w.close()
     }
@@ -249,13 +256,13 @@ describe('github under read: fresh', () => {
     const w = ws(await vfsOf())
     try {
       for (const [step, data] of [OLD, NEW, OLD].entries()) {
-        gh.set('docs/a.txt', data)
+        await repo.commit({ 'docs/a.txt': data })
         expect(await out(w, `cat ${PATH}`)).toBe(data)
         await out(w, `cp ${PATH} /r/c${String(step)}`)
         expect(await out(w, `cat /r/c${String(step)}`)).toBe(data)
-        const sha = await blobSha(data)
+        const sha = blobSha(data)
         expect(await w.cache.isFresh(PATH, sha)).toBe(true)
-        expect(gh.log).toContainEqual(['blob', sha])
+        expect(await repo.log()).toContainEqual(['blob', sha])
       }
     } finally {
       await w.close()
@@ -269,9 +276,9 @@ describe('github under read: fresh', () => {
     const w = ws(await vfsOf())
     try {
       await out(w, 'ls /gh/docs')
-      gh.set('docs/a.txt', NEW)
+      await repo.commit({ 'docs/a.txt': NEW })
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
-      expect(await w.cache.isFresh(PATH, await blobSha(NEW))).toBe(true)
+      expect(await w.cache.isFresh(PATH, blobSha(NEW))).toBe(true)
       expect(await out(w, `cat ${PATH}`)).toBe(NEW)
     } finally {
       await w.close()
@@ -283,7 +290,7 @@ describe('github under read: fresh', () => {
     try {
       await out(w, `cat ${PATH}`)
       await out(w, `cat ${PATH}`)
-      const walks = gh.count('recursive')
+      const walks = await repo.count('recursive')
       const listed = await out(w, 'find /gh -type f')
       expect(listed.split('\n').filter(Boolean).sort()).toEqual([
         '/gh/docs/a.txt',
@@ -293,7 +300,7 @@ describe('github under read: fresh', () => {
       // The probe left the whole listing; find, a new command, re-checks it
       // once under fresh, with a check of the head instead of a refetch of
       // the tree (Task 1.3).
-      expect(gh.count('recursive')).toBe(walks)
+      expect(await repo.count('recursive')).toBe(walks)
     } finally {
       await w.close()
     }
@@ -316,8 +323,8 @@ describe('github cannot-see versus gone', () => {
       await overlaid(w)
       // Lost access answers 404 on both endpoints: cannot verify, so the copy
       // is dropped and the cold read fails, but nothing is gone.
-      gh.fail.set('dir', [404, 'Not Found'])
-      gh.fail.set('recursive', [404, 'Not Found'])
+      await repo.refuse('dir', 404, 'Not Found')
+      await repo.refuse('recursive', 404, 'Not Found')
       // GitHub's own message, as any refused github read prints it; python
       // prints aiohttp's rendering of the same 404. Never ENOENT.
       expect(await fails(w, `cat ${PATH}`)).toBe('cat: Not Found\n')
@@ -336,8 +343,8 @@ describe('github cannot-see versus gone', () => {
       await overlaid(w)
       // A refused token refuses every route: the read fails with the refusal,
       // and the refusal never reads as the file gone.
-      gh.fail.set('dir', [401, 'Bad credentials'])
-      gh.fail.set('recursive', [401, 'Bad credentials'])
+      await repo.refuse('dir', 401, 'Bad credentials')
+      await repo.refuse('recursive', 401, 'Bad credentials')
       expect(await fails(w, `cat ${PATH}`)).toBe('cat: Bad credentials\n')
       expect(kept(w)).toBe(true)
     } finally {
@@ -350,8 +357,8 @@ describe('github cannot-see versus gone', () => {
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
-      gh.files.delete('docs/a.txt')
-      gh.files.delete('docs/b.txt')
+      await repo.commit({ 'docs/a.txt': null })
+      await repo.commit({ 'docs/b.txt': null })
       expect(await fails(w, `cat ${PATH}`)).toBe(`cat: ${PATH}: No such file or directory\n`)
       expect(w.namespace.metaFor(PATH) ?? null).toBeNull()
       expect(await w.cache.exists(PATH)).toBe(false)
@@ -365,14 +372,14 @@ describe('github cannot-see versus gone', () => {
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
-      gh.files.delete('docs/a.txt')
-      gh.log.length = 0
+      await repo.commit({ 'docs/a.txt': null })
+      await repo.run.recordRequests()
       expect(await fails(w, `cat ${PATH}`)).toBe(`cat: ${PATH}: No such file or directory\n`)
       expect(w.namespace.metaFor(PATH) ?? null).toBeNull()
       // The probe answers absent from one listing of docs/ and drops the
       // stale row; cat's own stat then lists its way there once, and that
       // tree names the file absent too.
-      expect(gh.counts()).toEqual([1, 1, 0])
+      expect(await repo.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
     }
@@ -383,8 +390,8 @@ describe('github cannot-see versus gone', () => {
     await w.cache.remove(PATH)
     await w.registry.mountFor(PATH).index.clear()
     await overlaid(w)
-    gh.fail.set('dir', [404, 'Not Found'])
-    gh.fail.set('recursive', [401, 'Bad credentials'])
+    await repo.refuse('dir', 404, 'Not Found')
+    await repo.refuse('recursive', 401, 'Bad credentials')
   }
 
   it('never reads cannot-see as gone through the dispatcher', async () => {
@@ -416,37 +423,35 @@ describe('github cannot-see versus gone', () => {
     try {
       await out(w, `cat ${PATH}`)
       await overlaid(w)
-      gh.truncatedDirs.set('docs', 0)
-      gh.log.length = 0
+      await repo.cutShort('docs', 0)
+      await repo.run.recordRequests()
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       expect(kept(w)).toBe(true)
       // The operand probe's listing of docs/ is cut short, so it defers to one
       // walk of the whole tree, which finds the file; cat's own stat and the
       // cache stage reuse its answer.
-      expect(gh.counts()).toEqual([1, 1, 0])
+      expect(await repo.counts()).toEqual([1, 1, 0])
     } finally {
       await w.close()
     }
   })
 
   it('probes one directory on a truncated repository', async () => {
-    gh.files.clear()
-    gh.set('top.txt', 't')
-    gh.set('docs/a.txt', OLD)
-    gh.truncatedRecursive = true
+    await repo.replace({ 'top.txt': 't', 'docs/a.txt': OLD })
+    await repo.truncate()
     const vfs = await vfsOf()
     expect(vfs.accessor.treeLoaded).toBe(false)
     const w = ws(vfs)
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       expect(vfs.accessor.truncated).toBe(true)
-      gh.log.length = 0
+      await repo.run.recordRequests()
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       // One listing of docs/, by the operand probe; cat's own stat and the
       // cache stage reuse its answer, so the truncated tree is never walked
       // folder by folder, which would reach docs/ by its sha.
-      expect(gh.counts()).toEqual([1, 0, 0])
-      expect(gh.count('sha_dir')).toBe(0)
+      expect(await repo.counts()).toEqual([1, 0, 0])
+      expect(await repo.count('sha_dir')).toBe(0)
     } finally {
       await w.close()
     }
@@ -458,14 +463,14 @@ describe('github directories cut short', () => {
     // A truncated repository whose docs/ listing GitHub also cuts short: the
     // walk refuses the cut listing rather than caching it whole, so a probe
     // cannot read the file as gone, and the overlay stays.
-    gh.truncatedRecursive = true
+    await repo.truncate()
     const w = ws(await vfsOf())
     try {
       expect(await out(w, `cat ${PATH}`)).toBe(OLD)
       await w.namespace.setAttrs(PATH, { mode: 0o600 })
-      gh.truncatedDirs.set('docs', 0)
+      await repo.cutShort('docs', 0)
       expect(await fails(w, `cat ${PATH}`)).toMatch(
-        /^cat: GitHub truncated the tree listing of o\/r /,
+        /^cat: GitHub truncated the tree listing of integ-user\/repo /,
       )
       expect(w.namespace.metaFor(PATH)?.mode).toBe(0o600)
     } finally {
@@ -506,16 +511,16 @@ describe('github snapshot pins', () => {
   it('pins the sha and a changed file drifts', async () => {
     const state = await pinnedState()
     const pins = (state.fingerprints ?? []).filter((f) => f.path === PATH)
-    expect(pins.map((p) => p.fingerprint)).toEqual([await blobSha(OLD)])
+    expect(pins.map((p) => p.fingerprint)).toEqual([blobSha(OLD)])
     expect(state.live_only_mounts ?? []).not.toContain('/gh/')
     await load(state, await vfsOf())
-    gh.set('docs/a.txt', NEW)
+    await repo.commit({ 'docs/a.txt': NEW })
     const err = await load(state, await vfsOf()).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ContentDriftError)
     expect([
       (err as ContentDriftError).snapshotFingerprint,
       (err as ContentDriftError).liveFingerprint,
-    ]).toEqual([await blobSha(OLD), await blobSha(NEW)])
+    ]).toEqual([blobSha(OLD), blobSha(NEW)])
   })
 
   it('asks one directory when the drift check runs on a live mount', async () => {
@@ -524,10 +529,10 @@ describe('github snapshot pins', () => {
     try {
       await out(w, `cat ${PATH}`)
       const state = await toStateDict(w)
-      gh.set('docs/a.txt', NEW)
-      gh.log.length = 0
+      await repo.commit({ 'docs/a.txt': NEW })
+      await repo.run.recordRequests()
       await expect(load(state, vfs)).rejects.toBeInstanceOf(ContentDriftError)
-      expect([gh.count('dir'), gh.count('recursive')]).toEqual([1, 0])
+      expect([await repo.count('dir'), await repo.count('recursive')]).toEqual([1, 0])
     } finally {
       await w.close()
     }
@@ -541,7 +546,7 @@ describe('github snapshot pins', () => {
       const state = await toStateDict(w)
       // The one-directory route is refused while the whole tree would answer:
       // deferring on 401 would pass the check silently.
-      gh.fail.set('dir', [401, 'Bad credentials'])
+      await repo.refuse('dir', 401, 'Bad credentials')
       const err = await load(state, vfs).catch((e: unknown) => e)
       expect(err).not.toBeInstanceOf(ContentDriftError)
       expect((err as { status?: number }).status).toBe(401)
@@ -563,16 +568,28 @@ describe('github snapshot pins', () => {
 it.each(['find /gh', 'du -a /gh', 'ls -R /gh'])(
   'truncated walk lists each directory once: %s',
   async (line) => {
-    gh.files.clear()
-    gh.files.set('a/b/c/d/e.txt', new TextEncoder().encode('x'))
-    gh.truncatedRecursive = true
+    const folders = ['', 'a', 'a/b', 'a/b/c', 'a/b/c/d']
+    // Each folder's tree sha, so a listing asked by sha names its folder.
+    const named = new Map<string, string>()
+    const nameFolders = async (): Promise<void> => {
+      for (const folder of folders) named.set((await repo.tree(`main:${folder}`)).sha, folder)
+    }
+    await repo.replace({ 'a/b/c/d/e.txt': 'x' })
+    await repo.truncate()
     const workspace = ws(await vfsOf())
     try {
       await out(workspace, line)
-      gh.files.set('a/b/c/d/new.txt', new TextEncoder().encode('new'))
-      gh.log.length = 0
+      await nameFolders()
+      await repo.commit({ 'a/b/c/d/new.txt': 'new' })
+      await nameFolders()
+      await repo.run.recordRequests()
       expect(await out(workspace, line)).toContain('new.txt')
-      expect(gh.log.filter(([kind]) => kind === 'dir' || kind === 'sha_dir')).toHaveLength(5)
+      const listed = (await repo.log()).flatMap(([kind, segment]) => {
+        if (kind === 'sha_dir') return [named.get(segment) ?? segment]
+        if (kind === 'dir') return [decodeURIComponent(segment).split(':').slice(1).join(':')]
+        return []
+      })
+      expect(listed.sort()).toEqual(folders)
     } finally {
       await workspace.close()
     }
@@ -589,14 +606,17 @@ describe('github dispatcher under read: fresh', () => {
   })
 
   it('fetches the tree once for a burst', async () => {
-    gh.files.clear()
-    for (let n = 0; n < 20; n++) gh.set(`docs/f${String(n).padStart(2, '0')}.txt`, 'x')
+    await repo.replace(
+      Object.fromEntries(
+        Array.from({ length: 20 }, (_, n) => [`docs/f${String(n).padStart(2, '0')}.txt`, 'x']),
+      ),
+    )
     const w = ws(await vfsOf())
     try {
       const names = await w.readdir('/gh/docs')
       expect(names).toHaveLength(20)
       for (const name of names) await w.stat(name)
-      expect(gh.count('recursive')).toBe(1)
+      expect(await repo.count('recursive')).toBe(1)
     } finally {
       await w.close()
     }
@@ -607,7 +627,7 @@ describe('github dispatcher under read: fresh', () => {
     const w = ws(await vfsOf(), ReadPolicy.FRESH, '/gh', clock)
     try {
       expect(await w.readdir('/gh/docs')).not.toContain('/gh/docs/c.txt')
-      gh.set('docs/c.txt', 'new')
+      await repo.commit({ 'docs/c.txt': 'new' })
       clock.advance(LISTING_TRUST_WINDOW)
       expect(await w.readdir('/gh/docs')).toContain('/gh/docs/c.txt')
     } finally {

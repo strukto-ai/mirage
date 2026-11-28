@@ -21,7 +21,7 @@ from mirage.types import MountMode, ReadSpec
 from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.fixtures.github_api import expired_on_arrival
+from tests.fixtures.expired_index import expired_on_arrival
 from tests.fixtures.hf_hub_api import FakeHub, serve
 
 REPO = ("models", "acme/widget")

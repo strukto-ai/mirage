@@ -13,15 +13,26 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { open } from 'node:fs/promises'
-import { record, startOp } from '@struktoai/mirage-core/observe/context'
+import { constants, lstat, open, stat } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
+import type { BigIntStats } from 'node:fs'
+import { join } from 'node:path'
+import { record, recordStream, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { norm } from '@struktoai/mirage-core/utils/path'
 import { diskError } from './errors.ts'
-import { resolveInside } from './utils.ts'
+import { exactName, insidePath, probeName, resolveInside } from './utils.ts'
 
 const CHUNK = 1 << 20
+
+// How a batch opens a file it checks: never through a link, and never waiting
+// on a FIFO that replaced it since. Where the open cannot refuse a link (no
+// `O_NOFOLLOW`, as on Windows), the batch looks at the name first and proves
+// the open reached the very file it saw.
+const OPEN_REFUSES_LINK = 'O_NOFOLLOW' in constants
+const OPEN_CHECKED = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 
 /**
  * Read a file, or a byte range of it, seeking rather than reading the whole
@@ -78,4 +89,157 @@ export async function read(
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * Several whole files by virtual path, each checked as its own read checks it
+ * (`resolveInside`): no link on the way and every name spelled as its entry
+ * is, each folder above the files proved once for the batch and each parent
+ * opened once. A file is read only while it is the regular file its check
+ * saw; one longer than `limit`, one that does not fit in `room` beside the
+ * files read before it, and one whose check or read fails is left out for its
+ * own read to meet. A path named twice is read once. Each file read is
+ * recorded as a whole streamed read records it. Mirrors Python's `read_many`.
+ *
+ * @param accessor the mount's disk handle
+ * @param paths the files, all on this mount
+ * @param limit the most bytes worth reading for one file
+ * @param room the most bytes the files read may come to together, null for
+ *   no bound
+ */
+export async function readMany(
+  accessor: DiskAccessor,
+  paths: readonly PathSpec[],
+  limit: number,
+  room: number | null = null,
+): Promise<Map<string, Uint8Array>> {
+  const opened = new Map<string, Promise<void>>()
+  const folders = new Map<string, [string, BigIntStats] | null>()
+  const read = new Map<string, Uint8Array>()
+  let total = 0
+  for (const spec of new Map(paths.map((p) => [p.virtual, p])).values()) {
+    const key = norm(spec.mountPath)
+    const cut = key.lastIndexOf('/')
+    const folder = key.slice(0, cut) || '/'
+    const name = key.slice(cut + 1)
+    let proven = folders.get(folder)
+    if (proven === undefined) {
+      proven = await folderInside(accessor.root, spec, folder, opened)
+      folders.set(folder, proven)
+    }
+    const most = room === null ? limit : Math.min(limit, room - total)
+    if (proven === null || name === '' || most < 0) continue
+    let data: Uint8Array | null
+    try {
+      data = await readChecked(...proven, name, most, opened)
+    } catch (err) {
+      console.debug(`batch read leaves ${spec.virtual} to its own read: ${String(err)}`)
+      continue
+    }
+    if (data === null) continue
+    total += data.byteLength
+    const rec = recordStream('read', spec.virtual, VFSName.DISK)
+    if (rec !== null) {
+      rec.bytes = data.byteLength
+      rec.complete = true
+    }
+    read.set(spec.virtual, data)
+  }
+  return read
+}
+
+/**
+ * The host directory a batch's `folder` names, checked as a read of a file in
+ * it checks it, with the stat it was proven as, or null when it is no
+ * directory there. The stat follows a link, as the mount root itself may be
+ * one, and keeps its ids as bigints: a number loses the low bits of an id
+ * past 2^53 (NTFS file ids), so two folders could compare equal. It is taken
+ * before the folder is proven, never after: a stat taken after the proof could
+ * land on a folder swapped for a link to a directory outside the mount since,
+ * and the batch would keep that directory's identity; one taken before is of
+ * what the proof then finds no link on the way to. Mirrors Python's
+ * `_folder_inside`.
+ */
+async function folderInside(
+  root: string,
+  spec: PathSpec,
+  folder: string,
+  opened: Map<string, Promise<void>>,
+): Promise<[string, BigIntStats] | null> {
+  try {
+    const host = insidePath(root, folder)
+    const info = await stat(host, { bigint: true })
+    if (!info.isDirectory()) return null
+    await resolveInside(root, spec, folder, opened)
+    return [host, info]
+  } catch (err) {
+    console.debug(`batch read leaves ${folder} to its own read: ${String(err)}`)
+    return null
+  }
+}
+
+/**
+ * The bytes of the regular file `name` in the checked host folder `parent`,
+ * or null when it is no regular file spelled so, is longer than `most` bytes,
+ * or grew past its stat while it was read. The file is opened before its name
+ * is proved, so the proof is of the file that is read; a link refuses the
+ * open, or where it cannot, the name's own lstat must show a regular file and
+ * the open reach that very file. The folder was proven once for the batch, so
+ * once the file is open the folder's path must still name the directory
+ * proven: an ancestor swapped for a link since then leads elsewhere and is
+ * refused, which keeps the batch's window to a single read's. It reads up to
+ * the size its stat gives and one byte more (`readUpto`), never `most`, so no
+ * buffer outgrows the file, and that one byte more tells a file that grew.
+ * Mirrors Python's `_read_checked`.
+ */
+async function readChecked(
+  parent: string,
+  proven: BigIntStats,
+  name: string,
+  most: number,
+  opened: Map<string, Promise<void>>,
+): Promise<Uint8Array | null> {
+  const host = join(parent, name)
+  const seen = OPEN_REFUSES_LINK ? null : await lstat(host, { bigint: true })
+  if (seen !== null && !seen.isFile()) return null
+  const handle = await open(host, OPEN_CHECKED)
+  try {
+    const info = await handle.stat()
+    if (!info.isFile() || info.size > most) return null
+    if (seen !== null) {
+      const reached = await handle.stat({ bigint: true })
+      if (seen.dev !== reached.dev || seen.ino !== reached.ino) return null
+    }
+    const buf = Buffer.allocUnsafe(info.size + 1)
+    const [exact, filled, folder] = await Promise.allSettled([
+      exactName(probeName(parent, name, opened, info), info),
+      readUpto(handle, buf),
+      stat(parent, { bigint: true }),
+    ])
+    if (exact.status === 'rejected') throw exact.reason
+    if (filled.status === 'rejected') throw filled.reason
+    if (folder.status === 'rejected') throw folder.reason
+    const elsewhere = folder.value.dev !== proven.dev || folder.value.ino !== proven.ino
+    if (elsewhere || !exact.value || filled.value > info.size) return null
+    return new Uint8Array(buf.buffer, buf.byteOffset, filled.value)
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
+ * How many bytes of `handle` from its start fill `buf`: all of them up to its
+ * end, or as many as `buf` holds when it holds more. A read may answer fewer
+ * bytes than it was asked for before the end, so it reads again from where the
+ * last one stopped until one answers none or `buf` is full. Mirrors Python's
+ * `_read_upto`.
+ */
+async function readUpto(handle: FileHandle, buf: Buffer): Promise<number> {
+  let got = 0
+  while (got < buf.byteLength) {
+    const { bytesRead } = await handle.read(buf, got, buf.byteLength - got, got)
+    if (bytesRead === 0) break
+    got += bytesRead
+  }
+  return got
 }

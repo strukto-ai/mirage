@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { PathSpec, type Delta } from '../../types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { FOLDER_MIME, type DriveChange, type DriveFile } from '../google/drive.ts'
-import { makeGDriveAccessor, stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
+import { serve, type JsonValue } from '../../../tests/fixtures/kit_fake.ts'
+import { FILE, FILES, GoogleAccount } from '../../../tests/core/google/account.ts'
 import { buildDeltaHook } from './events.ts'
 
 const ROOT = new PathSpec({
@@ -24,112 +24,84 @@ const ROOT = new PathSpec({
   directory: '/drive',
   vfsPath: mountKey('/drive', '/drive'),
 })
+const CHANGES = '/drive/v3/changes'
+const DOC_MIME = 'application/vnd.google-apps.document'
+// Stamped on an item to change it: an item whose modified time is no longer
+// its creation time is an update, never a create.
+const EDITED = '2030-01-01T00:00:00.000Z'
+const EDITED_AGAIN = '2030-01-02T00:00:00.000Z'
 
-const FOLDERS: Record<string, DriveFile> = {
-  root: { id: 'R', name: 'My Drive' },
-  G: { id: 'G', name: 'Sub', parents: ['F'] },
-  X: { id: 'X', name: 'Elsewhere' },
-  D: { id: 'D', name: 'Drive', driveId: 'D' },
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
+
+function kinds(delta: Delta): string[][] {
+  return delta.changes.map((c) => [c.kind, c.path.virtual])
 }
 
-function item(
-  fileId: string,
-  name: string,
-  parent: string,
-  opts: { mime?: string; created?: string; modified?: string; trashed?: boolean } = {},
-): DriveChange {
-  return {
-    fileId,
-    file: {
-      id: fileId,
-      name,
-      mimeType: opts.mime ?? 'text/plain',
-      parents: [parent],
-      createdTime: opts.created ?? '2020-01-01T00:00:00.000Z',
-      modifiedTime: opts.modified ?? '2026-10-01T00:00:00.000Z',
-      trashed: opts.trashed ?? false,
-    },
-  }
-}
-
-/**
- * Pull a baseline and then one read per page of `feed`, the root listing naming
- * `rootNames[n]` on read `n`. Mirrors Python's `_pulls`.
- */
-async function pulls(
-  feed: [DriveChange[], string][],
-  rootNames: string[][],
-): Promise<string[][][]> {
-  const drive = stubDrive()
-  const hook = buildDeltaHook(makeGDriveAccessor(drive))
-  drive.startPageToken.mockResolvedValue('1')
-  drive.getFile.mockImplementation((id) => {
-    const found = FOLDERS[id]
-    if (found === undefined) throw new Error(`no folder ${id}`)
-    return Promise.resolve(found)
-  })
-  const listings = [...rootNames]
-  drive.listFiles.mockImplementation(() =>
-    Promise.resolve(
-      (listings.shift() ?? []).map((name) => ({ id: name, name, mimeType: FOLDER_MIME })),
-    ),
-  )
-  drive.listSharedDrives.mockResolvedValue([{ id: 'D', name: 'Team' }])
-  const changes = drive.listChanges
-  for (const page of feed) changes.mockResolvedValueOnce(page)
-  let delta = await hook.pull(ROOT, null)
-  const out: string[][][] = []
-  while (out.length < feed.length) {
-    delta = await hook.pull(ROOT, delta.checkpoint)
-    out.push(delta.changes.map((c) => [c.kind, c.path.virtual]))
-  }
-  return out
+async function pageToken(): Promise<string> {
+  return (await account.run.call<{ startPageToken: string }>('GET', `${CHANGES}/startPageToken`))
+    .startPageToken
 }
 
 // Twin of test_changes_are_placed_by_their_parents.
 describe('GDriveDeltaHook', () => {
   it('places changes by their parents', async () => {
-    const drive = stubDrive()
-    const hook = buildDeltaHook(makeGDriveAccessor(drive))
-    drive.startPageToken.mockResolvedValue('1')
-    drive.getFile.mockImplementation((id) => {
-      const found = FOLDERS[id]
-      if (found === undefined) throw new Error(`no folder ${id}`)
-      return Promise.resolve(found)
-    })
-    drive.listFiles.mockResolvedValue([{ id: 'T', name: 'Team', mimeType: FOLDER_MIME }])
-    drive.listSharedDrives.mockResolvedValue([{ id: 'D', name: 'Team' }])
-    drive.listChanges
-      .mockResolvedValueOnce([
-        [
-          item('F', 'Docs', 'R', { mime: FOLDER_MIME }),
-          item('a', 'a.txt', 'F', { created: '2026-10-01T00:00:00.000Z' }),
-          item('b', 'b', 'G', { mime: 'application/vnd.google-apps.document' }),
-          item('c', 'c.txt', 'X'),
-          item('d', 'd.txt', 'D'),
-        ],
-        '2',
-      ])
-      .mockResolvedValueOnce([
-        [
-          item('F', 'Papers', 'R', { mime: FOLDER_MIME }),
-          item('a', 'a.txt', 'F', { trashed: true }),
-          { changeType: 'drive' },
-          { fileId: 'unseen', removed: true },
-        ],
-        '3',
-      ])
+    const docs = await account.folder('Docs')
+    const sub = await account.folder('Sub', docs)
+    const doc = await account.create('b', DOC_MIME, sub)
+    const elsewhere = await account.folder('Elsewhere')
+    const stray = await account.upload('c.txt', 'c', elsewhere)
+    // A My Drive folder takes the shared drive's name in the root listing.
+    await account.folder('Team')
+    const drive = await account.sharedDrive('Team')
+    const inDrive = await account.upload('d.txt', 'd', drive)
+    const hook = buildDeltaHook(account.driveAccessor())
     const baseline = await hook.pull(ROOT, null)
+
+    await account.patch(docs, { modifiedTime: EDITED })
+    const made = await account.upload('a.txt', 'a', docs)
+    for (const id of [doc, stray, inDrive]) await account.patch(id, { modifiedTime: EDITED })
+    // A folder shared with the account rather than kept in its Drive: Drive
+    // names no parent for it, so nothing in it is on the mount.
+    const shared: Record<string, JsonValue> = { ...(await account.item(elsewhere)) }
+    delete shared.parents
+    await account.run.answerNext('GET', FILE, 200, shared, 1, `${FILES}/${elsewhere}`)
     const first = await hook.pull(ROOT, baseline.checkpoint)
+
+    const afterFirst = await pageToken()
+    await account.patch(docs, { name: 'Papers', modifiedTime: EDITED_AGAIN })
+    await account.patch(made, { trashed: true })
+    await account.delete(await account.upload('unseen.txt', 'u'))
+    // The shared drive itself changed: the fake's feed names files only, so
+    // its own page is answered with Drive's drive change added.
+    const page = await account.run.call<{ [key: string]: JsonValue; changes: JsonValue[] }>(
+      'GET',
+      `${CHANGES}?pageToken=${afterFirst}`,
+    )
+    page.changes.push({ kind: 'drive#change', changeType: 'drive', driveId: drive })
+    await account.run.answerNext('GET', CHANGES, 200, page)
     const second = await hook.pull(ROOT, first.checkpoint)
+
     expect(baseline.changes).toEqual([])
-    expect(first.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+    expect(kinds(first)).toEqual([
       ['update', '/drive/Docs'],
       ['create', '/drive/Docs/a.txt'],
       ['update', '/drive/Docs/Sub/b.gdoc.json'],
       ['update', '/drive/Team [Shared Drive]/d.txt'],
     ])
-    expect(second.changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+    expect(kinds(second)).toEqual([
       ['delete', '/drive/Docs'],
       ['create', '/drive/Papers'],
       ['delete', '/drive/Docs/a.txt'],
@@ -139,22 +111,17 @@ describe('GDriveDeltaHook', () => {
 
   // Twin of test_a_child_listed_before_its_renamed_folder_lands_in_it.
   it('places a child listed before its renamed folder in that folder', async () => {
-    const edited = '2026-10-01T00:00:00.000Z'
-    const [first, second] = await pulls(
-      [
-        [[item('F', 'Docs', 'R', { mime: FOLDER_MIME })], '2'],
-        [
-          [
-            item('c', 'a.txt', 'F', { created: edited, modified: edited }),
-            item('F', 'Papers', 'R', { mime: FOLDER_MIME }),
-          ],
-          '3',
-        ],
-      ],
-      [],
-    )
-    expect(first).toEqual([['update', '/drive/Docs']])
-    expect(second).toEqual([
+    const docs = await account.folder('Docs')
+    const hook = buildDeltaHook(account.driveAccessor())
+    const baseline = await hook.pull(ROOT, null)
+    await account.patch(docs, { modifiedTime: EDITED })
+    const first = await hook.pull(ROOT, baseline.checkpoint)
+    // The new file is listed before the rename of the folder it is in.
+    await account.upload('a.txt', 'a', docs)
+    await account.patch(docs, { name: 'Papers', modifiedTime: EDITED_AGAIN })
+    const second = await hook.pull(ROOT, first.checkpoint)
+    expect(kinds(first)).toEqual([['update', '/drive/Docs']])
+    expect(kinds(second)).toEqual([
       ['create', '/drive/Papers/a.txt'],
       ['delete', '/drive/Docs'],
       ['create', '/drive/Papers'],
@@ -165,15 +132,18 @@ describe('GDriveDeltaHook', () => {
   // Drive folder named like the drive arrives between two reads, and the root
   // listing renames the drive "Team [Shared Drive]".
   it('names a shared drive as the root listing names it now', async () => {
-    const [first, second] = await pulls(
-      [
-        [[item('d', 'd.txt', 'D')], '2'],
-        [[item('d', 'd.txt', 'D')], '3'],
-      ],
-      [[], ['Team']],
-    )
-    expect(first).toEqual([['update', '/drive/Team/d.txt']])
-    expect(second).toEqual([
+    const drive = await account.sharedDrive('Team')
+    const inDrive = await account.upload('d.txt', 'd', drive)
+    const hook = buildDeltaHook(account.driveAccessor())
+    const baseline = await hook.pull(ROOT, null)
+    await account.patch(inDrive, { modifiedTime: EDITED })
+    const first = await hook.pull(ROOT, baseline.checkpoint)
+    await account.folder('Team')
+    await account.patch(inDrive, { modifiedTime: EDITED_AGAIN })
+    const second = await hook.pull(ROOT, first.checkpoint)
+    expect(kinds(first)).toEqual([['update', '/drive/Team/d.txt']])
+    expect(kinds(second)).toEqual([
+      ['create', '/drive/Team'],
       ['delete', '/drive/Team/d.txt'],
       ['create', '/drive/Team [Shared Drive]/d.txt'],
     ])
@@ -183,30 +153,22 @@ describe('GDriveDeltaHook', () => {
   // renamed to Z and B renamed to A in one read, B's child listed first: the
   // child is in the new A, and stays there for the next read.
   it("keeps a child in the folder that took another folder's name", async () => {
-    const edited = '2026-10-01T00:00:00.000Z'
-    const [, second, third] = await pulls(
-      [
-        [
-          [
-            item('A', 'A', 'R', { mime: FOLDER_MIME }),
-            item('B', 'B', 'R', { mime: FOLDER_MIME }),
-            item('c', 'c.txt', 'B'),
-          ],
-          '2',
-        ],
-        [
-          [
-            item('c', 'c.txt', 'B', { modified: edited }),
-            item('A', 'Z', 'R', { mime: FOLDER_MIME }),
-            item('B', 'A', 'R', { mime: FOLDER_MIME }),
-          ],
-          '3',
-        ],
-        [[item('c', 'c.txt', 'B', { trashed: true })], '4'],
-      ],
-      [],
-    )
-    expect(second).toEqual([
+    const firstFolder = await account.folder('A')
+    const secondFolder = await account.folder('B')
+    const child = await account.upload('c.txt', 'c', secondFolder)
+    const hook = buildDeltaHook(account.driveAccessor())
+    const baseline = await hook.pull(ROOT, null)
+    for (const id of [firstFolder, secondFolder, child]) {
+      await account.patch(id, { modifiedTime: EDITED })
+    }
+    const first = await hook.pull(ROOT, baseline.checkpoint)
+    await account.patch(child, { modifiedTime: EDITED_AGAIN })
+    await account.patch(firstFolder, { name: 'Z', modifiedTime: EDITED_AGAIN })
+    await account.patch(secondFolder, { name: 'A', modifiedTime: EDITED_AGAIN })
+    const second = await hook.pull(ROOT, first.checkpoint)
+    await account.patch(child, { trashed: true })
+    const third = await hook.pull(ROOT, second.checkpoint)
+    expect(kinds(second)).toEqual([
       ['delete', '/drive/B/c.txt'],
       ['create', '/drive/A/c.txt'],
       ['delete', '/drive/A'],
@@ -214,6 +176,6 @@ describe('GDriveDeltaHook', () => {
       ['delete', '/drive/B'],
       ['create', '/drive/A'],
     ])
-    expect(third).toEqual([['delete', '/drive/A/c.txt']])
+    expect(kinds(third)).toEqual([['delete', '/drive/A/c.txt']])
   })
 })

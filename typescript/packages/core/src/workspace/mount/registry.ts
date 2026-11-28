@@ -51,6 +51,7 @@ import {
   Limit,
   MountMode,
   PathSpec,
+  ReadPolicy,
   type ReadSpec,
   VFSName,
   WritePolicy,
@@ -809,6 +810,9 @@ export class MountRegistry {
         soleWriter: vfs.soleWriter,
         commandLimits: mount.commandLimits,
         workspaceLimits: this.commandLimits,
+        keepsListings: mount.indexStore.ttl > 0,
+        keepsBodies:
+          this.cacheStore !== null && vfs.cachesReads && mount.read.policy === ReadPolicy.BOUNDED,
       }
     })
     return [...this.rowCache]

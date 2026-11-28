@@ -19,7 +19,7 @@ import { create as sqlCreate } from '../../core/sql/create.ts'
 import { exists as sqlExists } from '../../core/sql/exists.ts'
 import { mkdir as sqlMkdir } from '../../core/sql/mkdir.ts'
 import { walk, type Walk } from '../../core/sql/path.ts'
-import { read as sqlRead } from '../../core/sql/read.ts'
+import { read as sqlRead, readMany as sqlReadMany } from '../../core/sql/read.ts'
 import { readdir as sqlReaddir, tree as sqlTree } from '../../core/sql/readdir.ts'
 import { rename as sqlRename } from '../../core/sql/rename.ts'
 import { rmR as sqlRmR } from '../../core/sql/rm.ts'
@@ -179,6 +179,15 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return sqlStream(this.accessor, path)
     return sqlRead(this.accessor, path, size === null ? { offset } : { offset, size })
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    _handed?: readonly Handed[],
+    room: number | null = null,
+  ): Promise<Map<string, Uint8Array>> {
+    return sqlReadMany(this.accessor, paths, limit, room)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

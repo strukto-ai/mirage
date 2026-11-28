@@ -31,6 +31,7 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
 import { Limit, MountMode, PathSpec } from '../../../../types.ts'
 import type { SessionProfile } from '../../../../policy/profile.ts'
+import { ManualClock, runWithSystemClock } from '../../../../utils/clock.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 import { ensureDir } from './io.ts'
@@ -390,4 +391,197 @@ describe('a narrow path', () => {
       }
     },
   )
+})
+
+/** Keeps listings past the command, as a disk or bucket mount does. */
+class KeptRAM extends RAMVFS {
+  override readonly indexTtl: number = 600
+}
+
+/** Serves reads from the workspace's file cache, as a bucket mount does under
+ * `read: bounded`. */
+class CachedRAM extends RAMVFS {
+  override readonly cachesReads: boolean = true
+}
+
+/** A one-commit repository mirrored into RAM at `/w/work`, git installed. */
+async function source(vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
+  const repo = mkdtempSync(join(tmp, 'src-'))
+  roots.push(repo)
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'A',
+    GIT_AUTHOR_EMAIL: 'a@example.com',
+    GIT_COMMITTER_NAME: 'A',
+    GIT_COMMITTER_EMAIL: 'a@example.com',
+  }
+  execFileSync('git', ['init', '-q', '-b', 'main', repo], { env })
+  put(repo, 'a.txt', 'one\n')
+  put(repo, 'sub/b.txt', 'two\n')
+  execFileSync('git', ['-C', repo, 'add', '-A'], { env })
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'first'], { env })
+  const ws = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+  for (const rel of walk(repo)) {
+    const target = `/w/work/${rel}`
+    await ensureDir(ws.vfs, PathSpec.fromStrPath(target).parent)
+    await ws.dispatch('write', target, [new Uint8Array(readFileSync(join(repo, rel)))])
+  }
+  ws.registerCli('git', GIT)
+  return ws
+}
+
+/** The clone's own files a run of the op log read since `start`. */
+function worktreeReads(ws: Workspace, start: number): string[] {
+  return ws.records
+    .slice(start)
+    .filter((r) => r.op === 'read' && r.path.startsWith('/w/dst/'))
+    .filter((r) => !r.path.startsWith('/w/dst/.git/'))
+    .map((r) => r.path)
+}
+
+describe('fingerprints the index keeps', () => {
+  it("spare a clone's status every read and still show an edit", async () => {
+    // A RAM mount stamps every write past the one before, so the clock standing
+    // still (as a Durable Object's does for a whole request) still moves the
+    // fingerprint of a same-size edit made after the clone. Mirrors Python's
+    // test_a_clone_s_status_reads_none_of_its_files_yet_sees_an_edit.
+    const ws = await source()
+    try {
+      const [reads, changed] = await runWithSystemClock(
+        new ManualClock(1_800_000_000),
+        async () => {
+          const cloned = await ws.shell('git clone -q /w/work /w/dst')
+          expect([cloned.exitCode, DEC.decode(cloned.stderr)]).toEqual([0, ''])
+          const start = ws.records.length
+          const clean = await ws.shell('git -C /w/dst status --porcelain')
+          expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+          const seen = worktreeReads(ws, start)
+          const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+          expect(edited.exitCode).toBe(0)
+          const after = await ws.shell('git -C /w/dst status --porcelain')
+          return [seen, DEC.decode(after.stdout)] as const
+        },
+      )
+      expect(reads).toEqual([])
+      expect(changed).toBe(' M a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('still show an edit under a time set back by hand', async () => {
+    // touch -r after a same-size edit puts back the time the clone gave the
+    // file; the RAM fingerprint carries the stamp of that set, so it is not the
+    // one the index kept. Mirrors Python's
+    // test_a_time_set_back_by_hand_still_shows_the_edit_under_it.
+    const ws = await source()
+    try {
+      const changed = await runWithSystemClock(new ManualClock(1_800_000_000), async () => {
+        const cloned = await ws.shell('git clone -q /w/work /w/dst')
+        expect(cloned.exitCode).toBe(0)
+        const before = await ws.vfs.stat('/w/dst/a.txt')
+        const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+        expect(edited.exitCode).toBe(0)
+        await ws.vfs.setattr('/w/dst/a.txt', { mtime: before.modified ?? '' })
+        return DEC.decode((await ws.shell('git -C /w/dst status --porcelain')).stdout)
+      })
+      expect(changed).toBe(' M a.txt\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['RAM', () => new RAMVFS(), true],
+    ['a cache-served mount', () => new CachedRAM(), false],
+  ] as const)('are kept by add on %s only where reads ask the backend', async (_, make, kept) => {
+    // A body the cache serves unasked may be older than the fingerprint a stat
+    // gives beside the read, so add keeps none there: kept beside the old
+    // bytes' blob, it would let a status trust an edit away once the cache let
+    // the old bytes go. The index's first entry is a.txt; its dev and ino sit
+    // at bytes 28 and 32. Mirrors Python's
+    // test_an_add_keeps_a_fingerprint_only_where_reads_ask_the_backend.
+    const ws = await source(make())
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const edited = await ws.shell('sed -i s/one/ONE/ /w/dst/a.txt')
+      expect(edited.exitCode).toBe(0)
+      const added = await ws.shell('git -C /w/dst add a.txt')
+      expect(added.exitCode).toBe(0)
+      const index = await ws.vfs.read('/w/dst/.git/index')
+      const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
+      expect(view.getUint32(28) !== 0 || view.getUint32(32) !== 0).toBe(kept)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('are asked past the listings a mount keeps', async () => {
+    // The second workspace's write never reaches the first one's kept listing,
+    // so the walk there still answers the file's old fingerprint; status has to
+    // ask the backend before it trusts it. Mirrors Python's
+    // test_a_status_asks_past_the_listings_a_mount_keeps.
+    const vfs = new KeptRAM()
+    const ws = await source(vfs)
+    const other = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const clean = await ws.shell('git -C /w/dst status --porcelain')
+      expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+      await other.vfs.write('/w/dst/a.txt', 'ONE\n')
+      const changed = await ws.shell('git -C /w/dst status --porcelain')
+      expect(DEC.decode(changed.stdout)).toBe(' M a.txt\n')
+    } finally {
+      await other.close()
+      await ws.close()
+    }
+  })
+
+  it('see a mode change their kept listing missed', async () => {
+    // chmod moves a mode, not the bytes or their fingerprint, so the fresh stat
+    // status takes past the kept listing is what carries it. Mirrors Python's
+    // test_a_status_sees_a_mode_change_its_kept_listing_missed.
+    const vfs = new KeptRAM()
+    const ws = await source(vfs)
+    const other = new Workspace({ '/w': vfs }, { mode: MountMode.WRITE })
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      const clean = await ws.shell('git -C /w/dst status --porcelain')
+      expect([clean.exitCode, DEC.decode(clean.stdout)]).toEqual([0, ''])
+      await other.vfs.setattr('/w/dst/a.txt', { mode: 0o755 })
+      const changed = await ws.shell('git -C /w/dst status --porcelain')
+      expect(DEC.decode(changed.stdout)).toBe(' M a.txt\n')
+    } finally {
+      await other.close()
+      await ws.close()
+    }
+  })
+
+  it('are kept by a checkout for a file it had to read', async () => {
+    // touch moves a file's time and so its fingerprint, not its bytes: status
+    // reads it to find it unchanged, and the checkout that reads it too keeps
+    // the new fingerprint in the index it writes. Mirrors Python's
+    // test_a_checkout_keeps_the_fingerprint_of_a_file_it_had_to_read.
+    const ws = await source()
+    try {
+      const cloned = await ws.shell('git clone -q /w/work /w/dst')
+      expect(cloned.exitCode).toBe(0)
+      expect((await ws.shell('touch /w/dst/a.txt')).exitCode).toBe(0)
+      let start = ws.records.length
+      const status = await ws.shell('git -C /w/dst status --porcelain')
+      expect([status.exitCode, DEC.decode(status.stdout)]).toEqual([0, ''])
+      expect(worktreeReads(ws, start)).toEqual(['/w/dst/a.txt'])
+      const moved = await ws.shell('git -C /w/dst checkout -q --detach')
+      expect([moved.exitCode, DEC.decode(moved.stderr)]).toEqual([0, ''])
+      start = ws.records.length
+      const again = await ws.shell('git -C /w/dst status --porcelain')
+      expect([again.exitCode, DEC.decode(again.stdout)]).toEqual([0, ''])
+      expect(worktreeReads(ws, start)).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
 })

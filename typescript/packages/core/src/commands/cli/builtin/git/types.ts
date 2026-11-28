@@ -141,6 +141,9 @@ export interface IndexEntry {
   readonly oid: string
   readonly mode: number
   readonly size: number
+  /** The fingerprint the entry keeps (`withFingerprint`); 0 for none. */
+  readonly dev?: number
+  readonly ino?: number
   /** 1, 2 or 3 for a conflicted entry; 0 for an ordinary one. */
   readonly stage: number
 }

@@ -12,18 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { MountMode, type DirListing, type PathSpec } from '../../types.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { PRIMARY, type GoogleAccount } from '../../../tests/fixtures/google_account.ts'
 import {
-  API,
   HK,
-  installCalendar,
+  calendarAccount,
+  eventListings,
   makeAccessor,
   names,
   spec,
-} from '../../../tests/core/gcal/_test_util.ts'
+} from '../../../tests/fixtures/gcal_seed.ts'
 
 const {
   readdir: gcalReaddir,
@@ -59,14 +61,24 @@ async function readdir(accessor: GCalAccessor, path: PathSpec): Promise<string[]
 
 const WEEK = '/primary/2026-08-10--2026-08-16'
 
-beforeEach(() => {
-  API.reset()
-  installCalendar()
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(async () => {
+  account = await calendarAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 describe('gcal readdir', () => {
   it('lists one directory per calendar at the root', async () => {
-    expect(names(await readdir(makeAccessor(), spec('/')))).toEqual([
+    expect(names(await readdir(makeAccessor(account), spec('/')))).toEqual([
       'Engineering__team@group.calendar.google.com',
       'Exec__busy@group.calendar.google.com',
       'primary',
@@ -74,8 +86,8 @@ describe('gcal readdir', () => {
   })
 
   it('keeps the primary alias and carries the id on the others', async () => {
-    const calendars = await calendarIndex(makeAccessor())
-    expect(calendars.get('primary')?.id).toBe('integ@example.com')
+    const calendars = await calendarIndex(makeAccessor(account))
+    expect(calendars.get('primary')?.id).toBe(PRIMARY)
     expect(calendars.get('Engineering__team@group.calendar.google.com')?.id).toBe(
       'team@group.calendar.google.com',
     )
@@ -86,7 +98,7 @@ describe('gcal readdir', () => {
     [{}, HK],
     [{ time_zone: 'Europe/Berlin' }, 'Europe/Berlin'],
   ])('buckets %j in %s', async (overrides, tz) => {
-    const accessor = makeAccessor(overrides)
+    const accessor = makeAccessor(account, overrides)
     expect(bucketZone(accessor, await calendarIndex(accessor))).toBe(tz)
   })
 
@@ -96,13 +108,14 @@ describe('gcal readdir', () => {
     [7, ['2024-12-30--2025-01-05', '2026-08-10--2026-08-16']],
     [30, ['2024-12-17--2025-01-15', '2026-08-09--2026-09-07']],
   ])('lists every %i-day bucket holding events', async (size, buckets) => {
-    const out = await readdir(makeAccessor({ bucket_days: size }), spec('/primary'))
+    const out = await readdir(makeAccessor(account, { bucket_days: size }), spec('/primary'))
     expect(names(out)).toEqual(['calendar.json', ...buckets])
   })
 
   it('centres the window in the bucket zone', async () => {
-    await readdir(makeAccessor(), spec('/primary'))
-    expect(API.listed.at(-1)?.slice(1)).toEqual([null, '2026-11-09T16:00:00.000Z'])
+    await readdir(makeAccessor(account), spec('/primary'))
+    const listed = await eventListings(account)
+    expect(listed.at(-1)?.slice(1)).toEqual([null, '2026-11-09T16:00:00.000Z'])
   })
 
   it.each([
@@ -121,21 +134,22 @@ describe('gcal readdir', () => {
       ['2024-12-29T16:00:00.000Z', '2025-01-05T16:00:00.000Z'],
     ],
   ])('moves a %i-day window to the glob %s', async (size, glob, bucket, window) => {
-    const accessor = makeAccessor({ bucket_days: size })
+    const accessor = makeAccessor(account, { bucket_days: size })
     // The backend's own listing for the glob word: the span it asks for,
     // before a shell matches names against it.
     const out = (await gcalReaddir(accessor, spec(`/primary/${glob}`, glob))) as DirListing
     expect(out.partial).toBe(true)
     expect(out.entries.map((row) => row.name)).toContain(bucket)
-    expect(API.listed.at(-1)?.slice(1)).toEqual(window)
+    expect((await eventListings(account)).at(-1)?.slice(1)).toEqual(window)
   })
 
   it('lists one file per overlapping event in a day', async () => {
-    expect(names(await readdir(makeAccessor(), spec('/primary/2026-08-11')))).toEqual([
-      'aaaa1__0900-1030_PhD_Defense.gcal.json',
-      'bbbb2__1500-1600_Committee_Meeting.gcal.json',
+    // In the order Calendar lists them, by start.
+    expect(names(await readdir(makeAccessor(account), spec('/primary/2026-08-11')))).toEqual([
       'cccc3__0000-2400_Conference.gcal.json',
       'dddd4__0000-2400_Public_Holiday.gcal.json',
+      'aaaa1__0900-1030_PhD_Defense.gcal.json',
+      'bbbb2__1500-1600_Committee_Meeting.gcal.json',
     ])
   })
 
@@ -145,29 +159,34 @@ describe('gcal readdir', () => {
     ['2026-08-12', '0000-2400'],
     ['2026-08-13', '0000-1700'],
   ])('shows a multi-day event under %s as %s', async (day, hhmm) => {
-    const out = names(await readdir(makeAccessor(), spec(`/primary/${day}`)))
+    const out = names(await readdir(makeAccessor(account), spec(`/primary/${day}`)))
     expect(out).toContain(`cccc3__${hhmm}_Conference.gcal.json`)
     // The all-day holiday's end date is exclusive: it stops at Aug 11.
     expect(out.some((n) => n.includes('Public_Holiday'))).toBe(day === '2026-08-11')
   })
 
   it('lists a week of days in one query', async () => {
-    expect(names(await readdir(makeAccessor({ bucket_days: 7 }), spec(WEEK)))).toEqual([
-      'aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json',
-      'bbbb2__2026-08-11_1500-1600_Committee_Meeting.gcal.json',
+    const week = await readdir(makeAccessor(account, { bucket_days: 7 }), spec(WEEK))
+    expect(names(week)).toEqual([
       'cccc3__2026-08-10_0900-2400_Conference.gcal.json',
       'cccc3__2026-08-11_0000-2400_Conference.gcal.json',
       'cccc3__2026-08-12_0000-2400_Conference.gcal.json',
       'cccc3__2026-08-13_0000-1700_Conference.gcal.json',
       'dddd4__2026-08-11_0000-2400_Public_Holiday.gcal.json',
+      'aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json',
+      'bbbb2__2026-08-11_1500-1600_Committee_Meeting.gcal.json',
     ])
-    expect(API.listed).toEqual([
-      ['integ@example.com', '2026-08-10T00:00:00+08:00', '2026-08-17T00:00:00+08:00'],
+    // The week of 2026-08-10 in Hong Kong, sent in UTC.
+    expect(await eventListings(account)).toEqual([
+      [PRIMARY, '2026-08-09T16:00:00.000Z', '2026-08-16T16:00:00.000Z'],
     ])
   })
 
   it('lists only the days of a scoped week inside the scope', async () => {
-    const scoped = makeAccessor({ bucket_days: 7, start_time: '2026-08-12T00:00:00+08:00' })
+    const scoped = makeAccessor(account, {
+      bucket_days: 7,
+      start_time: '2026-08-12T00:00:00+08:00',
+    })
     expect(names(await readdir(scoped, spec(WEEK)))).toEqual([
       'cccc3__2026-08-12_0000-2400_Conference.gcal.json',
       'cccc3__2026-08-13_0000-1700_Conference.gcal.json',
@@ -178,12 +197,15 @@ describe('gcal readdir', () => {
     [1, '/primary/2027-03-04'],
     [7, '/primary/2027-03-01--2027-03-07'],
   ])('lists a %i-day bucket with no events as empty', async (size, path) => {
-    expect(await readdir(makeAccessor({ bucket_days: size }), spec(path))).toEqual([])
+    expect(await readdir(makeAccessor(account, { bucket_days: size }), spec(path))).toEqual([])
   })
 
   it('renders a free/busy calendar without titles', async () => {
     const out = names(
-      await readdir(makeAccessor(), spec('/Exec__busy@group.calendar.google.com/2026-08-11')),
+      await readdir(
+        makeAccessor(account),
+        spec('/Exec__busy@group.calendar.google.com/2026-08-11'),
+      ),
     )
     expect(out.length).toBeGreaterThan(0)
     expect(out.every((n) => n.endsWith('_busy.gcal.json'))).toBe(true)
@@ -201,11 +223,11 @@ describe('gcal readdir', () => {
     [{ bucket_days: 7 }, '/primary/2026-08-11--2026-08-17'],
     [{ bucket_days: 7, end_time: '2026-08-10T00:00:00+08:00' }, WEEK],
   ])('is ENOENT under %j for %s', async (overrides, path) => {
-    await expect(readdir(makeAccessor(overrides), spec(path))).rejects.toThrow()
+    await expect(readdir(makeAccessor(account, overrides), spec(path))).rejects.toThrow()
   })
 
   it('filters the calendar list by min_access_role', async () => {
-    const owner = makeAccessor({ min_access_role: 'owner' })
+    const owner = makeAccessor(account, { min_access_role: 'owner' })
     expect(names(await readdir(owner, spec('/')))).toEqual(['primary'])
   })
 })

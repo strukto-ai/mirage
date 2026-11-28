@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
+import { READ_FILES_SCRIPT, TRUNCATE_SCRIPT } from '@struktoai/mirage-core/vfs/redis/constants'
 import type { RedisRestore, RedisStoreLike } from '@struktoai/mirage-core/vfs/redis/store'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { decodeBase64 } from '@struktoai/mirage-core/utils/base64'
@@ -338,6 +338,21 @@ export class UpstashRedisStore implements RedisStoreLike {
     const reply = await this.command(['GET', this.fk(path)], true)
     if (reply === null) return null
     return decodeBase64(expectString(reply, 'GET'))
+  }
+
+  async getFiles(
+    paths: readonly string[],
+    limit: number,
+    room: number | null,
+  ): Promise<(Uint8Array | null)[]> {
+    if (paths.length === 0) return []
+    const keys = paths.map((p) => this.fk(p))
+    const reply = await this.command(
+      ['EVAL', READ_FILES_SCRIPT, keys.length, ...keys, limit, room ?? ''],
+      true,
+    )
+    if (!Array.isArray(reply)) throw new Error('upstash: EVAL did not answer an array')
+    return reply.map((item) => (item === null ? null : decodeBase64(expectString(item, 'EVAL'))))
   }
 
   async getFileRange(

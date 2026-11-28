@@ -14,7 +14,13 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import FILE
-from mirage.core.sql.inode import by_ino, make_node, now_stamp, resized
+from mirage.core.sql.inode import (
+    Inode,
+    by_ino,
+    make_node,
+    now_stamp,
+    resized_from,
+)
 from mirage.core.sql.path import (
     check_dest_parents,
     check_write_target,
@@ -23,6 +29,7 @@ from mirage.core.sql.path import (
     target,
     walk,
 )
+from mirage.core.sql.write import land_fresh
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
 from mirage.vfs.sql.types import SqlStatement
@@ -36,17 +43,20 @@ async def create(accessor: SqlAccessor, path: PathSpec) -> None:
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
-    now = now_stamp()
     if node is None:
         await accessor.batch(
-            make_node(accessor, parent_ref(w), leaf(w), FILE, 0, now)
+            make_node(
+                accessor, parent_ref(w), leaf(w), FILE, 0, now_stamp(accessor)
+            )
         )
     else:
-        ino = by_ino(node.ino)
-        await accessor.batch(
-            [
+
+        async def emptied(n: Inode) -> list[SqlStatement]:
+            ino = by_ino(n.ino)
+            return [
                 SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
-                resized(ino, 0, now),
+                resized_from(n, 0, now_stamp(accessor, n)),
             ]
-        )
+
+        await land_fresh(accessor, node, emptied)
     record("create", path.virtual, VFSName.SQL, 0, timer)

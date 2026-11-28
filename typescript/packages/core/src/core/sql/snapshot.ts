@@ -69,7 +69,7 @@ export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
  * the database keeps what it holds.
  */
 export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promise<void> {
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   const root = await accessor.rootIno()
   const statements: SqlStatement[] = [
     { sql: SQL.dropBase },

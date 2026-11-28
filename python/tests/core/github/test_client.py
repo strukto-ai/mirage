@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import base64
 import socket
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -36,6 +34,7 @@ from mirage.core.github.client import (
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import RAW_BASE
 from mirage.vfs.github import GitHubVFS
+from tests.core.github.conftest import blob_sha
 
 
 def test_github_headers_contains_auth():
@@ -52,23 +51,12 @@ def test_github_headers_without_a_token_carry_no_authorization():
 
 
 @pytest.mark.asyncio
-@patch("mirage.core.github.client.github_get", new_callable=AsyncMock)
-async def test_fetch_blob_utf8(mock_get):
-    content = b"hello world"
-    mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    account = GitHubAccount(GhConfig(token="ghp_test"))
-    result = await fetch_blob(account, "acme", "proj", "sha123")
-    assert result == content
-    assert result.decode("utf-8") == "hello world"
-
-
-@pytest.mark.asyncio
-@patch("mirage.core.github.client.github_get", new_callable=AsyncMock)
-async def test_fetch_blob_binary(mock_get):
-    content = bytes(range(256))
-    mock_get.return_value = {"content": base64.b64encode(content).decode()}
-    account = GitHubAccount(GhConfig(token="ghp_test"))
-    result = await fetch_blob(account, "acme", "proj", "sha456")
+@pytest.mark.parametrize("content", [b"hello world", bytes(range(256))])
+async def test_fetch_blob_reads_its_bytes_back(repo, content):
+    await repo.create({"a.bin": content})
+    result = await fetch_blob(
+        repo.accessor().account, repo.owner, repo.name, blob_sha(content)
+    )
     assert result == content
 
 

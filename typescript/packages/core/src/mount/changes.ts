@@ -38,13 +38,17 @@ function overlaps(path: string, prefix: string): boolean {
  * The file changes of the last `window` seconds, each with the machine whose
  * served mount made it, so a machine whose kernel keeps what its mounts
  * answered that long starts a program only once nothing another made there
- * may still be held. Mirrors Python's `RecentChanges`.
+ * may still be held. Each change is numbered as it is noted, so a reader that
+ * took `count` before reading files asks `reachedSince` whether one has
+ * reached them since. Mirrors Python's `RecentChanges`.
  */
 export class RecentChanges {
   // Oldest first; those before `head` are past the window, dropped in one
   // slice once they make up half the list, so a write never shifts the rest.
-  private changes: [number, string | null, string][] = []
+  private changes: [number, string | null, string, number][] = []
   private head = 0
+  private noted = 0
+  private forgotten = 0
   private readonly watchers = new Set<(path: string, by: string | null) => void>()
 
   /**
@@ -55,6 +59,11 @@ export class RecentChanges {
     private readonly clock: Clock,
     private readonly window: number,
   ) {}
+
+  /** How many changes have been noted so far. */
+  get count(): number {
+    return this.noted
+  }
 
   /**
    * Record a change at `path`, made by `SERVED_BY`'s machine. Without task
@@ -67,8 +76,30 @@ export class RecentChanges {
     const now = this.clock.monotonic()
     this.forget(now)
     const by = asyncContextIsolatesTasks ? (SERVED_BY.getStore() ?? null) : null
-    this.changes.push([now, by, path])
+    this.noted += 1
+    this.changes.push([now, by, path, this.noted])
     for (const watcher of this.watchers) watcher(path, by)
+  }
+
+  /**
+   * Whether a change noted after the first `count` reached one of `paths`: it
+   * is the path, a directory above it or a file below it. Also true once such
+   * a change has been forgotten, which leaves nothing to tell that it did not.
+   *
+   * @param count `count` as the reader took it.
+   * @param paths the virtual paths read.
+   */
+  reachedSince(count: number, paths: readonly string[]): boolean {
+    if (this.noted === count) return false
+    this.forget(this.clock.monotonic())
+    if (this.forgotten > count) return true
+    for (let i = this.changes.length - 1; i >= this.head; i -= 1) {
+      const change = this.changes[i]
+      if (change === undefined || change[3] <= count) return false
+      const path = change[2]
+      if (paths.some((p) => overlaps(path, p))) return true
+    }
+    return false
   }
 
   /**
@@ -123,7 +154,12 @@ export class RecentChanges {
   }
 
   private forget(now: number): void {
-    while ((this.changes[this.head]?.[0] ?? Infinity) <= now - this.window) this.head += 1
+    let first = this.changes[this.head]
+    while (first !== undefined && first[0] <= now - this.window) {
+      this.forgotten = first[3]
+      this.head += 1
+      first = this.changes[this.head]
+    }
     if (this.head * 2 < this.changes.length) return
     this.changes = this.changes.slice(this.head)
     this.head = 0

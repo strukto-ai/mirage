@@ -28,7 +28,8 @@ import { Workspace as NodeWorkspace } from '../workspace.ts'
 import { FakeHub, serveHub } from '../../tests/core/hf_hub/_test_util.ts'
 import * as diskUtils from '../core/disk/utils.ts'
 import { DiskVFS } from './disk/disk.ts'
-import { InlineGitHub } from '../../tests/vfs/fixtures/github.ts'
+import { serve } from '../../../core/tests/fixtures/kit_fake.ts'
+import { GitHubRepo, TOKEN } from '../../../core/tests/fixtures/github_repo.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
 
 vi.mock('../core/disk/utils.ts', async (importOriginal) => {
@@ -54,8 +55,8 @@ interface Harness {
   ws: NodeWorkspace
   key: string
   nested: string
-  counts: () => [number, number]
-  change: () => void
+  counts: () => [number, number] | Promise<[number, number]>
+  change: () => unknown
   close?: () => Promise<void>
   // The checks one command listing `key` and `nested` sends: one for a MOUNT
   // version, one per folder for a FOLDER version.
@@ -63,14 +64,14 @@ interface Harness {
 }
 
 async function githubHarness(): Promise<Harness> {
-  const gh = new InlineGitHub({ 'docs/sub/a.txt': 'a\n', 'top.txt': 't\n' })
-  vi.stubGlobal('fetch', gh.fetch)
+  const repo = new GitHubRepo(await serve('github'))
+  await repo.create({ 'docs/sub/a.txt': 'a\n', 'top.txt': 't\n' })
   const vfs = await buildVfs('github', {
-    token: 't',
-    owner: 'o',
-    repo: 'r',
+    token: TOKEN,
+    owner: repo.owner,
+    repo: repo.name,
     ref: 'main',
-    base_url: gh.url,
+    base_url: repo.run.url,
   })
   const ws = new NodeWorkspace({
     '/m': new Mount(vfs, { mode: MountMode.READ, read: { policy: ReadPolicy.FRESH, ttl: 600 } }),
@@ -79,10 +80,9 @@ async function githubHarness(): Promise<Harness> {
     ws,
     key: '/m',
     nested: '/m/docs/sub',
-    counts: () => [gh.count('dir'), gh.count('recursive')],
-    change: () => {
-      gh.set('docs/new.txt', 'n\n')
-    },
+    counts: async () => [await repo.count('dir'), await repo.count('recursive')],
+    change: () => repo.commit({ 'docs/new.txt': 'n\n' }),
+    close: () => repo.run.close(),
   }
 }
 
@@ -209,12 +209,12 @@ async function checkContract(name: string): Promise<void> {
     expect((await store.listDir(harness.nested)).version ?? null).not.toBeNull()
     const remote = await throwawayStat(ws, mount, harness.key)
     expect(remote.fingerprint).toBe(stored)
-    const before = harness.counts()
+    const before = await harness.counts()
     await shell(ws, `ls ${harness.key} ${harness.nested}`)
-    const after = harness.counts()
+    const after = await harness.counts()
     expect([after[0] - before[0], after[1] - before[1]]).toEqual([harness.checks ?? 1, 0])
     expect(mount.vfs.listingVersion).toBe(manifest()[name]?.listing_version)
-    harness.change()
+    await harness.change()
     const moved = await throwawayStat(ws, mount, harness.key)
     expect(moved.fingerprint ?? null).not.toBeNull()
     expect(moved.fingerprint).not.toBe(stored)

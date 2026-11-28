@@ -32,3 +32,6 @@ class DevFileState:
     tombstones: set[str] = field(default_factory=set)
     inputs: dict[str, PipeRow] = field(default_factory=dict)
     next_allocation: int = 0
+    # The time the store's last write landed at, in nanoseconds, kept
+    # here so every session's view of /dev stamps past it.
+    stamp: int = 0

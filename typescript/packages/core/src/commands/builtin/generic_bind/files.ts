@@ -16,7 +16,7 @@ import type { WalkDeclinedError } from '../../../errors/types.ts'
 import { callsAs, currentCaller, sessionVisibility } from '../../../context/session_context.ts'
 import { eacces, eisdir, enoent, isDotWalkError, isEnoent, isFsError } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import type { ByteSource } from '../../../io/types.ts'
+import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec, type SetAttrFields } from '../../../types.ts'
@@ -27,6 +27,7 @@ import { CycleError } from '../../../utils/path.ts'
 import { rstripSlash } from '../../../utils/slash.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView, SessionAccess } from '../../../view/types.ts'
+import { READ_AHEAD_BYTES, ReadBatch } from '../../../workspace/dispatcher/read_batch.ts'
 import type { Context } from '../../config.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import {
@@ -171,19 +172,34 @@ const CROSSING_CALLS: ReadonlySet<string> = new Set([
 // How many files a whole read warms ahead of itself (`ReadAhead`).
 const READ_AHEAD = 8
 
+// How many files a whole read reads ahead on a mount that holds its data
+// locally, whose bytes the read-ahead hands over (`ReadBatch`).
+const READ_AHEAD_HELD = 64
+
+// The options of a read a held file answers: the whole stored bytes, whether
+// streamed or not. A read that passes a report is left to the dispatcher,
+// which stamps it.
+const HELD_OPTIONS: ReadonlySet<string> = new Set(['stream', 'filetype', 'offset', 'size'])
+
 // How many of a command's latest listings its reads are matched against.
 const LISTINGS = 16
 
 // Files a command reads in turn: its operands, or the files of one directory
 // as a listing or subtree answer named them. `sent` is where the next batch
-// starts and `last` where the latest read was. Mirrors Python's `_Run`.
+// starts, `latest` how many files the batch before it took, `last` where the
+// latest read was and `rows` what a subtree answer holds at each name.
+// Mirrors Python's `_Run`.
 class Run {
   sent = 0
+  latest = 0
   last: number | null = null
   order: Map<string, number> | null = null
-  readonly warming = new Map<string, Promise<boolean>>()
+  readonly warming = new Map<string, Promise<ReadBatch>>()
 
-  constructor(readonly names: string[]) {}
+  constructor(
+    readonly names: string[],
+    readonly rows: ReadonlyMap<string, FileStat> | null = null,
+  ) {}
 
   at(virtual: string): number | undefined {
     this.order ??= new Map(this.names.map((name, i) => [name, i]))
@@ -211,12 +227,26 @@ interface Tree {
  * shows it reads what it lists: one file once it reads two in a row, twice as
  * many each time a read lands on a warmed file, up to READ_AHEAD, and none
  * once it passes over files it warmed, so a walk that reads few of the files
- * it lists (a name filter) fetches few it never reads; the pace carries into
- * the next directory. A read whose file is still being warmed waits for it,
- * so it is served warm instead of fetching the file again. No bytes are held
- * here: a write in between drops the cached copy as it drops any. A path in
- * neither the operands nor the latest LISTINGS listings and subtree answers
- * warms nothing.
+ * it lists (a name filter) fetches few it never reads; the pace reads on
+ * warmed files set carries into the next directory, and a walk that reads in a
+ * directory has passed over what it warmed and never read in each one neither
+ * it nor above it. A read whose file is still being warmed waits for it,
+ * so it is served warm instead of fetching the file again; a write in between
+ * drops the cached copy as it drops any. A path in neither the operands nor
+ * the latest LISTINGS listings and subtree answers warms nothing.
+ *
+ * On a mount that holds its data locally there is no read cache to warm: the
+ * dispatcher reads the files for the command past each one's checks and hands
+ * their bytes back (`ReadBatch`), and each whole read of one is answered from
+ * them, once, while no change has reached the file since. Until a batch has
+ * said the mount holds its data, each asks the dispatcher to read nothing
+ * there, so a command that stops after its first file (`cat a b | head -n 1`)
+ * opens no other; the read that lands on such a batch reads ahead from itself
+ * instead. There a read reads ahead up to READ_AHEAD_HELD files, the file
+ * being read among them, so a directory's first file is no read of its own,
+ * and no more than the sizes it knows fit in READ_AHEAD_BYTES; the batch after
+ * goes once half of that one is read, so a run holds at most two at a time;
+ * no file is in two batches.
  *
  * It sits in the command's dispatcher (`dispatch`), which every whole read,
  * listing and subtree read of the command goes through. Mirrors Python's
@@ -230,6 +260,9 @@ export class ReadAhead {
   private readonly trees: Tree[] = []
   private width = 0
   private kept = true
+  private holding = false
+  private readonly unheld = new WeakSet<Promise<ReadBatch>>()
+  private walked: Run | null = null
 
   constructor(
     private readonly inner: DispatchFn,
@@ -253,19 +286,30 @@ export class ReadAhead {
   }
 
   /**
-   * The command's dispatcher: a whole read first warms what follows it, and a
-   * listing or subtree read is learned as the order the command's walk reads
-   * its files in.
+   * The command's dispatcher: a whole read first reads ahead what follows it
+   * and is answered from a batch that holds it, and a listing or subtree read
+   * is learned as the order the command's walk reads its files in.
    */
   readonly dispatch: DispatchFn = async (name, path, args, kwargs, report) => {
-    const asked = (kwargs ?? {}) as { offset?: number; size?: number | null; warm?: boolean }
+    const asked = (kwargs ?? {}) as {
+      offset?: number
+      size?: number | null
+      warm?: boolean
+      filetype?: string | null
+    }
     if (
       name === 'read' &&
       (asked.offset ?? 0) === 0 &&
       (asked.size ?? null) === null &&
       asked.warm !== true
     ) {
-      await this.warmed(path)
+      const held = await this.warmed(
+        path,
+        report === undefined &&
+          Object.keys(asked).every((key) => HELD_OPTIONS.has(key)) &&
+          (asked.filetype ?? null) === null,
+      )
+      if (held !== null) return [held, new IOResult()]
     }
     const answer = await this.inner(name, path, args, kwargs, report)
     if (!this.kept) return answer
@@ -282,60 +326,143 @@ export class ReadAhead {
     return answer
   }
 
-  // Warm what follows `path` in its run, then wait for `path` itself while a
-  // batch is fetching it; a batch whose mount keeps no reads (one holding its
-  // data locally) ends the command's warming.
-  private async warmed(path: PathSpec): Promise<void> {
+  // Read ahead what follows `path` in its run, then wait for `path` itself
+  // while a batch is fetching it, and answer it from that batch while
+  // `served`; null leaves the read to make. A batch that neither warmed nor
+  // held a file ends the command's read-ahead.
+  private async warmed(path: PathSpec, served: boolean): Promise<Uint8Array | null> {
     const run = this.run(path.virtual)
     const at = run?.at(path.virtual)
-    if (run === undefined || at === undefined) return
-    const pending = run.warming.get(path.virtual)
+    if (run === undefined || at === undefined) return null
+    let pending = run.warming.get(path.virtual)
     run.warming.delete(path.virtual)
-    const width = run === this.operands ? READ_AHEAD : this.paced(run, at, pending !== undefined)
-    const start = Math.max(run.sent, at + 1)
+    if (pending !== undefined && this.holding && this.unheld.has(pending)) {
+      this.unhold(run, at)
+      pending = undefined
+    }
+    if (run !== this.operands) {
+      const cut = path.virtual.lastIndexOf('/')
+      this.entered(run, cut > 0 ? path.virtual.slice(0, cut) : '/')
+    }
+    const width =
+      run === this.operands
+        ? this.holding
+          ? READ_AHEAD_HELD
+          : READ_AHEAD
+        : this.paced(run, at, pending !== undefined)
+    const start = Math.max(run.sent, this.holding && pending === undefined ? at : at + 1)
+    const ahead = this.holding ? Math.min(width, run.latest || width) : width
     if (
       this.kept &&
       width > 0 &&
       start < run.names.length &&
-      start - at <= Math.max(1, width >> 1)
+      start - at <= Math.max(1, ahead >> 1)
     ) {
-      const batch = run.names.slice(start, start + width)
-      run.sent = start + batch.length
-      const specs = batch.map((n) => this.specs.get(n) ?? PathSpec.fromStrPath(n))
-      const stats = new Map<string, FileStat>()
-      for (const name of batch) {
-        const known = this.stats.get(name)
-        if (known !== undefined) stats.set(name, known)
+      const found = new Map<string, FileStat>()
+      let names: string[] = []
+      for (const name of run.names.slice(start, start + width)) {
+        if (run.warming.has(name)) break
+        names.push(name)
+        const row = this.stats.get(name) ?? run.rows?.get(name)
+        if (row !== undefined) found.set(name, row)
       }
-      const task = warm(this.inner, specs, stats)
-      for (const name of batch) run.warming.set(name, task)
+      if (this.holding) names = fitting(names, found)
+      run.sent = start + names.length
+      while (run.sent < run.names.length && run.warming.has(run.names[run.sent] ?? '')) {
+        run.sent += 1
+      }
+      if (names.length > 0) {
+        run.latest = names.length
+        const specs = names.map((n) => this.specs.get(n) ?? PathSpec.fromStrPath(n))
+        const stats = new Map<string, FileStat>()
+        for (const name of names) {
+          const row = found.get(name)
+          if (row !== undefined) stats.set(name, row)
+        }
+        const task = warm(this.inner, specs, stats, this.holding)
+        if (!this.holding) this.unheld.add(task)
+        for (const name of names) run.warming.set(name, task)
+        if (start === at) {
+          pending = task
+          run.warming.delete(path.virtual)
+        }
+      }
     }
-    if (pending !== undefined && !(await pending)) {
+    if (pending === undefined) return null
+    const batch = await pending
+    if (!batch.kept && !batch.holds) {
       this.kept = false
       this.trees.length = 0
+      return null
     }
+    if (batch.holds) {
+      this.holding = true
+      if (this.unheld.has(pending)) {
+        this.unhold(run, at)
+        return this.warmed(path, served)
+      }
+    }
+    return served ? batch.take(path.virtual) : null
+  }
+
+  // Forget what `run` sent before the command knew its mount holds its data,
+  // which holds nothing there, so the read at `at` reads ahead from itself; a
+  // file another batch is reading stays with it.
+  private unhold(run: Run, at: number): void {
+    for (const [name, task] of [...run.warming]) {
+      if (this.unheld.has(task)) run.warming.delete(name)
+    }
+    run.sent = Math.min(run.sent, at)
   }
 
   // How many files a walk's read at `at` warms: twice the pace on a warmed
-  // file, none past warmed files it passed over, one once two reads in a row
-  // are neighbours, else the pace it had.
+  // file, none past warmed files it passed over, at least one when two reads
+  // in a row are neighbours, else the pace it had. Only a read on a warmed
+  // file sets the pace later reads start from, in this directory or the next.
   private paced(run: Run, at: number, hit: boolean): number {
     const last = run.last
     run.last = at
     const passed = [...run.warming.keys()].filter((n) => (run.at(n) ?? at) < at)
     for (const name of passed) run.warming.delete(name)
-    if (hit) this.width = Math.min(READ_AHEAD, Math.max(1, this.width) * 2)
-    else if (passed.length > 0) this.width = 0
-    else if (last !== null && at === last + 1) this.width = Math.max(1, this.width)
+    if (hit) {
+      this.width = Math.min(
+        this.holding ? READ_AHEAD_HELD : READ_AHEAD,
+        Math.max(1, this.width) * 2,
+      )
+    } else if (passed.length > 0) this.width = 0
+    else if (last !== null && at === last + 1) return Math.max(1, this.width)
     return this.width
   }
 
+  // Note the directory a walk's read lands in. A walk reads what is in and
+  // below a directory before it goes on, so once it reads in another one it is
+  // done with every listed directory that is neither that one nor above it:
+  // what their runs warmed and it never read is passed over, and their runs
+  // are the first to go.
+  private entered(run: Run, folder: string): void {
+    if (this.walked === run) return
+    this.walked = run
+    let passed = false
+    for (const [listed, kept] of this.runs) {
+      if (folder === listed || folder.startsWith(`${rstripSlash(listed)}/`)) continue
+      if (kept.warming.size > 0) {
+        kept.warming.clear()
+        passed = true
+      }
+    }
+    if (passed) this.width = 0
+  }
+
+  // Keep `run` as the latest of the LISTINGS runs, dropping the oldest one no
+  // batch is reading ahead for: a walk that went down into a directory comes
+  // back to its parent's files, which a batch may hold already.
   private keep(folder: string, run: Run): Run {
     this.runs.delete(folder)
     this.runs.set(folder, run)
     if (this.runs.size > LISTINGS) {
-      const oldest = this.runs.keys().next().value
-      if (oldest !== undefined) this.runs.delete(oldest)
+      const older = [...this.runs].slice(0, -1)
+      const idle = older.find(([, r]) => r.warming.size === 0) ?? older[0]
+      if (idle !== undefined) this.runs.delete(idle[0])
     }
     return run
   }
@@ -363,31 +490,60 @@ export class ReadAhead {
       }
       const rel = folder === tree.root ? '' : folder.slice(base.length)
       const below = [...(tree.groups.get(rel) ?? [])].sort(compareCodePoints)
-      return this.keep(folder, new Run(below.map((key) => base + key)))
+      const rows = new Map<string, FileStat>()
+      for (const key of below) {
+        const row = tree.rows.get(key)
+        if (row !== undefined) rows.set(base + key, row)
+      }
+      return this.keep(
+        folder,
+        new Run(
+          below.map((key) => base + key),
+          rows,
+        ),
+      )
     }
     return undefined
   }
 }
 
 /**
- * Ask the dispatcher to keep `paths` in the read cache, and answer whether
- * their mount keeps reads at all; `stats` are the stats the command made of
- * them, which size a file no listing holds. A failure is logged and dropped:
- * each read that follows meets it. Mirrors Python's `_warm`.
+ * The first of `names` whose sizes, where `rows` knows them, fit in what one
+ * held batch reads (READ_AHEAD_BYTES); at least one. Mirrors Python's
+ * `_fitting`.
+ */
+function fitting(names: string[], rows: ReadonlyMap<string, FileStat>): string[] {
+  let room = READ_AHEAD_BYTES
+  for (const [i, name] of names.entries()) {
+    const size = rows.get(name)?.size ?? 0
+    if (i > 0 && size > room) return names.slice(0, i)
+    room -= size
+  }
+  return names
+}
+
+/**
+ * Ask the dispatcher to read `paths` ahead: kept in the read cache, or held
+ * for the command where their mount holds its data locally and `hold` says to
+ * (false only learns whether theirs does); `stats` are what the command's
+ * stats and listings found at them, which size a file no index holds. A
+ * failure is logged and dropped: each read that follows meets it, and the
+ * read-ahead goes on. Mirrors Python's `_warm`.
  */
 async function warm(
   dispatch: DispatchFn,
   paths: readonly PathSpec[],
   stats: Map<string, FileStat>,
-): Promise<boolean> {
+  hold: boolean,
+): Promise<ReadBatch> {
   const [first, ...rest] = paths
-  if (first === undefined) return true
+  if (first === undefined) return new ReadBatch({ kept: true })
   try {
-    const [kept] = await dispatch('read_many', first, [], { paths: rest, stats })
-    return kept !== false
+    const [batch] = await dispatch('read_many', first, [], { paths: rest, stats, hold })
+    return batch instanceof ReadBatch ? batch : new ReadBatch({ kept: true })
   } catch (err) {
     console.debug(`read-ahead from ${first.virtual} failed: ${String(err)}`)
-    return true
+    return new ReadBatch({ kept: true })
   }
 }
 

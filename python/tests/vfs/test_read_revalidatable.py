@@ -21,8 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from inspect import isawaitable, signature
 from types import ModuleType
-from typing import Any
-from unittest.mock import AsyncMock
+from typing import Any, TypeVar
 from weakref import WeakKeyDictionary
 
 import boto3
@@ -58,6 +57,7 @@ from mirage.core.gdrive.readdir import readdir as gdrive_readdir
 from mirage.core.github.readdir import readdir as github_readdir
 from mirage.core.hf_hub.client import etag_value
 from mirage.core.hf_hub.readdir import readdir as hf_readdir
+from mirage.core.render.json import compact_json_bytes
 from mirage.observe.context import OpTimer, recording_active
 from mirage.observe.record import OpRecord
 from mirage.types import FileStat, MountMode, PathSpec, ReadPolicy, ReadSpec
@@ -72,17 +72,17 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import REGISTRY, build_vfs, known_vfs_names
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
-from tests.e2e.gdrive_mock import FakeDriveApi, FakeGDrive, patch_gdrive
+from tests.core.box.conftest import TOKEN, BoxAccount
+from tests.core.dropbox.conftest import DropboxAccount
+from tests.core.github.conftest import TOKEN as GITHUB_TOKEN
+from tests.core.github.conftest import GitHubRepo, blob_sha
 from tests.e2e.s3_mock import MultiBucketSession, patch_s3_session
-from tests.fixtures.box_api import FakeBox
-from tests.fixtures.box_api import serve as serve_box
-from tests.fixtures.dropbox_api import FakeDropbox
-from tests.fixtures.dropbox_api import serve as serve_dropbox
-from tests.fixtures.github_api import FakeGitHub, blob_sha
-from tests.fixtures.github_api import serve as serve_github
+from tests.fixtures.google_account import FILES, GoogleAccount
+from tests.fixtures.google_account import TOKEN as GOOGLE_TOKEN
 from tests.fixtures.handed import ListFn, entry_at
 from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
 from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
+from tests.fixtures.kit_fake import KitRun, LoopThread
 from tests.fixtures.msgraph_api import (
     DRIVE_ID,
     DRIVE_NAME,
@@ -165,6 +165,15 @@ GAPPS = {
     ),
 }
 
+# The request each Google app renders its file with.
+RENDERS = {
+    "gdocs": ("GET", "/v1/documents/:id"),
+    "gsheets": ("GET", "/v4/spreadsheets/:id"),
+    "gslides": ("GET", "/v1/presentations/:id"),
+}
+# Where a Google app run's clock starts: midday, far from a day's edge.
+NOON = "2026-02-01T12:00:00Z"
+
 # What each family can run, fixed at collection. github and gdrive have no
 # key_prefix. The GAPPS mounts have one flat listing, so only one shape,
 # and their stream is their render handed over whole, one chunk, so a
@@ -188,8 +197,21 @@ S3_CONFIG = {
 }
 S3_EXTRA = {"oci": {"namespace": "ns"}}
 GRIDFS_CONFIG = {"uri": "mongodb://127.0.0.1:27017", "database": "d"}
-GDRIVE_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
-DROPBOX_CONFIG = {"client_id": "i", "client_secret": "s", "refresh_token": "r"}
+DROPBOX_CONFIG = {
+    "client_id": "i",
+    "client_secret": "s",
+    "refresh_token": TOKEN,
+}
+A = TypeVar("A", BoxAccount, DropboxAccount)
+# More requests than any test here makes: an answer armed this many times
+# stands for the test, the way a stored state would.
+EVERY = 1000
+RESTRICTED = {
+    "error_summary": "path/restricted_content/..",
+    "error": {".tag": "path", "path": {".tag": "restricted_content"}},
+}
+BOX_DOWNLOAD = ("GET", "/2.0/files/:file_id/content")
+DROPBOX_DOWNLOAD = ("POST", "/2/files/download")
 
 PREFIX = "pfx/"
 
@@ -274,9 +296,23 @@ class Fake:
     # backend reads one (gdrive, box, dropbox, github, the Hub): the direct
     # calls are handed it, as the mount hands it.
     readdir: ListFn | None = None
+    # What a read of the key answers now, where that is not the bytes last
+    # written: a Google app's file reads as its API's rendering of it.
+    rendered: Callable[[], bytes] | None = None
+    # How many Drive listings the mount has asked, for a Google app, whose
+    # listing is a Drive search.
+    searched: Callable[[], int] | None = None
 
     def slot(self) -> str:
         return "stream" if self.stream_mod is not None else "bytes"
+
+    def expected(self, data: bytes) -> bytes:
+        """What a read of the key answers once ``data`` is its content.
+
+        Args:
+            data (bytes): the bytes last written to the key.
+        """
+        return data if self.rendered is None else self.rendered()
 
     async def handed(
         self, fn: Callable[..., Any], path: PathSpec
@@ -559,50 +595,168 @@ def _graph_fake(name: str, shape: str, data: bytes) -> Iterator[Fake]:
         )
 
 
+def _google_config(drive: GoogleAccount) -> dict[str, str]:
+    return {"access_token": GOOGLE_TOKEN, "api_base": drive.run.url}
+
+
+async def _downloads(drive: GoogleAccount) -> int:
+    return [name for name, _ in await drive.log()].count("media")
+
+
 @contextmanager
-def _gdrive_fake(shape: str, data: bytes) -> Iterator[Fake]:
+def _gdrive_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
+    # The account runs on a loop of its own, as Dropbox's does.
     key = KEYS[shape]
-    drive = FakeGDrive()
-    drive.add_file(key, data)
-    with patch_gdrive(drive):
-        vfs = build_vfs("gdrive", GDRIVE_CONFIG)
-        # No stray reach to refuse: stat has no download to fall into, and
-        # a no-index stat reaching get_file is its legitimate API entry point.
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: drive.calls["download_file"],
-            rewrite=lambda new: drive.add_file(key, new),
-            reach=[],
-            read_mod=gdrive_read,
-            stream_mod=gdrive_read,
-            readdir=gdrive_readdir,
+    thread = LoopThread()
+    try:
+        drive = thread.run(_account(GoogleAccount, origin))
+        try:
+            thread.run(drive.put(key, data))
+            thread.run(drive.run.record_requests())
+            # No stray reach to refuse: stat has no download to fall into,
+            # and a no-index stat reaching get_file is its legitimate API
+            # entry point.
+            yield Fake(
+                vfs=build_vfs("gdrive", _google_config(drive)),
+                key=key,
+                fetches=lambda: thread.run(_downloads(drive)),
+                rewrite=lambda new: thread.run(drive.put(key, new)),
+                reach=[],
+                read_mod=gdrive_read,
+                stream_mod=gdrive_read,
+                readdir=gdrive_readdir,
+            )
+        finally:
+            thread.run(drive.run.close())
+    finally:
+        thread.close()
+
+
+async def _app_write(
+    drive: GoogleAccount, name: str, file_id: str, text: str
+) -> None:
+    """Write ``text`` into a Google app's file as its editor's API does,
+    which moves the file's modifiedTime.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+        file_id (str): the file.
+        text (str): what is written.
+    """
+    if name == "gdocs":
+        edit = {"insertText": {"location": {"index": 1}, "text": text}}
+        await drive.run.call(
+            "POST",
+            f"/v1/documents/{file_id}:batchUpdate",
+            json={"requests": [edit]},
         )
+    elif name == "gsheets":
+        await drive.run.call(
+            "PUT",
+            f"/v4/spreadsheets/{file_id}/values/A1",
+            params={"valueInputOption": "RAW"},
+            json={"values": [[text]]},
+        )
+    else:
+        await drive.run.call(
+            "POST",
+            f"/v1/presentations/{file_id}:batchUpdate",
+            json={
+                "requests": [
+                    {"insertText": {"objectId": "shape", "text": text}}
+                ]
+            },
+        )
+
+
+async def _app_file(drive: GoogleAccount, name: str, text: str) -> str:
+    """A Google app's file named ``a`` holding ``text``, and its id; a
+    presentation's text is in a shape on a slide of its own.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+        text (str): what it holds.
+    """
+    file_id = await drive.create("a", GAPPS[name][0])
+    if name == "gslides":
+        on_slide = {"pageObjectId": "slide"}
+        await drive.run.call(
+            "POST",
+            f"/v1/presentations/{file_id}:batchUpdate",
+            json={
+                "requests": [
+                    {"createSlide": {"objectId": "slide"}},
+                    {
+                        "createShape": {
+                            "objectId": "shape",
+                            "elementProperties": on_slide,
+                        }
+                    },
+                ]
+            },
+        )
+    await _app_write(drive, name, file_id, text)
+    return file_id
+
+
+async def _searches(drive: GoogleAccount) -> int:
+    return len(await drive.asked("GET", FILES))
+
+
+async def _renders(drive: GoogleAccount, name: str) -> int:
+    return len(await drive.asked(*RENDERS[name]))
+
+
+async def _rendered(drive: GoogleAccount, name: str) -> bytes:
+    """The app's answer to the last render request the mount made, asked
+    again, compacted as a read hands it on.
+
+    Args:
+        drive (GoogleAccount): the account.
+        name (str): the app's mount name.
+    """
+    asked = (await drive.asked(*RENDERS[name]))[-1]
+    made = await drive.run.call("GET", f"{asked['path']}?{asked['query']}")
+    return compact_json_bytes(made)
 
 
 @contextmanager
-def _gapps_fake(name: str, data: bytes) -> Iterator[Fake]:
-    mime, read_mod, filename = GAPPS[name]
-    drive = FakeGDrive()
-    file_id = drive.add_file("a", data, mime)
-    listed = drive.find_entry(file_id)
-    assert listed is not None
-    # The fake names no owner, so the file lists under shared/. A rewrite
-    # moves modifiedTime within the same day, which keeps the name.
-    key = "shared/" + filename("a", file_id, listed["modifiedTime"])
-    with patch_gdrive(drive):
-        vfs = build_vfs(name, GDRIVE_CONFIG)
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: drive.calls["render"],
-            rewrite=lambda new: drive.add_file("a", new, mime),
-            reach=[],
-            read_mod=read_mod,
-            stream_mod=None,
-            index=RAMIndexCacheStore(),
-            stat_indexed=False,
-        )
+def _gapps_fake(name: str, data: bytes, origin: str) -> Iterator[Fake]:
+    _, read_mod, filename = GAPPS[name]
+    thread = LoopThread()
+    try:
+        drive = thread.run(_account(GoogleAccount, origin))
+        try:
+            # The name carries modifiedTime's day. The run's clock starts at
+            # noon, so the rewrites, a second each, stay on that day and keep
+            # the name; on the wall clock a run near midnight would not.
+            thread.run(drive.reset(epoch=NOON))
+            file_id = thread.run(_app_file(drive, name, data.decode()))
+            item = thread.run(drive.item(file_id))
+            # The account owns the file, so it lists under owned/.
+            key = "owned/" + filename("a", file_id, item["modifiedTime"])
+            thread.run(drive.run.record_requests())
+            yield Fake(
+                vfs=build_vfs(name, _google_config(drive)),
+                key=key,
+                fetches=lambda: thread.run(_renders(drive, name)),
+                rewrite=lambda new: thread.run(
+                    _app_write(drive, name, file_id, new.decode())
+                ),
+                reach=[],
+                read_mod=read_mod,
+                stream_mod=None,
+                index=RAMIndexCacheStore(),
+                stat_indexed=False,
+                rendered=lambda: thread.run(_rendered(drive, name)),
+                searched=lambda: thread.run(_searches(drive)),
+            )
+        finally:
+            thread.run(drive.run.close())
+    finally:
+        thread.close()
 
 
 @contextmanager
@@ -644,105 +798,174 @@ def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
 
 @contextmanager
 def _github_fake(
-    shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
+    shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch, origin: str
 ) -> Iterator[Fake]:
     # The nested key's parent is two or more lowercase letters, the spelling
     # Octokit rewrites when the point request goes unencoded; the python
-    # twin keeps the same key so both hosts test one shape.
+    # twin keeps the same key so both hosts test one shape. The repository
+    # runs on a loop of its own, as Dropbox's does.
     key = {"root": "a.txt", "nested": "docs/a.txt"}[shape]
-    hub = FakeGitHub(files={key: data, "other.txt": DECOY})
-    with serve_github(hub):
-        vfs = build_vfs(
-            "github",
-            {
-                "token": "t",
-                "owner": "o",
-                "repo": "r",
-                "ref": "main",
-                "base_url": hub.url,
-            },
-        )
-        reach = _watch_walks(vfs, monkeypatch)
+    thread = LoopThread()
+    try:
+        repo = thread.run(_account(GitHubRepo, origin))
+        try:
+            thread.run(repo.create({key: data, "other.txt": DECOY}))
+            vfs = build_vfs(
+                "github",
+                {
+                    "token": GITHUB_TOKEN,
+                    "owner": repo.owner,
+                    "repo": repo.name,
+                    "ref": "main",
+                    "base_url": repo.run.url,
+                },
+            )
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(repo.count("blob")),
+                rewrite=lambda new: thread.run(repo.commit({key: new})),
+                reach=_watch_walks(vfs, monkeypatch),
+                read_mod=github_read,
+                stream_mod=github_read,
+                readdir=github_readdir,
+            )
+        finally:
+            thread.run(repo.run.close())
+    finally:
+        thread.close()
 
-        def rewrite(new: bytes) -> None:
-            hub.files[key] = new
 
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: hub.count("blob"),
-            rewrite=rewrite,
-            reach=reach,
-            read_mod=github_read,
-            stream_mod=github_read,
-            readdir=github_readdir,
-        )
+async def _account(kind: type[A], origin: str) -> A:
+    """An account made on the running loop, which its session belongs to."""
+    return kind(origin)
+
+
+async def _requests_to(run: KitRun, route: tuple[str, str]) -> int:
+    return len(await run.params(*route))
+
+
+async def _dropbox_rewrite(
+    dropbox: DropboxAccount, path: str, data: bytes
+) -> None:
+    # Two same-size edits in one second share server_modified on the real
+    # service, so only content_hash may tell them apart. The fake's clock
+    # moves on every write, so the stamp is set back; the reload stops the
+    # request list, which starts again.
+    stamp = (await dropbox.metadata(path))["server_modified"]
+    await dropbox.put(path, data)
+    await dropbox.run.execute(
+        "UPDATE DropboxItem SET modified = ? WHERE path = ?", stamp, path
+    )
+    await dropbox.run.record_requests()
+
+
+async def _box_rewrite(box: BoxAccount, path: str, data: bytes) -> None:
+    # As _dropbox_rewrite: modified_at stays, so only sha1 tells the two
+    # versions apart.
+    file_id = await box.id_of(path)
+    stamp = (await box.file_info(file_id))["modified_at"]
+    await box.write(path, data)
+    await box.run.execute(
+        "UPDATE BoxItem SET modified = ? WHERE id = ?", stamp, file_id
+    )
+    await box.run.record_requests()
 
 
 @contextmanager
-def _dropbox_fake(shape: str, data: bytes) -> Iterator[Fake]:
+def _dropbox_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     # Dropbox has no key_prefix; the prefixed shape mounts a root_path
-    # instead, with a decoy at the same key outside it.
+    # instead, with a decoy at the same key outside it. The harness counts
+    # and rewrites from inside its own loop and does not await, so the
+    # account runs on a loop of its own.
     key = KEYS[shape]
     root = "/" + PREFIX.strip("/") if shape == "prefixed" else "/"
     stored = root.rstrip("/") + "/" + key
-    files = {stored: data}
-    if shape == "prefixed":
-        files["/" + key] = DECOY
-    dropbox = FakeDropbox(files=files)
-    with serve_dropbox(dropbox):
-        vfs = build_vfs(
-            "dropbox",
-            {**DROPBOX_CONFIG, "root_path": root, "endpoint": dropbox.url},
-        )
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: dropbox.count("download"),
-            rewrite=lambda new: dropbox.write(stored, new),
-            reach=[],
-            read_mod=dropbox_read,
-            stream_mod=dropbox_read,
-            readdir=dropbox_readdir,
-        )
+    thread = LoopThread()
+    try:
+        dropbox = thread.run(_account(DropboxAccount, origin))
+        try:
+            thread.run(dropbox.put(stored, data))
+            if shape == "prefixed":
+                thread.run(dropbox.put("/" + key, DECOY))
+            thread.run(dropbox.run.record_requests())
+            vfs = build_vfs(
+                "dropbox",
+                {
+                    **DROPBOX_CONFIG,
+                    "root_path": root,
+                    "endpoint": dropbox.run.url,
+                },
+            )
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(
+                    _requests_to(dropbox.run, DROPBOX_DOWNLOAD)
+                ),
+                rewrite=lambda new: thread.run(
+                    _dropbox_rewrite(dropbox, stored, new)
+                ),
+                reach=[],
+                read_mod=dropbox_read,
+                stream_mod=dropbox_read,
+                readdir=dropbox_readdir,
+            )
+        finally:
+            thread.run(dropbox.run.close())
+    finally:
+        thread.close()
 
 
 @contextmanager
-def _box_fake(shape: str, data: bytes) -> Iterator[Fake]:
+def _box_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     # Box has no key_prefix; the prefixed shape mounts a root_folder_id
-    # instead, with a decoy at the same key outside it.
+    # instead, with a decoy at the same key outside it. The account runs on
+    # a loop of its own, as Dropbox's does.
     key = KEYS[shape]
     stored = PREFIX + key if shape == "prefixed" else key
-    files = {stored: data}
-    if shape == "prefixed":
-        files[key] = DECOY
-    box = FakeBox(files=files)
-    with serve_box(box):
-        config = {"access_token": "t", "endpoint": box.url}
-        if shape == "prefixed":
-            config["root_folder_id"] = box.id_of(PREFIX)
-        yield Fake(
-            vfs=build_vfs("box", config),
-            key=key,
-            fetches=lambda: box.count("content"),
-            rewrite=lambda new: box.write(stored, new),
-            reach=[],
-            read_mod=box_read,
-            stream_mod=box_read,
-            readdir=box_readdir,
-        )
+    thread = LoopThread()
+    try:
+        box = thread.run(_account(BoxAccount, origin))
+        try:
+            thread.run(box.write(stored, data))
+            if shape == "prefixed":
+                thread.run(box.write(key, DECOY))
+            thread.run(box.run.record_requests())
+            config = {"access_token": TOKEN, "endpoint": box.run.url}
+            if shape == "prefixed":
+                config["root_folder_id"] = thread.run(box.id_of(PREFIX))
+            yield Fake(
+                vfs=build_vfs("box", config),
+                key=key,
+                fetches=lambda: thread.run(
+                    _requests_to(box.run, BOX_DOWNLOAD)
+                ),
+                rewrite=lambda new: thread.run(_box_rewrite(box, stored, new)),
+                reach=[],
+                read_mod=box_read,
+                stream_mod=box_read,
+                readdir=box_readdir,
+            )
+        finally:
+            thread.run(box.run.close())
+    finally:
+        thread.close()
 
 
 @contextmanager
 def _fake(
-    name: str, shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
+    name: str,
+    shape: str,
+    data: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest | None = None,
 ) -> Iterator[Fake]:
-    if HARNESSES[name] == "dropbox":
-        with _dropbox_fake(shape, data) as fake:
-            yield fake
-        return
-    if HARNESSES[name] == "box":
-        with _box_fake(shape, data) as fake:
+    if HARNESSES[name] in ("dropbox", "box"):
+        assert request is not None, name
+        origin = request.getfixturevalue(f"{HARNESSES[name]}_origin")
+        build = _dropbox_fake if HARNESSES[name] == "dropbox" else _box_fake
+        with build(shape, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "hf_buckets":
@@ -750,7 +973,9 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "github":
-        with _github_fake(shape, data, monkeypatch) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("github_origin")
+        with _github_fake(shape, data, monkeypatch, origin) as fake:
             yield fake
         return
     if HARNESSES[name] in GRAPH:
@@ -758,11 +983,15 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "gdrive":
-        with _gdrive_fake(shape, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("gws_origin")
+        with _gdrive_fake(shape, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] in GAPPS:
-        with _gapps_fake(name, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("gws_origin")
+        with _gapps_fake(name, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "hf_models":
@@ -960,10 +1189,10 @@ def test_every_declaring_backend_has_a_harness():
 
 @pytest.mark.parametrize(("name", "shape", "row"), A_CASES)
 def test_a_read_leaves_an_entry_reconcile_calls_fresh(
-    name, shape, row, monkeypatch
+    name, shape, row, monkeypatch, request
 ):
     data = SEED
-    with _fake(name, shape, data, monkeypatch) as fake:
+    with _fake(name, shape, data, monkeypatch, request) as fake:
         slots = _spy_slots(fake, monkeypatch)
         virtual = "/m/" + fake.key
 
@@ -1007,11 +1236,12 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
             refetched,
             second,
         ) = asyncio.run(run())
+        want = fake.expected(data)
 
     assert cached_before is False
     assert taken == [(fake.slot(), virtual)]
     assert fetched == 1
-    assert first == data
+    assert first == want
     assert stat.fingerprint is not None
     # A whole read of a rendered Google file goes through the dispatcher,
     # where a filetype read op always renders and keeps nothing, so its
@@ -1020,13 +1250,13 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
     renders = row == "bytes" and name in GAPPS
     assert fresh is not renders
     assert refetched == (1 if renders else 0)
-    assert second == data
+    assert second == want
     assert fake.reach == []
 
 
 @pytest.mark.parametrize(("name", "shape", "row"), _cases(("partial",)))
-def test_early_pipe_exit_keeps_nothing(name, shape, row, monkeypatch):
-    with _fake(name, shape, BIG, monkeypatch) as fake:
+def test_early_pipe_exit_keeps_nothing(name, shape, row, monkeypatch, request):
+    with _fake(name, shape, BIG, monkeypatch, request) as fake:
         slots = _spy_slots(fake, monkeypatch)
         virtual = "/m/" + fake.key
 
@@ -1051,7 +1281,7 @@ def test_early_pipe_exit_keeps_nothing(name, shape, row, monkeypatch):
 
 @pytest.mark.parametrize(("name", "shape", "row"), B_CASES)
 def test_an_unrecorded_read_stamps_the_stat_token(
-    name, shape, row, monkeypatch
+    name, shape, row, monkeypatch, request
 ):
     records: list[OpRecord] = []
 
@@ -1098,7 +1328,7 @@ def test_an_unrecorded_read_stamps_the_stat_token(
         records.append(rec)
         return rec
 
-    with _fake(name, shape, SEED, monkeypatch) as fake:
+    with _fake(name, shape, SEED, monkeypatch, request) as fake:
         monkeypatch.setitem(vars(fake.read_mod), "record", capture)
         if fake.stream_mod is not None:
             monkeypatch.setitem(
@@ -1122,9 +1352,10 @@ def test_an_unrecorded_read_stamps_the_stat_token(
             return unrecorded, data, stat
 
         unrecorded, data, stat = asyncio.run(run())
+        want = fake.expected(SEED)
 
     assert unrecorded
-    assert data == SEED
+    assert data == want
     assert [r.path for r in records] == [virtual]
     # The real record_stream returns None with no recorder bound, so no
     # stream read can stamp a token outside a capture at all. This row can
@@ -1149,11 +1380,11 @@ CHANGED_CASES = [
 
 
 @pytest.mark.parametrize(("name", "shape"), CHANGED_CASES)
-def test_a_changed_object_is_refetched(name, shape, monkeypatch):
+def test_a_changed_object_is_refetched(name, shape, monkeypatch, request):
     # The rows above prove stat and read agree; this proves what they agree
     # on is the content. A backend stamping a constant, or the key, on both
     # sides passes every other row and serves stale bytes here.
-    with _fake(name, shape, SEED, monkeypatch) as fake:
+    with _fake(name, shape, SEED, monkeypatch, request) as fake:
         virtual = "/m/" + fake.key
 
         async def run():
@@ -1195,14 +1426,15 @@ def test_a_changed_object_is_refetched(name, shape, monkeypatch):
         (stat, fresh, refetched, second, refreshed, third_fetched, third) = (
             asyncio.run(run())
         )
+        want = fake.expected(CHANGED)
 
     assert stat.fingerprint is not None
     assert not fresh
     assert refetched == 1
-    assert second == CHANGED
+    assert second == want
     assert refreshed
     assert third_fetched == 0
-    assert third == CHANGED
+    assert third == want
     assert fake.reach == []
 
 
@@ -1245,11 +1477,11 @@ def test_every_writable_family_has_a_write_harness_or_an_exception():
 
 @pytest.mark.parametrize(("family", "target"), WRITE_CASES)
 def test_a_written_file_is_served_without_a_download(
-    family, target, monkeypatch
+    family, target, monkeypatch, request
 ):
     # The new target takes the create path (box/gdrive new upload, Graph
     # create), the seeded one the update path (version, update by id).
-    with _fake(family, "root", SEED, monkeypatch) as fake:
+    with _fake(family, "root", SEED, monkeypatch, request) as fake:
         virtual = "/m/" + WRITE_TARGETS[target]
 
         async def run():
@@ -1275,27 +1507,42 @@ def test_a_written_file_is_served_without_a_download(
     assert fake.reach == written
 
 
-def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
+def _dropbox_routes(requests: list[str]) -> list[str]:
+    """Each request's endpoint name, the token refresh left out."""
+    names = [request.rsplit("/", 1)[-1] for request in requests]
+    return [name for name in names if name != "token"]
+
+
+def _dropbox_vfs(dropbox: DropboxAccount) -> BaseVFS:
+    return build_vfs(
+        "dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.run.url}
+    )
+
+
+def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder(
+    dropbox_origin,
+):
     # The probe stats through a throwaway store, so dropbox answers it
     # with one get_metadata rather than listing the whole folder into it.
     files = {"/d/a.txt": SEED, **{f"/d/f{i}.txt": DECOY for i in range(5)}}
-    dropbox = FakeDropbox(files=files)
-    with serve_dropbox(dropbox):
-        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
 
-        async def run():
-            ws = _fresh_workspace(vfs)
+    async def run():
+        dropbox = DropboxAccount(dropbox_origin)
+        try:
+            for path, data in files.items():
+                await dropbox.put(path, data)
+            ws = _fresh_workspace(_dropbox_vfs(dropbox))
             try:
                 await _line(ws, "cat /m/d/a.txt")
-                before = len(dropbox.log)
+                await dropbox.run.record_requests()
                 out = await _line(ws, "cat /m/d/a.txt")
-                return out, [
-                    r for r, _ in dropbox.log[before:] if r != "token"
-                ]
+                return out, _dropbox_routes(await dropbox.run.requests())
             finally:
                 await ws.close()
+        finally:
+            await dropbox.run.close()
 
-        out, routes = asyncio.run(run())
+    out, routes = asyncio.run(run())
     assert out == SEED
     assert "list_folder" not in routes
     assert "download" not in routes
@@ -1303,33 +1550,44 @@ def test_a_dropbox_fresh_probe_asks_for_the_file_not_its_folder():
 
 
 @pytest.mark.parametrize("gone", [False, True], ids=["restricted", "deleted"])
-def test_a_dropbox_probe_drops_an_overlay_only_on_a_miss(gone):
+def test_a_dropbox_probe_drops_an_overlay_only_on_a_miss(gone, dropbox_origin):
     # A 409 other than not_found cannot verify the copy: the read fails but
     # the file is not called gone, so chmod's 600 stays. A real miss drops
     # it, so it never carries over to a file re-created at the path.
-    dropbox = FakeDropbox(files={"/d/a.txt": SEED})
-    with serve_dropbox(dropbox):
-        vfs = build_vfs("dropbox", {**DROPBOX_CONFIG, "endpoint": dropbox.url})
 
-        async def run():
-            ws = _fresh_workspace(vfs)
+    async def run():
+        dropbox = DropboxAccount(dropbox_origin)
+        try:
+            await dropbox.put("/d/a.txt", SEED)
+            ws = _fresh_workspace(_dropbox_vfs(dropbox))
             try:
                 await _line(ws, "cat /m/d/a.txt")
                 await _line(ws, "chmod 600 /m/d/a.txt")
                 if gone:
-                    del dropbox.files["/d/a.txt"]
+                    await dropbox.remove("/d/a.txt")
                 else:
-                    dropbox.restricted.add("/d/a.txt")
+                    # Dropbox refuses content it may not serve this way, on
+                    # its metadata and on its download, for as long as the
+                    # restriction stands.
+                    for route in (
+                        "/2/files/get_metadata",
+                        "/2/files/download",
+                    ):
+                        await dropbox.run.answer_next(
+                            "POST", route, 409, RESTRICTED, times=EVERY
+                        )
                 result = await ws.shell("cat /m/d/a.txt")
                 err = await result.stderr_str()
-                dropbox.restricted.clear()
-                dropbox.write("/d/a.txt", SEED)
+                await dropbox.run.clear_answers()
+                await dropbox.put("/d/a.txt", SEED)
                 mode = await _line(ws, "stat -c %a /m/d/a.txt")
                 return result.exit_code, err, mode
             finally:
                 await ws.close()
+        finally:
+            await dropbox.run.close()
 
-        code, err, mode = asyncio.run(run())
+    code, err, mode = asyncio.run(run())
     assert code == 1
     assert ("No such file" in err) is gone
     assert mode == (b"644\n" if gone else b"600\n")
@@ -1586,7 +1844,9 @@ def test_a_rendered_read_is_the_read_it_records_through():
     assert not vfs.supports("read")
 
 
-def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
+def test_the_contract_goes_red_on_github_stamping_another_kind(
+    monkeypatch, request
+):
     # github forced to stamp an md5 of the bytes while stat reports the blob
     # sha: both tokens exist and differ. A whole read streams, so the
     # override replaces what `record_stream` stamps.
@@ -1602,7 +1862,7 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
             revision=revision,
         )
 
-    with _fake("github", "root", SEED, monkeypatch) as fake:
+    with _fake("github", "root", SEED, monkeypatch, request) as fake:
         monkeypatch.setitem(vars(github_read), "record_stream", md5_record)
         virtual = "/m/" + fake.key
 
@@ -1628,45 +1888,80 @@ def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
 
 @pytest.mark.parametrize("name", ["gdocs", "gsheets", "gslides"])
 def test_partial_search_cannot_evict_live_app_bytes_or_overlay(
-    name, monkeypatch
+    name, monkeypatch, request
 ):
-    with _fake(name, "root", SEED, monkeypatch) as fake:
+    with _fake(name, "root", SEED, monkeypatch, request) as fake:
         virtual = "/m/" + fake.key
+        assert fake.searched is not None
+        searched = fake.searched
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
             try:
-                await _line(ws, f"cat {virtual}")
+                first = await _line(ws, f"cat {virtual}")
                 await _line(ws, f"chmod 600 {virtual}")
-                search = AsyncMock(return_value=([], False))
-                monkeypatch.setattr(FakeDriveApi, "list_all_files", search)
                 before = fake.fetches()
-                assert await _line(ws, f"cat {virtual}") == SEED
+                listed = searched()
+                assert await _line(ws, f"cat {virtual}") == first
                 assert await _line(ws, f"stat -c %a {virtual}") == b"600\n"
                 assert fake.fetches() == before
-                search.assert_not_awaited()
+                # Neither the read nor the stat searched Drive.
+                assert searched() == listed
+                return first
             finally:
                 await ws.close()
 
-        asyncio.run(run())
+        first = asyncio.run(run())
+        want = fake.expected(SEED)
+
+    assert first == want
 
 
 DEEP = "a/b/c.txt"
+BOX_INFO = ("GET", "/2.0/files/:file_id")
+FORBIDDEN = {
+    "type": "error",
+    "status": 403,
+    "code": "forbidden",
+    "message": "Access denied - insufficient permission",
+}
+TRASHED = {
+    "type": "error",
+    "status": 404,
+    "code": "trashed",
+    "message": "Item is trashed",
+}
 
 
-def _deep_box(root: str = "") -> FakeBox:
+def _info(file_id: str) -> str:
+    return f"GET /2.0/files/{file_id}"
+
+
+def _content(file_id: str) -> str:
+    return f"GET /2.0/files/{file_id}/content"
+
+
+def _dl(file_id: str) -> str:
+    return f"GET /dl/{file_id}"
+
+
+def _items(folder_id: str) -> str:
+    return f"GET /2.0/folders/{folder_id}/items"
+
+
+async def _deep_box(box: BoxAccount, root: str = "") -> None:
     # Decoys at every level, so a folder listing reads differently from a
     # point lookup by id.
-    files = {f"{root}{DEEP}": SEED}
+    await box.write(f"{root}{DEEP}", SEED)
     for level in ("", "a/", "a/b/"):
-        files.update({f"{root}{level}d{i}.txt": DECOY for i in range(5)})
-    return FakeBox(files=files)
+        for i in range(5):
+            await box.write(f"{root}{level}d{i}.txt", DECOY)
 
 
-def _box_vfs(box: FakeBox, root: str = "") -> BaseVFS:
-    config = {"access_token": "t", "endpoint": box.url}
+async def _box_vfs(box: BoxAccount, root: str = "") -> BaseVFS:
+    config = {"access_token": TOKEN, "endpoint": box.run.url}
     if root:
-        config["root_folder_id"] = box.id_of(root)
+        config["root_folder_id"] = await box.id_of(root)
     return build_vfs("box", config)
 
 
@@ -1676,99 +1971,115 @@ async def _run(ws: Workspace, line: str) -> tuple[int, bytes, str]:
     return result.exit_code, out, await result.stderr_str()
 
 
-def _walk(box: FakeBox) -> list[str]:
-    return ["items:0", f"items:{box.id_of('a')}", f"items:{box.id_of('a/b')}"]
+async def _walk(box: BoxAccount) -> list[str]:
+    return [
+        _items("0"),
+        _items(await box.id_of("a")),
+        _items(await box.id_of("a/b")),
+    ]
 
 
-def _box_case(scenario, root: str = ""):
-    box = _deep_box(root)
-    with serve_box(box):
-        vfs = _box_vfs(box, root)
-
-        async def run():
+def _box_case(origin: str, scenario, root: str = ""):
+    async def run():
+        box = BoxAccount(origin)
+        try:
+            await _deep_box(box, root)
+            vfs = await _box_vfs(box, root)
+            await box.run.record_requests()
             ws = _fresh_workspace(vfs)
             try:
                 return await scenario(ws, box)
             finally:
                 await ws.close()
+        finally:
+            await box.run.close()
 
-        return asyncio.run(run())
+    return asyncio.run(run())
 
 
-def test_a_cold_fresh_box_read_lists_each_level_once_then_downloads():
+def test_a_cold_fresh_box_read_lists_each_level_once_then_downloads(
+    box_origin,
+):
     out, log, walk, fid = _box_case(
-        _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case
+        box_origin,
+        _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case,
     )
     assert out == SEED
-    assert log == walk + [f"content:{fid}", f"dl:{fid}"]
+    assert log == walk + [_content(fid), _dl(fid)]
 
 
 @pytest.mark.parametrize("root", ["", "r/"])
-def test_a_warm_fresh_box_read_is_one_request_by_id(root):
+def test_a_warm_fresh_box_read_is_one_request_by_id(root, box_origin):
     out, log, fid = _box_case(
+        box_origin,
         functools.partial(
             _a_warm_fresh_box_read_is_one_request_by_id_case, root=root
         ),
         root=root,
     )
     assert out == SEED
-    assert log == [f"info:{fid}"]
+    assert log == [_info(fid)]
 
 
-def test_a_fresh_box_read_after_a_tee_probes_once_without_a_download():
+def test_a_fresh_box_read_after_a_tee_probes_once_without_a_download(
+    box_origin,
+):
     async def scenario(ws, box):
         await _line(ws, f"echo new | tee /m/{DEEP}")
-        before = len(box.log)
+        await box.run.record_requests()
         out = await _line(ws, f"cat /m/{DEEP}")
-        return out, box.log[before:], box.id_of(DEEP)
+        return out, await box.run.requests(), await box.id_of(DEEP)
 
-    out, log, fid = _box_case(scenario)
+    out, log, fid = _box_case(box_origin, scenario)
     assert out == b"new\n"
     # The write keeps the row its reply named, so the probe after it is one
     # info by id rather than a parent walk.
-    assert log == [f"info:{fid}"]
+    assert log == [_info(fid)]
 
 
 async def _direct_box_read_case(ws, box):
     assert await ws.vfs.read(f"/m/{DEEP}") == SEED
-    before = len(box.log)
+    await box.run.record_requests()
     assert await ws.vfs.read(f"/m/{DEEP}") == SEED
-    return box.log[before:], box.id_of(DEEP)
+    return await box.run.requests(), await box.id_of(DEEP)
 
 
-def test_direct_warm_fresh_box_read_is_one_request_by_id():
-    log, fid = _box_case(_direct_box_read_case)
-    assert log == [f"info:{fid}"]
+def test_direct_warm_fresh_box_read_is_one_request_by_id(box_origin):
+    log, fid = _box_case(box_origin, _direct_box_read_case)
+    assert log == [_info(fid)]
 
 
-def test_with_its_index_cleared_a_warm_box_read_walks_every_time():
+def test_with_its_index_cleared_a_warm_box_read_walks_every_time(box_origin):
     # Every stale or unknown verdict on the mount clears its index, and a
     # fresh verdict reached by the walk refills only the throwaway store:
     # until a cold read or a listing refills it, each check walks.
 
     logs, walk = _box_case(
-        _with_its_index_cleared_a_warm_box_read_walks_every_time_case
+        box_origin,
+        _with_its_index_cleared_a_warm_box_read_walks_every_time_case,
     )
     assert logs == [walk, walk]
 
 
-def test_a_same_size_box_rewrite_in_the_same_second_is_refetched():
-    # The fake keeps modified_at across writes, as the real service does
-    # within a second: only sha1 tells the two versions apart, and it must
-    # come from Box's live answer, not the cached row.
+def test_a_same_size_box_rewrite_in_the_same_second_is_refetched(box_origin):
+    # The rewrite keeps modified_at, as the real service does within a
+    # second: only sha1 tells the two versions apart, and it must come from
+    # Box's live answer, not the cached row.
 
     out, log, walk, fid = _box_case(
-        _a_same_size_box_rewrite_in_the_same_second_is_refetched_case
+        box_origin,
+        _a_same_size_box_rewrite_in_the_same_second_is_refetched_case,
     )
     assert len(CHANGED) == len(SEED)
     assert out == CHANGED
     # The read is handed the probe's live row, so it downloads by id.
-    assert log == [f"info:{fid}", f"content:{fid}", f"dl:{fid}"]
+    assert log == [_info(fid), _content(fid), _dl(fid)]
 
 
-def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
+def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay(box_origin):
     code, err, log, meta, moved, fid, walk = _box_case(
-        _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case
+        box_origin,
+        _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case,
     )
     assert code == 1
     assert "No such file or directory" in err
@@ -1777,142 +2088,160 @@ def test_a_box_file_moved_outside_is_gone_and_drops_its_overlay():
     # The probe: one info by the hinted id, which places the file elsewhere;
     # its walk lists the old parent chain and misses. GONE clears the mount
     # index, so cat's own stat walks once more.
-    assert log == [f"info:{fid}"] + walk + walk
+    assert log == [_info(fid)] + walk + walk
 
 
 @pytest.mark.parametrize("mode", ["trash", "purge"])
-def test_a_box_file_deleted_and_recreated_is_read_anew(mode):
+def test_a_box_file_deleted_and_recreated_is_read_anew(mode, box_origin):
     async def scenario(ws, box):
         await _line(ws, f"cat /m/{DEEP}")
         await _line(ws, f"chmod 600 /m/{DEEP}")
-        old = box.id_of(DEEP)
-        box.delete(DEEP, mode)
-        new = box.create(DEEP, CHANGED)
-        before = len(box.log)
+        old = await box.id_of(DEEP)
+        await box.remove(DEEP)
+        if mode == "trash":
+            # A trashed file keeps its id, which Box answers as trashed
+            # rather than not found.
+            await box.run.answer_next(
+                *BOX_INFO, 404, TRASHED, times=EVERY, path=f"/2.0/files/{old}"
+            )
+        new = await box.write(DEEP, CHANGED)
+        await box.run.record_requests()
         out = await _line(ws, f"cat /m/{DEEP}")
-        log = box.log[before:]
+        log = await box.run.requests()
         mode_bits = await _line(ws, f"stat -c %a /m/{DEEP}")
-        return out, log, mode_bits, old, new, _walk(box)
+        return out, log, mode_bits, old, new, await _walk(box)
 
-    out, log, mode_bits, old, new, walk = _box_case(scenario)
+    out, log, mode_bits, old, new, walk = _box_case(box_origin, scenario)
     assert out == CHANGED
     # The probe's walk finds the new id, and the read is handed that live
     # row: no second walk.
-    assert log == [f"info:{old}"] + walk + [
-        f"content:{new}",
-        f"dl:{new}",
-    ]
+    assert log == [_info(old)] + walk + [_content(new), _dl(new)]
     # STALE keeps the overlay; reading the purged id's 404 as gone would
     # have dropped it while the walk still printed the new bytes.
     assert mode_bits == b"600\n"
 
 
-def test_a_box_file_recreated_with_the_same_bytes_is_served_warm():
+def test_a_box_file_recreated_with_the_same_bytes_is_served_warm(box_origin):
     logs, old, new, walk = _box_case(
-        _a_box_file_recreated_with_the_same_bytes_is_served_warm_case
+        box_origin,
+        _a_box_file_recreated_with_the_same_bytes_is_served_warm_case,
     )
-    assert logs == [[f"info:{old}"] + walk, [f"info:{new}"]]
+    assert logs == [[_info(old)] + walk, [_info(new)]]
 
 
-def test_a_box_file_under_a_renamed_parent_is_gone():
+def test_a_box_file_under_a_renamed_parent_is_gone(box_origin):
     code, err, renamed, log, fid, to_a = _box_case(
-        _a_box_file_under_a_renamed_parent_is_gone_case
+        box_origin, _a_box_file_under_a_renamed_parent_is_gone_case
     )
     assert code == 1
     assert "No such file or directory" in err
     assert renamed == SEED
     # Each walk stops at a, which no longer holds b: the probe's, then cat's
     # own stat over the cleared index.
-    assert log == [f"info:{fid}"] + to_a + to_a
+    assert log == [_info(fid)] + to_a + to_a
 
 
-def test_a_box_file_under_a_trashed_mount_root_is_gone():
-    # Trashing the root makes metadata for its descendant return not_found.
+def test_a_box_file_under_a_trashed_mount_root_is_gone(box_origin):
+    # Trashing the root makes metadata for its descendant return not_found,
+    # as deleting it does, which stands for it here.
 
     code, out, err, log, root, fid = _box_case(
-        _a_box_file_under_a_trashed_mount_root_is_gone_case, root="r/"
+        box_origin,
+        _a_box_file_under_a_trashed_mount_root_is_gone_case,
+        root="r/",
     )
     assert code == 1
     assert out == b""
     assert "No such file or directory" in err
     # The root's listing 404s each time: the probe's walk, cat's own stat,
     # then the parent listing cat's missing-operand path asks for.
-    assert log == [f"info:{fid}"] + [f"items:{root}"] * 3
+    assert log == [_info(fid)] + [_items(root)] * 3
 
 
-def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk():
+def test_a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk(
+    box_origin,
+):
     out, log, again, mode_bits, fid, walk = _box_case(
-        _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case
+        box_origin,
+        _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case,
     )
     assert out == SEED
     # Each check pays the refused GET and the walk again: an accepted cost.
-    assert log == again == [f"info:{fid}"] + walk
+    assert log == again == [_info(fid)] + walk
     assert mode_bits == b"600\n"
 
 
-def test_a_box_file_with_no_sha1_is_refetched_on_every_fresh_read():
+def test_a_box_file_with_no_sha1_is_refetched_on_every_fresh_read(box_origin):
     # Pinned on purpose: a file Box gives no sha1 cannot be verified, so
     # each fresh read is UNKNOWN -- a cold download and a cleared mount
     # index. That cost is the documented price of an unverifiable file.
 
     out, log, fid, walk = _box_case(
-        _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case
+        box_origin,
+        _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case,
     )
     assert out == SEED
-    assert log == [f"info:{fid}", f"content:{fid}", f"dl:{fid}"]
+    assert log == [_info(fid), _content(fid), _dl(fid)]
 
 
-def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request():
+def test_a_warm_box_ls_shows_what_a_cold_one_does_from_one_request(
+    box_origin,
+):
     # The probe's stat is reused by the command's own stat, so the fields
     # the probe asks for must carry everything ls prints.
 
     cold, warm, log, fid = _box_case(
-        _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case
+        box_origin,
+        _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case,
     )
     assert warm == cold
-    assert log == [f"info:{fid}"]
+    assert log == [_info(fid)]
 
 
 async def _replaced_box_folder_case(ws, box, root="", operand="/m/a/b"):
     await _line(ws, f"ls {operand}")
-    box.rename_folder(f"{root}a/b", "old")
-    box.create(f"{root}a/b/new.txt", b"new listing")
-    box.create(f"{root}{DEEP}", CHANGED)
-    box.log.clear()
+    await box.move(f"{root}a/b", f"{root}a/old")
+    await box.write(f"{root}a/b/new.txt", b"new listing")
+    await box.write(f"{root}{DEEP}", CHANGED)
+    await box.run.record_requests()
     listing = await _line(ws, f"ls {operand}")
     body = await _line(ws, f"cat /m/{DEEP}")
+    log = await box.run.requests()
     walk = [
-        f"items:{box.id_of(root) if root else '0'}",
-        f"items:{box.id_of(root + 'a')}",
-        f"items:{box.id_of(root + 'a/b')}",
+        _items(await box.id_of(root) if root else "0"),
+        _items(await box.id_of(root + "a")),
+        _items(await box.id_of(root + "a/b")),
     ]
-    return listing, body, box.log, walk, box.id_of(root + DEEP)
+    return listing, body, log, walk, await box.id_of(root + DEEP)
 
 
 @pytest.mark.parametrize("root", ["", "sub/"])
 @pytest.mark.parametrize("operand", ["/m/a/b", "/m/a/b/"])
-def test_fresh_box_listing_resolves_replaced_parent_folder(root, operand):
+def test_fresh_box_listing_resolves_replaced_parent_folder(
+    root, operand, box_origin
+):
     async def scenario(ws, box):
         return await _replaced_box_folder_case(ws, box, root, operand)
 
-    listing, body, log, walk, fid = _box_case(scenario, root)
+    listing, body, log, walk, fid = _box_case(box_origin, scenario, root)
     assert listing == b"c.txt\nnew.txt\n"
     assert body == CHANGED
-    assert log == walk + walk + [f"content:{fid}", f"dl:{fid}"]
+    assert log == walk + walk + [_content(fid), _dl(fid)]
 
 
 async def _a_cold_fresh_box_read_lists_each_level_once_then_downloads_case(
     ws, box
 ):
     out = await _line(ws, f"cat /m/{DEEP}")
-    return out, list(box.log), _walk(box), box.id_of(DEEP)
+    log = await box.run.requests()
+    return out, log, await _walk(box), await box.id_of(DEEP)
 
 
 async def _a_warm_fresh_box_read_is_one_request_by_id_case(ws, box, root):
     await _line(ws, f"cat /m/{DEEP}")
-    before = len(box.log)
+    await box.run.record_requests()
     out = await _line(ws, f"cat /m/{DEEP}")
-    return out, box.log[before:], box.id_of(root + DEEP)
+    return out, await box.run.requests(), await box.id_of(root + DEEP)
 
 
 async def _with_its_index_cleared_a_warm_box_read_walks_every_time_case(
@@ -1922,20 +2251,26 @@ async def _with_its_index_cleared_a_warm_box_read_walks_every_time_case(
     logs = []
     for _ in range(2):
         await ws.mount("/m").index.clear()
-        before = len(box.log)
+        await box.run.record_requests()
         assert await _line(ws, f"cat /m/{DEEP}") == SEED
-        logs.append(box.log[before:])
-    return logs, _walk(box)
+        logs.append(await box.run.requests())
+    return logs, await _walk(box)
 
 
 async def _a_same_size_box_rewrite_in_the_same_second_is_refetched_case(
     ws, box
 ):
     await _line(ws, f"cat /m/{DEEP}")
-    box.write(DEEP, CHANGED)
-    before = len(box.log)
+    fid = await box.id_of(DEEP)
+    stamp = (await box.file_info(fid))["modified_at"]
+    await box.write(DEEP, CHANGED)
+    # The fake's clock moves on every write, so the stamp is set back.
+    await box.run.execute(
+        "UPDATE BoxItem SET modified = ? WHERE id = ?", stamp, fid
+    )
+    await box.run.record_requests()
     out = await _line(ws, f"cat /m/{DEEP}")
-    return out, box.log[before:], _walk(box), box.id_of(DEEP)
+    return out, await box.run.requests(), await _walk(box), fid
 
 
 async def _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case(
@@ -1943,49 +2278,49 @@ async def _a_box_file_moved_outside_is_gone_and_drops_its_overlay_case(
 ):
     await _line(ws, f"cat /m/{DEEP}")
     await _line(ws, f"chmod 600 /m/{DEEP}")
-    fid = box.id_of(DEEP)
-    box.move(DEEP, "a/x/c.txt")
-    before = len(box.log)
+    fid = await box.id_of(DEEP)
+    await box.move(DEEP, "a/x/c.txt")
+    await box.run.record_requests()
     code, _, err = await _run(ws, f"cat /m/{DEEP}")
-    log = box.log[before:]
+    log = await box.run.requests()
     meta = ws.namespace.meta_for(f"/m/{DEEP}")
     moved = await _line(ws, "cat /m/a/x/c.txt")
-    return code, err, log, meta, moved, fid, _walk(box)
+    return code, err, log, meta, moved, fid, await _walk(box)
 
 
 async def _a_box_file_recreated_with_the_same_bytes_is_served_warm_case(
     ws, box
 ):
     await _line(ws, f"cat /m/{DEEP}")
-    old = box.id_of(DEEP)
-    box.delete(DEEP, "purge")
-    new = box.create(DEEP, SEED)
+    old = await box.id_of(DEEP)
+    await box.remove(DEEP)
+    new = await box.write(DEEP, SEED)
     logs = []
     for _ in range(2):
-        before = len(box.log)
+        await box.run.record_requests()
         assert await _line(ws, f"cat /m/{DEEP}") == SEED
-        logs.append(box.log[before:])
-    return logs, old, new, _walk(box)
+        logs.append(await box.run.requests())
+    return logs, old, new, await _walk(box)
 
 
 async def _a_box_file_under_a_renamed_parent_is_gone_case(ws, box):
     await _line(ws, f"cat /m/{DEEP}")
-    fid, to_a = box.id_of(DEEP), _walk(box)[:2]
-    box.rename_folder("a/b", "b2")
-    before = len(box.log)
+    fid, to_a = await box.id_of(DEEP), (await _walk(box))[:2]
+    await box.move("a/b", "a/b2")
+    await box.run.record_requests()
     code, _, err = await _run(ws, f"cat /m/{DEEP}")
-    log = box.log[before:]
+    log = await box.run.requests()
     renamed = await _line(ws, "cat /m/a/b2/c.txt")
     return code, err, renamed, log, fid, to_a
 
 
 async def _a_box_file_under_a_trashed_mount_root_is_gone_case(ws, box):
     await _line(ws, f"cat /m/{DEEP}")
-    root, fid = box.id_of("r"), box.id_of("r/" + DEEP)
-    box.delete("r", "trash_ancestor")
-    before = len(box.log)
+    root, fid = await box.id_of("r"), await box.id_of("r/" + DEEP)
+    await box.remove("r")
+    await box.run.record_requests()
     code, out, err = await _run(ws, f"cat /m/{DEEP}")
-    return code, out, err, box.log[before:], root, fid
+    return code, out, err, await box.run.requests(), root, fid
 
 
 async def _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case(
@@ -1993,27 +2328,29 @@ async def _a_box_file_the_user_lost_info_access_to_is_checked_by_the_walk_case(
 ):
     await _line(ws, f"cat /m/{DEEP}")
     await _line(ws, f"chmod 600 /m/{DEEP}")
-    fid = box.id_of(DEEP)
-    box.forbidden.add(fid)
-    before = len(box.log)
+    fid = await box.id_of(DEEP)
+    await box.run.answer_next(
+        *BOX_INFO, 403, FORBIDDEN, times=EVERY, path=f"/2.0/files/{fid}"
+    )
+    await box.run.record_requests()
     out = await _line(ws, f"cat /m/{DEEP}")
-    log = box.log[before:]
+    log = await box.run.requests()
     mode_bits = await _line(ws, f"stat -c %a /m/{DEEP}")
-    before = len(box.log)
+    await box.run.record_requests()
     assert await _line(ws, f"cat /m/{DEEP}") == SEED
-    again = box.log[before:]
-    return out, log, again, mode_bits, fid, _walk(box)
+    again = await box.run.requests()
+    return out, log, again, mode_bits, fid, await _walk(box)
 
 
 async def _a_box_file_with_no_sha1_is_refetched_on_every_fresh_read_case(
     ws, box
 ):
-    fid = box.id_of(DEEP)
-    box.unhashed.add(fid)
+    fid = await box.id_of(DEEP)
+    await box.unhash(fid)
     await _line(ws, f"cat /m/{DEEP}")
-    before = len(box.log)
+    await box.run.record_requests()
     out = await _line(ws, f"cat /m/{DEEP}")
-    return out, box.log[before:], fid, _walk(box)
+    return out, await box.run.requests(), fid, await _walk(box)
 
 
 async def _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case(
@@ -2021,6 +2358,6 @@ async def _a_warm_box_ls_shows_what_a_cold_one_does_from_one_request_case(
 ):
     cold = await _line(ws, f"ls -l /m/{DEEP}")
     await _line(ws, f"cat /m/{DEEP}")
-    before = len(box.log)
+    await box.run.record_requests()
     warm = await _line(ws, f"ls -l /m/{DEEP}")
-    return cold, warm, box.log[before:], box.id_of(DEEP)
+    return cold, warm, await box.run.requests(), await box.id_of(DEEP)

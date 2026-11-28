@@ -31,16 +31,16 @@ from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.utils.dates import to_iso_z
 from tests.core.discord.conftest import FakeDiscordApi
 from tests.core.slack.conftest import USERS, FakeSlack
-from tests.e2e.gdrive_mock import (
+from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
+from tests.sim.dropbox import FakeDropbox
+from tests.sim.gdrive import (
     _FAKE_EXPIRES_IN,
     _FAKE_TOKEN,
     FakeDriveApi,
     FakeGDrive,
     FakeRenderApi,
 )
-from tests.e2e.s3_mock import CONDITION_KEYS, S3_SESSION, MultiBucketS3Client
-from tests.fixtures.dropbox_api import FakeDropbox
-from tests.fixtures.github_mock import (
+from tests.sim.github import (
     MOCK_BLOBS,
     MOCK_DEFAULT_BRANCH,
     MOCK_TREE,
@@ -134,12 +134,8 @@ DISCORD_OPS = frozenset(
 )
 
 RAM_CLOCKED = (
-    "copy",
-    "create",
     "mkdir",
-    "pwrite",
     "rename",
-    "truncate",
     "write",
 )
 
@@ -1286,9 +1282,15 @@ def route_ram(clock: SimClock) -> Iterator[None]:
     def now_iso() -> str:
         return to_iso_z(datetime.fromtimestamp(clock.now(), timezone.utc))
 
+    def stamp_after(last: int) -> int:
+        return max(round(clock.now() * 1_000_000_000), last + 1)
+
     with ExitStack() as stack:
         for mod in RAM_CLOCKED:
             stack.enter_context(
                 patch(f"mirage.core.ram.{mod}.now_iso", new=now_iso)
             )
+        stack.enter_context(
+            patch("mirage.accessor.ram.stamp_after", new=stamp_after)
+        )
         yield

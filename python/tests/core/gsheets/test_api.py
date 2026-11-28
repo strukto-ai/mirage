@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from mirage.core.gsheets.api import SheetsApi, SheetsClient
-from tests.e2e.gdrive_mock import FakeRenderApi
 from tests.fixtures.google_api import parameter_drift
+from tests.sim.gdrive import FakeRenderApi
 
 MANAGER = SimpleNamespace(config=SimpleNamespace(api_base=""))
 

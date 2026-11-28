@@ -692,12 +692,16 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * recorded as `read` records it, fingerprint included, so the read cache
    * keeps its token. A VFS that needs what the listings hold declares
    * `readMany` in `handed` and gets each path's `Handed`, in the order of
-   * `paths`. Mirrors Python's `read_many`.
+   * `paths`. `room` is the most bytes the files it answers may come to
+   * together, null for no bound; a VFS that reads a batch itself leaves out a
+   * file that would pass it before fetching its bytes. Mirrors Python's
+   * `read_many`.
    */
   readMany(
     paths: PathSpec[],
     _limit: number,
     _handed?: readonly Handed[],
+    _room?: number | null,
   ): Promise<Map<string, Uint8Array>> {
     return Promise.reject(enotsup(this.name, 'read', paths[0] ?? ''))
   }

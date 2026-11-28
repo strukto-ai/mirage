@@ -12,18 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { GCalAccessor } from '../../accessor/gcal.ts'
 import type { Workspace } from '../../workspace/workspace/workspace.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import type { GoogleAccount } from '../../../tests/fixtures/google_account.ts'
 import {
-  API,
-  EVENTS,
   HK,
-  installCalendar,
+  calendarAccount,
+  eventListings,
   makeAccessor,
   spec,
-} from '../../../tests/core/gcal/_test_util.ts'
+} from '../../../tests/fixtures/gcal_seed.ts'
 
 const { readMany } = await import('./read.ts')
 const { GCalVFS } = await import('../../vfs/gcal/gcal.ts')
@@ -55,9 +56,19 @@ const WEEK = '/primary/2026-08-10--2026-08-16'
 const PHD = 'aaaa1__0900-1030_PhD_Defense.gcal.json'
 const DATED_PHD = 'aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json'
 
-beforeEach(() => {
-  API.reset()
-  installCalendar()
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(async () => {
+  account = await calendarAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 function parsed(bytes: Uint8Array): Record<string, unknown> {
@@ -72,10 +83,12 @@ describe('gcal read', () => {
   ])('serves the unmodified API payload on a %i-day mount', async (size, path) => {
     // The names are a view; the payload, original offsets included, is what
     // an absolute-instant comparison is made against.
-    expect(parsed(await read(makeAccessor({ bucket_days: size }), spec(path)))).toEqual(EVENTS[0])
-    // Only the day the name is on is queried, whatever the bucket's size.
-    expect(API.listed).toEqual([
-      ['integ@example.com', '2026-08-11T00:00:00+08:00', '2026-08-12T00:00:00+08:00'],
+    const body = await read(makeAccessor(account, { bucket_days: size }), spec(path))
+    expect(parsed(body)).toEqual(await account.eventItem('aaaa1'))
+    // Only the day the name is on is queried, whatever the bucket's size:
+    // 2026-08-11 in Hong Kong, sent in UTC.
+    expect(await eventListings(account)).toEqual([
+      ['integ@example.com', '2026-08-10T16:00:00.000Z', '2026-08-11T16:00:00.000Z'],
     ])
   })
 
@@ -91,7 +104,7 @@ describe('gcal read', () => {
       { calendarTimeZone: 'America/Los_Angeles', bucketTimeZone: HK },
     ],
   ])('renders %s with the role and bucket zone', async (path, fields) => {
-    expect(parsed(await read(makeAccessor(), spec(path)))).toMatchObject(fields)
+    expect(parsed(await read(makeAccessor(account), spec(path)))).toMatchObject(fields)
   })
 
   it('reports a directory read as EISDIR once its stat proves it', async () => {
@@ -99,13 +112,13 @@ describe('gcal read', () => {
     // reports absence; the dispatcher's stat proves a calendar that exists,
     // and the read through the mount answers EISDIR, as the mount root does.
     // A calendar that does not exist stays absent.
-    await expect(read(makeAccessor(), spec('/primary'))).rejects.toMatchObject({
+    await expect(read(makeAccessor(account), spec('/primary'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
-    await expect(read(makeAccessor(), spec('/'))).rejects.toMatchObject({
+    await expect(read(makeAccessor(account), spec('/'))).rejects.toMatchObject({
       code: 'EISDIR',
     })
-    await expect(read(makeAccessor(), spec('/nope'))).rejects.toMatchObject({
+    await expect(read(makeAccessor(account), spec('/nope'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
@@ -121,7 +134,7 @@ describe('gcal read', () => {
     [7, `${WEEK}/aaaa1__2026-08-18_0900-1030_PhD_Defense.gcal.json`],
     [7, `/primary/2026-08-11/${PHD}`],
   ])('is ENOENT on a %i-day mount for %s', async (size, path) => {
-    await expect(read(makeAccessor({ bucket_days: size }), spec(path))).rejects.toThrow()
+    await expect(read(makeAccessor(account, { bucket_days: size }), spec(path))).rejects.toThrow()
   })
 })
 
@@ -135,22 +148,22 @@ it('lists each day of a batch once', async () => {
     '/primary/calendar.json',
   ]
   const answers = await readMany(
-    makeAccessor(),
+    makeAccessor(account),
     paths.map((path) => spec(path)),
     1 << 20,
   )
   expect(new Map([...answers].map(([path, body]) => [path, parsed(body)]))).toEqual(
     new Map([
-      [paths[0], EVENTS[0]],
-      [paths[1], EVENTS[1]],
+      [paths[0], await account.eventItem('aaaa1')],
+      [paths[1], await account.eventItem('bbbb2')],
     ]),
   )
-  expect(API.listed).toHaveLength(1)
+  expect(await eventListings(account)).toHaveLength(1)
   // An event past the limit is left out for its own read.
   const [small] = [...answers].sort(([, a], [, b]) => a.byteLength - b.byteLength)
   if (small === undefined) throw new Error('two events answered')
   const capped = await readMany(
-    makeAccessor(),
+    makeAccessor(account),
     paths.map((path) => spec(path)),
     small[1].byteLength,
   )

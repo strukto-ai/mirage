@@ -34,7 +34,7 @@ import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { create as opfsCreate } from '../../core/opfs/create.ts'
 import { exists as opfsExists } from '../../core/opfs/exists.ts'
 import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
-import { read as opfsRead } from '../../core/opfs/read.ts'
+import { read as opfsRead, readMany as opfsReadMany } from '../../core/opfs/read.ts'
 import { readdir as opfsReaddir } from '../../core/opfs/readdir.ts'
 import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
@@ -184,6 +184,15 @@ export class OPFSVFS extends BaseVFS {
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return opfsStream(this.accessor, path)
     return opfsRead(this.accessor, path, size === null ? { offset } : { offset, size })
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    _handed?: readonly Handed[],
+    room: number | null = null,
+  ): Promise<Map<string, Uint8Array>> {
+    return opfsReadMany(this.accessor, paths, limit, room)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {

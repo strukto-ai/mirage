@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -22,75 +21,83 @@ from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
-from tests.fixtures.gsheets_api import StubSheets
+from tests.fixtures.google_account import FILE, FILES
 from tests.fixtures.mounted import Mounted
 
+APP = "/gsheets"
+MIME = "application/vnd.google-apps.spreadsheet"
+SUFFIX = ".gsheet.json"
 
-@pytest.fixture
-def accessor():
-    return GSheetsAccessor(config=None, token_manager=offline_token_manager())
+
+def _accessor(google_account, clock=None) -> GSheetsAccessor:
+    manager = google_account.token_manager(clock)
+    return GSheetsAccessor(config=manager.config, token_manager=manager)
 
 
-@pytest.mark.asyncio
-async def test_a_read_no_listing_named_resolves_by_id(accessor):
+def _spec(virtual: str, pattern: str | None = None) -> PathSpec:
+    directory = virtual.rsplit("/", 1)[0] if pattern else virtual
+    return PathSpec(
+        vfs_path=mount_key(virtual, APP),
+        virtual=virtual,
+        directory=directory,
+        pattern=pattern,
+    )
+
+
+async def _made(google_account, name: str, stamp: str) -> str:
+    """Make a file of the app named ``name``, stamped ``stamp``, and
+    answer its id.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        name (str): its title.
+        stamp (str): its modified time.
+    """
+    made = await google_account.create(name, MIME)
+    await google_account.patch(made, modifiedTime=stamp)
+    return made
+
+
+async def _answer_listing(google_account, **fields_by_id) -> None:
+    """Answer the next listing with the fake's own listing of the app's
+    files, each file named in ``fields_by_id`` with those fields set: what
+    the fake keeps no model of, as another owner or a native file's size.
+
+    Args:
+        google_account (GoogleAccount): the account.
+        **fields_by_id: file id to the fields its row carries.
+    """
+    listing = await google_account.run.call(
+        "GET", FILES, params={"q": f"mimeType = '{MIME}'"}
+    )
     files = [
-        {
-            "mimeType": "application/vnd.google-apps.spreadsheet",
-            "id": "sheet1",
-            "name": "Budget",
-            "modifiedTime": "2026-04-01T00:00:00.000Z",
-            "owners": [{"me": True}],
-        }
+        {**row, **fields_by_id.get(row["id"], {})} for row in listing["files"]
     ]
-    with (
-        serve(
-            drive=StubDrive(get_file=AsyncMock(return_value=files[0])),
-            sheets=StubSheets(
-                read_spreadsheet=AsyncMock(
-                    return_value=b'{"spreadsheetId":"sheet1"}'
-                )
-            ),
-        ),
-    ):
-        path = PathSpec(
-            vfs_path=mount_key(
-                "/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json",
-                "/gsheets",
-            ),
-            virtual="/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json",
-            directory="/gsheets/owned/2026-04-01_Budget__sheet1.gsheet.json",
-        )
-        result = await read(accessor, path)
-        assert b"sheet1" in result
+    await google_account.run.answer_next(
+        "GET", FILES, 200, {**listing, "files": files}
+    )
 
 
 @pytest.mark.asyncio
-async def test_read_missing_file_raises_by_id(accessor):
-    with (
-        serve(
-            drive=StubDrive(
-                get_file=AsyncMock(side_effect=FileNotFoundError("missing"))
-            ),
-            sheets=StubSheets(
-                read_spreadsheet=AsyncMock(
-                    side_effect=AssertionError(
-                        "should not call read_spreadsheet"
-                    )
-                )
-            ),
-        ),
-    ):
-        path = PathSpec(
-            vfs_path=mount_key(
-                "/gsheets/owned/Missing__xyz.gsheet.json", "/gsheets"
-            ),
-            virtual="/gsheets/owned/Missing__xyz.gsheet.json",
-            directory="/gsheets/owned/Missing__xyz.gsheet.json",
-        )
-        with pytest.raises(FileNotFoundError):
-            await read(accessor, path)
+async def test_a_read_no_listing_named_resolves_by_id(google_account):
+    made = await _made(google_account, "Notes", "2026-04-01T00:00:00.000Z")
+    path = _spec(f"{APP}/owned/2026-04-01_Notes__{made}{SUFFIX}")
+    await google_account.run.record_requests()
+    result = await read(_accessor(google_account), path)
+    assert made.encode() in result
+    assert [name for name, _ in await google_account.log()] == [
+        "get",
+        "GET /v4/spreadsheets/:id",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_read_missing_file_raises_by_id(google_account):
+    await google_account.run.record_requests()
+    path = _spec(f"{APP}/owned/Missing__xyz{SUFFIX}")
+    with pytest.raises(FileNotFoundError):
+        await read(_accessor(google_account), path)
+    assert [name for name, _ in await google_account.log()] == ["get"]
 
 
 @pytest.mark.asyncio
@@ -98,40 +105,27 @@ async def test_read_missing_file_raises_by_id(accessor):
     ("stamp", "token"),
     [("2026-04-01T00:00:00.000Z", "2026-04-01T00:00:00.000Z"), ("", None)],
 )
-async def test_read_records_the_token_stat_reports(accessor, stamp, token):
+async def test_read_records_the_token_stat_reports(
+    google_account, stamp, token
+):
     # read: fresh compares this record with stat's fingerprint, so both take
     # the file's modified stamp, and a file without one stamps nothing.
-    item = {
-        "mimeType": "application/vnd.google-apps.spreadsheet",
-        "id": "s1",
-        "name": "My Sheet",
-        "modifiedTime": stamp,
-        "owners": [{"me": True}],
-    }
-    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
+    made = await _made(google_account, "My Sheet", "2026-04-01T00:00:00.000Z")
+    if not stamp:
+        # A file Drive gives no modified time: its own item without one,
+        # on the listing and on the lookup.
+        await _answer_listing(google_account, **{made: {"modifiedTime": ""}})
+        item = await google_account.item(made)
+        await google_account.run.answer_next(
+            "GET", FILE, 200, {**item, "modifiedTime": ""}, times=2
+        )
+    accessor = _accessor(google_account)
+    mounted = Mounted(GSheetsVFS, accessor, APP)
     scope = RecordingScope()
     try:
-        with (
-            serve(
-                drive=StubDrive(
-                    list_all_files=AsyncMock(return_value=([item], True)),
-                    get_file=AsyncMock(return_value=item),
-                ),
-                sheets=StubSheets(
-                    read_spreadsheet=AsyncMock(
-                        return_value=b'{"spreadsheetId":"s1"}'
-                    )
-                ),
-            ),
-        ):
-            (target,) = await mounted.readdir("/owned")
-            path = PathSpec(
-                vfs_path=mount_key(target, "/gsheets"),
-                virtual=target,
-                directory=target,
-            )
-            data = await read(accessor, path)
-            info = await mounted.stat(path)
+        (target,) = await mounted.readdir(_spec(f"{APP}/owned"))
+        data = await read(accessor, _spec(target))
+        info = await mounted.stat(_spec(target))
     finally:
         scope.close()
 

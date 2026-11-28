@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
+import json
 
 import pytest
 
@@ -20,11 +20,13 @@ from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
-from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
+APP = "/gsheets"
+MIME = "application/vnd.google-apps.spreadsheet"
 
-def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
+
+def _scope(path: str, prefix: str = APP) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, prefix),
         virtual=path,
@@ -32,40 +34,28 @@ def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GSheetsAccessor(config=None, token_manager=offline_token_manager())
+def _accessor(google_account) -> GSheetsAccessor:
+    manager = google_account.token_manager()
+    return GSheetsAccessor(config=manager.config, token_manager=manager)
 
 
 @pytest.mark.asyncio
-async def test_read_calls_core(accessor):
+async def test_read_calls_core(google_account):
+    made = await google_account.create("Budget", MIME)
+    await google_account.patch(made, modifiedTime="2026-04-01T00:00:00.000Z")
     fn = call_over(GSheetsVFS, "read_sheet")
-    with patch(
-        "mirage.vfs.gsheets.gsheets._read",
-        new_callable=AsyncMock,
-        return_value=b'{"spreadsheetId": "sheet1"}',
-    ) as mock:
-        scope = _scope("/gsheets/owned/Budget__sheet1.gsheet.json")
-        result = await fn(accessor, scope)
-        mock.assert_called_once_with(
-            accessor,
-            _scope(
-                "/gsheets/owned/Budget__sheet1.gsheet.json", prefix="/gsheets"
-            ),
+    result = await fn(
+        _accessor(google_account),
+        _scope(f"{APP}/owned/2026-04-01_Budget__{made}.gsheet.json"),
+    )
+    assert json.loads(result)["spreadsheetId"] == made
+
+
+@pytest.mark.asyncio
+async def test_read_not_found(google_account):
+    fn = call_over(GSheetsVFS, "read_sheet")
+    with pytest.raises(FileNotFoundError):
+        await fn(
+            _accessor(google_account),
+            _scope(f"{APP}/owned/Nonexistent__doc9.gsheet.json"),
         )
-        assert b"sheet1" in result
-
-
-@pytest.mark.asyncio
-async def test_read_not_found(accessor):
-    fn = call_over(GSheetsVFS, "read_sheet")
-    with patch(
-        "mirage.vfs.gsheets.gsheets._read",
-        new_callable=AsyncMock,
-        side_effect=FileNotFoundError("not found"),
-    ):
-        with pytest.raises(FileNotFoundError):
-            await fn(
-                accessor,
-                _scope("/gsheets/owned/Nonexistent__sheet9.gsheet.json"),
-            )

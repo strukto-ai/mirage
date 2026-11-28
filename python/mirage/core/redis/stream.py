@@ -19,7 +19,6 @@ from mirage.core.redis.dest import lookup_error
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
-from mirage.utils.key_prefix import raw_path_of
 from mirage.utils.path import norm
 
 
@@ -28,9 +27,8 @@ async def read_stream(
     path: PathSpec,
 ) -> AsyncIterator[bytes]:
     virtual = path.virtual
-    raw = raw_path_of(path)
     store = accessor.store
-    key = norm(raw)
+    key = norm(path.mount_path)
     data = await store.get_file(key)
     if data is None:
         if await store.has_dir(key):

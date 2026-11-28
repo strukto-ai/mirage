@@ -12,91 +12,101 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
+import { createHash } from 'node:crypto'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DirListing, FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { DriveFile } from '../google/drive.ts'
+import { GoogleApiError } from '../google/client.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import {
-  FakeDrive,
-  type StubDrive,
-  driveError,
-  makeGDriveAccessor,
-  stubDrive,
-} from '../../../tests/core/gdrive/_test_util.ts'
+  DRIVES,
+  FILE,
+  FILES,
+  GoogleAccount,
+  UNTIL_CLEARED,
+  type DriveListing,
+} from '../../../tests/core/google/account.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { liveRow, readdir } from './readdir.ts'
 
-const FOLDER_MIME = 'application/vnd.google-apps.folder'
 const DOC_MIME = 'application/vnd.google-apps.document'
 const ROOT = new PathSpec({ vfsPath: '', virtual: '/', directory: '/' })
+const TIMEOUT = 0.2
 
-let drive: StubDrive
+let origin: string
+let account: GoogleAccount
 
-function makeAccessor(): GDriveAccessor {
-  return makeGDriveAccessor(drive)
-}
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
-function file(
-  id: string,
-  name: string,
-  mimeType = 'text/plain',
-  more: Partial<DriveFile> = {},
-): DriveFile {
-  return { id, name, mimeType, modifiedTime: '2026-04-01T00:00:00.000Z', ...more }
-}
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 function rows(listed: readonly FileStat[] | DirListing): Map<string, FileStat> {
   const found = listed instanceof DirListing ? listed.entries : listed
   return new Map(found.map((row) => [row.name, row]))
 }
 
-beforeEach(() => {
-  drive = stubDrive()
-  drive.listSharedDrives.mockResolvedValue([])
-})
+/**
+ * `listing` with `fields` set on the row named `name`, a field set to null
+ * taken off it.
+ */
+function withFields(
+  listing: DriveListing,
+  name: string,
+  fields: Record<string, string | null>,
+): DriveListing {
+  return {
+    ...listing,
+    files: listing.files.map((row) => {
+      if (row.name !== name) return row
+      const changed = Object.fromEntries(
+        Object.entries({ ...row, ...fields }).filter(([key]) => fields[key] !== null),
+      )
+      return changed as typeof row
+    }),
+  }
+}
+
+function md5(data: string): string {
+  return createHash('md5').update(data).digest('hex')
+}
 
 // Mirrors python's test_a_stat_after_the_listings_drop_lists_the_ids_again.
 describe('a stat after the listings drop', () => {
   it.each(['updated', 'deleted', 'renamed-folder'])('lists the ids again: %s', async (change) => {
-    let refreshed = false
-    const calls: string[] = []
-    drive.listFiles.mockImplementation((options) => {
-      const folderId = options.folderId
-      calls.push(folderId)
-      if (folderId === 'root') {
-        if (!refreshed) return Promise.resolve([file('old-folder', 'docs', FOLDER_MIME)])
-        const name = change === 'renamed-folder' ? 'renamed' : 'docs'
-        return Promise.resolve([file('new-folder', name, FOLDER_MIME)])
-      }
-      expect(folderId).toBe(refreshed ? 'new-folder' : 'old-folder')
-      if (refreshed && change === 'deleted') return Promise.resolve([])
-      return Promise.resolve([
-        file(refreshed ? 'new-file' : 'old-file', 'report.pdf', 'application/pdf', {
-          size: refreshed ? '42' : '3',
-        }),
-      ])
-    })
-    const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
-    Object.assign(vfs, { accessor: makeAccessor() })
+    const oldFolder = await account.folder('docs')
+    await account.upload('report.pdf', 'old', oldFolder)
+    const vfs = new GoogleDriveVFS(account.config())
     const ws = new Workspace({ '/drive/': vfs }, { mode: MountMode.READ })
     try {
       await ws.dispatch('readdir', '/drive/docs')
       await ws.mount('/drive/').indexStore.invalidate()
-      refreshed = true
-      calls.length = 0
+      await account.delete(oldFolder)
+      const newFolder = await account.folder(change === 'renamed-folder' ? 'renamed' : 'docs')
+      const newFile =
+        change === 'deleted' ? null : await account.upload('report.pdf', 'x'.repeat(42), newFolder)
+      await account.run.recordRequests()
       if (change === 'updated') {
         const result = (await ws.dispatch('stat', '/drive/docs/report.pdf')) as FileStat
-        expect(result.extra.file_id).toBe('new-file')
+        expect(result.extra.file_id).toBe(newFile)
         expect(result.size).toBe(42)
       } else {
         await expect(ws.dispatch('stat', '/drive/docs/report.pdf')).rejects.toMatchObject({
           code: 'ENOENT',
         })
       }
-      expect(calls[0]).toBe('root')
-      expect(calls).not.toContain('old-folder')
+      const listed = (await account.log()).filter(([name]) => name === 'list').map(([, d]) => d)
+      expect(listed[0]).toBe('root')
+      expect(listed).not.toContain(oldFolder)
     } finally {
       await ws.close()
     }
@@ -105,36 +115,39 @@ describe('a stat after the listings drop', () => {
 
 describe('gdrive readdir', () => {
   it('lists the root', async () => {
-    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
-    expect(listed.get('readme.txt')?.extra.file_id).toBe('f1')
+    const made = await account.upload('readme.txt', 'hi')
+    const listed = rows(await readdir(account.driveAccessor(), ROOT))
+    expect(listed.get('readme.txt')?.extra.file_id).toBe(made)
   })
 
   it('lists a folder by the id its row names, in its shared drive', async () => {
-    drive.listFiles.mockResolvedValue([file('f2', 'notes.txt')])
+    // The row names the folder "docs" but carries the id of "other": the
+    // listing follows the id and the drive, never the name.
+    const drive = await account.sharedDrive('Team')
+    await account.upload('notes.txt', 'n', await account.folder('docs', drive))
+    const other = await account.folder('other', drive)
+    await account.upload('x.txt', 'x', other)
     const folder = new FileStat({
       name: 'docs',
       type: FileType.DIRECTORY,
-      extra: { file_id: 'folder1', drive_id: 'drive1' },
+      extra: { file_id: other, drive_id: drive },
     })
+    await account.run.recordRequests()
     const listed = rows(
       await readdir(
-        makeAccessor(),
+        account.driveAccessor(),
         new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
         folder,
       ),
     )
-    expect([...listed.keys()]).toEqual(['notes.txt'])
-    expect(drive.listFiles.mock.calls[0]?.[0]).toEqual({
-      folderId: 'folder1',
-      driveId: 'drive1',
-    })
+    expect([...listed.keys()]).toEqual(['x.txt'])
+    expect((await account.listings()).map((l) => [l.folders, l.drive])).toEqual([[[other], drive]])
   })
 
   it('answers ENOENT for nothing', async () => {
     await expect(
       readdir(
-        makeAccessor(),
+        account.driveAccessor(),
         new PathSpec({ vfsPath: 'docs', virtual: '/docs', directory: '/docs' }),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
@@ -144,75 +157,89 @@ describe('gdrive readdir', () => {
     // Listing a file's own id answers with an empty child set rather than an
     // error, so the row has to refuse at the file itself or `/a.txt/x` comes
     // back ENOENT where opendir(2) says ENOTDIR.
-    const row = new FileStat({ name: 'a.txt', type: FileType.FILE, extra: { file_id: 'f1' } })
+    const made = await account.upload('a.txt', 'a')
+    const row = new FileStat({ name: 'a.txt', type: FileType.FILE, extra: { file_id: made } })
+    await account.run.recordRequests()
     await expect(
       readdir(
-        makeAccessor(),
+        account.driveAccessor(),
         new PathSpec({ vfsPath: 'a.txt', virtual: '/a.txt', directory: '/a.txt' }),
         row,
       ),
     ).rejects.toMatchObject({ code: 'ENOTDIR' })
-    expect(drive.listFiles).not.toHaveBeenCalled()
+    expect(await account.log()).toEqual([])
   })
 })
 
 describe('readdir shared drives', () => {
   it('surfaces shared drives as top-level directories', async () => {
-    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
-    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
+    await account.upload('readme.txt', 'hi')
+    const drive = await account.sharedDrive('Team Drive')
+    const listed = rows(await readdir(account.driveAccessor(), ROOT))
     expect(listed.has('readme.txt')).toBe(true)
     expect(listed.get('Team Drive')?.type).toBe(FileType.DIRECTORY)
-    expect(listed.get('Team Drive')?.extra.drive_id).toBe('drive1')
+    expect(listed.get('Team Drive')?.extra.drive_id).toBe(drive)
   })
 
   it('uniquifies duplicate shared drive names', async () => {
-    drive.listFiles.mockResolvedValue([])
-    drive.listSharedDrives.mockResolvedValue([
-      { id: 'drive1', name: 'Team' },
-      { id: 'drive2', name: 'Team' },
-      { id: 'drive3', name: 'Team' },
-    ])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
+    const first = await account.sharedDrive('Team')
+    const second = await account.sharedDrive('Team')
+    const third = await account.sharedDrive('Team')
+    const listed = rows(await readdir(account.driveAccessor(), ROOT))
     expect([...listed.keys()]).toEqual(['Team', 'Team [Shared Drive 2]', 'Team [Shared Drive]'])
-    expect(listed.get('Team')?.extra.file_id).toBe('drive1')
-    expect(listed.get('Team [Shared Drive]')?.extra.file_id).toBe('drive2')
-    expect(listed.get('Team [Shared Drive 2]')?.extra.file_id).toBe('drive3')
+    expect(listed.get('Team')?.extra.file_id).toBe(first)
+    expect(listed.get('Team [Shared Drive]')?.extra.file_id).toBe(second)
+    expect(listed.get('Team [Shared Drive 2]')?.extra.file_id).toBe(third)
   })
 
-  it.each([
-    ['forbidden', driveError(403, 'Insufficient scope')],
-    ['dropped', new TypeError('fetch failed')],
-    ['timeout', new DOMException('The operation timed out.', 'TimeoutError')],
-  ])('answers a root short of its shared drives as partial: %s', async (_name, failure) => {
-    // A short root listing must not be kept as the directory: it would hold
-    // the mount My-Drive-only until it expires, long after the cause (a
-    // missing scope) is fixed. The rows are real, so they come back as a
-    // partial listing, and the next readdir retries enumeration.
-    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
-    drive.listSharedDrives.mockRejectedValue(failure)
-    const short = await readdir(makeAccessor(), ROOT)
-    expect(short).toBeInstanceOf(DirListing)
-    expect((short as DirListing).partial).toBe(true)
-    expect(rows(short).get('readme.txt')?.extra.file_id).toBe('f1')
-    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team' }])
-    const full = await readdir(makeAccessor(), ROOT)
-    expect(full).not.toBeInstanceOf(DirListing)
-    expect(rows(full).has('Team')).toBe(true)
-  })
+  it.each(['forbidden', 'dropped', 'timeout'])(
+    'answers a root short of its shared drives as partial: %s',
+    async (failure) => {
+      // A short root listing must not be kept as the directory: it would hold
+      // the mount My-Drive-only until it expires, long after the cause (a
+      // missing scope) is fixed. The rows are real, so they come back as a
+      // partial listing, and the next readdir retries enumeration.
+      const made = await account.upload('readme.txt', 'hi')
+      await account.sharedDrive('Team')
+      if (failure === 'forbidden') {
+        await account.refuse('GET', DRIVES, 403, 'Insufficient scope')
+      } else {
+        await account.run.answerNext(
+          'GET',
+          DRIVES,
+          failure === 'timeout' ? 200 : null,
+          undefined,
+          UNTIL_CLEARED,
+          undefined,
+          undefined,
+          failure === 'timeout' ? TIMEOUT * 5000 : 0,
+        )
+      }
+      const refused = account.driveAccessor(new ManualClock(), { timeout: TIMEOUT })
+      const short = await readdir(refused, ROOT)
+      expect(short).toBeInstanceOf(DirListing)
+      expect((short as DirListing).partial).toBe(true)
+      expect(rows(short).get('readme.txt')?.extra.file_id).toBe(made)
+      expect(rows(short).has('Team')).toBe(false)
+      await account.run.clearAnswers()
+      const full = await readdir(account.driveAccessor(), ROOT)
+      expect(full).not.toBeInstanceOf(DirListing)
+      expect(rows(full).has('Team')).toBe(true)
+    },
+  )
 
   it('raises any other fault in listing the shared drives', async () => {
     // Only Drive refusing or the network failing makes the root partial; any
-    // other fault is raised, not hidden behind a My-Drive-only listing.
-    drive.listFiles.mockResolvedValue([file('f1', 'readme.txt')])
-    drive.listSharedDrives.mockRejectedValue(new RangeError('nextPageToken'))
-    await expect(readdir(makeAccessor(), ROOT)).rejects.toThrow(RangeError)
+    // other fault is raised, not hidden behind a My-Drive-only listing. A row
+    // that is no drive at all fails as it is read, after the listing.
+    await account.upload('readme.txt', 'hi')
+    await account.run.answerNext('GET', DRIVES, 200, { drives: [null] })
+    await expect(readdir(account.driveAccessor(), ROOT)).rejects.toThrow(TypeError)
   })
 
   it('leaves a shared drive root without a token', async () => {
-    drive.listFiles.mockResolvedValue([])
-    drive.listSharedDrives.mockResolvedValue([{ id: 'drive1', name: 'Team Drive' }])
-    const row = rows(await readdir(makeAccessor(), ROOT)).get('Team Drive')
+    await account.sharedDrive('Team Drive')
+    const row = rows(await readdir(account.driveAccessor(), ROOT)).get('Team Drive')
     expect(row?.extra.md5_checksum).toBeUndefined()
     expect(row?.fingerprint).toBeNull()
   })
@@ -220,12 +247,10 @@ describe('readdir shared drives', () => {
 
 describe('readdir rows', () => {
   it('render google-apps files with their extensions', async () => {
-    drive.listFiles.mockResolvedValue([
-      file('d1', 'My Document', DOC_MIME),
-      file('s1', 'My Sheet', 'application/vnd.google-apps.spreadsheet'),
-      file('p1', 'My Slides', 'application/vnd.google-apps.presentation'),
-    ])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
+    await account.create('My Document', DOC_MIME)
+    await account.create('My Sheet', 'application/vnd.google-apps.spreadsheet')
+    await account.create('My Slides', 'application/vnd.google-apps.presentation')
+    const listed = rows(await readdir(account.driveAccessor(), ROOT))
     expect([...listed.keys()].sort()).toEqual([
       'My Document.gdoc.json',
       'My Sheet.gsheet.json',
@@ -234,11 +259,17 @@ describe('readdir rows', () => {
   })
 
   it('keep Drive size for binaries and move google-apps source size to extra', async () => {
-    drive.listFiles.mockResolvedValue([
-      file('f1', 'report.pdf', 'application/pdf', { size: '2048' }),
-      file('d1', 'My Document', DOC_MIME, { quotaBytesUsed: '9999' }),
-    ])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
+    await account.upload('report.pdf', 'p'.repeat(2048))
+    await account.create('My Document', DOC_MIME)
+    // Drive counts a native file's quota in quotaBytesUsed; the fake keeps no
+    // quota, so its own listing is answered with that one field added.
+    await account.run.answerNext(
+      'GET',
+      FILES,
+      200,
+      withFields(await account.listing(), 'My Document', { quotaBytesUsed: '9999' }),
+    )
+    const listed = rows(await readdir(account.driveAccessor(), ROOT))
     // Binary files download raw: Drive's size is the rendered byte length.
     expect(listed.get('report.pdf')?.size).toBe(2048)
     // Google-apps files render to JSON: Drive's source size must not become
@@ -249,53 +280,66 @@ describe('readdir rows', () => {
   })
 
   it.each([
-    ['0', 0],
-    ['42', 42],
-    [undefined, null],
-  ])('keep a binary size of %s and never use the quota', async (reported, expected) => {
-    drive.listFiles.mockResolvedValue([
-      file('binary', 'file.txt', 'text/plain', {
-        quotaBytesUsed: '99',
-        ...(reported === undefined ? {} : { size: reported }),
-      }),
-    ])
-    const listed = rows(await readdir(makeAccessor(), PathSpec.fromStrPath('/drive', '')))
+    ['', '0', 0],
+    ['x'.repeat(42), '42', 42],
+    ['x'.repeat(42), null, null],
+  ])('keep a binary size and never use the quota (%#)', async (data, reported, expected) => {
+    await account.upload('file.txt', data)
+    // Drive's quotaBytesUsed beside the size, and no size at all for the last
+    // case: neither is a state the fake reaches, so its own listing is
+    // answered with those fields changed.
+    await account.run.answerNext(
+      'GET',
+      FILES,
+      200,
+      withFields(await account.listing(), 'file.txt', { quotaBytesUsed: '99', size: reported }),
+    )
+    const listed = rows(await readdir(account.driveAccessor(), PathSpec.fromStrPath('/drive', '')))
     expect(listed.get('file.txt')?.size).toBe(expected)
   })
 
   it('carry both content tokens for a binary file', async () => {
-    drive.listFiles.mockResolvedValue([
-      file('f1', 'report.pdf', 'application/pdf', {
-        size: '2048',
-        md5Checksum: '9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e',
-        headRevisionId: 'f1-r3',
-      }),
-    ])
-    const row = rows(await readdir(makeAccessor(), ROOT)).get('report.pdf')
-    expect(row?.extra.md5_checksum).toBe('9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e')
-    expect(row?.extra.head_revision_id).toBe('f1-r3')
-    expect(row?.fingerprint).toBe('9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e')
+    const data = 'p'.repeat(2048)
+    const made = await account.upload('report.pdf', data)
+    const revision = (await account.item(made)).headRevisionId
+    const row = rows(await readdir(account.driveAccessor(), ROOT)).get('report.pdf')
+    expect(row?.extra.md5_checksum).toBe(md5(data))
+    expect(row?.extra.head_revision_id).toBe(revision)
+    expect(row?.fingerprint).toBe(md5(data))
   })
 
   it('omit what a native file does not have, and keep the drive beside the tokens', async () => {
-    drive.listFiles.mockResolvedValue([
-      file('f1', 'report.pdf', 'application/pdf', {
-        size: '2048',
-        driveId: 'drive1',
-        md5Checksum: '9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e',
-        headRevisionId: 'f1-r3',
-      }),
-      file('d1', 'My Document', DOC_MIME, { driveId: 'drive1', quotaBytesUsed: '9999' }),
-    ])
-    const listed = rows(await readdir(makeAccessor(), ROOT))
+    const drive = await account.sharedDrive('Team')
+    const data = 'p'.repeat(2048)
+    await account.upload('report.pdf', data, drive)
+    await account.create('My Document', DOC_MIME, drive)
+    const accessor = account.driveAccessor()
+    const path = PathSpec.fromStrPath('/Team')
+    const folder = await entryAt(readdir, accessor, path)
+    // The native file's quotaBytesUsed, which the fake keeps none of.
+    await account.run.answerNext(
+      'GET',
+      FILES,
+      200,
+      withFields(await account.listing(drive, drive), 'My Document', { quotaBytesUsed: '9999' }),
+    )
+    const listed = rows(await readdir(accessor, path, folder))
     const binary = listed.get('report.pdf')
-    expect(binary?.extra.drive_id).toBe('drive1')
-    expect(binary?.extra.md5_checksum).toBe('9f2b6c1d4e5a7b8c9d0e1f2a3b4c5d6e')
+    expect(binary?.extra.drive_id).toBe(drive)
+    expect(binary?.extra.md5_checksum).toBe(md5(data))
     const native = listed.get('My Document.gdoc.json')
-    expect(native?.extra.drive_id).toBe('drive1')
+    expect(native?.extra.drive_id).toBe(drive)
     expect(native?.extra.source_size).toBe(9999)
     expect('md5_checksum' in (native?.extra ?? {})).toBe(false)
     expect('head_revision_id' in (native?.extra ?? {})).toBe(false)
+  })
+
+  it('list a scoped mount from its folder', async () => {
+    const scope = await account.folder('scope')
+    await account.upload('in.txt', 'x', scope)
+    await account.upload('out.txt', 'y')
+    const listed = rows(await readdir(account.driveAccessor(undefined, { folderId: scope }), ROOT))
+    expect([...listed.keys()]).toEqual(['in.txt'])
   })
 })
 
@@ -305,14 +349,13 @@ describe('a listed file deleted since', () => {
     // Drive answers 404 for the id a listing named once another client
     // deletes the file; the folder is listed again, and what it names at the
     // path now answers, null for nothing.
-    const fake = new FakeDrive()
-    const accessor = makeGDriveAccessor(fake)
-    const folder = fake.folder('docs')
-    const listedId = fake.add('a.txt', folder)
+    const folder = await account.folder('docs')
+    const listedId = await account.upload('a.txt', 'old', folder)
+    const accessor = account.driveAccessor()
     const path = PathSpec.fromStrPath('/docs/a.txt')
     const listed = await entryAt(readdir, accessor, path)
-    await fake.deleteFile(listedId)
-    const made = replaced ? fake.add('a.txt', folder) : null
+    await account.delete(listedId)
+    const made = replaced ? await account.upload('a.txt', 'new', folder) : null
     const row = await liveRow(accessor, path, listed)
     if (made === null) expect(row).toBeNull()
     else expect(row?.extra.file_id).toBe(made)
@@ -321,14 +364,14 @@ describe('a listed file deleted since', () => {
   it('raises a refused lookup of a listed file', async () => {
     // Only Drive's 404 sends the folder to be listed again; a refusal
     // reaches the caller as it is.
-    const fake = new FakeDrive()
-    const accessor = makeGDriveAccessor(fake)
-    const folder = fake.folder('docs')
-    fake.add('a.txt', folder)
+    const folder = await account.folder('docs')
+    await account.upload('a.txt', 'a', folder)
+    const accessor = account.driveAccessor()
     const path = PathSpec.fromStrPath('/docs/a.txt')
     const listed = await entryAt(readdir, accessor, path)
-    const refused = driveError(403, 'Forbidden')
-    vi.spyOn(fake, 'getFile').mockRejectedValue(refused)
-    await expect(liveRow(accessor, path, listed)).rejects.toBe(refused)
+    await account.refuse('GET', FILE, 403, 'Forbidden')
+    const raised = liveRow(accessor, path, listed)
+    await expect(raised).rejects.toBeInstanceOf(GoogleApiError)
+    await expect(raised).rejects.toMatchObject({ status: 403, message: 'Forbidden' })
   })
 })

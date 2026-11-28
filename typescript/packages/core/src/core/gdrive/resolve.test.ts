@@ -12,28 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { beforeEach, describe, expect, it } from 'vitest'
-import type { GDriveAccessor } from '../../accessor/gdrive.ts'
-import {
-  DOC_MIME,
-  FakeDrive,
-  makeGDriveAccessor,
-  makeScopedGDriveAccessor,
-} from '../../../tests/core/gdrive/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DirListing, FileStat, FileType, PathSpec } from '../../types.ts'
 import { GoogleApiError } from '../google/client.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
 import { driveTargetName, eaccesOnDenied, parentFolder, rootContext } from './resolve.ts'
 
-const FOLDER_MIME_TEST = 'application/vnd.google-apps.folder'
+const DOC_MIME = 'application/vnd.google-apps.document'
 
-const ENC = new TextEncoder()
-let fake: FakeDrive
-let accessor: GDriveAccessor
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
 
 beforeEach(() => {
-  fake = new FakeDrive()
-  accessor = makeGDriveAccessor(fake)
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
 })
 
 async function rows(
@@ -53,10 +54,10 @@ describe('gdrive resolve', () => {
 
 describe('gdrive resolve with a folder scope', () => {
   it('lists the configured folder', async () => {
-    const scope = fake.folder('scope')
-    const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'))
-    fake.add('f.txt', 'root', undefined, ENC.encode('out'))
-    const scoped = makeScopedGDriveAccessor(scope, fake)
+    const scope = await account.folder('scope')
+    const inner = await account.upload('f.txt', 'in', scope)
+    await account.upload('f.txt', 'out')
+    const scoped = account.driveAccessor(undefined, { folderId: scope })
     expect(await rootContext(scoped)).toEqual([scope, null])
     const listed = await rows(readdir(scoped, PathSpec.fromStrPath('/')))
     expect(listed.map((row) => row.extra.file_id)).toEqual([inner])
@@ -65,13 +66,16 @@ describe('gdrive resolve with a folder scope', () => {
 
 describe('gdrive resolve with a shared-drive scope', () => {
   it('threads the root driveId and memoizes the lookup', async () => {
-    const scope = fake.add('team', 'root', FOLDER_MIME_TEST, new Uint8Array(0), 'd1')
-    const inner = fake.add('f.txt', scope, undefined, ENC.encode('in'), 'd1')
-    const scoped = makeScopedGDriveAccessor(scope, fake)
-    expect(await rootContext(scoped)).toEqual([scope, 'd1'])
-    expect(await rootContext(scoped)).toEqual([scope, 'd1'])
+    const drive = await account.sharedDrive('Team')
+    const scope = await account.folder('team', drive)
+    const inner = await account.upload('f.txt', 'in', scope)
+    const scoped = account.driveAccessor(undefined, { folderId: scope })
+    await account.run.recordRequests()
+    expect(await rootContext(scoped)).toEqual([scope, drive])
+    expect(await rootContext(scoped)).toEqual([scope, drive])
+    expect(await account.log()).toEqual([['get', scope]])
     const listed = await rows(readdir(scoped, PathSpec.fromStrPath('/')))
-    expect(listed.map((row) => [row.extra.file_id, row.extra.drive_id])).toEqual([[inner, 'd1']])
+    expect(listed.map((row) => [row.extra.file_id, row.extra.drive_id])).toEqual([[inner, drive]])
   })
 })
 
@@ -97,26 +101,32 @@ describe('eaccesOnDenied', () => {
 describe('parentFolder', () => {
   it('lands a create at the root in the root folder', async () => {
     const path = PathSpec.fromStrPath('/drive/new.txt', 'new.txt')
-    expect(await parentFolder(accessor, path, null)).toEqual(['root', null])
+    expect(await parentFolder(account.driveAccessor(), path, null)).toEqual(['root', null])
   })
 
   it('lands a create in the folder its parent names', async () => {
+    const drive = await account.sharedDrive('Team')
+    const made = await account.folder('a', drive)
     const folder = new FileStat({
       name: 'a',
       type: FileType.DIRECTORY,
-      extra: { file_id: 'f1', drive_id: 'd1' },
+      extra: { file_id: made, drive_id: drive },
     })
     const path = PathSpec.fromStrPath('/drive/a/new.txt', 'a/new.txt')
-    expect(await parentFolder(accessor, path, folder)).toEqual(['f1', 'd1'])
+    expect(await parentFolder(account.driveAccessor(), path, folder)).toEqual([made, drive])
   })
 
   it.each(['missing', 'file'])('names the operand for a %s parent', async (kind) => {
     const parent =
       kind === 'missing'
         ? null
-        : new FileStat({ name: 'a', type: FileType.FILE, extra: { file_id: 'f1' } })
+        : new FileStat({
+            name: 'a',
+            type: FileType.FILE,
+            extra: { file_id: await account.upload('a', 'a') },
+          })
     const path = PathSpec.fromStrPath('/drive/a/child', 'a/child')
-    await expect(parentFolder(accessor, path, parent)).rejects.toMatchObject({
+    await expect(parentFolder(account.driveAccessor(), path, parent)).rejects.toMatchObject({
       code: kind === 'missing' ? 'ENOENT' : 'ENOTDIR',
       virtualPath: path.virtual,
     })

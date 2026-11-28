@@ -17,7 +17,8 @@ import pytest
 from mirage.accessor.gcal import GCalAccessor
 from mirage.types import PathSpec
 from mirage.vfs.gcal import GCalVFS
-from tests.fixtures.gcal_api import make_accessor, spec
+from tests.fixtures.gcal_seed import make_accessor, spec
+from tests.fixtures.google_account import PRIMARY
 from tests.fixtures.mounted import mounted
 
 pytestmark = pytest.mark.asyncio
@@ -39,13 +40,19 @@ async def unlink(accessor: GCalAccessor, path: PathSpec) -> None:
     ],
 )
 async def test_unlink_deletes_the_event_the_name_carries(
-    gcal_api, size, path, index
+    calendar, size, path, index
 ):
-    await unlink(make_accessor(bucket_days=size), spec(path))
-    assert gcal_api.deleted == [("integ@example.com", "aaaa1")]
+    await unlink(make_accessor(calendar, bucket_days=size), spec(path))
+    log = await calendar.calendar_log()
+    assert [e for e in log if e[0] == "delete"] == [
+        ("delete", PRIMARY, "aaaa1")
+    ]
     # The entry resolves through the parent bucket's one listing first, so
     # an unlisted name is refused without a destructive call.
-    assert [call[0] for call in gcal_api.listed] == ["integ@example.com"]
+    assert [e[:2] for e in log if e[0] in ("list", "delete")] == [
+        ("list", PRIMARY),
+        ("delete", PRIMARY),
+    ]
 
 
 @pytest.mark.parametrize(
@@ -56,20 +63,20 @@ async def test_unlink_deletes_the_event_the_name_carries(
         # than surfacing a 403 after the call has already gone out.
         (
             "/Engineering__team@group.calendar.google.com/2026-08-11/"
-            "aaaa1__0900-1030_PhD_Defense.gcal.json",
+            "taaaa1__0900-1030_PhD_Defense.gcal.json",
             PermissionError,
         ),
         (
             "/Exec__busy@group.calendar.google.com/2026-08-11/"
-            "aaaa1__0900-1030_busy.gcal.json",
+            "saaaa1__0900-1030_busy.gcal.json",
             PermissionError,
         ),
         ("/nope/2026-08-11/aaaa1__0900-1030_X.gcal.json", FileNotFoundError),
     ],
 )
 async def test_unlink_refuses_without_deleting(
-    gcal_api, accessor, index, path, error
+    calendar, accessor, index, path, error
 ):
     with pytest.raises(error):
         await unlink(accessor, spec(path))
-    assert gcal_api.deleted == []
+    assert [e for e in await calendar.calendar_log() if e[0] == "delete"] == []

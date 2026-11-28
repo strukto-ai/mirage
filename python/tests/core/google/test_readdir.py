@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -22,23 +22,7 @@ from mirage.core.gsheets.constants import MIME
 from mirage.core.gsheets.scope import detect_scope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
-
-FILES = [
-    {
-        "id": "a1",
-        "name": "Mine",
-        "modifiedTime": "2026-04-01T00:00:00.000Z",
-        "owners": [{"me": True}],
-        "size": "12",
-    },
-    {
-        "id": "b2",
-        "name": "Theirs",
-        "owners": [{"me": False}],
-    },
-]
+from tests.fixtures.google_account import FILES
 
 
 def _name(title: str, file_id: str, modified: str) -> str:
@@ -51,26 +35,50 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
+def _accessor(google_account) -> GoogleApiAccessor:
+    manager = google_account.token_manager()
+    return GoogleApiAccessor(manager.config, manager)
+
+
 READDIR = make_app_readdir(MIME, detect_scope, _name)
 
 
 @pytest.mark.asyncio
-async def test_a_corpus_lists_its_owners_files_through_the_apps_namer():
-    listed = AsyncMock(return_value=(FILES, True))
-    with serve(drive=StubDrive(list_all_files=listed)):
-        out = await READDIR(GoogleApiAccessor(None, None), _spec("/m/owned"))
+async def test_a_corpus_lists_its_owners_files_through_the_apps_namer(
+    google_account,
+):
+    mine = await google_account.create("Mine", MIME)
+    await google_account.patch(mine, modifiedTime="2026-04-01T00:00:00.000Z")
+    theirs = await google_account.create("Theirs", MIME)
+    # Every file the fake holds is the account's own; Drive names another
+    # owner for one shared with it, and gives a native file's size.
+    listing = await google_account.run.call(
+        "GET", FILES, params={"q": f"mimeType = '{MIME}'"}
+    )
+    files = []
+    for row in listing["files"]:
+        if row["id"] == mine:
+            row = {**row, "size": "12"}
+        if row["id"] == theirs:
+            row = {**row, "owners": [{"me": False}]}
+        files.append(row)
+    await google_account.run.answer_next(
+        "GET", FILES, 200, {**listing, "files": files}
+    )
+    await google_account.run.record_requests()
+    out = await READDIR(_accessor(google_account), _spec("/m/owned"))
     (row,) = out.entries
     assert out.partial is False
-    assert row.name == "Mine.a1.2026"
-    assert listed.await_args.kwargs["mime_type"] == MIME
+    assert row.name == f"Mine.{mine}.2026"
+    (asked,) = await google_account.asked("GET", FILES)
+    assert f"mimeType='{MIME}'" in parse_qs(asked["query"])["q"][0]
     assert row.size is None
-    assert row.extra == {"doc_id": "a1", "doc_name": "Mine", "source_size": 12}
+    assert row.extra == {"doc_id": mine, "doc_name": "Mine", "source_size": 12}
 
 
 @pytest.mark.asyncio
-async def test_the_root_lists_the_corpora_without_a_request():
-    listed = AsyncMock()
-    with serve(drive=StubDrive(list_all_files=listed)):
-        out = await READDIR(GoogleApiAccessor(None, None), _spec("/m"))
+async def test_the_root_lists_the_corpora_without_a_request(google_account):
+    await google_account.run.record_requests()
+    out = await READDIR(_accessor(google_account), _spec("/m"))
     assert [row.name for row in out] == ["owned", "shared"]
-    listed.assert_not_awaited()
+    assert await google_account.log() == []

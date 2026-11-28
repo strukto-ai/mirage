@@ -36,7 +36,7 @@ def test_entry_stat_keeps_the_machine_s_kind_mode_times_and_owners():
         8,
         "",
     )
-    got = entry_stat("x.py", entry)
+    got = entry_stat("x.py", entry, "box")
     assert (got.type, got.size, got.mode, got.uid, got.gid) == (
         FileType.FILE,
         12,
@@ -61,7 +61,7 @@ def test_entry_stat_keeps_the_machine_s_kind_mode_times_and_owners():
 )
 def test_entry_stat_maps_each_kind(kind, want, size):
     entry = PosixEntry(kind, 0o755, 7, 0, 0, 0, 0, 0, 0, 1, 0, "")
-    got = entry_stat("n", entry)
+    got = entry_stat("n", entry, "box")
     assert (got.type, got.size) == (want, size)
 
 

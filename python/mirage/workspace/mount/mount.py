@@ -103,7 +103,7 @@ from mirage.core.generic.rewrite import (
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
 from mirage.io.gateway import with_egress
-from mirage.io.memory import check_memory
+from mirage.io.memory import check_memory, memory_room
 from mirage.io.spool import MEMORY_LIMIT, ByteSpool
 from mirage.io.stream import OutputStream, close_quietly, rechunk
 from mirage.io.types import ByteSource, IOResult, materialize
@@ -437,6 +437,33 @@ async def _as_stream(
             yield chunk
     finally:
         await close_quietly(found)
+
+
+def _in_room(
+    scopes: list[PathSpec], read: dict[str, bytes], held_bytes: int
+) -> dict[str, bytes]:
+    """The files of a batch read that fit together, in ``scopes``' order,
+    in what the workspace's ``max_memory`` has left beside ``held_bytes``
+    now; one that does not fit is left out for its own read to meet, and
+    a smaller one after it may still fit.
+
+    Args:
+        scopes (list[PathSpec]): the files the batch asked for, in order.
+        read (dict[str, bytes]): what the batch read, by virtual path.
+        held_bytes (int): the bytes the batch already holds.
+    """
+    room = memory_room()
+    if room is None:
+        return read
+    kept: dict[str, bytes] = {}
+    left = room - held_bytes
+    for spec in scopes:
+        data = read.get(spec.virtual)
+        if data is None or spec.virtual in kept or len(data) > left:
+            continue
+        kept[spec.virtual] = data
+        left -= len(data)
+    return kept
 
 
 async def _collected(
@@ -2907,9 +2934,10 @@ class MountEntry:
             )
 
     async def read_many(
-        self, paths: list[str], limit: int
+        self, paths: list[str], limit: int, held_bytes: int = 0
     ) -> dict[str, bytes]:
-        """Read several whole files on this mount in one request.
+        """Read several whole files on this mount, in one request where
+        its VFS reads a batch and one file after another otherwise.
 
         For the dispatcher's read-ahead, once it has walked and followed
         each path; keyed by virtual path, a file left out is read on its
@@ -2918,11 +2946,13 @@ class MountEntry:
         Args:
             paths (list[str]): the files, as virtual paths.
             limit (int): the most bytes worth fetching for one file.
+            held_bytes (int): the bytes the batch this read is for
+                already holds, which what it builds must fit beside.
         """
         async with self.use():
             return await self._framed(
                 lambda: self._read_many(
-                    [self._scope(p) for p in paths], limit
+                    [self._scope(p) for p in paths], limit, held_bytes
                 ),
             )
 
@@ -2941,18 +2971,34 @@ class MountEntry:
             reset_caller(token)
 
     async def _read_many(
-        self, scopes: list[PathSpec], limit: int
+        self, scopes: list[PathSpec], limit: int, held_bytes: int
     ) -> dict[str, bytes]:
         """The VFS's batch read, handed what is at each path and at its
-        folder as the stored listings name them, where it takes them.
+        folder as the stored listings name them, and the bytes the files
+        may come to together (``room``: what the workspace's
+        ``max_memory`` has left beside ``held_bytes``), where it takes
+        them; what it answers is kept only as far as it fits in what is
+        left once it is done (``_in_room``), since the stores may have
+        grown while it read. A VFS with no batch read has each file read
+        as its own whole read reads it (``_read_each``), and one longer
+        than ``limit``, one that does not fit in what is left, or one that
+        fails is left out. Either way the index is observed once.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
             limit (int): the most bytes worth fetching for one file.
+            held_bytes (int): the bytes the batch this read is for
+                already holds, which what it builds must fit beside.
         """
+        if not self.vfs.supports("read_many"):
+            read = await self._read_each(scopes, limit, held_bytes)
+            await self._observe(
+                self.index, [s for s in scopes if s.virtual in read]
+            )
+            return read
         fn = self.vfs.read_many
         names = _parameters(getattr(fn, "__func__", fn))
-        kwargs: dict[str, list[FileStat | None]] = {}
+        kwargs: dict[str, list[FileStat | None] | int | None] = {}
         if names is None or "entries" in names:
             kwargs["entries"] = [
                 await self._entry(s, self.index) for s in scopes
@@ -2961,11 +3007,70 @@ class MountEntry:
             kwargs["parents"] = [
                 await self._entry(self._folder(s), self.index) for s in scopes
             ]
-        result = await fn(scopes, limit, **kwargs)
+        if names is None or "room" in names:
+            room = memory_room()
+            kwargs["room"] = None if room is None else room - held_bytes
+        result = _in_room(
+            scopes, await fn(scopes, limit, **kwargs), held_bytes
+        )
         await self._observe(
             self.index, [s for s in scopes if s.virtual in result]
         )
         return result
+
+    async def _read_each(
+        self, scopes: list[PathSpec], limit: int, held_bytes: int
+    ) -> dict[str, bytes]:
+        """Each file's whole bytes as its own whole read answers them, by
+        virtual path. The bytes built for the batch must fit together, and
+        beside what it already holds, in what the workspace's
+        ``max_memory`` has left, as one file's must for its own read
+        (``_collected``), what a RAM store holds already counted; one
+        longer than ``limit`` bytes, one that does not fit, or one whose
+        read fails, is left out for its own read to meet.
+
+        Args:
+            scopes (list[PathSpec]): the files, keyed below the mount.
+            limit (int): the most bytes worth holding for one file.
+            held_bytes (int): the bytes the batch already holds.
+        """
+        counted = isinstance(self.vfs, RAMVFS)
+        read: dict[str, bytes] = {}
+        built = held_bytes
+        for scope in scopes:
+            parts: list[bytes] = []
+            size = 0
+            source: AsyncIterator[bytes] | None = None
+            try:
+                answer = await self._answer(self.index, scope)
+                found = await answer if inspect.isawaitable(answer) else answer
+                if isinstance(found, bytes):
+                    if len(found) <= limit:
+                        if not counted:
+                            check_memory(built + len(found))
+                            built += len(found)
+                        read[scope.virtual] = found
+                    continue
+                source = _as_stream(found)
+                async for chunk in source:
+                    size += len(chunk)
+                    if size > limit:
+                        break
+                    check_memory(built + size)
+                    parts.append(chunk)
+                else:
+                    read[scope.virtual] = b"".join(parts)
+                    built += size
+            except Exception as exc:
+                logger.debug(
+                    "batch read leaves %s to its own read: %s",
+                    scope.virtual,
+                    exc,
+                )
+            finally:
+                if source is not None:
+                    await close_quietly(source)
+        return read
 
     def live_pipe(self, path: str) -> DevicePipe | None:
         """The live pipe a read of ``path`` takes bytes from, which another

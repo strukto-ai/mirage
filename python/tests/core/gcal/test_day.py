@@ -32,10 +32,33 @@ from mirage.core.gcal.day import (
     window_bounds,
     zone,
 )
-from tests.fixtures.gcal_api import event
+from mirage.types import JsonValue
 
 HK = "Asia/Hong_Kong"
 LA = "America/Los_Angeles"
+
+
+def event(
+    event_id: str, summary: str, start: str, end: str
+) -> dict[str, JsonValue]:
+    """An events.list item: a ``YYYY-MM-DD`` pair is an all-day event.
+
+    Args:
+        event_id (str): the event id.
+        summary (str): the title.
+        start (str): RFC3339 start, or the first all-day date.
+        end (str): RFC3339 end, or the exclusive all-day end date.
+    """
+    key = "date" if len(start) == 10 else "dateTime"
+    return {
+        "id": event_id,
+        "status": "confirmed",
+        "summary": summary,
+        "start": {key: start},
+        "end": {key: end},
+    }
+
+
 CONFERENCE = event(
     "c", "", "2026-08-10T09:00:00+08:00", "2026-08-13T17:00:00+08:00"
 )

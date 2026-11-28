@@ -12,53 +12,38 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Mirror of the narrow_paths tests in python/tests/core/github/test_search.py.
+// Mirror of python/tests/core/github/test_search.py.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GitHubAccessor, GitHubAccount } from '../../accessor/github.ts'
 import { PathSpec } from '../../types.ts'
+import { serve, type JsonValue } from '../../../tests/fixtures/kit_fake.ts'
+import { GitHubRepo, SEARCH, blobSha } from '../../../tests/core/github/repo.ts'
 import type { GitHubTransport } from './client.ts'
 import { SCOPE_WARN } from './constants.ts'
 import { filesContaining, narrowPaths, searchCode } from './search.ts'
-import type { TreeEntry } from './tree_entry.ts'
+import { ensureTree } from './tree.ts'
 
-// The code search endpoint, as the accessor's transport reaches it.
-const search = vi.fn<(params: Record<string, string>) => Promise<unknown>>()
 // GitHub's documented code-search limit; files at or over it are not indexed.
 const SEARCH_LIMIT = 384 * 1024
+const SOURCES = { 'src/main.py': 'import os\n', 'src/utils.py': 'import os, sys\n' }
 
-function blob(path: string, size: number | null): TreeEntry {
-  return { path, type: 'blob', sha: path, size }
-}
+let origin: string
+let repo: GitHubRepo
 
-// A code search answer naming `hits` in the mounted repository; a truncated
-// one counts a row more than it carries.
-function found(hits: { path: string; sha: string }[], truncated: boolean): Record<string, unknown> {
-  return {
-    total_count: hits.length + (truncated ? 1 : 0),
-    incomplete_results: false,
-    items: hits.map((hit) => ({ ...hit, repository: { full_name: 'acme/proj' } })),
-  }
-}
+beforeAll(async () => {
+  origin = await serve('github')
+})
 
-function makeAccessor(tree: Record<string, TreeEntry>): GitHubAccessor {
-  const transport: GitHubTransport = {
-    get(_path: string, params?: Record<string, string>): Promise<unknown> {
-      return search(params ?? {})
-    },
-    request(): Promise<unknown> {
-      throw new Error('unexpected request')
-    },
-  }
-  return new GitHubAccessor({
-    account: new GitHubAccount({ token: 't' }, transport),
-    owner: 'acme',
-    repo: 'proj',
-    ref: 'main',
-    defaultBranch: 'main',
-    tree,
-  })
-}
+beforeEach(() => {
+  repo = new GitHubRepo(origin)
+})
+
+afterEach(async () => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  await repo.run.close()
+})
 
 function root(): PathSpec {
   return new PathSpec({ virtual: '/', directory: '/', vfsPath: '' })
@@ -68,100 +53,128 @@ function scope(name: string): PathSpec {
   return new PathSpec({ virtual: `/${name}`, directory: `/${name}`, vfsPath: name })
 }
 
-const SMALL = { 'src/a.py': blob('src/a.py', 10) }
+function transport(): GitHubTransport {
+  return repo.accessor().account.transport
+}
 
-beforeEach(() => {
-  search.mockReset()
-})
+async function asked(): Promise<string[]> {
+  return (await repo.run.params('GET', SEARCH)).map((params) => params.q ?? '')
+}
+
+// A code search answer naming `paths` in the mounted repository; a truncated
+// one counts a row more than it carries.
+function found(paths: string[], truncated: boolean): JsonValue {
+  return {
+    total_count: paths.length + (truncated ? 1 : 0),
+    incomplete_results: false,
+    items: paths.map((path) => ({ path, sha: path, repository: { full_name: 'integ-user/repo' } })),
+  }
+}
+
+// An accessor whose tree is loaded, as a mount's is once it has listed.
+async function loaded(): Promise<GitHubAccessor> {
+  const accessor = repo.accessor()
+  await ensureTree(accessor)
+  return accessor
+}
 
 describe('filesContaining', () => {
-  // A truncated tree cannot list the files code search never indexes.
+  // A truncated tree cannot list the files code search never indexes, and a
+  // cold mount learns its tree is truncated only once it loads it.
   it('leaves a truncated tree to the walk', async () => {
-    const accessor = makeAccessor({})
-    for (let i = 0; i <= SCOPE_WARN; i++) accessor.tree[`f${String(i)}`] = blob(`f${String(i)}`, 10)
-    accessor.truncated = true
-    expect(await filesContaining(accessor, 'needle', [root()])).toBeNull()
-    expect(search).not.toHaveBeenCalled()
+    const files: Record<string, string> = {}
+    for (let i = 0; i <= SCOPE_WARN; i++) files[`f${String(i)}`] = 'needle\n'
+    await repo.create(files)
+    await repo.truncate()
+    expect(await filesContaining(repo.accessor(), 'needle', [root()])).toBeNull()
+    expect(await repo.count('recursive')).toBe(1)
+    expect(await repo.count('search')).toBe(0)
   })
 
   // Twin of test_files_containing_asks_nothing_of_an_anonymous_account: code
   // search refuses a call with no credential, so it is not asked, and neither
-  // is the tree its scope count would load.
+  // is the tree its scope count would load. github.com's API host is reached
+  // on the fake's run, so a request the account made would be listed.
   it('asks nothing of an anonymous account', async () => {
-    const asked = vi.fn<() => Promise<unknown>>()
-    const transport: GitHubTransport = { get: asked, request: asked }
+    await repo.create({ 'src/a.py': 'needle\n' })
+    vi.stubGlobal('fetch', repo.githubComFetch())
     const accessor = new GitHubAccessor({
-      account: new GitHubAccount({}, transport),
-      owner: 'acme',
-      repo: 'proj',
+      account: new GitHubAccount({}),
+      owner: repo.owner,
+      repo: repo.name,
       ref: 'main',
       defaultBranch: 'main',
     })
     expect(await filesContaining(accessor, 'needle', [root()])).toBeNull()
-    expect(asked).not.toHaveBeenCalled()
+    expect(await repo.log()).toEqual([])
+  })
+
+  // Twin of test_files_containing_leaves_a_branch_off_the_default_to_the_walk:
+  // code search indexes the default branch only, so a mount on any other
+  // branch is not narrowed by it, even one named main.
+  it('leaves a branch off the default to the walk', async () => {
+    const files: Record<string, string> = {}
+    for (let i = 0; i <= SCOPE_WARN; i++) files[`f${String(i)}`] = 'needle\n'
+    await repo.create(files)
+    await repo.branch('trunk')
+    await repo.setDefaultBranch('trunk')
+    expect(await filesContaining(repo.accessor('main'), 'needle', [root()])).toBeNull()
+    expect(await repo.count('search')).toBe(0)
   })
 })
 
 // Twin of the search_code tests in python/tests/core/github/test_search.py.
+// The answers past the first test are code search's, with the rows or counts
+// each case needs: the fake only answers rows of its own repositories, each
+// counted.
 describe('searchCode', () => {
-  type Item = Record<string, unknown>
+  type Item = Record<string, JsonValue>
 
-  function stub(
-    body: Record<string, unknown>,
-    seen: Record<string, string>[] = [],
-  ): GitHubTransport {
-    return {
-      get(_path: string, params?: Record<string, string>): Promise<unknown> {
-        seen.push(params ?? {})
-        return Promise.resolve(body)
-      },
-      request(): Promise<unknown> {
-        throw new Error('unexpected request')
-      },
-    }
-  }
-
-  function item(path: string, fullName: unknown): Item {
+  function item(path: string, fullName: JsonValue): Item {
     return { path, sha: path, repository: { full_name: fullName } }
   }
 
-  function body(items: Item[], total?: unknown): Record<string, unknown> {
+  function body(items: Item[], total?: JsonValue): JsonValue {
     return { total_count: total ?? items.length, incomplete_results: false, items }
   }
 
-  it('asks for the largest page', async () => {
+  it('finds the files that hold every word, asking the largest page', async () => {
     // The default page is 30 rows, and a first page read as the whole
     // answer silently narrows grep to 30 files.
-    const seen: Record<string, string>[] = []
-    await searchCode(stub(body([]), seen), 'acme', 'proj', 'needle')
-    expect(seen[0]?.per_page).toBe('100')
+    await repo.create(SOURCES)
+    const out = await searchCode(transport(), repo.owner, repo.name, 'import os')
+    expect(out).toEqual({
+      results: Object.entries(SOURCES).map(([path, data]) => ({ path, sha: blobSha(data) })),
+      truncated: false,
+    })
+    expect(await repo.run.params('GET', SEARCH)).toEqual([
+      { q: 'import os repo:integ-user/repo', per_page: '100' },
+    ])
   })
 
   it('keeps only the mounted repository', async () => {
     // The pattern is sent verbatim, so a qualifier inside it can rescope the
     // search; a fork shares the repository name and a prefix is not a match.
-    const out = await searchCode(
-      stub(
-        body([
-          item('src/a.py', 'acme/proj'),
-          item('src/a.py', 'other/x'),
-          item('src/a.py', 'other/proj'),
-          item('src/a.py', 'acme/other'),
-          item('src/a.py', 'acme/proj-fork'),
-        ]),
-      ),
-      'acme',
-      'proj',
-      'needle',
+    await repo.answer(
+      'search',
+      body([
+        item('src/a.py', 'acme/proj'),
+        item('src/a.py', 'other/x'),
+        item('src/a.py', 'other/proj'),
+        item('src/a.py', 'acme/other'),
+        item('src/a.py', 'acme/proj-fork'),
+      ]),
     )
+    const out = await searchCode(transport(), 'acme', 'proj', 'needle')
     expect(out.results).toEqual([{ path: 'src/a.py', sha: 'src/a.py' }])
   })
 
   it.each([
     ['Acme/Proj', 'acme', 'proj'],
     ['acme/proj', 'Acme', 'Proj'],
-  ])('compares %s with %s/%s case-insensitively', async (fullName, owner, repo) => {
-    const out = await searchCode(stub(body([item('src/a.py', fullName)])), owner, repo, 'needle')
+  ])('compares %s with %s/%s case-insensitively', async (fullName, owner, name) => {
+    await repo.answer('search', body([item('src/a.py', fullName)]))
+    const out = await searchCode(transport(), owner, name, 'needle')
     expect(out.results.map((r) => r.path)).toEqual(['src/a.py'])
   })
 
@@ -174,11 +187,12 @@ describe('searchCode', () => {
   ])('drops an item with %s, without throwing', async (_label, entry) => {
     // Nothing vouches for such an item, and dropping it must not throw: a
     // throw inside narrowPaths voids the whole narrowing.
-    const out = await searchCode(stub(body([entry])), 'acme', 'proj', 'needle')
+    await repo.answer('search', body([entry]))
+    const out = await searchCode(transport(), 'acme', 'proj', 'needle')
     expect(out.results).toEqual([])
   })
 
-  it.each<[string, Record<string, unknown>, boolean]>([
+  it.each<[string, Record<string, JsonValue>, boolean]>([
     ['a count equal to the rows', { total_count: 1, incomplete_results: false }, false],
     ['a count below the rows', { total_count: 0, incomplete_results: false }, false],
     ['a count above the rows', { total_count: 2, incomplete_results: false }, true],
@@ -191,33 +205,21 @@ describe('searchCode', () => {
   ])('reports %s as truncated=%s', async (_label, head, truncated) => {
     // Only an answer that says it is complete, with a count no larger than
     // the rows it carries, is the whole set; anything else is truncated.
-    const out = await searchCode(
-      stub({ ...head, items: [item('src/a.py', 'acme/proj')] }),
-      'acme',
-      'proj',
-      'needle',
-    )
+    await repo.answer('search', { ...head, items: [item('src/a.py', 'acme/proj')] })
+    const out = await searchCode(transport(), 'acme', 'proj', 'needle')
     expect(out.truncated).toBe(truncated)
   })
 
   it('reads null items as no rows', async () => {
-    const out = await searchCode(
-      stub({ total_count: 0, incomplete_results: false, items: null }),
-      'acme',
-      'proj',
-      'needle',
-    )
+    await repo.answer('search', { total_count: 0, incomplete_results: false, items: null })
+    const out = await searchCode(transport(), 'acme', 'proj', 'needle')
     expect(out).toEqual({ results: [], truncated: false })
   })
 
   it('judges completeness before filtering', async () => {
     // total_count counts every row the search matched, foreign ones too.
-    const out = await searchCode(
-      stub(body([item('src/a.py', 'acme/proj'), item('src/b.py', 'other/x')])),
-      'acme',
-      'proj',
-      'needle',
-    )
+    await repo.answer('search', body([item('src/a.py', 'acme/proj'), item('src/b.py', 'other/x')]))
+    const out = await searchCode(transport(), 'acme', 'proj', 'needle')
     expect(out.results.map((r) => r.path)).toEqual(['src/a.py'])
     expect(out.truncated).toBe(false)
   })
@@ -225,100 +227,92 @@ describe('searchCode', () => {
 
 describe('narrowPaths', () => {
   it('returns null for a truncated answer', async () => {
-    search.mockResolvedValueOnce(found([{ path: 'src/a.py', sha: 'a' }], true))
-    expect(await narrowPaths(makeAccessor(SMALL), 'needle', [root()])).toBeNull()
+    await repo.create({ 'src/a.py': 'needle\n' })
+    await repo.answer('search', found(['src/a.py'], true))
+    expect(await narrowPaths(await loaded(), 'needle', [root()])).toBeNull()
   })
 
   it('stops at the first truncated scope', async () => {
     // Code search is rate limited; a narrowing already void asks nothing more.
-    search.mockResolvedValue(found([], true))
-    const out = await narrowPaths(makeAccessor(SMALL), 'needle', [scope('src'), scope('docs')])
+    await repo.create({ 'src/a.py': 'needle\n', 'docs/b.md': 'needle\n' })
+    await repo.answer('search', found([], true), 2)
+    const out = await narrowPaths(await loaded(), 'needle', [scope('src'), scope('docs')])
     expect(out).toBeNull()
-    expect(search).toHaveBeenCalledTimes(1)
+    expect(await repo.count('search')).toBe(1)
   })
 
   it('lets a failed scope void the others', async () => {
     // A scope whose search failed contributes nothing, so the hits of the
     // scopes that did answer are not the whole set either.
-    search
-      .mockResolvedValueOnce(found([{ path: 'src/a.py', sha: 'a' }], false))
-      .mockRejectedValueOnce(new Error('boom'))
-    const out = await narrowPaths(makeAccessor(SMALL), 'needle', [scope('src'), scope('docs')])
+    await repo.create({ 'src/a.py': 'needle\n', 'docs/b.md': 'needle\n' })
+    await repo.run.answerNext(
+      'GET',
+      SEARCH,
+      422,
+      { message: 'boom' },
+      1,
+      undefined,
+      repo.searchQuery('needle repo:integ-user/repo path:docs'),
+    )
+    const out = await narrowPaths(await loaded(), 'needle', [scope('src'), scope('docs')])
     expect(out).toBeNull()
+    expect(await repo.count('search')).toBe(2)
   })
 
   it('adds the files code search never indexes, once', async () => {
     // Code search skips files at or over the limit, so a trusted narrowing
-    // has to read them itself; one that is also a hit is listed once.
-    const tree = {
-      'src/a.py': blob('src/a.py', 10),
-      'src/big.bin': blob('src/big.bin', SEARCH_LIMIT),
-    }
-    for (const hits of [['src/a.py'], ['src/a.py', 'src/big.bin']]) {
-      search.mockResolvedValueOnce(
-        found(
-          hits.map((path) => ({ path, sha: path })),
-          false,
-        ),
-      )
-      const out = await narrowPaths(makeAccessor(tree), 'needle', [root()])
-      expect(out?.map((p) => p.virtual)).toEqual(['/src/a.py', '/src/big.bin'])
-    }
+    // has to read them itself, off the tree the mount loaded; one an answer
+    // also names is listed once.
+    await repo.create({ 'src/a.py': 'needle\n', 'src/big.bin': 'needle\n'.padEnd(SEARCH_LIMIT) })
+    const accessor = await loaded()
+    const out = await narrowPaths(accessor, 'needle', [root()])
+    expect(out?.map((p) => p.virtual)).toEqual(['/src/a.py', '/src/big.bin'])
+    await repo.answer('search', found(['src/a.py', 'src/big.bin'], false))
+    const again = await narrowPaths(accessor, 'needle', [root()])
+    expect(again?.map((p) => p.virtual)).toEqual(['/src/a.py', '/src/big.bin'])
   })
 
   it('adds big files only from the scope', async () => {
     // A big file elsewhere would put lines from outside the operand in the
     // output.
-    const tree = {
-      'src/a.py': blob('src/a.py', 10),
-      'src/big.bin': blob('src/big.bin', SEARCH_LIMIT),
-      'docs/big.md': blob('docs/big.md', SEARCH_LIMIT),
-    }
-    search.mockResolvedValueOnce(found([{ path: 'src/a.py', sha: 'a' }], false))
-    const out = await narrowPaths(makeAccessor(tree), 'needle', [scope('src')])
+    const big = 'needle\n'.padEnd(SEARCH_LIMIT)
+    await repo.create({ 'src/a.py': 'needle\n', 'src/big.bin': big, 'docs/big.md': big })
+    const out = await narrowPaths(await loaded(), 'needle', [scope('src')])
     expect(out?.map((p) => p.virtual)).toEqual(['/src/a.py', '/src/big.bin'])
   })
 
   it('returns null when the only scope fails, and says why', async () => {
+    await repo.create({ 'src/a.py': 'needle\n' })
+    await repo.refuse('search', 422, 'boom')
     const warn = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
-    search.mockRejectedValueOnce(new Error('boom'))
-    expect(await narrowPaths(makeAccessor(SMALL), 'needle', [scope('src')])).toBeNull()
-    expect(warn).toHaveBeenCalledWith(
-      'github code search failed (Error: boom); falling back to per-file scan',
-    )
-    warn.mockRestore()
+    expect(await narrowPaths(await loaded(), 'needle', [scope('src')])).toBeNull()
+    const said = warn.mock.calls.map((call) => String(call[0]))
+    expect(said).toContainEqual(expect.stringMatching(/^github code search failed \(.*boom/))
+    expect(said).toContainEqual(expect.stringMatching(/falling back to per-file scan$/))
   })
 
   it('filters a subdirectory scope by its repo-relative path', async () => {
-    search.mockResolvedValueOnce(found([], false))
-    await narrowPaths(makeAccessor(SMALL), 'needle', [scope('src')])
-    expect(search.mock.calls[0]?.[0].q).toBe('needle repo:acme/proj path:src')
+    await repo.create({ 'src/a.py': 'needle\n' })
+    await narrowPaths(await loaded(), 'needle', [scope('src')])
+    expect(await asked()).toEqual(['needle repo:integ-user/repo path:src'])
   })
 
   it('does not filter the root scope', async () => {
-    search.mockResolvedValueOnce(found([], false))
-    await narrowPaths(makeAccessor(SMALL), 'needle', [root()])
-    expect(search.mock.calls[0]?.[0].q).toBe('needle repo:acme/proj')
+    await repo.create({ 'src/a.py': 'needle\n' })
+    await narrowPaths(await loaded(), 'needle', [root()])
+    expect(await asked()).toEqual(['needle repo:integ-user/repo'])
   })
 
   it('does not let big files rescue a truncated answer', async () => {
-    search.mockResolvedValueOnce(found([], true))
-    const tree = { 'src/big.bin': blob('src/big.bin', SEARCH_LIMIT) }
-    expect(await narrowPaths(makeAccessor(tree), 'needle', [root()])).toBeNull()
+    await repo.create({ 'src/big.bin': 'needle\n'.padEnd(SEARCH_LIMIT) })
+    await repo.answer('search', found([], true))
+    expect(await narrowPaths(await loaded(), 'needle', [root()])).toBeNull()
   })
 
   it('maps hits under the mount prefix', async () => {
-    search.mockResolvedValueOnce(
-      found(
-        [
-          { path: 'src/main.py', sha: 'a' },
-          { path: 'src/utils.py', sha: 'b' },
-        ],
-        false,
-      ),
-    )
+    await repo.create(SOURCES)
     const mounted = new PathSpec({ virtual: '/gh', directory: '/gh', vfsPath: '' })
-    const out = await narrowPaths(makeAccessor(SMALL), 'import', [mounted])
+    const out = await narrowPaths(await loaded(), 'import', [mounted])
     expect(out?.map((p) => p.virtual)).toEqual(['/gh/src/main.py', '/gh/src/utils.py'])
     expect(out?.map((p) => p.vfsPath)).toEqual(['src/main.py', 'src/utils.py'])
   })

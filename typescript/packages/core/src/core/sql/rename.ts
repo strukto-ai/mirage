@@ -62,7 +62,7 @@ export async function rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec
     params: [toParent.ino, leaf(to), fromParent.ino, leaf(from)],
   })
   if (there !== null) statements.push(...dropInodes([there.ino]))
-  const now = nowStamp()
+  const now = nowStamp(accessor)
   for (const ino of new Set([fromParent.ino, toParent.ino]))
     statements.push(touched(byIno(ino), now))
   try {

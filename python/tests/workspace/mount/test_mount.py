@@ -874,3 +874,133 @@ async def test_a_lookup_finds_a_file_a_listing_landing_beside_it_names(
 
     monkeypatch.setattr(mount.index, "list_dir", racing)
     assert await mount.call("read", "/d/w/a") == b"x"
+
+
+class _FailingRAM(RAMVFS):
+    """A RAM mount whose read of one file fails."""
+
+    async def read(self, path, offset=0, size=None):
+        if path.virtual.endswith("/bad"):
+            raise OSError(errno.EIO, "unreadable", path.virtual)
+        return await super().read(path, offset, size)
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_without_one_on_the_vfs_reads_each_file():
+    # The VFS reads no batch, so each file is read as its own read would
+    # read it; one longer than the limit, and one whose read fails, is left
+    # for that read.
+    vfs = _FailingRAM()
+    vfs._store.files.update(
+        {"/a": b"a\n", "/big": b"x" * 9, "/bad": b"b\n", "/e": b""}
+    )
+    mount = MountEntry("/d/", vfs)
+    assert not vfs.supports("read_many")
+    read = await mount.read_many(["/d/a", "/d/big", "/d/bad", "/d/e"], 8)
+    assert read == {"/d/a": b"a\n", "/d/e": b""}
+
+
+class _Streamed(BaseVFS):
+    """Answers a whole read as a stream, 16 bytes in four chunks."""
+
+    name = "streamed"
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        for _ in range(4):
+            yield b"x" * 4
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_leaves_out_what_its_own_read_could_not_fit():
+    # The files a batch reads must fit together, beside what the batch
+    # already holds, in what the workspace has left, as one file must for
+    # its own read, so a read of one left out meets the refusal; what a RAM
+    # store holds is already counted.
+    ram = RAMVFS()
+    ram._store.files.update({"/f": b"x" * 16, "/g": b"x" * 16})
+    one = MemoryBudget(8, lambda: 0)
+    both = MemoryBudget(24, lambda: 0)
+    built = MountEntry("/b/", _Built())
+    streamed = MountEntry("/s/", _Streamed())
+    stored = MountEntry("/r/", ram)
+    assert await run_with_memory(one, built.read_many(["/b/f"], 64)) == {}
+    assert await run_with_memory(one, streamed.read_many(["/s/f"], 64)) == {}
+    assert await run_with_memory(
+        both, built.read_many(["/b/f", "/b/g"], 64)
+    ) == {"/b/f": b"x" * 16}
+    assert await run_with_memory(both, built.read_many(["/b/f"], 64, 16)) == {}
+    assert await run_with_memory(
+        both, streamed.read_many(["/s/f", "/s/g"], 64)
+    ) == {"/s/f": b"x" * 16}
+    assert await run_with_memory(
+        one, stored.read_many(["/r/f", "/r/g"], 64)
+    ) == {"/r/f": b"x" * 16, "/r/g": b"x" * 16}
+    assert await streamed.read_many(["/s/f"], 64) == {"/s/f": b"x" * 16}
+
+
+class _Batched(BaseVFS):
+    """Reads a batch itself, keeping the room each batch read was handed."""
+
+    name = "batched"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rooms: list[int | None] = []
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int, room: int | None = None
+    ) -> dict[str, bytes]:
+        self.rooms.append(room)
+        return {p.virtual: b"x" for p in paths}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_hands_its_vfs_the_room_its_files_must_fit():
+    # A VFS that reads a batch itself is handed what the workspace has left
+    # beside what the batch already holds, and no bound without a budget.
+    vfs = _Batched()
+    mount = MountEntry("/b/", vfs)
+    budget = MemoryBudget(24, lambda: 0)
+    assert await run_with_memory(
+        budget, mount.read_many(["/b/f"], 64, 16)
+    ) == {"/b/f": b"x"}
+    await mount.read_many(["/b/f"], 64, 16)
+    assert vfs.rooms == [8, None]
+
+
+class _StoresGrow(BaseVFS):
+    """Reads a batch whole, taking no room, while the workspace's stores
+    grow by ``grows`` bytes."""
+
+    name = "grows"
+
+    def __init__(self, files: dict[str, bytes], grows: int) -> None:
+        super().__init__()
+        self.files = files
+        self.grows = grows
+        self.held = 0
+
+    async def read_many(
+        self, paths: list[PathSpec], limit: int
+    ) -> dict[str, bytes]:
+        self.held += self.grows
+        return {p.virtual: self.files[p.virtual] for p in paths}
+
+
+@pytest.mark.asyncio
+async def test_a_batch_read_keeps_what_fits_in_the_room_left_once_it_is_done():
+    # The stores grew by 10 bytes while the VFS read, so of what it answers
+    # the mount keeps, in the order asked, only what fits beside the 16 the
+    # batch holds in the 22 left now: /g/a, then /g/c after /g/b no longer
+    # fits.
+    vfs = _StoresGrow(
+        {"/g/a": b"a" * 4, "/g/b": b"b" * 8, "/g/c": b"c" * 2}, 10
+    )
+    mount = MountEntry("/g/", vfs)
+    budget = MemoryBudget(32, lambda: vfs.held)
+    got = await run_with_memory(
+        budget, mount.read_many(["/g/a", "/g/b", "/g/c"], 64, 16)
+    )
+    assert got == {"/g/a": b"a" * 4, "/g/c": b"c" * 2}

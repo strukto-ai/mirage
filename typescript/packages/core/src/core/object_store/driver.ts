@@ -89,6 +89,9 @@ export interface ChildEntry {
   size?: number | null
   /** ISO-8601 mtime; empty/absent when unknown. */
   modified?: string
+  /** The file's content identity (ETag, revision id), as `stat` reports it;
+   * null/absent when the listing carries none. */
+  fingerprint?: string | null
 }
 
 /** One key of a recursive listing, directory markers included. */
@@ -98,6 +101,9 @@ export interface TreeEntry {
   /** Byte size; markers report 0 and may omit it. */
   size?: number
   modified?: string
+  /** The key's content identity, as `stat` reports it; null/absent when
+   * the listing carries none. */
+  fingerprint?: string | null
 }
 
 /** What a point lookup of one key returned. */

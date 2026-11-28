@@ -16,14 +16,19 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
+import {
+  DEFAULT_CHUNK_SIZE,
+  DIR,
+  FILE,
+  READ_RUN_BYTES,
+} from '@struktoai/mirage-core/core/sql/constants'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { recordingScope } from '@struktoai/mirage-core/observe/context'
 import { ops } from '@struktoai/mirage-core/test-utils'
 import { CapacityState, FileType, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
-import { SqlDialect, type SqlDriver } from '@struktoai/mirage-core/vfs/sql/types'
+import { SqlDialect, type SqlDriver, type SqlRow } from '@struktoai/mirage-core/vfs/sql/types'
 import { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
 import { SqlWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/sql'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -106,6 +111,125 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
       data.slice(DEFAULT_CHUNK_SIZE * 2),
     )
     expect((await chunks()) - before).toBe(3)
+  })
+
+  it('answers a batch read in a few queries however many files it names', async () => {
+    // Each folder is walked once, the entries it names come in one query and
+    // the rows of the files kept in one more, each split where a statement's
+    // parameters run out (120 names here: two entry queries in /b, and three
+    // row queries for the 121 files kept at two parameters a file); the walks
+    // of /a, /b and the missing /gone make 3, so 9 in all. A file across rows
+    // reads whole, and a folder, a file gone or one longer than the limit is
+    // left for its own read. Each file kept is recorded once, one named twice
+    // too.
+    const data = new Uint8Array(DEFAULT_CHUNK_SIZE * 2 + 5).map((_, i) => i % 251)
+    await ops(vfs).mkdir(at('/a'))
+    await ops(vfs).mkdir(at('/a/sub'))
+    await ops(vfs).mkdir(at('/b'))
+    await ops(vfs).write(at('/a/big'), data)
+    await ops(vfs).write(at('/a/long'), new Uint8Array(DEFAULT_CHUNK_SIZE * 3))
+    const small = new Map<string, Uint8Array>()
+    for (let i = 0; i < 120; i++) small.set(`/b/${String(i)}`, enc.encode(`${String(i)}\n`))
+    for (const [key, body] of small) await ops(vfs).write(at(key), body)
+    const query = vi.spyOn(vfs.accessor, 'query')
+    const names = ['/a/big', '/a/sub', '/a/gone', '/a/long', '/gone/x', ...small.keys()]
+    const [got, records] = await recordingScope(() => vfs.readMany(names.map(at), data.length))
+    expect(got).toEqual(new Map([['/a/big', data], ...small]))
+    expect(query.mock.calls.length).toBeLessThanOrEqual(9)
+    expect(records.map((r) => r.path).sort()).toEqual([...got.keys()].sort())
+    const [twice, once] = await recordingScope(() =>
+      vfs.readMany([at('/a/big'), at('/a/big')], data.length),
+    )
+    expect(twice).toEqual(new Map([['/a/big', data]]))
+    expect(once.map((r) => r.path)).toEqual(['/a/big'])
+  })
+
+  it('fetches the rows of a batch read a run at a time', async () => {
+    // The rows a query answers live beside the files built from them, so a
+    // query asks for the rows of at most READ_RUN_BYTES of files: three files
+    // of 100 KiB come in two row queries, and a file longer than a run comes
+    // alone in its own.
+    const files = new Map<string, Uint8Array>()
+    for (let i = 0; i < 3; i++) files.set(`/r${String(i)}`, new Uint8Array(100 * 1024).fill(i + 1))
+    files.set('/long', new Uint8Array(READ_RUN_BYTES + 1).fill(76))
+    for (const [key, body] of files) await ops(vfs).write(at(key), body)
+    const query = vi.spyOn(vfs.accessor, 'query')
+    expect(await vfs.readMany([...files.keys()].map(at), 1 << 20)).toEqual(files)
+    expect(query.mock.calls.filter(([sql]) => sql.includes('FROM fs_data')).length).toBe(3)
+  })
+
+  it('keeps an inode two paths of a batch read reach once', async () => {
+    // Two paths can reach one inode (a file moved between the folders'
+    // lookups, or a spec keyed by another path, as here), each with the size
+    // it saw then; the first is kept and the later one is left for its own
+    // read, so neither is answered with the size the other saw.
+    await ops(vfs).mkdir(at('/a'))
+    await ops(vfs).write(at('/a/f'), enc.encode('ffffff'))
+    const alias = PathSpec.fromStrPath('/b/f', 'a/f')
+    const [got, records] = await recordingScope(() => vfs.readMany([at('/a/f'), alias], 64))
+    expect(got).toEqual(new Map([['/a/f', enc.encode('ffffff')]]))
+    expect(records.map((r) => r.path)).toEqual(['/a/f'])
+  })
+
+  it('fetches no row of a batch read past the size it kept', async () => {
+    // The rows come in a query after the sizes were checked, so a file that
+    // grew between them is fetched only as far as the size the batch kept it
+    // at: here its inode answers one byte past a row of a file that is three
+    // rows long now, so only its first two rows come. Those rows carry the size
+    // it has now, so it is then left for its own read.
+    await ops(vfs).write(at('/g'), new Uint8Array(DEFAULT_CHUNK_SIZE * 3).fill(103))
+    const query = vfs.accessor.query.bind(vfs.accessor)
+    const fetched: SqlRow[] = []
+    vi.spyOn(vfs.accessor, 'query').mockImplementation(async (sql, params) => {
+      const rows = await query(sql, params)
+      if (sql.includes('d.name IN'))
+        return rows.map((r) => ({ ...r, size: DEFAULT_CHUNK_SIZE + 1 }))
+      if (sql.includes('FROM fs_data')) fetched.push(...rows)
+      return rows
+    })
+    const got = await vfs.readMany([at('/g')], DEFAULT_CHUNK_SIZE * 3)
+    expect(got).toEqual(new Map())
+    expect(fetched.map((r) => Number(r.chunk_index)).sort()).toEqual([0, 1])
+  })
+
+  it('leaves out a file of a batch read written between its queries', async () => {
+    // A truncate or an unlink that lands after the sizes were checked and
+    // before the rows come would leave a file padded with zeros to the size
+    // the batch saw; each row carries the size its file has as it is read, so
+    // a file whose rows carry another size, or that has none, is left for its
+    // own read, and an untouched one still comes.
+    await ops(vfs).write(at('/t'), enc.encode('ab'))
+    await ops(vfs).write(at('/u'), enc.encode('uu'))
+    await ops(vfs).write(at('/k'), enc.encode('kk'))
+    const query = vfs.accessor.query.bind(vfs.accessor)
+    let landed = false
+    vi.spyOn(vfs.accessor, 'query').mockImplementation(async (sql, params) => {
+      if (sql.includes('chunk_index <=') && !landed) {
+        landed = true
+        await ops(vfs).truncate(at('/t'), 1)
+        await ops(vfs).unlink(at('/u'))
+      }
+      return query(sql, params)
+    })
+    const got = await vfs.readMany([at('/t'), at('/u'), at('/k')], 64)
+    expect(landed).toBe(true)
+    expect(got).toEqual(new Map([['/k', enc.encode('kk')]]))
+  })
+
+  it('keeps the files of a batch read that fit its room', async () => {
+    // A file that would take the batch past its room is left out before its
+    // rows are asked for, and a smaller one after it still fits.
+    for (const [key, size] of [
+      ['/f', 16],
+      ['/g', 16],
+      ['/h', 4],
+    ] as const) {
+      await ops(vfs).write(at(key), new Uint8Array(size))
+    }
+    const files = ['/f', '/g', '/h'].map(at)
+    expect([...(await vfs.readMany(files, 64, [], 20)).keys()].sort()).toEqual(['/f', '/h'])
+    expect((await vfs.readMany(files, 64, [], -1)).size).toBe(0)
+    expect((await vfs.readMany(files, 64)).size).toBe(3)
   })
 
   it('declines a subtree over the listing limit and never returns a partial tree', async () => {

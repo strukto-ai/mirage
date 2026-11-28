@@ -218,8 +218,10 @@ class TestFreshStat:
             )
             if replacement is None:
                 await other.vfs.unlink("/data/f.txt")
+                current = None
             else:
                 await other.vfs.write("/data/f.txt", replacement)
+                current = (await other.vfs.stat("/data/f.txt")).fingerprint
             options = {} if fresh is None else {"fresh": fresh}
             if fresh and replacement is None:
                 with pytest.raises(FileNotFoundError):
@@ -229,7 +231,11 @@ class TestFreshStat:
                 assert row.name == "f.txt"
                 assert row.type is FileType.FILE
                 assert row.size == (6 if fresh else 3)
-                assert row.fingerprint is None
+                # The fingerprint is the answering row's: the kept
+                # listing's, or the backend's under fresh.
+                assert row.fingerprint == (
+                    current if fresh else listed.fingerprint
+                )
                 assert row.revision is None
         finally:
             await other.close()

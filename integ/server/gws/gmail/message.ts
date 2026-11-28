@@ -167,5 +167,6 @@ export function insertGmailMessage(
     })),
   }
   st.messages.set(id, msg)
+  st.noteGmail('messagesAdded', msg)
   return msg
 }

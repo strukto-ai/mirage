@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import pytest
 
 from mirage.core.gdrive.copy import copy
@@ -26,86 +25,114 @@ def spec(virtual: str) -> PathSpec:
 
 
 @pytest.mark.asyncio
-async def test_copy_file(fake_drive, gdrive_accessor):
-    fake_drive.add("src.txt", content=b"data")
+async def test_copy_file(google_account):
+    await google_account.upload("src.txt", b"data")
     await call(
-        copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/dst.txt")
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
     )
-    dst = fake_drive.find("dst.txt")
+    dst = await google_account.find("dst.txt")
     assert dst is not None
-    assert dst["content"] == b"data"
-    assert fake_drive.find("src.txt") is not None
+    assert await google_account.content(dst["id"]) == b"data"
+    assert await google_account.find("src.txt") is not None
 
 
 @pytest.mark.asyncio
-async def test_copy_overwrites_existing_file(fake_drive, gdrive_accessor):
-    fake_drive.add("src.txt", content=b"new")
-    fake_drive.add("dst.txt", content=b"old")
+async def test_copy_overwrites_existing_file(google_account):
+    await google_account.upload("src.txt", b"new")
+    await google_account.upload("dst.txt", b"old")
     await call(
-        copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/dst.txt")
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src.txt"),
+        dst=spec("/dst.txt"),
     )
-    dst = fake_drive.find("dst.txt")
+    dst = await google_account.find("dst.txt")
     assert dst is not None
-    assert dst["content"] == b"new"
-    assert len(fake_drive.items) == 2
+    assert await google_account.content(dst["id"]) == b"new"
+    assert len(await google_account.items()) == 2
 
 
 @pytest.mark.asyncio
-async def test_copy_file_onto_dir_raises(fake_drive, gdrive_accessor):
-    fake_drive.add("src.txt", content=b"x")
-    fake_drive.folder("d")
+async def test_copy_file_onto_dir_raises(google_account):
+    await google_account.upload("src.txt", b"x")
+    await google_account.folder("d")
     with pytest.raises(IsADirectoryError):
         await call(
-            copy, readdir, gdrive_accessor, spec("/src.txt"), dst=spec("/d")
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/d"),
         )
 
 
 @pytest.mark.asyncio
-async def test_copy_tree_creates_missing_dir(fake_drive, gdrive_accessor):
-    src = fake_drive.folder("src")
-    sub = fake_drive.folder("sub", parent=src)
-    fake_drive.add("f.txt", parent=sub, content=b"deep")
-    fake_drive.add("top.txt", parent=src, content=b"top")
-    await call(copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/dst"))
-    dst = fake_drive.find("dst")
-    assert dst is not None
+async def test_copy_tree_creates_missing_dir(google_account):
+    src = await google_account.folder("src")
+    sub = await google_account.folder("sub", src)
+    await google_account.upload("f.txt", b"deep", sub)
+    await google_account.upload("top.txt", b"top", src)
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src"),
+        dst=spec("/dst"),
+    )
+    assert await google_account.find("dst") is not None
+    items = await google_account.items()
     for name in ("sub", "f.txt", "top.txt"):
-        copies = [i for i in fake_drive.items.values() if i["name"] == name]
+        copies = [i for i in items if i["name"] == name]
         assert len(copies) == 2
-    deep = [i for i in fake_drive.items.values() if i["name"] == "f.txt"]
-    assert {i["content"] for i in deep} == {b"deep"}
+    deep = [i for i in items if i["name"] == "f.txt"]
+    assert {await google_account.content(i["id"]) for i in deep} == {b"deep"}
 
 
 @pytest.mark.asyncio
-async def test_copy_tree_merges_existing_dir(fake_drive, gdrive_accessor):
-    src = fake_drive.folder("src")
-    fake_drive.add("f.txt", parent=src, content=b"x")
-    dst = fake_drive.folder("dst")
-    fake_drive.add("keep.txt", parent=dst, content=b"k")
-    await call(copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/dst"))
+async def test_copy_tree_merges_existing_dir(google_account):
+    src = await google_account.folder("src")
+    await google_account.upload("f.txt", b"x", src)
+    dst = await google_account.folder("dst")
+    await google_account.upload("keep.txt", b"k", dst)
+    await call(
+        copy,
+        readdir,
+        google_account.drive_accessor(),
+        spec("/src"),
+        dst=spec("/dst"),
+    )
     dst_children = [
-        i for i in fake_drive.items.values() if dst in i["parents"]
+        i for i in await google_account.items() if dst in i["parents"]
     ]
     assert {i["name"] for i in dst_children} == {"keep.txt", "f.txt"}
 
 
 @pytest.mark.asyncio
-async def test_copy_dir_onto_file_raises(fake_drive, gdrive_accessor):
-    fake_drive.folder("src")
-    fake_drive.add("f.txt", content=b"x")
+async def test_copy_dir_onto_file_raises(google_account):
+    await google_account.folder("src")
+    await google_account.upload("f.txt", b"x")
     with pytest.raises(NotADirectoryError):
         await call(
-            copy, readdir, gdrive_accessor, spec("/src"), dst=spec("/f.txt")
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src"),
+            dst=spec("/f.txt"),
         )
 
 
 @pytest.mark.asyncio
-async def test_copy_missing_src_raises(fake_drive, gdrive_accessor):
+async def test_copy_missing_src_raises(google_account):
     with pytest.raises(FileNotFoundError):
         await call(
             copy,
             readdir,
-            gdrive_accessor,
+            google_account.drive_accessor(),
             spec("/missing.txt"),
             dst=spec("/dst.txt"),
         )

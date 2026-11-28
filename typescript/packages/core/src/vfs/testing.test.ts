@@ -359,6 +359,13 @@ class CountsListings extends RAMVFS {
   }
 }
 
+/** Stats the same fingerprint whatever a file holds. */
+class StuckFingerprint extends RAMVFS {
+  override async stat(path: PathSpec): Promise<FileStat> {
+    return (await super.stat(path)).with({ fingerprint: 'stuck' })
+  }
+}
+
 /** Refuses to unlink the rename destination. */
 class KeepsRenameDst extends RAMVFS {
   override unlink(path: PathSpec): Promise<void> {
@@ -420,6 +427,12 @@ describe('checkMutationContract', () => {
     const vfs = new CountsListings()
     await checkMutationContract(vfs, SCRATCH)
     expect(vfs.listings).toBe(0)
+  })
+
+  it('catches a fingerprint a same-size rewrite leaves', async () => {
+    await expect(checkMutationContract(new StuckFingerprint(), SCRATCH)).rejects.toThrow(
+      'must move the fingerprint',
+    )
   })
 
   it('tries every file in cleanup, then throws', async () => {

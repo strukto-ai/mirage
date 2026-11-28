@@ -26,7 +26,6 @@ from mirage.core.sql.inode import (
     inode_at,
     make_node,
     now_stamp,
-    resized,
     resized_from,
 )
 from mirage.core.sql.path import (
@@ -51,7 +50,7 @@ from mirage.vfs.sql.types import SqlStatement
 _TRIES = 3
 
 
-async def _land_fresh(
+async def land_fresh(
     accessor: SqlAccessor,
     node: Inode,
     build: Callable[[Inode], Awaitable[list[SqlStatement]]],
@@ -88,7 +87,7 @@ async def _landing(
 ) -> list[SqlStatement]:
     # The statements that land ``data`` whole: a new file made with it,
     # an existing one's rows replaced, or ``data`` added at its end.
-    now = now_stamp()
+    now = now_stamp(accessor, node)
     if node is None:
         ref = by_entry(parent_ref(w), leaf(w))
         return [
@@ -104,8 +103,31 @@ async def _landing(
     return [
         SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
         *await place_bytes(accessor, ino, None, 0, data),
-        resized(ino, len(data), now),
+        resized_from(node, len(data), now),
     ]
+
+
+async def _replace(
+    accessor: SqlAccessor, w: Walk, existing: Inode | None, data: bytes
+) -> None:
+    """Land ``data`` as the whole file: a new one made with it, or an
+    existing one's rows replaced, retried on the inode as it is now when
+    another writer changed it after the walk read it.
+
+    Args:
+        accessor (SqlAccessor): the database.
+        w (Walk): the destination as walked.
+        existing (Inode | None): the file the walk found, None for none.
+        data (bytes): the whole contents.
+    """
+    if existing is None:
+        await accessor.batch(await _landing(accessor, w, None, data, False))
+        return
+
+    async def replaced(n: Inode) -> list[SqlStatement]:
+        return await _landing(accessor, w, n, data, False)
+
+    await land_fresh(accessor, existing, replaced)
 
 
 async def write(
@@ -149,15 +171,13 @@ async def write(
             async def appended(n: Inode) -> list[SqlStatement]:
                 return await _landing(accessor, w, n, whole, True)
 
-            await _land_fresh(accessor, existing, appended)
+            await land_fresh(accessor, existing, appended)
         else:
-            await accessor.batch(
-                await _landing(accessor, w, existing, whole, append)
-            )
+            await _replace(accessor, w, existing, whole)
         record(op, path.virtual, VFSName.SQL, len(whole), timer)
         return
     if existing is None or not append:
-        await accessor.batch(await _landing(accessor, w, existing, b"", False))
+        await _replace(accessor, w, existing, b"")
     node = found(await walk(accessor, path), path)
     offset = node.size if append else 0
     pending = bytearray()
@@ -170,12 +190,14 @@ async def write(
         if not pending:
             return
         block = bytes(pending)
-        stamp = now_stamp()
+        stamp = node.mtime, node.mtime_nsec
         at = offset
         size = 0
 
+        # Stamped on each try, past the inode as that try finds it.
         async def placed(n: Inode) -> list[SqlStatement]:
-            nonlocal at, size
+            nonlocal at, size, stamp
+            stamp = now_stamp(accessor, n)
             at = n.size if append else offset
             size = max(n.size, at + len(block))
             return [
@@ -183,7 +205,7 @@ async def write(
                 resized_from(n, size, stamp),
             ]
 
-        used = await _land_fresh(accessor, node, placed)
+        used = await land_fresh(accessor, node, placed)
         node = replace(used, size=size, mtime=stamp[0], mtime_nsec=stamp[1])
         offset = at + len(block)
         written += len(block)

@@ -134,6 +134,41 @@ model DriveChange {
   @@id([tenant, seq])
 }
 
+// The fake's own record of each change a request made to the mailbox, not a
+// Gmail resource: Gmail keeps its change feed to itself and shows it only
+// through users.history.list and the historyId it hands out. Kept in order,
+// so history.list can name what changed after a history id: a message added
+// or deleted, or labels added to or removed from one (`labelIds`
+// comma-joined). The history id is this table's seq, a counter where Gmail's
+// is opaque. A row per change, as for DriveChange, since a deleted message
+// has no row left.
+model GmailChange {
+  tenant    String
+  seq       Int
+  kind      String
+  messageId String
+  threadId  String
+  labelIds  String @default("")
+
+  @@id([tenant, seq])
+}
+
+// The fake's own record of each event a request made, changed or deleted, not
+// a Calendar resource: Calendar shows its change feed only through
+// events.list asked with a syncToken, which names each event changed since
+// (a deleted one `cancelled`) and hands out the next token. Kept in order for
+// that listing. The token is this table's seq, a counter where Calendar's is
+// opaque, and it never expires: a test that wants Calendar's 410
+// fullSyncRequired arms it.
+model CalendarChange {
+  tenant     String
+  seq        Int
+  calendarId String
+  eventId    String
+
+  @@id([tenant, seq])
+}
+
 model DriveParent {
   pk       Int    @id @default(autoincrement())
   tenant   String

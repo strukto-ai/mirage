@@ -12,28 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.accessor.gsheets import GSheetsAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gsheets import GSheetsVFS
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
+from tests.fixtures.google_account import FILES
 from tests.fixtures.mounted import Mounted
 from tests.fixtures.vfs_io import call_over
 
+readdir = call_over(GSheetsVFS, "readdir")
 
-def _op(name: str):
-    return call_over(GSheetsVFS, name)
-
-
-readdir = _op("readdir")
+APP = "/gsheets"
+MIME = "application/vnd.google-apps.spreadsheet"
 
 
-def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
+def _scope(path: str, prefix: str = APP) -> PathSpec:
     return PathSpec(
         vfs_path=mount_key(path, prefix),
         virtual=path,
@@ -41,37 +36,24 @@ def _scope(path: str, prefix: str = "/gsheets") -> PathSpec:
     )
 
 
-@pytest.fixture
-def accessor():
-    return GSheetsAccessor(config=None, token_manager=offline_token_manager())
+def _accessor(google_account) -> GSheetsAccessor:
+    manager = google_account.token_manager()
+    return GSheetsAccessor(config=manager.config, token_manager=manager)
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor):
-    result = await readdir(accessor, _scope("/gsheets"))
+async def test_readdir_root(google_account):
+    result = await readdir(_accessor(google_account), _scope(APP))
     assert [row.name for row in result] == ["owned", "shared"]
 
 
 @pytest.mark.asyncio
-async def test_a_listed_corpus_is_listed_once(accessor):
-    mounted = Mounted(GSheetsVFS, accessor, "/gsheets")
-    listed = AsyncMock(
-        return_value=(
-            [
-                {
-                    "mimeType": "application/vnd.google-apps.spreadsheet",
-                    "id": "sheet1",
-                    "name": "Budget",
-                    "modifiedTime": "2026-04-01T00:00:00Z",
-                    "owners": [{"me": True}],
-                }
-            ],
-            True,
-        )
-    )
-    with serve(drive=StubDrive(list_all_files=listed)):
-        first = await mounted.readdir(_scope("/gsheets/owned"))
-        again = await mounted.readdir(_scope("/gsheets/owned"))
+async def test_a_listed_corpus_is_listed_once(google_account):
+    made = await google_account.create("Budget", MIME)
+    mounted = Mounted(GSheetsVFS, _accessor(google_account), APP)
+    await google_account.run.record_requests()
+    first = await mounted.readdir(_scope(f"{APP}/owned"))
+    again = await mounted.readdir(_scope(f"{APP}/owned"))
     assert first == again and len(first) == 1
-    assert "sheet1" in first[0]
-    listed.assert_awaited_once()
+    assert made in first[0]
+    assert len(await google_account.asked("GET", FILES)) == 1

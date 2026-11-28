@@ -12,47 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import hashlib
 from http import HTTPStatus
-from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.accessor.gdrive import GDriveAccessor
 from mirage.core.gdrive.readdir import stat_from_item
 from mirage.core.gdrive.stat import stat
-from mirage.core.google.client import TokenManager
-from mirage.core.google.config import GoogleConfig
+from mirage.core.google.client import GoogleApiError
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
+from mirage.utils.clock import ManualClock
 from mirage.vfs.gdrive import GoogleDriveConfig, GoogleDriveVFS
 from mirage.workspace import Workspace
-from tests.fixtures.gdrive_api import StubDrive, drive_error, install_drive
+from tests.fixtures.google_account import DRIVES, FILES, UNTIL_CLEARED
 
 STAMP = "2026-04-01T00:00:00.000Z"
 DOC_MIME = "application/vnd.google-apps.document"
 
 
-@pytest.fixture
-def config():
-    return GoogleConfig(
-        client_id="test-id",
-        client_secret="test-secret",
-        refresh_token="test-refresh",
-    )
-
-
-@pytest.fixture
-def accessor(config):
-    mgr = TokenManager(config)
-    mgr._access_token = "fake-token"
-    mgr._expires_at = 9999999999
-    return GDriveAccessor(config=config, token_manager=mgr)
-
-
-def _workspace(accessor) -> Workspace:
+def _workspace(google_account, **fields) -> Workspace:
     vfs = GoogleDriveVFS(
-        config=GoogleDriveConfig(client_id="x", refresh_token="y")
+        config=google_account.config(GoogleDriveConfig, **fields)
     )
-    vfs.accessor = accessor
     return Workspace({"/drive/": vfs}, mode=MountMode.READ)
 
 
@@ -61,78 +42,80 @@ def _file(file_id: str, name: str, mime: str = "text/plain", **more) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_stat_root(accessor):
+async def test_stat_root(google_account):
     result = await stat(
-        accessor, PathSpec(vfs_path="", virtual="/", directory="/")
+        google_account.drive_accessor(),
+        PathSpec(vfs_path="", virtual="/", directory="/"),
     )
     assert result.type == FileType.DIRECTORY
     assert result.name == "/"
 
 
 @pytest.mark.asyncio
-async def test_stat_answers_the_row_its_parent_listed(accessor):
+async def test_stat_answers_the_row_its_parent_listed(google_account):
     row = stat_from_item(
         _file("f1", "report.pdf", "application/pdf", size="1024")
     )
-    result = await stat(accessor, PathSpec.from_str_path("/report.pdf"), row)
+    await google_account.run.record_requests()
+    result = await stat(
+        google_account.drive_accessor(),
+        PathSpec.from_str_path("/report.pdf"),
+        row,
+    )
     assert result == row
     assert result.size == 1024
     assert result.extra["file_id"] == "f1"
     assert result.extra["resource_type"] == "gdrive/file"
+    assert await google_account.log() == []
 
 
 @pytest.mark.asyncio
-async def test_stat_of_nothing_is_not_found(accessor):
+async def test_stat_of_nothing_is_not_found(google_account):
     with pytest.raises(FileNotFoundError):
-        await stat(accessor, PathSpec.from_str_path("/nonexistent.txt"), None)
+        await stat(
+            google_account.drive_accessor(),
+            PathSpec.from_str_path("/nonexistent.txt"),
+            None,
+        )
 
 
 @pytest.mark.asyncio
-async def test_a_cold_stat_lists_its_parent_once(accessor, monkeypatch):
-    files = [
-        _file(
-            "f99",
-            "fresh.pdf",
-            "application/pdf",
-            modifiedTime="2026-04-15T00:00:00.000Z",
-            size="2048",
-        )
-    ]
-    ws = _workspace(accessor)
-    mock_list = AsyncMock(return_value=files)
+async def test_a_cold_stat_lists_its_parent_once(google_account):
+    made = await google_account.upload("fresh.pdf", b"p" * 2048)
+    await google_account.run.record_requests()
+    ws = _workspace(google_account)
     try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                list_files=mock_list,
-                list_shared_drives=AsyncMock(return_value=[]),
-            ),
-        )
         result, _ = await ws.dispatch(
             "stat", PathSpec.from_str_path("/drive/fresh.pdf")
         )
         assert result.name == "fresh.pdf"
-        assert result.extra["file_id"] == "f99"
+        assert result.extra["file_id"] == made
         # binary files download raw, so Drive's size is the rendered length
         assert result.size == 2048
-        assert mock_list.call_count == 1
+        listed = [
+            d for name, d in await google_account.log() if name == "list"
+        ]
+        assert listed == ["root"]
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_failed_parent_listing_propagates(accessor, monkeypatch):
-    ws = _workspace(accessor)
+async def test_a_failed_parent_listing_propagates(google_account):
+    await google_account.refuse(
+        "GET",
+        FILES,
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        "Backend Error",
+        reason="backendError",
+        times=UNTIL_CLEARED,
+    )
+    # A workspace binds its own clock to its mounts' clients, so the
+    # retries wait on the clock it is handed.
+    vfs = GoogleDriveVFS(config=google_account.config(GoogleDriveConfig))
+    ws = Workspace({"/drive/": vfs}, mode=MountMode.READ, clock=ManualClock())
     try:
-        install_drive(
-            monkeypatch,
-            StubDrive(
-                list_files=AsyncMock(
-                    side_effect=RuntimeError("drive unavailable")
-                )
-            ),
-        )
-        with pytest.raises(RuntimeError, match="drive unavailable"):
+        with pytest.raises(GoogleApiError, match="Backend Error"):
             await ws.dispatch(
                 "stat", PathSpec.from_str_path("/drive/missing.txt")
             )
@@ -143,43 +126,25 @@ async def test_a_failed_parent_listing_propagates(accessor, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["updated", "deleted"])
 async def test_a_partial_root_does_not_make_a_child_a_permanent_hit(
-    accessor, change, monkeypatch
+    google_account, change
 ):
     """A best-effort root listing must not make a child a permanent hit."""
-    phase = "initial"
-
-    async def list_files(folder_id="root", **_kwargs):
-        assert folder_id == "root"
-        if phase == "initial":
-            return [_file("old-file", "readme.txt", size="3")]
-        if change == "deleted":
-            return []
-        return [_file("new-file", "readme.txt", size="42")]
-
-    async def list_shared_drives():
-        if phase == "initial":
-            raise drive_error(
-                HTTPStatus.FORBIDDEN, "Insufficient scope", "drives"
-            )
-        return []
-
-    install_drive(
-        monkeypatch,
-        StubDrive(
-            list_files=list_files, list_shared_drives=list_shared_drives
-        ),
+    old = await google_account.upload("readme.txt", b"old")
+    await google_account.refuse(
+        "GET", DRIVES, HTTPStatus.FORBIDDEN, "Insufficient scope"
     )
-    ws = _workspace(accessor)
+    ws = _workspace(google_account)
     try:
         await ws.dispatch("readdir", PathSpec.from_str_path("/drive"))
         index = ws.mount("/drive/").index_store
         assert (await index.list_dir("/drive")).entries is None
         await index.invalidate()
-        phase = "refresh"
+        await google_account.delete(old)
         path = PathSpec.from_str_path("/drive/readme.txt")
         if change == "updated":
+            made = await google_account.upload("readme.txt", b"x" * 42)
             result, _ = await ws.dispatch("stat", path)
-            assert result.extra["file_id"] == "new-file"
+            assert result.extra["file_id"] == made
             assert result.size == 42
         else:
             with pytest.raises(FileNotFoundError):
@@ -209,48 +174,55 @@ def test_a_doc_is_stamped_by_its_modified_time():
     assert row.fingerprint == STAMP
 
 
-def test_an_item_renders_every_kind_in_full(fake_drive):
-    # Each kind's name suffix, size, token and extras.
-    doc = fake_drive.add("Report", mime=DOC_MIME)
-    folder = fake_drive.folder("d")
-    blob = fake_drive.add("a.bin", content=b"hello")
-    assert stat_from_item(fake_drive.public(doc)) == FileStat(
+@pytest.mark.asyncio
+async def test_an_item_renders_every_kind_in_full(google_account):
+    # Each kind's name suffix, size, token and extras, from the items as
+    # Drive answers them.
+    doc = await google_account.item(
+        await google_account.create("Report", DOC_MIME)
+    )
+    folder = await google_account.item(await google_account.folder("d"))
+    blob = await google_account.item(
+        await google_account.upload("a.bin", b"hello")
+    )
+    assert stat_from_item(doc) == FileStat(
         name="Report.gdoc.json",
         size=None,
-        modified="2026-01-01T00:00:00Z",
-        fingerprint="2026-01-01T00:00:00Z",
+        modified=doc["modifiedTime"],
+        fingerprint=doc["modifiedTime"],
         type=FileType.FILE,
         content=ContentType.JSON,
         extra={
-            "file_id": "id1",
+            "file_id": doc["id"],
             "mime_type": DOC_MIME,
             "parents": ["root"],
             "resource_type": "gdrive/gdoc",
         },
     )
-    assert stat_from_item(fake_drive.public(folder)) == FileStat(
+    assert stat_from_item(folder) == FileStat(
         name="d",
-        modified="2026-01-01T00:00:00Z",
+        modified=folder["modifiedTime"],
         type=FileType.DIRECTORY,
         extra={
-            "file_id": "id2",
+            "file_id": folder["id"],
             "mime_type": "application/vnd.google-apps.folder",
             "parents": ["root"],
         },
     )
-    assert stat_from_item(fake_drive.public(blob)) == FileStat(
+    md5 = hashlib.md5(b"hello").hexdigest()
+    assert stat_from_item(blob) == FileStat(
         name="a.bin",
         size=5,
-        modified="2026-01-01T00:00:00Z",
-        fingerprint="5d41402abc4b2a76b9719d911017c592",
+        modified=blob["modifiedTime"],
+        fingerprint=md5,
         type=FileType.FILE,
         content=ContentType.BINARY,
         extra={
-            "file_id": "id3",
+            "file_id": blob["id"],
             "mime_type": "application/octet-stream",
             "parents": ["root"],
-            "md5_checksum": "5d41402abc4b2a76b9719d911017c592",
-            "head_revision_id": "id3-r1",
+            "md5_checksum": md5,
+            "head_revision_id": blob["headRevisionId"],
             "resource_type": "gdrive/file",
         },
     )

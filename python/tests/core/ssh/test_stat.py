@@ -18,7 +18,7 @@ import pytest
 from mirage.core.posix.stat import tree_command
 from mirage.core.ssh.stat import attrs_to_file_stat, tree
 from mirage.types import FileType, PathSpec
-from mirage.utils.dates import epoch_to_iso
+from mirage.utils.dates import epoch_to_iso, wall_ns
 from tests.fixtures.ssh_run import RunAccessor
 
 TOP = b"d 755 4096 1700000000.5 1700000001.0 1000 1000 3 8 \0"
@@ -52,8 +52,10 @@ async def test_tree_renders_each_entry_as_stat_does():
             atime=1700000002,
             mtime=1700000000,
         ),
+        wall_ns(),
     )
     assert rows["a.txt"].modified == epoch_to_iso(1700000000)
+    assert rows["a.txt"].fingerprint == "5:1700000000"
     assert rows["sub"].type is FileType.DIRECTORY
     assert rows["sub"].size is None
     assert rows["sub/b b.md"].name == "b b.md"
@@ -96,7 +98,7 @@ async def test_anything_but_a_clean_find_leaves_the_walk(answer):
 )
 def test_special_entries_keep_their_kind(wire, mode, kind):
     row = attrs_to_file_stat(
-        "entry", asyncssh.SFTPAttrs(type=wire, permissions=mode)
+        "entry", asyncssh.SFTPAttrs(type=wire, permissions=mode), wall_ns()
     )
     assert row.type == kind
     assert row.content is None

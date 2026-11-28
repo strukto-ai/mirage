@@ -56,6 +56,27 @@ async def test_head_and_list_timestamp_format(input, expected):
     assert children[0].modified == expected
 
 
+@pytest.mark.asyncio
+async def test_a_listing_carries_the_etag_head_stats():
+    etag = '"9a0364b9e99bb480dd25e1f0284c8555"'
+    client = Mock()
+    client.head_object = AsyncMock(
+        return_value={"ContentLength": 7, "ETag": etag}
+    )
+    pages = MagicMock()
+    pages.__aiter__.return_value = [
+        {"Contents": [{"Key": "a.txt", "Size": 7, "ETag": etag}]}
+    ]
+    client.get_paginator.return_value.paginate.return_value = pages
+    conn = S3Conn(client, S3Config(bucket="b"))
+    head = await DRIVER.head(conn, "a.txt")
+    children = [child async for child in DRIVER.list_children(conn, "")]
+    subtree = [row async for row in DRIVER.list_subtree(conn, "")]
+    assert head is not None
+    assert children[0].fingerprint == head.fingerprint
+    assert subtree[0].fingerprint == head.fingerprint
+
+
 _MATCHED = LOST_CODES["matched"]
 
 

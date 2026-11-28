@@ -322,6 +322,25 @@ class Checker {
     return false
   }
 
+  /**
+   * Check that a same-size rewrite moves the fingerprint a VFS stats. A VFS
+   * that stats none promises nothing, so is not probed.
+   */
+  async checkFingerprint(): Promise<void> {
+    const content = this.content
+    if (content.byteLength === 0) return
+    const path = this.path('fingerprint')
+    await this.put(path, content)
+    const before = (await this.vfs.stat(path, await this.handed('stat', path))).fingerprint
+    if (before === null) return
+    await this.put(
+      path,
+      content.map((byte) => byte ^ 0xff),
+    )
+    const after = (await this.vfs.stat(path, await this.handed('stat', path))).fingerprint
+    check(after !== before, 'a same-size rewrite must move the fingerprint the VFS stats')
+  }
+
   async version(path: PathSpec): Promise<string> {
     const info = await this.vfs.stat(path, await this.handed('stat', path))
     check(
@@ -462,6 +481,7 @@ class Checker {
         else if (kind === 'delete' && mode === 'match') await this.checkDelete()
       }
     }
+    await this.checkFingerprint()
     for (const op of ['rename', 'copy'] as const) {
       if (this.vfs.supports(op)) await this.checkMoved(op)
     }
@@ -478,7 +498,8 @@ class Checker {
  * a `write: conditional` mount runs it: a declared condition lands when it
  * holds and rejects as a stale write, writing nothing, when it does not. An
  * undeclared condition is refused by the mount before the VFS sees it, so it
- * is not probed. `rename` and `copy` are checked where the VFS defines them:
+ * is not probed. A fingerprint the VFS stats must move on a same-size rewrite.
+ * `rename` and `copy` are checked where the VFS defines them:
  * onto a fresh name and over an existing file the destination holds the
  * source's bytes, `rename` removes the source and `copy` keeps it, and a
  * missing source rejects ENOENT and leaves the destination. `index` is the

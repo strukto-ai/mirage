@@ -2166,6 +2166,42 @@ async def test_a_spooled_landing_that_fails_keeps_its_writes_for_the_retry():
 
 
 @pytest.mark.asyncio
+async def test_a_sync_beside_a_failing_release_leaves_its_writes_gone():
+    # The sync lists the handle while its release is still landing, and
+    # settles it once the release has failed and let it go. The release
+    # reported its failure and its writes went with the handle, as
+    # close(2)'s do, so the sync has nothing to land: retrying them read
+    # the spool the release had closed and reported "spool is closed"
+    # for the handle, in place of the release's own error.
+    core, store = _streamed_core()
+    fh = await core.open("/f", open_mode(os.O_WRONLY | os.O_CREAT))
+    for i in range(24):
+        await core.write("/f", BLOCK, i * len(BLOCK), fh)
+    asked = asyncio.Event()
+    answer = asyncio.Event()
+
+    async def refused(path, data, *, atomic=False):
+        async for _ in data:
+            pass
+        asked.set()
+        await answer.wait()
+        raise PermissionError(errno.EACCES, "denied", path)
+
+    store.write = refused
+    releasing = asyncio.create_task(core.release(fh))
+    await asyncio.wait_for(asked.wait(), 5)
+    syncing = asyncio.create_task(core.sync())
+    for _ in range(5):
+        await asyncio.sleep(0)
+    answer.set()
+    with pytest.raises(PermissionError):
+        await releasing
+    assert await syncing == []
+    assert fh not in core.handles
+    assert "/f" not in store._store.files or store._store.files["/f"] == b""
+
+
+@pytest.mark.asyncio
 async def test_another_handles_write_cuts_what_one_holds_in_its_spool():
     core, store = _streamed_core()
     first = await core.open(

@@ -30,6 +30,7 @@ from mirage.core.sql.constants import (
 from mirage.errors.fs import enoent, enotdir
 from mirage.types import PathSpec
 from mirage.utils.clock import system_date
+from mirage.utils.dates import stamp_after
 from mirage.utils.path import norm
 from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
 
@@ -38,6 +39,11 @@ logger = logging.getLogger(__name__)
 # How many times each driver's tree lost or moved an entry, through any
 # mount on it.
 STRUCTURE: "weakref.WeakKeyDictionary[SqlDriver, int]" = (
+    weakref.WeakKeyDictionary()
+)
+# The last time each driver's writes landed at, in nanoseconds, through
+# any mount on it.
+STAMPS: "weakref.WeakKeyDictionary[SqlDriver, int]" = (
     weakref.WeakKeyDictionary()
 )
 # A statement that removes or moves an entry or an inode.
@@ -175,3 +181,14 @@ class SqlAccessor(Accessor):
     def reshaped(self) -> None:
         """Mark the tree as having lost or moved an entry."""
         STRUCTURE[self.driver] = self.structure() + 1
+
+    def stamped(self, floor: int = 0) -> int:
+        """The time a write lands at, in nanoseconds: now, past every time
+        a mount on the driver gave a write before and past ``floor``.
+
+        Args:
+            floor (int): a time the write must land past, in nanoseconds.
+        """
+        ns = stamp_after(max(STAMPS.get(self.driver, 0), floor))
+        STAMPS[self.driver] = ns
+        return ns

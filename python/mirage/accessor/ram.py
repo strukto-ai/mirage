@@ -12,10 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import threading
+
 from mirage.accessor.base import Accessor
+from mirage.utils.dates import stamp_after
 from mirage.vfs.ram.store import RAMStore
+
+# Held across reading a store's last stamp and keeping the next, so two
+# threads writing one store never take the same one.
+_STAMPING = threading.Lock()
 
 
 class RAMAccessor(Accessor):
     def __init__(self, store: RAMStore) -> None:
         self.store = store
+
+    def stamped(self) -> int:
+        """The time a write lands at, in nanoseconds: now, past every time
+        a mount on the store gave a write before."""
+        with _STAMPING:
+            self.store.stamp = stamp_after(self.store.stamp)
+            return self.store.stamp

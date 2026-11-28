@@ -12,264 +12,151 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import type * as DriveModule from '../google/drive.ts'
-
-vi.mock('../google/drive.ts', async () => {
-  const actual = await vi.importActual<typeof DriveModule>('../google/drive.ts')
-  return { ...actual, listAllFiles: vi.fn(), getFile: vi.fn() }
-})
-
 import { GDocsAccessor } from '../../accessor/gdocs.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { TokenManager } from '../google/client.ts'
-import * as drive from '../google/drive.ts'
+import { serve, type JsonValue } from '../../../tests/fixtures/kit_fake.ts'
+import { FILES, GoogleAccount, type DriveListing } from '../../../tests/core/google/account.ts'
 
-const STUB_TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
+const MIME = 'application/vnd.google-apps.document'
 
-function makeAccessor(): GDocsAccessor {
-  return new GDocsAccessor({ tokenManager: STUB_TOKEN_MANAGER })
-}
+let origin: string
+let account: GoogleAccount
+
+beforeAll(async () => {
+  origin = await serve('gws')
+})
+
+beforeEach(() => {
+  account = new GoogleAccount(origin)
+})
+
+afterEach(async () => {
+  await account.run.close()
+})
 
 // The account behind a mount at /gdocs, which keeps each listing as a command's
 // walk does.
-function mounted(accessor: GDocsAccessor): Workspace {
-  const vfs = Object.assign(
-    new GDocsVFS({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' }),
-    { accessor },
-  )
+function mounted(): Workspace {
+  const vfs = Object.assign(new GDocsVFS(account.config()), {
+    accessor: new GDocsAccessor({ tokenManager: account.tokenManager() }),
+  })
   return new Workspace({ '/gdocs/': vfs })
 }
 
 // A directory's children through the mount; a glob word, the children it
 // matches.
-async function readdir(_accessor: GDocsAccessor, path: PathSpec, ws: Workspace): Promise<string[]> {
+async function readdir(path: PathSpec, ws: Workspace): Promise<string[]> {
   if (path.pattern === null) return (await ws.dispatch('readdir', path.virtual)) as string[]
   const words = (await ws.shell(`echo ${path.virtual}`)).stdoutText.trim().split(/\s+/)
   return words.length === 1 && words[0] === path.virtual ? [] : words
 }
 
-function stat(_accessor: GDocsAccessor, path: PathSpec, ws: Workspace): Promise<FileStat> {
+function stat(path: PathSpec, ws: Workspace): Promise<FileStat> {
   return ws.dispatch('stat', path.virtual) as Promise<FileStat>
+}
+
+function spec(virtual: string, pattern?: string): PathSpec {
+  return new PathSpec({
+    virtual,
+    directory: pattern === undefined ? virtual : virtual.slice(0, virtual.lastIndexOf('/')),
+    ...(pattern === undefined ? {} : { pattern }),
+    vfsPath: mountKey(virtual, '/gdocs'),
+  })
+}
+
+/** Make a doc named `name`, stamped `stamp`, and answer its id. */
+async function made(name: string, stamp: string): Promise<string> {
+  const id = await account.create(name, MIME)
+  await account.patch(id, { modifiedTime: stamp })
+  return id
+}
+
+/**
+ * Answer the next listing with the fake's own listing of docs, each doc named
+ * in `fieldsById` with those fields set: what the fake keeps no model of, as
+ * another owner or a native file's size.
+ */
+async function answerListing(fieldsById: Record<string, Record<string, JsonValue>>): Promise<void> {
+  const listing = await account.run.call<DriveListing>(
+    'GET',
+    `${FILES}?${new URLSearchParams({ q: `mimeType = '${MIME}'` }).toString()}`,
+  )
+  const files = listing.files.map((row) => ({ ...row, ...(fieldsById[row.id] ?? {}) }))
+  await account.run.answerNext('GET', FILES, 200, { ...listing, files })
+}
+
+/** The query of each listing asked since recording started. */
+async function listedQueries(): Promise<string[]> {
+  return (await account.asked('GET', FILES)).map((r) => new URLSearchParams(r.query).get('q') ?? '')
 }
 
 describe('gdocs readdir', () => {
   it('pushes modified range to drive when pattern is a date glob', async () => {
-    const captured: { modifiedAfter?: string | null; modifiedBefore?: string | null } = {}
-    vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
-      captured.modifiedAfter = opts?.modifiedAfter ?? null
-      captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve({ files: [], complete: true })
-    }) as typeof drive.listAllFiles)
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned/2026-05-*',
-        directory: '/gdocs/owned',
-        pattern: '2026-05-*',
-        vfsPath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
-      }),
-      ws,
-    )
-
-    expect(captured.modifiedAfter).toBe('2026-05-01T00:00:00Z')
-    expect(captured.modifiedBefore).toBe('2026-06-01T00:00:00Z')
+    const ws = mounted()
+    await account.run.recordRequests()
+    await readdir(spec('/gdocs/owned/2026-05-*', '2026-05-*'), ws)
+    const [q] = await listedQueries()
+    expect(q).toContain("modifiedTime >= '2026-05-01T00:00:00Z'")
+    expect(q).toContain("modifiedTime < '2026-06-01T00:00:00Z'")
   })
 
   it('omits modified range when no pattern', async () => {
-    const captured: { modifiedAfter?: string | null; modifiedBefore?: string | null } = {}
-    vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
-      captured.modifiedAfter = opts?.modifiedAfter ?? null
-      captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve({ files: [], complete: true })
-    }) as typeof drive.listAllFiles)
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned',
-        directory: '/gdocs/owned',
-        vfsPath: mountKey('/gdocs/owned', '/gdocs'),
-      }),
-      ws,
-    )
-
-    expect(captured.modifiedAfter).toBeNull()
-    expect(captured.modifiedBefore).toBeNull()
+    const ws = mounted()
+    await account.run.recordRequests()
+    await readdir(spec('/gdocs/owned'), ws)
+    const [q] = await listedQueries()
+    expect(q).not.toContain('modifiedTime')
   })
 
   it('omits modified range for non-date pattern', async () => {
-    const captured: { modifiedAfter?: string | null; modifiedBefore?: string | null } = {}
-    vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
-      captured.modifiedAfter = opts?.modifiedAfter ?? null
-      captured.modifiedBefore = opts?.modifiedBefore ?? null
-      return Promise.resolve({ files: [], complete: true })
-    }) as typeof drive.listAllFiles)
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned/*foo*',
-        directory: '/gdocs/owned',
-        pattern: '*foo*',
-        vfsPath: mountKey('/gdocs/owned/*foo*', '/gdocs'),
-      }),
-      ws,
-    )
-
-    expect(captured.modifiedAfter).toBeNull()
-    expect(captured.modifiedBefore).toBeNull()
+    const ws = mounted()
+    await account.run.recordRequests()
+    await readdir(spec('/gdocs/owned/*foo*', '*foo*'), ws)
+    const [q] = await listedQueries()
+    expect(q).not.toContain('modifiedTime')
   })
 
   it('filtered listing does not clobber unfiltered cache', async () => {
-    const full = [
-      {
-        id: 'may',
-        name: 'MayDoc',
-        modifiedTime: '2026-05-15T00:00:00.000Z',
-        owners: [{ me: true }],
-      },
-      {
-        id: 'jan',
-        name: 'JanDoc',
-        modifiedTime: '2026-01-15T00:00:00.000Z',
-        owners: [{ me: true }],
-      },
-    ]
-    const mayOnly = full.slice(0, 1)
-    let calls = 0
-    vi.mocked(drive.listAllFiles).mockImplementation(((_tm, opts) => {
-      calls += 1
-      if (opts?.modifiedAfter) return Promise.resolve({ files: mayOnly, complete: true })
-      return Promise.resolve({ files: full, complete: true })
-    }) as typeof drive.listAllFiles)
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned/2026-05-*',
-        directory: '/gdocs/owned',
-        pattern: '2026-05-*',
-        vfsPath: mountKey('/gdocs/owned/2026-05-*', '/gdocs'),
-      }),
-      ws,
-    )
-    const result = await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned',
-        directory: '/gdocs/owned',
-        vfsPath: mountKey('/gdocs/owned', '/gdocs'),
-      }),
-      ws,
-    )
-    expect(calls).toBe(2)
+    await made('MayDoc', '2026-05-15T00:00:00.000Z')
+    await made('JanDoc', '2026-01-15T00:00:00.000Z')
+    const ws = mounted()
+    await account.run.recordRequests()
+    await readdir(spec('/gdocs/owned/2026-05-*', '2026-05-*'), ws)
+    const result = await readdir(spec('/gdocs/owned'), ws)
+    expect(await listedQueries()).toHaveLength(2)
     expect(result.length).toBe(2)
   })
 
   it('answers a stat after a filtered listing', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue({
-      files: [
-        {
-          id: 'may1',
-          name: 'MayDoc',
-          modifiedTime: '2026-05-15T00:00:00.000Z',
-          owners: [{ me: false }],
-        },
-      ],
-      complete: true,
-    })
-
-    vi.mocked(drive.getFile).mockResolvedValue({
-      id: 'may1',
-      name: 'MayDoc',
-      mimeType: 'application/vnd.google-apps.document',
-      modifiedTime: '2026-05-15T00:00:00.000Z',
-      owners: [{ me: false }],
-    })
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    const listed = await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/shared/2026-05-*',
-        directory: '/gdocs/shared',
-        pattern: '2026-05-*',
-        vfsPath: mountKey('/gdocs/shared/2026-05-*', '/gdocs'),
-      }),
-      ws,
-    )
+    const may = await made('MayDoc', '2026-05-15T00:00:00.000Z')
+    await answerListing({ [may]: { owners: [{ me: false }] } })
+    const ws = mounted()
+    await account.run.recordRequests()
+    const listed = await readdir(spec('/gdocs/shared/2026-05-*', '2026-05-*'), ws)
     expect(listed.length).toBe(1)
     const matched = listed[0]
     if (matched === undefined) throw new Error('expected one match')
-    vi.mocked(drive.getFile).mockClear()
-    const result = await stat(
-      accessor,
-      new PathSpec({
-        virtual: matched,
-        directory: matched,
-        vfsPath: mountKey(matched, '/gdocs'),
-      }),
-      ws,
-    )
+    const result = await stat(spec(matched), ws)
     // The filtered result is not the directory, but the rows it lists are
     // real, so the stat is answered from them.
-    expect(result.extra.doc_id).toBe('may1')
-    expect(drive.getFile).not.toHaveBeenCalled()
+    expect(result.extra.doc_id).toBe(may)
+    expect((await account.log()).map(([name]) => name)).toEqual(['list'])
   })
 
   it('keeps entry size null, Drive source size lands in extra', async () => {
-    vi.mocked(drive.listAllFiles).mockResolvedValue({
-      files: [
-        {
-          id: 'doc1',
-          name: 'My Doc',
-          modifiedTime: '2026-04-01T00:00:00.000Z',
-          size: '1234',
-          owners: [{ me: true }],
-        },
-      ],
-      complete: true,
-    })
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    const listed = await readdir(
-      accessor,
-      new PathSpec({
-        virtual: '/gdocs/owned',
-        directory: '/gdocs/owned',
-        vfsPath: mountKey('/gdocs/owned', '/gdocs'),
-      }),
-      ws,
-    )
-
+    const id = await made('My Doc', '2026-04-01T00:00:00.000Z')
+    await answerListing({ [id]: { size: '1234' } })
+    const ws = mounted()
+    const listed = await readdir(spec('/gdocs/owned'), ws)
     // Drive's source size never becomes the row's size: the rendered
     // JSON length is unknown until read.
     const listedPath = listed[0]
     if (listedPath === undefined) throw new Error('expected one entry')
-    const result = await stat(
-      accessor,
-      new PathSpec({
-        virtual: listedPath,
-        directory: listedPath,
-        vfsPath: mountKey(listedPath, '/gdocs'),
-      }),
-      ws,
-    )
+    const result = await stat(spec(listedPath), ws)
     expect(result.size).toBeNull()
     expect(result.extra.source_size).toBe(1234)
   })
@@ -281,36 +168,21 @@ describe('gdocs incomplete search', () => {
     // Keeping it would pin the short listing until it expires, so a Shared
     // Drive document stays invisible long after the cause clears: the next
     // listing asks Drive again until one finishes.
-    const files = [
-      {
-        id: 'd1',
-        name: 'Doc',
-        modifiedTime: '2026-05-15T00:00:00.000Z',
-        owners: [{ me: true }],
-      },
-    ]
-    let complete = false
-    let listings = 0
-    vi.mocked(drive.listAllFiles).mockImplementation((() => {
-      listings += 1
-      return Promise.resolve({ files, complete })
-    }) as typeof drive.listAllFiles)
-
-    const accessor = makeAccessor()
-    const ws = mounted(accessor)
-    const owned = new PathSpec({
-      virtual: '/gdocs/owned',
-      directory: '/gdocs/owned',
-      vfsPath: mountKey('/gdocs/owned', '/gdocs'),
-    })
-    const listed = await readdir(accessor, owned, ws)
+    await made('Doc', '2026-05-15T00:00:00.000Z')
+    const listing = await account.run.call<DriveListing>(
+      'GET',
+      `${FILES}?${new URLSearchParams({ q: `mimeType = '${MIME}'` }).toString()}`,
+    )
+    await account.run.answerNext('GET', FILES, 200, { ...listing, incompleteSearch: true }, 2)
+    const ws = mounted()
+    const owned = spec('/gdocs/owned')
+    await account.run.recordRequests()
+    const listed = await readdir(owned, ws)
     expect(listed).toHaveLength(1)
-    await readdir(accessor, owned, ws)
-    expect(listings).toBe(2)
-
-    complete = true
-    await readdir(accessor, owned, ws)
-    await readdir(accessor, owned, ws)
-    expect(listings).toBe(3)
+    await readdir(owned, ws)
+    expect(await listedQueries()).toHaveLength(2)
+    await readdir(owned, ws)
+    await readdir(owned, ws)
+    expect(await listedQueries()).toHaveLength(3)
   })
 })

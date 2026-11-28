@@ -91,6 +91,8 @@ export function listCalendarEvents(
   // per-field wording.)
   if (asked !== null && !isIanaZone(asked)) return invalidFormat()
   const tz = asked ?? cal.timeZone
+  const syncToken = query.get('syncToken')
+  if (syncToken !== null) return syncedEvents(st, cal, query, syncToken, tz)
   const showDeleted = query.get('showDeleted') === 'true'
   const q = query.get('q')
   const timeMin = query.get('timeMin')
@@ -113,8 +115,14 @@ export function listCalendarEvents(
   if (query.get('orderBy') === 'startTime') {
     rows.sort((a, b) => eventStartMs(a, cal.timeZone) - eventStartMs(b, cal.timeZone))
   }
+  // The first page fixes the sync token the listing ends with, and each page
+  // token carries it beside the next row's index, so an event edited between
+  // pages stays after that token and reaches the next pull.
+  const paging = /^(\d+)\.(\d+)$/.exec(query.get('pageToken') ?? `${syncTokenOf(st)}.0`)
+  if (paging === null) return googleError(400, 'Bad Request', 'INVALID_ARGUMENT')
+  const [, bound = '0', offset = '0'] = paging
   const max = Number(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS))
-  const start = Number(query.get('pageToken') ?? '0')
+  const start = Number(offset)
   const page = rows.slice(start, start + max)
   const out: JsonObj = {
     kind: 'calendar#events',
@@ -127,7 +135,8 @@ export function listCalendarEvents(
     // grouping by local date read the wrong day.
     items: page.map((ev) => fmtEvent(cal, ev, tz)),
   }
-  if (start + max < rows.length) out.nextPageToken = String(start + max)
+  if (start + max < rows.length) out.nextPageToken = `${bound}.${start + max}`
+  else out.nextSyncToken = bound
   return ok(out)
 }
 
@@ -223,10 +232,15 @@ export function readEventTimes(
   return { start, end }
 }
 
-export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): CalendarEvent {
+export function makeEvent(
+  st: GwsState,
+  body: JsonObj,
+  times: EventTimes,
+  id?: string,
+): CalendarEvent {
   const now = st.now()
   const ev: CalendarEvent = {
-    id: st.nextEventId(),
+    id: id ?? freeEventId(st),
     status: 'confirmed',
     start: times.start,
     end: times.end,
@@ -241,4 +255,79 @@ export function makeEvent(st: GwsState, body: JsonObj, times: EventTimes): Calen
   if (location !== undefined) ev.location = location
   if (body.attendees !== undefined) ev.attendees = body.attendees
   return ev
+}
+
+// An event id as Calendar takes one from a caller: base32hex, 5 to 1024
+// characters.
+export function isEventId(id: string): boolean {
+  return /^[a-v0-9]{5,1024}$/.test(id)
+}
+
+// Whether any calendar of the account already holds an event of this id.
+export function eventIdTaken(st: GwsState, id: string): boolean {
+  return [...st.events.values()].some((bucket) => bucket.has(id))
+}
+
+// The next minted id no event holds: a caller may pin an id of the minted
+// shape, and a minted one must not replace it.
+function freeEventId(st: GwsState): string {
+  let id = st.nextEventId()
+  while (eventIdTaken(st, id)) id = st.nextEventId()
+  return id
+}
+
+// The sync token an events listing hands out: the last event change recorded.
+export function syncTokenOf(st: GwsState): string {
+  return String(st.counters.get('calendarChange') ?? 0)
+}
+
+// An events listing asked with a sync token: each event of the calendar made,
+// changed or deleted since, at its newest state, a deleted one as Calendar
+// names it, `cancelled` with its id alone. Every change is kept, so no token
+// is too old; a test that wants Calendar's 410 for one arms it.
+// The first page fixes the last change the pull covers, and each page token
+// carries that bound and the change its page ended at. An event changed
+// between pages leaves this pull, so the pages after it stay where they
+// were, and its change reaches the next pull. A page token that is not one
+// earns the generic refusal, not a probed wording.
+function syncedEvents(
+  st: GwsState,
+  cal: CalendarEntry,
+  query: URLSearchParams,
+  token: string,
+  tz: string,
+): Reply {
+  if (!/^\d+$/.test(token)) return googleError(400, 'Invalid sync token value.', 'INVALID_ARGUMENT')
+  const after = Number(token)
+  const page = /^(\d+)\.(\d+)$/.exec(query.get('pageToken') ?? `${syncTokenOf(st)}.${after}`)
+  if (page === null) return googleError(400, 'Bad Request', 'INVALID_ARGUMENT')
+  const bound = Number(page[1])
+  const from = Number(page[2])
+  const latest = new Map<string, number>()
+  for (const [seq, calendarId, eventId] of st.calendarChanges) {
+    if (seq <= after || calendarId !== cal.id) continue
+    latest.delete(eventId)
+    latest.set(eventId, seq)
+  }
+  const due = [...latest].filter(([, seq]) => seq > from && seq <= bound)
+  const max = Number(query.get('maxResults') ?? String(DEFAULT_MAX_RESULTS))
+  const shown = due.slice(0, max)
+  const bucket = eventsOf(st, cal.id)
+  const items: JsonValue[] = shown.map(([id]) => {
+    const ev = bucket.get(id)
+    return ev === undefined
+      ? { kind: 'calendar#event', id, status: 'cancelled' }
+      : fmtEvent(cal, ev, tz)
+  })
+  const out: JsonObj = {
+    kind: 'calendar#events',
+    summary: cal.summary,
+    timeZone: tz,
+    accessRole: cal.accessRole,
+    items,
+  }
+  const last = shown.at(-1)
+  if (due.length > max && last !== undefined) out.nextPageToken = `${bound}.${last[1]}`
+  else out.nextSyncToken = String(bound)
+  return ok(out)
 }

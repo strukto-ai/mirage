@@ -12,69 +12,54 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
-
 import pytest
 
 from mirage.accessor.gdocs import GDocsAccessor
 from mirage.core.gdocs.unlink import unlink
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
-from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import offline_token_manager, serve
+
+MIME = "application/vnd.google-apps.document"
 
 
-@pytest.fixture
-def accessor():
-    return GDocsAccessor(config=None, token_manager=offline_token_manager())
+def _accessor(google_account) -> GDocsAccessor:
+    manager = google_account.token_manager()
+    return GDocsAccessor(config=manager.config, token_manager=manager)
 
 
-@pytest.mark.asyncio
-async def test_unlink_calls_delete_with_doc_id(accessor):
-    mock_delete = AsyncMock()
-    with serve(drive=StubDrive(delete_file=mock_delete)):
-        await unlink(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key(
-                    "/gdocs/owned/Foo__doc1.gdoc.json", "/gdocs"
-                ),
-                virtual="/gdocs/owned/Foo__doc1.gdoc.json",
-                directory="/gdocs/owned/Foo__doc1.gdoc.json",
-            ),
-            FileStat(name="Foo__doc1.gdoc.json", type=FileType.FILE),
-        )
-        mock_delete.assert_awaited_once()
-        assert mock_delete.await_args.args[0] == "doc1"
+def _spec(virtual: str) -> PathSpec:
+    return PathSpec(
+        vfs_path=mount_key(virtual, "/gdocs"),
+        virtual=virtual,
+        directory=virtual,
+    )
 
 
 @pytest.mark.asyncio
-async def test_unlink_virtual_dir_raises(accessor):
+async def test_unlink_calls_delete_with_doc_id(google_account):
+    made = await google_account.create("Foo", MIME)
+    await google_account.run.record_requests()
+    await unlink(
+        _accessor(google_account),
+        _spec(f"/gdocs/owned/Foo__{made}.gdoc.json"),
+        FileStat(name=f"Foo__{made}.gdoc.json", type=FileType.FILE),
+    )
+    assert await google_account.log() == [
+        ("DELETE /drive/v3/files/:id", f"/drive/v3/files/{made}")
+    ]
+    assert await google_account.items() == []
+
+
+@pytest.mark.asyncio
+async def test_unlink_virtual_dir_raises(google_account):
     with pytest.raises(IsADirectoryError):
-        await unlink(
-            accessor,
-            PathSpec(
-                vfs_path=mount_key("/gdocs/owned", "/gdocs"),
-                virtual="/gdocs/owned",
-                directory="/gdocs/owned",
-            ),
-        )
+        await unlink(_accessor(google_account), _spec("/gdocs/owned"))
 
 
 @pytest.mark.asyncio
-async def test_unlink_missing_raises(accessor):
-    files = []
-    with serve(
-        drive=StubDrive(list_all_files=AsyncMock(return_value=(files, True)))
-    ):
-        with pytest.raises(FileNotFoundError):
-            await unlink(
-                accessor,
-                PathSpec(
-                    vfs_path=mount_key(
-                        "/gdocs/owned/Nope__doc9.gdoc.json", "/gdocs"
-                    ),
-                    virtual="/gdocs/owned/Nope__doc9.gdoc.json",
-                    directory="/gdocs/owned/Nope__doc9.gdoc.json",
-                ),
-            )
+async def test_unlink_missing_raises(google_account):
+    with pytest.raises(FileNotFoundError):
+        await unlink(
+            _accessor(google_account),
+            _spec("/gdocs/owned/Nope__doc9.gdoc.json"),
+        )

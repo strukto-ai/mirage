@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Buffer } from 'node:buffer'
-import { timingSafeEqual } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import Fastify, {
@@ -87,18 +85,20 @@ import {
 } from './errors.ts'
 import { RAW_BODIES } from './constants.ts'
 import { traceContextMiddleware } from './trace.ts'
-import { isStopped } from './routers/workspaces.ts'
+import { createSandboxWorkspace, isStopped } from './routers/workspaces.ts'
 import { ENV_E2B_PORT } from './env.ts'
-import { CONNECT_STREAM } from './e2b/constants.ts'
-import { connectCode } from './e2b/errors.ts'
-import { Sandboxes } from './e2b/sandbox.ts'
 import {
-  acceptsRawBody,
-  isDataRequest,
-  isLifecycleRequest,
-  router as registerE2BRoutes,
+  MemoryLifecycleBackend,
   sandboxAccount,
+  sandboxOwner,
   sandboxWorkspace,
+  webForwarder,
+} from './e2b/node.ts'
+import {
+  errorBody,
+  isLifecycleRequest,
+  lifecycleRoutes,
+  ROUTES as E2B_ROUTES,
 } from './routers/e2b.ts'
 
 export interface BuildAppOptions {
@@ -261,14 +261,6 @@ function noop(): void {
   /* intentional no-op for onIdleExit default */
 }
 
-function matchesAccessToken(expected: string, presented: string): boolean {
-  const expectedBytes = Buffer.from(expected)
-  const presentedBytes = Buffer.from(presented)
-  return (
-    expectedBytes.length === presentedBytes.length && timingSafeEqual(expectedBytes, presentedBytes)
-  )
-}
-
 export function resolveE2bPort(
   port?: number,
   env: Record<string, string | undefined> = process.env,
@@ -368,11 +360,10 @@ function requestGuards(
 
 function e2bError(reply: FastifyReply, error: HttpError): FastifyReply {
   const request = reply.request
-  const data = isDataRequest(request.method, request.routeOptions.url ?? '')
   for (const [name, value] of Object.entries(error.headers)) reply.header(name, value)
   return reply
     .code(error.status)
-    .send({ code: data ? connectCode(error.status) : error.status, message: error.message })
+    .send(errorBody(request.method, request.routeOptions.url ?? '', error))
 }
 
 export function buildApp(options: BuildAppOptions = {}) {
@@ -458,7 +449,12 @@ export function buildApp(options: BuildAppOptions = {}) {
       ? null
       : {
           app: server(e2bError),
-          sandboxes: new Sandboxes(registry, matchesAccessToken),
+          sandboxes: new MemoryLifecycleBackend(registry, (owner) =>
+            createSandboxWorkspace(
+              { registry, host, resources, snapshotStore: options.snapshotStore },
+              owner,
+            ),
+          ),
           port: e2bPort,
         }
   if (companion !== null) {
@@ -470,7 +466,6 @@ export function buildApp(options: BuildAppOptions = {}) {
     e2b.setNotFoundHandler((_req, reply) => {
       void e2bError(reply, new HttpError('not_found', 'not found'))
     })
-    lenientJson(e2b)
     requestGuards(e2b, allowedHosts, e2bError)
     const workspaceOf = (request: FastifyRequest) =>
       sandboxWorkspace(sandboxes, request.routeOptions.url ?? '', request)
@@ -482,28 +477,19 @@ export function buildApp(options: BuildAppOptions = {}) {
       (request) => sandboxAccount(sandboxes, request.headers),
     )
     registerRateLimits(e2b, rateLimitBuckets, true, e2bError, workspaceOf)
-    e2b.removeContentTypeParser(RAW_BODIES)
-    for (const media of [RAW_BODIES, CONNECT_STREAM]) {
-      e2b.addContentTypeParser(media, (request, _payload, parsed) => {
-        const contentType =
-          request.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-        if (acceptsRawBody(request.method, request.routeOptions.url ?? '', contentType)) {
-          parsed(null)
-        } else {
-          parsed(
-            new HttpError('invalid_request', 'expected JSON on a unary E2B route', {
-              headers: { connection: 'close' },
-            }),
-          )
-        }
-      })
-    }
-    registerE2BRoutes(fastifyRoutes(e2b), {
-      registry,
-      host,
-      resources,
-      snapshotStore: options.snapshotStore,
+    const forward = webForwarder({
       sandboxes,
+      lifecycle: lifecycleRoutes(sandboxes),
+      ownerOf: (request) => sandboxOwner(request.account),
+      draining: () => registry.draining,
+    })
+    void e2b.register((scope, _opts, done) => {
+      scope.removeAllContentTypeParsers()
+      scope.addContentTypeParser('*', (_req, _payload, parsed) => {
+        parsed(null)
+      })
+      for (const { method, url } of E2B_ROUTES) scope.route({ method, url, handler: forward })
+      done()
     })
     listenTogether(app, e2b, port)
   }

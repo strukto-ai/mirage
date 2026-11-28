@@ -27,9 +27,11 @@ import { setCurrentSession } from '../../context/session_context.ts'
 import { record, revisionFor, recordingScope, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Dispatcher } from './dispatcher.ts'
-import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
+import type { ReadBatch } from './read_batch.ts'
+import { BatchedRAM, HeldRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
-import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
+import { POLICY_WRITE_OPS } from './constants.ts'
+import { READ_AHEAD_BYTES } from './read_batch.ts'
 import { commandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { SERVED_BY } from '../../mount/changes.ts'
@@ -1768,6 +1770,15 @@ const text = async (ws: Workspace, virtual: string): Promise<string> =>
 
 const spec = (virtual: string): PathSpec => PathSpec.fromStrPath(virtual)
 
+// What a command's listing found at each file under /r, by name and size.
+const sized = (sizes: Record<string, number>): Map<string, FileStat> =>
+  new Map(
+    Object.entries(sizes).map(([name, size]) => [
+      `/r/${name}`,
+      new FileStat({ name, type: FileType.FILE, size }),
+    ]),
+  )
+
 // An op a command makes, with its gate: what the command's bound dispatch
 // passes.
 const byCommand = (
@@ -3001,6 +3012,231 @@ describe('a hide filters a one-call read', () => {
     try {
       await ws.dispatch('read_many', '/r/a', [], { paths: [PathSpec.fromStrPath('/r/b')] })
       expect([vfs.batches, vfs.reads]).toEqual([[], []])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_on_a_local_mount_holds_each_file_for_one_read:
+  // one batch where the store reads one, each file read in turn where not.
+  it.each([true, false])(
+    'holds each file a read-ahead on a local mount reads for one read (batched %s)',
+    async (batched) => {
+      const vfs = new HeldRAM(batched)
+      const ws = new Workspace({ '/r': vfs })
+      try {
+        const batch = (await ws.dispatch('read_many', '/r/a', [], {
+          paths: [spec('/r/b')],
+          stats: sized({ a: 2, b: 2 }),
+        })) as ReadBatch
+        expect([batch.kept, batch.holds]).toEqual([false, true])
+        expect([vfs.batches, vfs.reads]).toEqual(
+          batched ? [[['/r/a', '/r/b']], []] : [[], ['/r/a', '/r/b']],
+        )
+        expect([batch.take('/r/a'), batch.take('/r/a')]).toEqual([ENC.encode('a\n'), null])
+        expect(batch.take('/r/b')).toEqual(ENC.encode('b\n'))
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  // Twin of test_a_write_since_the_read_ahead_drops_the_held_file.
+  it('drops a held file a write reached since the read-ahead', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/a', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ a: 2, b: 2 }),
+      })) as ReadBatch
+      await ws.dispatch('write', '/r/b', [ENC.encode('new\n')])
+      const data = await ws.dispatch('read', '/r/b')
+      expect([batch.take('/r/a'), batch.take('/r/b')]).toEqual([ENC.encode('a\n'), null])
+      expect(DEC.decode(data as Uint8Array)).toBe('new\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_copy_since_the_read_ahead_keeps_its_held_source: a copy
+  // changes only what it writes, so its source is still the held bytes and
+  // its destination is not.
+  it('keeps the held source of a copy made since the read-ahead', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/a', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ a: 2, b: 2 }),
+      })) as ReadBatch
+      await ws.dispatch('copy', '/r/a', [spec('/r/b')])
+      expect([batch.take('/r/a'), batch.take('/r/b')]).toEqual([ENC.encode('a\n'), null])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_across_mounts_holds_one_batch_of_bytes: the room
+  // is the batch's, not each mount's, so a file on the second mount past what
+  // the first left is left to its own read.
+  it('holds one batch of bytes on a read-ahead across mounts', async () => {
+    const size = Math.floor(READ_AHEAD_BYTES / 2) + 1
+    const first = new HeldRAM(false)
+    const second = new HeldRAM(false)
+    first.store.files.set('/big', new Uint8Array(size).fill(120))
+    second.store.files.set('/big', new Uint8Array(size).fill(121))
+    const stats = new Map(
+      ['r', 's'].map((m) => [
+        `/${m}/big`,
+        new FileStat({ name: 'big', type: FileType.FILE, size }),
+      ]),
+    )
+    const ws = new Workspace({ '/r': first, '/s': second })
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/big', [], {
+        paths: [spec('/s/big')],
+        stats,
+      })) as ReadBatch
+      expect([[...batch.held.keys()].sort(), second.reads]).toEqual([['/r/big'], []])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_link_changed_since_the_read_ahead_drops_the_held_files:
+  // /r/one reaches /r/a through /r/two; pointing /r/two at /r/b changes
+  // neither the name read nor the file it reached, and the read must still
+  // follow the link as it now stands.
+  it('drops the held files once a link changed since the read-ahead', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    try {
+      await ws.dispatch('symlink', '/r/two', [], { target: '/r/a' })
+      await ws.dispatch('symlink', '/r/one', [], { target: '/r/two' })
+      const batch = (await ws.dispatch('read_many', '/r/one', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ one: 2, b: 2 }),
+      })) as ReadBatch
+      expect([...batch.held.keys()].sort()).toEqual(['/r/b', '/r/one'])
+      await ws.dispatch('unlink', '/r/two')
+      await ws.dispatch('symlink', '/r/two', [], { target: '/r/b' })
+      const data = await ws.dispatch('read', '/r/one')
+      expect([batch.take('/r/one'), batch.take('/r/b')]).toEqual([null, null])
+      expect(DEC.decode(data as Uint8Array)).toBe('b\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_streamed_write_drops_the_held_file_as_it_starts: the write
+  // has landed a chunk and waits for the next, and the held bytes are what the
+  // file held before it, so none is handed out.
+  it('drops a held file as a streamed write to it starts', async () => {
+    const vfs = new HeldRAM()
+    const ws = new Workspace({ '/r': vfs }, { mode: MountMode.WRITE })
+    let landed!: () => void
+    const landing = new Promise<void>((resolve) => (landed = resolve))
+    let finish!: () => void
+    const finishing = new Promise<void>((resolve) => (finish = resolve))
+    async function* body(): AsyncIterable<Uint8Array> {
+      yield ENC.encode('ne')
+      landed()
+      await finishing
+      yield ENC.encode('w\n')
+    }
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/a', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ a: 2, b: 2 }),
+      })) as ReadBatch
+      const writing = ws.dispatch('write', '/r/b', [body()])
+      await landing
+      const taken = batch.take('/r/b')
+      finish()
+      await writing
+      expect([batch.take('/r/a'), taken]).toEqual([ENC.encode('a\n'), null])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_holds_no_hidden_ruled_unsized_or_empty_file: a
+  // hidden or ruled file is left to a read the checks refuse, one no listing
+  // sized to its own read, and an empty one to the read that asks whether a
+  // directory is there.
+  it('holds no hidden, ruled, unsized or empty file', async () => {
+    const vfs = new HeldRAM(false)
+    vfs.store.files.set('/d', ENC.encode('d\n'))
+    vfs.store.files.set('/e', new Uint8Array())
+    const ws = new Workspace({ '/r': vfs })
+    const session = new SessionState({
+      sessionId: 'agent',
+      visibility: { paths: { paths: ['/r/secret'] } },
+    })
+    const gate: EntryGate = {
+      granted: [],
+      judged: new Set(),
+      check: () => undefined,
+      scopes: (virtual) => virtual === '/r/d',
+      refusal: () => null,
+    }
+    try {
+      const stats = sized({ a: 2, d: 2, e: 0 })
+      stats.set('/r/secret/c', new FileStat({ name: 'c', type: FileType.FILE, size: 2 }))
+      const [batch] = (await setCurrentSession(session, () =>
+        byCommand(ws, gate, 'read_many', '/r/a', [], {
+          paths: ['/r/secret/c', '/r/b', '/r/d', '/r/e'].map(spec),
+          stats,
+        }),
+      )) as [ReadBatch, IOResult]
+      expect([batch.holds, vfs.reads, [...batch.held.keys()]]).toEqual([true, ['/r/a'], ['/r/a']])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_read_ahead_holds_nothing_a_policy_could_judge: a coded
+  // preVfs policy keeps the read-ahead from reading at all, and a postVfs one
+  // from holding what its reads would judge.
+  it('holds nothing a policy could judge', async () => {
+    const policies: Policy[] = [
+      {
+        preVfs: (ctx: VfsContext) =>
+          ctx.path.virtual.startsWith('/data/locked/')
+            ? { kind: 'deny', reason: 'locked\n' }
+            : null,
+      },
+      { postVfs: (_ctx: VfsResultContext) => null },
+    ]
+    for (const policy of policies) {
+      const vfs = new HeldRAM(false)
+      const ws = new Workspace({ '/r': vfs }, { policies: [policy] })
+      try {
+        const batch = (await ws.dispatch('read_many', '/r/a', [], {
+          paths: [spec('/r/b')],
+          stats: sized({ a: 2, b: 2 }),
+        })) as ReadBatch
+        expect([batch.holds, batch.held.size, vfs.reads]).toEqual([false, 0, []])
+      } finally {
+        await ws.close()
+      }
+    }
+  })
+
+  // Twin of test_a_read_ahead_holds_no_file_the_read_cache_answers: a local
+  // mount that keeps reads too serves each read from its read cache, which
+  // may hold a copy older than the store.
+  it('holds no file the read cache answers', async () => {
+    const vfs = new HeldRAM(false)
+    Object.assign(vfs, { cachesReads: true })
+    const ws = new Workspace({ '/r': vfs })
+    try {
+      const batch = (await ws.dispatch('read_many', '/r/a', [], {
+        paths: [spec('/r/b')],
+        stats: sized({ a: 2, b: 2 }),
+      })) as ReadBatch
+      expect([batch.holds, batch.held.size, vfs.reads]).toEqual([false, 0, []])
     } finally {
       await ws.close()
     }

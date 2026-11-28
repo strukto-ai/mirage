@@ -124,7 +124,14 @@ async function* listChildren(conn: S3Conn, pfx: string): AsyncIterable<ChildEntr
       if (key === undefined) continue
       const relative = key.slice(pfx.length)
       if (relative !== '' && !relative.includes('/')) {
-        yield { key, kind: 'f', size: obj.Size ?? null, modified: isoOf(obj.LastModified) }
+        const etag = etagOf(obj)
+        yield {
+          key,
+          kind: 'f',
+          size: obj.Size ?? null,
+          modified: isoOf(obj.LastModified),
+          ...(etag !== '' ? { fingerprint: etag } : {}),
+        }
       } else {
         yield { key, kind: 'marker' }
       }
@@ -142,7 +149,13 @@ async function* listSubtree(conn: S3Conn, stem: string): AsyncIterable<TreeEntry
       const okey = obj.Key
       if (okey === undefined) continue
       if (!(okey === stem || okey.startsWith(base))) continue
-      yield { key: okey, size: obj.Size ?? 0, modified: isoOf(obj.LastModified) }
+      const etag = etagOf(obj)
+      yield {
+        key: okey,
+        size: obj.Size ?? 0,
+        modified: isoOf(obj.LastModified),
+        ...(etag !== '' ? { fingerprint: etag } : {}),
+      }
     }
   }
 }

@@ -44,4 +44,6 @@ export interface PosixEntry {
   readonly blocks: number
   /** The path under the listed scope, empty for the scope. */
   readonly rel: string
+  /** This host's wall clock when find was asked; absent when not kept. */
+  readonly askedNs?: bigint
 }

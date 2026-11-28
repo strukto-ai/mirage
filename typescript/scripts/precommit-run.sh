@@ -61,6 +61,12 @@ bin="node_modules/.bin/$tool"
 # instead: pre-commit's split into one batch per CPU rebuilt core's program
 # fourteen times. Over every file that took 87 s and peaked at 18 GB; two
 # halves take 39 s and 6 GB.
+# V8's default heap on the 16 GB CI runner is about 4 GB, and over every file
+# the half holding node and the packages after it outgrew it (2026-11-26), so
+# eslint gets 6 GB: both halves still fit the runner.
+if [[ "$tool" == eslint ]]; then
+  export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=6144"
+fi
 if [[ "$tool" == eslint && ${#files[@]} -gt 500 ]]; then
   half=$(((${#files[@]} + 1) / 2))
   "$bin" "${flags[@]}" "${files[@]:0:half}" &

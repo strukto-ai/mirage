@@ -20,10 +20,16 @@ from mirage.accessor.gcal import GCalAccessor
 from mirage.core.gcal.read import read_many
 from mirage.types import PathSpec
 from mirage.vfs.gcal import GCalVFS
-from tests.fixtures.gcal_api import EVENTS, HK, make_accessor, spec
+from tests.fixtures.gcal_seed import (
+    HK,
+    event_listings,
+    make_accessor,
+    spec,
+)
+from tests.fixtures.google_account import PRIMARY
 from tests.fixtures.mounted import mounted
 
-pytestmark = [pytest.mark.asyncio, pytest.mark.usefixtures("gcal_api")]
+pytestmark = pytest.mark.asyncio
 
 PHD = "aaaa1__0900-1030_PhD_Defense.gcal.json"
 DATED_PHD = "aaaa1__2026-08-11_0900-1030_PhD_Defense.gcal.json"
@@ -42,19 +48,16 @@ async def read(accessor: GCalAccessor, path: PathSpec) -> bytes:
     ],
 )
 async def test_an_event_reads_the_unmodified_api_payload(
-    gcal_api, size, path, index
+    calendar, size, path, index
 ):
     # The names are a view; the payload, original offsets included, is what
     # an absolute-instant comparison is made against.
-    body = await read(make_accessor(bucket_days=size), spec(path))
-    assert json.loads(body) == EVENTS[0]
-    # Only the day the name is on is queried, whatever the bucket's size.
-    assert gcal_api.listed == [
-        (
-            "integ@example.com",
-            "2026-08-11T00:00:00+08:00",
-            "2026-08-12T00:00:00+08:00",
-        )
+    body = await read(make_accessor(calendar, bucket_days=size), spec(path))
+    assert json.loads(body) == await calendar.event_item("aaaa1")
+    # Only the day the name is on is queried, whatever the bucket's size:
+    # 2026-08-11 in Hong Kong, sent in UTC.
+    assert await event_listings(calendar) == [
+        (PRIMARY, "2026-08-10T16:00:00+00:00", "2026-08-11T16:00:00+00:00")
     ]
 
 
@@ -116,12 +119,12 @@ async def test_reading_a_directory_is_eisdir_once_it_is_proved(accessor):
         (7, f"/primary/2026-08-11/{PHD}"),
     ],
 )
-async def test_a_name_the_tree_does_not_hold_is_enoent(size, path):
+async def test_a_name_the_tree_does_not_hold_is_enoent(calendar, size, path):
     with pytest.raises(FileNotFoundError):
-        await read(make_accessor(bucket_days=size), spec(path))
+        await read(make_accessor(calendar, bucket_days=size), spec(path))
 
 
-async def test_a_batch_lists_each_day_once(gcal_api):
+async def test_a_batch_lists_each_day_once(calendar):
     day = "/primary/2026-08-11"
     paths = [
         f"{day}/{PHD}",
@@ -130,18 +133,18 @@ async def test_a_batch_lists_each_day_once(gcal_api):
         "/primary/calendar.json",
     ]
     answers = await read_many(
-        make_accessor(), [spec(path) for path in paths], 1 << 20
+        make_accessor(calendar), [spec(path) for path in paths], 1 << 20
     )
     assert {path: json.loads(body) for path, body in answers.items()} == {
-        paths[0]: EVENTS[0],
-        paths[1]: EVENTS[1],
+        paths[0]: await calendar.event_item("aaaa1"),
+        paths[1]: await calendar.event_item("bbbb2"),
     }
-    assert len(gcal_api.listed) == 1
+    assert len(await event_listings(calendar)) == 1
     # An event past the limit is left out for its own read.
     small = min(answers, key=lambda path: len(answers[path]))
     assert list(
         await read_many(
-            make_accessor(),
+            make_accessor(calendar),
             [spec(path) for path in paths],
             len(answers[small]),
         )

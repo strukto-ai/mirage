@@ -18,7 +18,7 @@ import type { C } from './config.ts'
 import { unifiedDiff } from './diff.ts'
 import type { FileChange } from './diff.ts'
 import { errorBody } from './wire.ts'
-import { repoByName } from './store.ts'
+import { metaOf, repoByName } from './store.ts'
 import type { RepoRow } from './store.ts'
 
 export type Handler = (ctx: Ctx<C>) => Promise<Reply> | Reply
@@ -47,6 +47,26 @@ export function authedRoute(fn: Handler): Handler {
   return async (ctx: Ctx<C>): Promise<Reply> => {
     const auth = ctx.headers.authorization
     if (auth === undefined || auth === '') return fail(401, 'Requires authentication')
+    return await fn(ctx)
+  }
+}
+
+// A public repository answers the reads a mount makes with no credential, as
+// GitHub serves one: its metadata, its trees, its blobs and its raw files.
+// Code search and GraphQL still refuse an anonymous caller, as GitHub's do. A
+// repository is public only when its row says so, as one created without
+// `private: true` does; a seeded one names no visibility and stays private, so
+// an anonymous read of it is the 401 every other route answers.
+export function publicRead(fn: Handler): Handler {
+  return async (ctx: Ctx<C>): Promise<Reply> => {
+    const auth = ctx.headers.authorization
+    if (auth !== undefined && auth !== '') return await fn(ctx)
+    const repo = await repoByName(
+      ctx.sql,
+      ctx.tenant,
+      `${param(ctx, 'owner')}/${param(ctx, 'repo')}`,
+    )
+    if (repo === null || metaOf(repo).private !== false) return fail(401, 'Requires authentication')
     return await fn(ctx)
   }
 }

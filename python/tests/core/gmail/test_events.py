@@ -12,68 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import MagicMock
-
 import pytest
+import pytest_asyncio
 
-from mirage.accessor.gmail import GmailAccessor
 from mirage.core.gmail import events
-from mirage.core.google.client import GoogleApiError
-from mirage.types import FileChangeKind, JsonValue, PathSpec
-from mirage.vfs.gmail.config import GmailConfig
-from tests.fixtures.gmail_api import LABELS, MESSAGES, _message
-from tests.fixtures.google_api import install_api
+from mirage.types import FileChangeKind, PathSpec
+from tests.fixtures.google_account import HISTORY, GoogleAccount
 
 pytestmark = pytest.mark.asyncio
 
 ROOT = PathSpec.from_str_path("/gmail", vfs_path="")
-ACCESSOR = GmailAccessor(GmailConfig(access_token="t"), MagicMock())
-TRASHED = {**MESSAGES[0], "labelIds": ["TRASH"]}
-NEW = _message(
-    "n3", ["INBOX"], "2026-01-07", "Cy <cy@example.com>", "Hi", "hey"
-)
-WORK = _message(
-    "w1", ["Label_1"], "2026-01-08", "Di <di@example.com>", "Plan", "go"
-)
+JAN_5 = "Mon, 5 Jan 2026 09:00:00 +0000"
+JAN_6 = "Tue, 6 Jan 2026 09:00:00 +0000"
+JAN_7 = "Wed, 7 Jan 2026 09:00:00 +0000"
+JAN_8 = "Thu, 8 Jan 2026 09:00:00 +0000"
 
 
-def _gone() -> GoogleApiError:
-    return GoogleApiError("gone", 404)
-
-
-class Mailbox:
-    """Gmail's history and messages, scripted per pull."""
-
-    def __init__(self) -> None:
-        self.history: dict[
-            str,
-            tuple[list[dict[str, JsonValue]], str] | GoogleApiError,
-        ] = {}
-        self.now = "100"
-        self.labels = LABELS
-        self.messages = {m["id"]: m for m in (TRASHED, NEW, WORK)}
-
-    async def current_history_id(self):
-        return self.now
-
-    async def list_history(self, start):
-        answer = self.history[start]
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
-
-    async def list_labels(self):
-        return self.labels
-
-    async def get_message_raw(self, message_id):
-        return self.messages[message_id]
-
-
-@pytest.fixture
-def mailbox(monkeypatch):
-    box = Mailbox()
-    install_api(monkeypatch, gmail=box)
-    return box
+@pytest_asyncio.fixture
+async def mailbox(google_account: GoogleAccount) -> GoogleAccount:
+    """The account with Gmail's system labels and no message yet."""
+    await google_account.reset()
+    return google_account
 
 
 def _pairs(delta):
@@ -81,76 +40,79 @@ def _pairs(delta):
 
 
 async def test_events_follow_each_message_s_labels(mailbox):
-    hook = events.build_delta_hook(ACCESSOR)
+    a1 = await mailbox.message(
+        "Budget review",
+        "numbers for travel",
+        sender="Ana Lima <ana@example.com>",
+        date=JAN_5,
+        attachments=(("plan.txt", "text/plain", b"plan\n"),),
+    )
+    # A message no pull names before it goes.
+    z9 = await mailbox.message("Gone", "soon", date=JAN_6)
+    hook = events.build_delta_hook(mailbox.gmail_accessor())
     baseline = await hook.pull(ROOT, None)
     assert baseline.changes == ()
-    mailbox.history["100"] = (
-        [
-            {
-                "labelsAdded": [
-                    {"message": {"id": "a1"}, "labelIds": ["TRASH"]}
-                ]
-            },
-            {
-                "labelsRemoved": [
-                    {"message": {"id": "a1"}, "labelIds": ["INBOX"]}
-                ]
-            },
-            {"messagesAdded": [{"message": {"id": "n3"}}]},
-            {"messagesDeleted": [{"message": {"id": "z9"}}]},
-        ],
-        "120",
+    await mailbox.trash(a1)
+    n3 = await mailbox.message(
+        "Hi", "hey", sender="Cy <cy@example.com>", date=JAN_7
     )
+    await mailbox.delete_message(z9)
     moved = await hook.pull(ROOT, baseline.checkpoint)
     old, new = "/gmail/INBOX/2026-01-05", "/gmail/TRASH/2026-01-05"
     assert _pairs(moved) == [
-        (FileChangeKind.DELETE, f"{old}/Budget_review__a1.gmail.json"),
-        (FileChangeKind.DELETE, f"{old}/Budget_review__a1"),
-        (FileChangeKind.CREATE, f"{new}/Budget_review__a1.gmail.json"),
-        (FileChangeKind.CREATE, f"{new}/Budget_review__a1"),
-        (FileChangeKind.CREATE, "/gmail/INBOX/2026-01-07/Hi__n3.gmail.json"),
+        (FileChangeKind.DELETE, f"{old}/Budget_review__{a1}.gmail.json"),
+        (FileChangeKind.DELETE, f"{old}/Budget_review__{a1}"),
+        (FileChangeKind.CREATE, f"{new}/Budget_review__{a1}.gmail.json"),
+        (FileChangeKind.CREATE, f"{new}/Budget_review__{a1}"),
+        (
+            FileChangeKind.CREATE,
+            f"/gmail/INBOX/2026-01-07/Hi__{n3}.gmail.json",
+        ),
         (FileChangeKind.UNKNOWN, "/gmail"),
     ]
     # A message a pull has seen leaves the paths it was when it goes.
-    mailbox.history["120"] = (
-        [{"messagesDeleted": [{"message": {"id": "a1"}}]}],
-        "130",
-    )
+    await mailbox.delete_message(a1)
     deleted = await hook.pull(ROOT, moved.checkpoint)
     assert _pairs(deleted) == [
-        (FileChangeKind.DELETE, f"{new}/Budget_review__a1.gmail.json"),
-        (FileChangeKind.DELETE, f"{new}/Budget_review__a1"),
+        (FileChangeKind.DELETE, f"{new}/Budget_review__{a1}.gmail.json"),
+        (FileChangeKind.DELETE, f"{new}/Budget_review__{a1}"),
     ]
-    # A history id Gmail no longer keeps reinventories the root.
-    mailbox.history["130"] = _gone()
-    mailbox.now = "200"
+    # A history id Gmail no longer keeps reinventories the root, from the
+    # one the mailbox is at now.
+    await mailbox.message("Later", "after", date=JAN_8)
+    await mailbox.refuse(
+        "GET",
+        HISTORY,
+        404,
+        "Requested entity was not found.",
+        reason="notFound",
+    )
     lost = await hook.pull(ROOT, deleted.checkpoint)
     assert _pairs(lost) == [(FileChangeKind.UNKNOWN, "/gmail")]
-    assert '"history": "200"' in (lost.checkpoint or "")
+    now = await mailbox.history_id()
+    assert f'"history": "{now}"' in (lost.checkpoint or "")
+    assert f'"history": "{now}"' not in (deleted.checkpoint or "")
 
 
 async def test_events_follow_the_label_folders(mailbox):
     # History records no label created, renamed or deleted: each pull
     # compares the folders, and a message below a renamed one moves with it.
-    hook = events.build_delta_hook(ACCESSOR)
+    work = await mailbox.label("Work")
+    hook = events.build_delta_hook(mailbox.gmail_accessor())
     baseline = await hook.pull(ROOT, None)
-    mailbox.history["100"] = (
-        [{"messagesAdded": [{"message": {"id": "w1"}}]}],
-        "110",
+    w1 = await mailbox.message(
+        "Plan",
+        "go",
+        labels=("Work",),
+        sender="Di <di@example.com>",
+        date=JAN_8,
     )
     seen = await hook.pull(ROOT, baseline.checkpoint)
-    plan = "2026-01-08/Plan__w1.gmail.json"
+    plan = f"2026-01-08/Plan__{w1}.gmail.json"
     assert _pairs(seen) == [(FileChangeKind.CREATE, f"/gmail/Work/{plan}")]
-    mailbox.labels = [
-        *LABELS[:2],
-        {"id": "Label_1", "name": "Projects", "type": "user"},
-        {"id": "Label_2", "name": "Empty", "type": "user"},
-    ]
-    mailbox.messages["w1"] = {**WORK, "labelIds": ["Label_1", "INBOX"]}
-    mailbox.history["110"] = (
-        [{"labelsAdded": [{"message": {"id": "w1"}, "labelIds": ["INBOX"]}]}],
-        "120",
-    )
+    await mailbox.rename_label(work, "Projects")
+    empty = await mailbox.label("Empty")
+    await mailbox.modify(w1, add=("INBOX",))
     renamed = await hook.pull(ROOT, seen.checkpoint)
     assert _pairs(renamed) == [
         (FileChangeKind.DELETE, "/gmail/Work"),
@@ -160,15 +122,9 @@ async def test_events_follow_the_label_folders(mailbox):
         (FileChangeKind.UPDATE, f"/gmail/Projects/{plan}"),
     ]
     # One label takes the name another gives up: each path moves once.
-    mailbox.labels = [
-        *LABELS[:2],
-        {"id": "Label_1", "name": "Empty", "type": "user"},
-        {"id": "Label_2", "name": "Archive", "type": "user"},
-    ]
-    mailbox.history["120"] = (
-        [{"messagesDeleted": [{"message": {"id": "w1"}}]}],
-        "130",
-    )
+    await mailbox.rename_label(empty, "Archive")
+    await mailbox.rename_label(work, "Empty")
+    await mailbox.delete_message(w1)
     swapped = await hook.pull(ROOT, renamed.checkpoint)
     assert _pairs(swapped) == [
         (FileChangeKind.DELETE, "/gmail/Projects"),
@@ -178,8 +134,8 @@ async def test_events_follow_the_label_folders(mailbox):
         (FileChangeKind.DELETE, f"/gmail/Empty/{plan}"),
         (FileChangeKind.DELETE, f"/gmail/INBOX/{plan}"),
     ]
-    mailbox.labels = LABELS[:2]
-    mailbox.history["130"] = ([], "140")
+    await mailbox.delete_label(work)
+    await mailbox.delete_label(empty)
     removed = await hook.pull(ROOT, swapped.checkpoint)
     assert _pairs(removed) == [
         (FileChangeKind.DELETE, "/gmail/Empty"),

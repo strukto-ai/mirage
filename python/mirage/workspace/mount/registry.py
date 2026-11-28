@@ -62,6 +62,7 @@ from mirage.types import (
     Limit,
     MountMode,
     PathSpec,
+    ReadPolicy,
     ReadSpec,
     VFSName,
     WritePolicy,
@@ -1195,6 +1196,10 @@ class MountRegistry:
                 command_limits=m.command_limits,
                 workspace_limits=self.command_limits,
                 calls=m.calls,
+                keeps_listings=m.index_store.ttl > 0,
+                keeps_bodies=self._file_cache is not None
+                and m.vfs.caches_reads
+                and m.read.policy is ReadPolicy.BOUNDED,
             )
             for m in self._mounts
         ]

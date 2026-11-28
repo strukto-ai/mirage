@@ -59,6 +59,10 @@ _LOST = json.loads(
 ITEMS_ROUTE = "/2.0/folders/:folder_id/items"
 SEARCH_ROUTE = "/2.0/search"
 EVENTS_ROUTE = "/2.0/events"
+# Box spells a stream position as a JSON number near 1.15e18, past the 2**53
+# a JavaScript number holds exactly; the kit parses a plan in JavaScript, so
+# an answer carrying one is sent as written.
+POSITION = "1152922976252290886"
 
 
 @pytest.fixture
@@ -193,19 +197,28 @@ async def test_events_now_returns_the_stream_head(account):
     assert await events_now(_tm(account), "changes") == "1"
     (sent,) = await account.run.params("GET", EVENTS_ROUTE)
     assert sent["stream_position"] == "now"
-    # Box spells a position as a JSON number. The kit parses JSON in
-    # JavaScript, so the largest it carries exactly is 2**53 - 1.
-    await account.run.answer_next(
-        "GET",
-        EVENTS_ROUTE,
-        200,
-        {
-            "chunk_size": 0,
-            "next_stream_position": 9007199254740991,
-            "entries": [],
-        },
+    head = f'{{"chunk_size": 0, "next_stream_position": {POSITION}, "entries": []}}'
+    await account.run.answer_next("GET", EVENTS_ROUTE, 200, head.encode())
+    assert await events_now(_tm(account), "changes") == POSITION
+
+
+@pytest.mark.asyncio
+async def test_events_since_sends_back_a_position_as_box_wrote_it(account):
+    # A position read into a float comes back as a neighbour, and the next
+    # read from it repeats or skips events.
+    page = (
+        f'{{"chunk_size": 1, "next_stream_position": {POSITION}, '
+        '"entries": [{"event_id": "a"}]}'
     )
-    assert await events_now(_tm(account), "changes") == "9007199254740991"
+    await account.run.answer_next("GET", EVENTS_ROUTE, 200, page.encode())
+    await account.run.answer_next(
+        "GET", EVENTS_ROUTE, 200, {"chunk_size": 0, "entries": []}
+    )
+    await account.run.record_requests()
+    found, position = await events_since(_tm(account), "10", "changes")
+    assert ([e["event_id"] for e in found], position) == (["a"], POSITION)
+    sent = await account.run.params("GET", EVENTS_ROUTE)
+    assert [p["stream_position"] for p in sent] == ["10", POSITION]
 
 
 @pytest.mark.asyncio

@@ -204,6 +204,8 @@ async function reread(db: Db, tenant: string, id: string): Promise<Item> {
 
 // A new version of an existing file: the vendor keeps the id and advances the
 // etag, which is what a client compares to notice a change it did not make.
+// A file stored with no sha1 (a run's snapshot can make one) keeps none, so
+// a test can pin what a client does with a file Box answers without one.
 export async function updateFile(
   db: Db,
   tenant: string,
@@ -216,7 +218,7 @@ export async function updateFile(
     `UPDATE BoxItem SET content = ${BYTES}, sha1 = ?, version = ?, modified = ? ` +
       'WHERE tenant = ? AND id = ?',
     ...bytes(content),
-    sha1Of(content),
+    item.sha1 === null ? null : sha1Of(content),
     item.version + 1,
     modified,
     tenant,

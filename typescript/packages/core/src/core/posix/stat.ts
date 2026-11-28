@@ -52,8 +52,10 @@ function milliseconds(stamp: string): number {
  * records.
  *
  * @param out find's output.
+ * @param askedNs this host's wall clock when find was asked, kept on each
+ *   entry; absent keeps none.
  */
-export function parseEntries(out: Uint8Array): PosixEntry[] | null {
+export function parseEntries(out: Uint8Array, askedNs?: bigint): PosixEntry[] | null {
   if (out[out.length - 1] !== 0) return null
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const entries: PosixEntry[] = []
@@ -98,6 +100,7 @@ export function parseEntries(out: Uint8Array): PosixEntry[] | null {
       nlink: Number(nlink),
       blocks: Number(blocks),
       rel: fields.slice(9).join(' '),
+      ...(askedNs !== undefined ? { askedNs } : {}),
     })
   }
   return entries

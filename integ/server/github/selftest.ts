@@ -492,6 +492,90 @@ async function supersededBlobs(at: string): Promise<void> {
   eq('a sha no tree ever held is not found', await blob('0'.repeat(40)), 404)
 }
 
+// A public repository answers a mount's reads with no credential: its
+// metadata, its trees, its blobs and its raw files. A private one, a seeded
+// one and code search still refuse an anonymous caller.
+async function publicReads(at: string): Promise<void> {
+  const run = 'public-reads'
+  const base = `${at}/_run/${run}`
+  await post(`${base}/reset`, { run, tenants: [TENANT], fixture: 'v1' })
+  const make = async (name: string, isPrivate: boolean): Promise<string> => {
+    const r = await fetch(`${base}/user/repos`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify({ name, private: isPrivate, auto_init: true }),
+    })
+    eq(`creating ${name} succeeds`, r.status, 201)
+    return String(field((await r.json()) as JsonValue, 'full_name'))
+  }
+  const open = await make('open', false)
+  const shut = await make('shut', true)
+  const anonymous = { 'x-mirage-tenant': TENANT }
+  const status = async (path: string): Promise<number> =>
+    (await fetch(`${base}${path}`, { headers: anonymous })).status
+  const tree = (await get(`${base}/repos/${open}/git/trees/main`)) as { tree: { sha: string }[] }
+  const blob = tree.tree[0]?.sha ?? ''
+  eq(
+    'a public repository answers its reads with no credential',
+    [
+      await status(`/repos/${open}`),
+      await status(`/repos/${open}/git/trees/main?recursive=1`),
+      await status(`/repos/${open}/git/blobs/${blob}`),
+      await status(`/raw/${open}/main/README.md`),
+    ],
+    [200, 200, 200, 200],
+  )
+  eq(
+    'a private, a seeded and a searched repository refuse one',
+    [
+      await status(`/repos/${shut}/git/trees/main`),
+      await status(`/repos/${REPO}/git/trees/main`),
+      await status(`/search/code?q=open+repo:${open}`),
+    ],
+    [401, 401, 401],
+  )
+}
+
+// GraphQL's `object(oid:)` answers a blob by its sha with its text, the way a
+// client reads several files in one call: variables typed `GitObjectID!`,
+// one alias per blob. Bytes that are not UTF-8 answer no text, which GitHub
+// documents as a binary blob, and a blob a write replaced still answers.
+async function blobsByOid(at: string): Promise<void> {
+  const run = 'blobs-by-oid'
+  const base = `${at}/_run/${run}`
+  await post(`${base}/reset`, { run, tenants: [TENANT], fixture: 'v1' })
+  const repo = `${base}/repos/${REPO}`
+  const put = async (path: string, data: Buffer, sha?: JsonValue): Promise<string> => {
+    const r = await fetch(`${repo}/contents/${path}`, {
+      method: 'PUT',
+      headers: HEADERS,
+      body: JSON.stringify({ message: `Write ${path}`, content: data.toString('base64'), sha }),
+    })
+    eq(`the PUT of ${path} succeeds`, r.status === 200 || r.status === 201, true)
+    return String(field(field((await r.json()) as JsonValue, 'content'), 'sha'))
+  }
+  const first = await put('notes.txt', Buffer.from('first\n'))
+  await put('notes.txt', Buffer.from('second\n'), first)
+  const latin = await put('latin.txt', Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]))
+  const [owner = '', name = ''] = REPO.split('/')
+  const answer = await post(`${base}/graphql`, {
+    query:
+      'query($owner: String!, $repo: String!, $a: GitObjectID!, $b: GitObjectID!, $c: GitObjectID!) ' +
+      '{ repository(owner: $owner, name: $repo) { ' +
+      'a: object(oid: $a) { ... on Blob { text isTruncated isBinary byteSize } } ' +
+      'b: object(oid: $b) { ... on Blob { text isTruncated isBinary byteSize } } ' +
+      'c: object(oid: $c) { ... on Blob { text } } } }',
+    variables: { owner, repo: name, a: first, b: latin, c: '0'.repeat(40) },
+  })
+  eq('object(oid:) answers each blob by its sha', field(answer.body, 'data'), {
+    repository: {
+      a: { text: 'first\n', isTruncated: false, isBinary: false, byteSize: 6 },
+      b: { text: null, isTruncated: false, isBinary: true, byteSize: 5 },
+      c: null,
+    },
+  })
+}
+
 // A ref names a branch, or one commit by its full or abbreviated sha, and
 // every read that takes one answers from what it names: a commit's own
 // files, its own history, its own place in a comparison.
@@ -2935,6 +3019,8 @@ async function main(): Promise<void> {
     await emptyRepository(at)
     await seededHistory(at)
     await supersededBlobs(at)
+    await blobsByOid(at)
+    await publicReads(at)
     await refsNameCommits(at)
     await abandonedRoot(at)
     await gitDatabase(at)

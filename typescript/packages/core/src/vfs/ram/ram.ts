@@ -51,6 +51,9 @@ export interface RAMVFSState {
   dirs?: string[]
   modified?: Record<string, string>
   attrs?: Record<string, RAMAttrs>
+  /** The store's last stamp, in nanoseconds, so a loaded store stamps
+   * past every write the saved one dated. */
+  stamp?: string
 }
 
 export class RAMVFS extends BaseVFS {
@@ -195,6 +198,7 @@ export class RAMVFS extends BaseVFS {
       dirs: [...this.store.dirs],
       modified,
       attrs,
+      stamp: this.store.stamp.toString(),
     }
   }
 
@@ -208,6 +212,7 @@ export class RAMVFS extends BaseVFS {
     for (const [k, v] of Object.entries(state.modified ?? {})) this.store.modified.set(k, v)
     this.store.attrs.clear()
     for (const [k, v] of Object.entries(state.attrs ?? {})) this.store.attrs.set(k, { ...v })
+    this.store.stamp = BigInt(state.stamp ?? '0')
   }
 
   /** df's QUOTA row for a capped store; the base UNKNOWN otherwise. Mirrors

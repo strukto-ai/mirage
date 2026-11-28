@@ -229,6 +229,13 @@ class MountView:
     # serving a path (its VFS's ``walk_limit``), -1 for no cap, so a
     # walk that crosses mounts charges each entry to its own backend.
     walk_limit: Callable[[str], int] | None = None
+    # Whether the mount serving a path keeps listings past the command
+    # that fetched them, so a stat it answers may be as old as one.
+    keeps_listings: Callable[[str], bool] | None = None
+    # Whether the mount serving a path answers a read from cached bytes
+    # without asking the backend first, so the bytes may be older than a
+    # stat taken beside the read.
+    keeps_bodies: Callable[[str], bool] | None = None
 
 
 @runtime_checkable

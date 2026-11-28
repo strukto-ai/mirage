@@ -134,6 +134,28 @@ describe('resolveInside', () => {
     expect(debug).toHaveBeenCalledWith('Disk probe failed:', 'EACCES')
     debug.mockRestore()
   })
+  it('opens each parent once for a batch of checks that share their opens', async () => {
+    // Checks that share `opened` prove a parent readable once for all of
+    // them, and one that does not share it opens the parent again.
+    await mkdir(join(root, '1', '2'), { recursive: true })
+    for (const name of ['3', '4', '5']) await writeFile(join(root, '1', '2', name), 'x')
+    const open = vi.mocked(fs.open)
+    const folderOpens = (): string[] =>
+      open.mock.calls
+        .filter(
+          ([, flags]) => typeof flags === 'number' && (flags & fs.constants.O_DIRECTORY) !== 0,
+        )
+        .map(([target]) => String(target))
+    open.mockClear()
+    const opened = new Map<string, Promise<void>>()
+    for (const name of ['3', '4', '5']) {
+      await resolveInside(root, spec(`/1/2/${name}`), undefined, opened)
+    }
+    const folders = [resolve(root), join(resolve(root), '1'), join(resolve(root), '1', '2')]
+    expect(folderOpens()).toEqual(folders)
+    await resolveInside(root, spec('/1/2/3'))
+    expect(folderOpens().slice(3)).toEqual(folders)
+  })
   it('refuses a link out of the root as the leaf', async () => {
     await expect(resolveInside(root, spec('/abs'))).rejects.toMatchObject({ code: 'ENOENT' })
   })

@@ -89,6 +89,132 @@
       ]
     },
     {
+      "id": "mount_type_ssh_fails_a_line_whose_spooled_write_cannot_land",
+      "note": "A file past the 1 MiB a handle keeps in memory waits in a spool. At 64 MB its release is still landing when the line ends and lands every open handle; the release that fails takes its writes with it, so the line reports the landing's own error, not the spool the release closed.",
+      "runtimes": ["docker", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": { "mounts": { "/capped": { "vfs": "ram", "config": { "capacity": 32000000 } } } },
+      "entry": { "captures": ["dash"], "config": { "mount_type": "ssh" } },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 64000000 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_fails_a_line_whose_spooled_write_cannot_land",
+      "note": "A file past the 1 MiB a handle keeps in memory waits in a spool. At 64 MB its release is still landing when the line ends and lands every open handle; the release that fails takes its writes with it, so the line reports the landing's own error, not the spool the release closed, as under ssh.",
+      "runtimes": ["docker", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": { "mounts": { "/capped": { "vfs": "ram", "config": { "capacity": 32000000 } } } },
+      "entry": { "captures": ["dash"], "config": { "mount_type": "mirage" } },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 64000000 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_lands_a_file_written_in_many_writes",
+      "note": "mirage-fuse sends a file's writes ahead of their answers and its close waits for them, so a file seq writes 4 KiB at a time reads back whole on the box, and in Mirage once the line ends.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'seq 1 100000 > /served/seq.txt; echo rc=$?; tail -n 1 /served/seq.txt; wc -c < /served/seq.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=0\n100000\n588895\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "wc -c /served/seq.txt; tail -n 1 /served/seq.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "588895 /served/seq.txt\n100000\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_lands_a_file_past_the_writes_in_flight",
+      "note": "A file larger than the 8 MiB of writes mirage-fuse sends ahead of their answers waits for room as it is written and lands whole.",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox",
+        "kubernetes"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 12000000 /dev/zero > /served/big.bin; echo rc=$?; wc -c < /served/big.bin'",
+          "expect": {
+            "exit": 0,
+            "stdout": "rc=0\n12000000\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "wc -c /served/big.bin",
+          "expect": {
+            "exit": 0,
+            "stdout": "12000000 /served/big.bin\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_leaves_the_box_its_own_tmp",
       "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "note": "/tmp is the box's own, as / and /dev are, and the workspace shows it as a machine mount: sshfs does not serve over it, a file a program writes there is the file Mirage reads, and a line runs from it.",
