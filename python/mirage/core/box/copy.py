@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 from collections.abc import Mapping
 from typing import Any
+from uuid import uuid4
 
 from mirage.accessor.box import BoxAccessor
 from mirage.cache.context import (
@@ -30,6 +32,7 @@ from mirage.core.box.api import (
     delete_file,
     list_folder_items,
     refused,
+    update_file,
 )
 from mirage.core.box.client import BoxApiError
 from mirage.core.box.constants import CONFLICT_STATUS
@@ -55,6 +58,52 @@ from mirage.types import FileStat, PathSpec
 from mirage.utils.key_prefix import child_spec
 from mirage.utils.upload import upload_stat
 
+logger = logging.getLogger(__name__)
+
+
+async def held_file(
+    accessor: BoxAccessor, dst: PathSpec, existing: Mapping[str, Any] | None
+) -> tuple[WriteCondition | None, Mapping[str, Any] | None, str | None]:
+    """What a copy or move onto ``dst`` is held to, refusing a stale one.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        dst (PathSpec): the destination.
+        existing (dict[str, Any] | None): the file there, None when none.
+
+    Returns:
+        tuple[WriteCondition | None, dict[str, Any] | None, str | None]:
+            the op's condition (None when unconditional), the file there
+            as the condition saw it, and the etag its delete carries.
+    """
+    cond = await write_condition(dst, "copy")
+    if cond is not None:
+        existing = await live_item(accessor, dst, existing)
+    etag = await native_condition(dst, cond, live_of(existing), "copy")
+    return cond, existing, etag
+
+
+async def clear_file(
+    accessor: BoxAccessor,
+    dst: PathSpec,
+    existing: Mapping[str, Any],
+    cond: WriteCondition | None,
+    etag: str | None,
+) -> None:
+    """Delete the file a copy or move replaces, held to ``etag``.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        dst (PathSpec): the destination.
+        existing (dict[str, Any]): the file there.
+        cond (WriteCondition | None): the op's condition.
+        etag (str | None): the etag the delete carries.
+    """
+    try:
+        await delete_file(accessor.token_manager, existing["id"], etag)
+    except BoxApiError as exc:
+        raise (await refused(dst, exc, cond, etag)) or exc
+
 
 async def replace_file(
     accessor: BoxAccessor, dst: PathSpec, existing: Mapping[str, Any] | None
@@ -69,15 +118,9 @@ async def replace_file(
     Returns:
         WriteCondition | None: the op's condition, None when unconditional.
     """
-    cond = await write_condition(dst, "copy")
-    if cond is not None:
-        existing = await live_item(accessor, dst, existing)
-    etag = await native_condition(dst, cond, live_of(existing), "copy")
+    cond, existing, etag = await held_file(accessor, dst, existing)
     if existing is not None:
-        try:
-            await delete_file(accessor.token_manager, existing["id"], etag)
-        except BoxApiError as exc:
-            raise (await refused(dst, exc, cond, etag)) or exc
+        await clear_file(accessor, dst, existing, cond, etag)
     return cond
 
 
@@ -119,6 +162,53 @@ async def _landed(
     """
     record("copy_prefix" if whole else "copy", dst.virtual, "box", 0, timer)
     lift_lost(dst, upto, subtree=whole)
+
+
+async def _copy_over(
+    accessor: BoxAccessor,
+    item: Mapping[str, Any],
+    dst: PathSpec,
+    folder_id: str,
+    existing: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Copy a file onto the file that holds ``dst``'s name.
+
+    A stale destination is refused before anything is sent. Box refuses a
+    taken name, so the copy lands beside it under a staged name first, the
+    file it replaces goes next, held to the version read, and the copy
+    takes the name last: a refused copy leaves the file as it was, and a
+    refused delete or rename drops the copy again.
+
+    Args:
+        accessor (BoxAccessor): Box accessor.
+        item (dict[str, Any]): the file copied.
+        dst (PathSpec): where the copy lands.
+        folder_id (str): the folder ``dst`` is in.
+        existing (dict[str, Any]): the file at ``dst``.
+    """
+    tm = accessor.token_manager
+    new_name = path_parts(dst)[-1]
+    cond, live, etag = await held_file(accessor, dst, existing)
+    name = new_name if live is None else f"{new_name}.mirage-{uuid4().hex}"
+    try:
+        made = await copy_file(tm, item["id"], folder_id, name=name)
+    except BoxApiError as exc:
+        raise (await retaken(exc, cond, dst)) or exc
+    if live is None:
+        return made
+    try:
+        await clear_file(accessor, dst, live, cond, etag)
+        return await update_file(tm, made["id"], name=new_name)
+    except Exception as exc:
+        try:
+            await delete_file(tm, made["id"])
+        except Exception as undo:
+            logger.debug(
+                "could not drop the copy at %s: %s", dst.virtual, undo
+            )
+        if isinstance(exc, BoxApiError):
+            raise (await retaken(exc, cond, dst)) or exc
+        raise
 
 
 async def _copy_into(
@@ -172,7 +262,6 @@ async def _copy_into(
             )
         return None
     new_name = path_parts(dst)[-1]
-    cond: WriteCondition | None = None
     if existing is not None and existing["id"] != item["id"]:
         # Folder onto folder already merged above, so what is left is a type
         # mismatch or a file replacing a file. cp refuses either mismatch
@@ -182,8 +271,11 @@ async def _copy_into(
             raise eisdir(dst.virtual)
         if item.get("type") == "folder":
             raise enotdir(dst.virtual)
-        cond = await replace_file(accessor, dst, existing)
-    elif existing is None and item.get("type") == "file":
+        made = await _copy_over(accessor, item, dst, folder_id, existing)
+        await _landed(dst, False, timer, upto)
+        return upload_stat(made, stat_from_item, dst.virtual)
+    cond: WriteCondition | None = None
+    if existing is None and item.get("type") == "file":
         cond = await replace_file(accessor, dst, None)
     try:
         if item.get("type") == "folder":

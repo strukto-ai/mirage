@@ -1,3 +1,5 @@
+import errno
+import re
 from collections.abc import AsyncIterator
 
 import pytest
@@ -18,6 +20,7 @@ from mirage.core.msgraph.drive import (
     rename_replace,
     write_item,
 )
+from mirage.core.onedrive.client import drive_loc
 from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
 from mirage.io.types import ByteSource
@@ -25,6 +28,9 @@ from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 _CONFLICT = {"error": {"code": "nameAlreadyExists", "message": "x"}}
+_STAGED = re.compile(
+    r"^https://graph\.example/drives/d1/root:/b\.txt\.mirage-[0-9a-f]{32}:$"
+)
 
 
 def _url(path: str, action: str = "") -> str:
@@ -142,7 +148,7 @@ async def test_copy_raises_the_provider_code_when_the_monitor_fails(
 
 
 @pytest.mark.asyncio
-async def test_copy_deletes_a_conflicting_file_destination_and_retries(
+async def test_copy_lands_beside_a_conflicting_file_then_deletes_it(
     exact_cloud_paths,
 ):
     monitor = "https://monitor.example/op/3"
@@ -160,13 +166,18 @@ async def test_copy_deletes_a_conflicting_file_destination_and_retries(
             _url("b.txt"),
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_url("b.txt"), status=204)
         m.post(_url("a.txt", "/copy"), status=202, headers={"Location": retry})
         m.get(retry, payload={"status": "completed"})
+        m.delete(_url("b.txt"), status=204)
+        m.patch(_STAGED, payload={"id": "3", "name": "b.txt", "file": {}})
         await copy_tree(_accessor(), _loc("d1", "a.txt"), _loc("d1", "b.txt"))
         assert ("DELETE", URL(_url("b.txt"))) in m.requests
-        assert len(m.requests[("POST", URL(_url("a.txt", "/copy")))]) == 2
+        copies = m.requests[("POST", URL(_url("a.txt", "/copy")))]
+        assert len(copies) == 2
+        assert _STAGED.match(_url(copies[1].kwargs["json"]["name"]))
         assert ("GET", URL(retry)) in m.requests
+        named = [url for method, url in m.requests if method == "PATCH"]
+        assert len(named) == 1 and _STAGED.match(str(named[0]))
 
 
 @pytest.mark.asyncio
@@ -174,12 +185,13 @@ async def test_copy_deletes_a_conflicting_file_destination_and_retries(
 async def test_copy_normalizes_a_failed_replacement_retry(
     exact_cloud_paths, transport
 ):
+    # The staged copy is the retry: refused, it leaves the file it would
+    # have replaced untouched.
     retry = "https://monitor.example/op/retry-failed"
     with aioresponses() as m:
         m.post(_url("a.txt", "/copy"), status=409, payload=_CONFLICT)
         m.get(_url("a.txt"), payload={"id": "1", "file": {}})
         m.get(_url("b.txt"), payload={"id": "2", "file": {}})
-        m.delete(_url("b.txt"), status=204)
         if transport == "monitor":
             m.post(
                 _url("a.txt", "/copy"), status=202, headers={"Location": retry}
@@ -194,7 +206,7 @@ async def test_copy_normalizes_a_failed_replacement_retry(
         assert exc.value.status == 500
         assert exc.value.code == "nameAlreadyExists"
         assert str(exc.value).endswith(": x")
-        assert len(m.requests[("DELETE", URL(_url("b.txt")))]) == 1
+        assert not [k for k in m.requests if k[0] == "DELETE"]
         assert len(m.requests[("POST", URL(_url("a.txt", "/copy")))]) == 2
         if transport == "monitor":
             assert ("GET", URL(retry)) in m.requests
@@ -810,3 +822,95 @@ def test_invalid_counts_stay_unknown(value):
 
 def test_parent_of_directory_with_trailing_slash():
     assert _loc("d1", "parent/nested/").parent() == "parent"
+
+
+ITEM_ROUTE = "/me/drive/*rest"
+_DENIED = {"error": {"code": "accessDenied", "message": "Access denied."}}
+
+
+def _on(onedrive) -> OneDriveAccessor:
+    return OneDriveAccessor(OneDriveConfig(**onedrive.config("onedrive")))
+
+
+async def _names(onedrive, folder: str = "") -> list[str]:
+    at = f"root:/{folder}:/children" if folder else "root/children"
+    listed = await onedrive.run.call("GET", f"/me/drive/{at}")
+    return sorted(child["name"] for child in listed["value"])
+
+
+async def _mkdir(onedrive, name: str) -> None:
+    await onedrive.run.call(
+        "POST", "/me/drive/root/children", json={"name": name, "folder": {}}
+    )
+
+
+async def _replace(onedrive, op, src: str, dst: str) -> None:
+    config = _on(onedrive).config
+    await op(
+        _on(onedrive),
+        drive_loc(config, src),
+        drive_loc(config, dst),
+        f"/{src}",
+        f"/{dst}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [rename_replace, copy_tree])
+async def test_a_replace_lands_beside_and_leaves_no_staged_name(onedrive, op):
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await _replace(onedrive, op, "a.txt", "b.txt")
+    kept = ["a.txt"] if op is copy_tree else []
+    assert await _names(onedrive) == [*kept, "b.txt"]
+    assert await onedrive.content("b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_landing_keeps_the_destination(onedrive):
+    # The move meets the taken name, then the staged move is refused (a
+    # view-only source, say): nothing was deleted yet.
+    await onedrive.write("a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await onedrive.run.answer_next("PATCH", ITEM_ROUTE, 409, _CONFLICT)
+    await onedrive.run.answer_next("PATCH", ITEM_ROUTE, 403, _DENIED)
+    with pytest.raises(GraphError):
+        await _replace(onedrive, rename_replace, "a.txt", "b.txt")
+    assert await _names(onedrive) == ["a.txt", "b.txt"]
+    assert await onedrive.content("b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [rename_replace, copy_tree])
+async def test_a_refused_delete_takes_the_landed_item_back(onedrive, op):
+    await onedrive.write("sub/a.txt", b"mine")
+    await onedrive.write("b.txt", b"theirs")
+    await onedrive.run.answer_next("DELETE", ITEM_ROUTE, 403, _DENIED)
+    with pytest.raises(GraphError):
+        await _replace(onedrive, op, "sub/a.txt", "b.txt")
+    assert await _names(onedrive) == ["b.txt", "sub"]
+    assert await _names(onedrive, "sub") == ["a.txt"]
+    assert await onedrive.content("b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_rename_keeps_a_folder_given_a_child_while_moving(onedrive):
+    # Another client writes into the empty folder while the source moves
+    # beside it (the move after the one that met the name): the probe made
+    # just before the delete sees the child, so the folder stays and the
+    # source goes back.
+    await onedrive.write("src/x.txt", b"x")
+    await _mkdir(onedrive, "dst")
+    await onedrive.run.before_next(
+        [("PATCH", ITEM_ROUTE)],
+        lambda: onedrive.run.before_next(
+            [("PATCH", ITEM_ROUTE)],
+            lambda: onedrive.write("dst/late.txt", b"late"),
+        ),
+    )
+    with pytest.raises(OSError) as caught:
+        await _replace(onedrive, rename_replace, "src", "dst")
+    assert caught.value.errno == errno.ENOTEMPTY
+    assert await _names(onedrive) == ["dst", "src"]
+    assert await _names(onedrive, "dst") == ["late.txt"]
+    assert await _names(onedrive, "src") == ["x.txt"]

@@ -14,11 +14,13 @@
 
 import pytest
 
+from mirage.core.dropbox.client import DropboxApiError
 from mirage.core.dropbox.copy import copy, dir_copy
 from mirage.types import PathSpec
 
 COPY_ROUTE = "/2/files/copy_v2"
 DELETE_ROUTE = "/2/files/delete_v2"
+MOVE_ROUTE = "/2/files/move_v2"
 
 
 def _pairs(bodies: list) -> list[tuple[str, str]]:
@@ -42,8 +44,9 @@ async def test_copy_maps_paths_under_mount_root(account):
 
 @pytest.mark.asyncio
 async def test_copy_replaces_existing_destination_file(account):
-    # Dropbox refuses a copy onto a file; cp replaces it, so the file goes
-    # and the copy is asked again.
+    # Dropbox refuses a copy onto a file; cp replaces it, so the copy lands
+    # beside the file under a staged name, the file goes, and the copy
+    # takes its name.
     await account.put("/a.txt", b"mine")
     await account.put("/b.txt", b"theirs")
     await account.run.record_requests()
@@ -54,8 +57,33 @@ async def test_copy_replaces_existing_destination_file(account):
     )
     deleted = await account.run.bodies("POST", DELETE_ROUTE)
     assert [body["path"] for body in deleted] == ["/b.txt"]
-    assert len(await account.run.bodies("POST", COPY_ROUTE)) == 2
+    tried, landed = _pairs(await account.run.bodies("POST", COPY_ROUTE))
+    assert tried == ("/a.txt", "/b.txt")
+    assert landed[1].startswith("/b.txt.mirage-")
+    named = _pairs(await account.run.bodies("POST", MOVE_ROUTE))
+    assert named == [(landed[1], "/b.txt")]
+    assert await account.names() == ["a.txt", "b.txt"]
     assert await account.read("/b.txt") == b"mine"
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_delete_drops_the_copy(account):
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.answer_next(
+        "POST",
+        DELETE_ROUTE,
+        409,
+        {"error_summary": "path_lookup/restricted_content/.."},
+    )
+    with pytest.raises(DropboxApiError):
+        await copy(
+            account.accessor(),
+            PathSpec.from_str_path("/a.txt"),
+            PathSpec.from_str_path("/b.txt"),
+        )
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"theirs"
 
 
 @pytest.mark.asyncio

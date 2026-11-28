@@ -17,7 +17,7 @@ import { conditionVersion, nativeCondition, stale, writeCondition } from '../../
 import type { WriteCondition } from '../../cache/types.ts'
 import { liftLost, lostCount, record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
-import { enoent } from '../../errors/fs.ts'
+import { enoent, enotempty } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
 import { DropboxApiError, type DropboxTokenManager } from './client.ts'
 import {
@@ -26,6 +26,7 @@ import {
   getMetadata,
   listFolder,
   lookup,
+  movePath,
   refused,
   type DropboxEntry,
 } from './api.ts'
@@ -51,19 +52,43 @@ async function retaken(
 }
 
 /**
+ * Delete what holds the destination name, once the op landed beside it. A
+ * folder is asked for a child again first, so one written while the op landed
+ * is not deleted with it: mv's "Directory not empty". Mirrors Python's
+ * `_clear`.
+ */
+async function clear(
+  tm: DropboxTokenManager,
+  dst: PathSpec,
+  to: string,
+  rev: string | null,
+  existing: DropboxEntry | null,
+): Promise<void> {
+  if (existing?.['.tag'] === 'folder' && (await listFolder(tm, to, { limit: 1 })).length > 0) {
+    throw enotempty(dst.virtual)
+  }
+  await deletePath(tm, to, rev)
+}
+
+/**
  * Run a copy or move, replacing a file that holds the destination name. The op
  * goes first, since Dropbox answers a missing source before a taken name. A
  * held destination is measured before the op, cleared with its rev on a taken
- * name, and refused as gone when a folder took it. `emptyFolder` lets an empty
- * folder there give way too. Returns the op's reply and the destination it
- * replaced when that was looked up. Mirrors Python's `replace_onto`.
+ * name, and refused as gone when a folder took it. On a taken name the op
+ * lands under a staged name beside the destination, what holds the name goes
+ * next, and the landed entry takes the name last: a refused op leaves the
+ * destination as it was, and a refused delete hands the landed entry to
+ * `undo`. `emptyFolder` lets an empty folder there give way too. Returns the
+ * op's reply and the destination it replaced when that was looked up. Mirrors
+ * Python's `replace_onto`.
  */
 export async function replaceOnto<T>(
   tm: DropboxTokenManager,
   src: PathSpec,
   dst: PathSpec,
   to: string,
-  op: () => Promise<T>,
+  op: (to: string) => Promise<T>,
+  undo: (staged: string) => Promise<unknown>,
   emptyFolder: boolean,
 ): Promise<[T, DropboxEntry | null]> {
   const cond = await writeCondition(dst, 'copy')
@@ -71,13 +96,13 @@ export async function replaceOnto<T>(
   if (cond?.kind === 'match' && cond.version !== '') {
     rev = await nativeCondition(dst, cond, liveOf(await lookup(tm, to)), 'copy')
   }
+  let existing: DropboxEntry | null = null
   try {
-    return [await op(), null]
+    return [await op(to), null]
   } catch (err) {
     if (!(err instanceof DropboxApiError)) throw err
     if (err.summary.startsWith(MISSING_SOURCE)) throw enoent(src.virtual)
     if (!err.summary.startsWith(TAKEN)) throw err
-    let existing: DropboxEntry | null = null
     if (rev === null) {
       existing = await getMetadata(tm, to)
       const blocks =
@@ -87,19 +112,44 @@ export async function replaceOnto<T>(
     } else if (err.summary.startsWith(TAKEN_BY_FOLDER)) {
       throw await stale(dst)
     }
-    try {
-      await deletePath(tm, to, rev)
-    } catch (cleared) {
+  }
+  const staged = `${to}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+  let landed: T
+  try {
+    landed = await op(staged)
+  } catch (again) {
+    if (again instanceof DropboxApiError && again.summary.startsWith(MISSING_SOURCE)) {
+      throw enoent(src.virtual)
+    }
+    throw again
+  }
+  try {
+    await clear(tm, dst, to, rev, existing)
+  } catch (cleared) {
+    await takeBack(undo, staged)
+    if (cleared instanceof DropboxApiError) {
       throw (await refused(dst, cleared, cond, rev)) ?? cleared
     }
-    try {
-      return [await op(), existing]
-    } catch (again) {
-      if (again instanceof DropboxApiError && again.summary.startsWith(MISSING_SOURCE)) {
-        throw enoent(src.virtual)
-      }
-      throw (await retaken(again, cond, dst)) ?? again
-    }
+    throw cleared
+  }
+  try {
+    await movePath(tm, staged, to)
+  } catch (again) {
+    await takeBack(undo, staged)
+    throw (await retaken(again, cond, dst)) ?? again
+  }
+  return [landed, existing]
+}
+
+/**
+ * Hand an entry the op landed to `undo`; a refusal is logged, so the error
+ * that called for it stays the one raised. Mirrors Python's `_take_back`.
+ */
+async function takeBack(undo: (staged: string) => Promise<unknown>, staged: string): Promise<void> {
+  try {
+    await undo(staged)
+  } catch (back) {
+    console.debug(`could not take back ${staged}: ${String(back)}`)
   }
 }
 
@@ -115,7 +165,15 @@ export async function copy(accessor: DropboxAccessor, src: PathSpec, dst: PathSp
   const tm = accessor.tokenManager
   const upto = lostCount()
   const timer = startOp()
-  await replaceOnto(tm, src, dst, to, () => copyPath(tm, from, to), false)
+  await replaceOnto(
+    tm,
+    src,
+    dst,
+    to,
+    (at) => copyPath(tm, from, at),
+    (staged) => deletePath(tm, staged),
+    false,
+  )
   record('copy', dst.virtual, 'dropbox', 0, timer)
   liftLost(dst, upto)
 }

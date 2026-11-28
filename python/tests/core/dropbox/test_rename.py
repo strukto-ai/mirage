@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
+
 import pytest
 
 from mirage.core.dropbox.client import DropboxApiError
@@ -36,16 +38,25 @@ async def _deleted(account) -> list[str]:
     return [b["path"] for b in await account.run.bodies("POST", DELETE_ROUTE)]
 
 
+async def _moves(account) -> list[tuple[str, str]]:
+    bodies = await account.run.bodies("POST", MOVE_ROUTE)
+    return [(body["from_path"], body["to_path"]) for body in bodies]
+
+
 @pytest.mark.asyncio
 async def test_rename_replaces_existing_destination_file(account):
-    # Dropbox refuses a move onto a file; mv replaces it, so the file goes
-    # and the move is asked again.
+    # Dropbox refuses a move onto a file; mv replaces it, so the move lands
+    # beside the file under a staged name, the file goes, and the moved
+    # file takes its name.
     await account.put("/a.txt", b"mine")
     await account.put("/b.txt", b"theirs")
     await account.run.record_requests()
     await _rename(account, "/a.txt", "/b.txt")
     assert await _deleted(account) == ["/b.txt"]
-    assert len(await account.run.bodies("POST", MOVE_ROUTE)) == 2
+    tried, landed, named = await _moves(account)
+    assert tried == ("/a.txt", "/b.txt")
+    assert landed[0] == "/a.txt" and landed[1].startswith("/b.txt.mirage-")
+    assert named == (landed[1], "/b.txt")
     assert await account.names() == ["b.txt"]
     assert await account.read("/b.txt") == b"mine"
 
@@ -57,9 +68,67 @@ async def test_rename_conflict_replaces_empty_dir_destination(account):
     await account.run.record_requests()
     await _rename(account, "/src", "/dst")
     assert await _deleted(account) == ["/dst"]
-    assert len(await account.run.bodies("POST", MOVE_ROUTE)) == 2
+    assert len(await _moves(account)) == 3
     assert await account.names() == ["dst"]
     assert await account.names("/dst") == ["x.txt"]
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_landing_keeps_the_destination(account):
+    # The move meets the taken name first, then the staged move is refused
+    # (a view-only source, say): nothing was deleted yet.
+    await account.put("/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.answer_next(
+        "POST", MOVE_ROUTE, 409, {"error_summary": "to/conflict/file/.."}
+    )
+    await account.run.answer_next(
+        "POST", MOVE_ROUTE, 409, {"error_summary": "from_write/no_write/.."}
+    )
+    with pytest.raises(DropboxApiError):
+        await _rename(account, "/a.txt", "/b.txt")
+    assert await account.names() == ["a.txt", "b.txt"]
+    assert await account.read("/b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_delete_moves_the_file_back(account):
+    await account.put("/src/a.txt", b"mine")
+    await account.put("/b.txt", b"theirs")
+    await account.run.answer_next(
+        "POST",
+        DELETE_ROUTE,
+        409,
+        {"error_summary": "path_lookup/restricted_content/.."},
+    )
+    with pytest.raises(DropboxApiError):
+        await _rename(account, "/src/a.txt", "/b.txt")
+    assert await account.names() == ["b.txt", "src"]
+    assert await account.names("/src") == ["a.txt"]
+    assert await account.read("/b.txt") == b"theirs"
+
+
+@pytest.mark.asyncio
+async def test_rename_keeps_a_folder_given_a_child_while_moving(account):
+    # Another client writes into the empty folder after the first probe,
+    # while the source moves beside it (the move after that probe): the
+    # probe made just before the delete sees the child, so the folder stays
+    # and the source goes back.
+    await account.put("/src/x.txt", b"x")
+    await account.mkdir("/dst")
+    await account.run.before_next(
+        [("POST", LIST_ROUTE)],
+        lambda: account.run.before_next(
+            [("POST", MOVE_ROUTE)],
+            lambda: account.put("/dst/late.txt", b"late"),
+        ),
+    )
+    with pytest.raises(OSError) as caught:
+        await _rename(account, "/src", "/dst")
+    assert caught.value.errno == errno.ENOTEMPTY
+    assert await account.names() == ["dst", "src"]
+    assert await account.names("/dst") == ["late.txt"]
+    assert await account.names("/src") == ["x.txt"]
 
 
 @pytest.mark.asyncio

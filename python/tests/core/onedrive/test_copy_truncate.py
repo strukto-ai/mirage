@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from aioresponses import CallbackResult, aioresponses
 from yarl import URL
@@ -139,11 +141,14 @@ async def test_copy_rejects_non_object_monitor_response():
 
 
 @pytest.mark.asyncio
-async def test_copy_file_conflict_deletes_destination_and_retries(
+async def test_copy_file_conflict_lands_beside_then_deletes_destination(
     exact_cloud_paths,
 ):
     monitor = "https://monitor.example/op/789"
     retry_monitor = "https://monitor.example/op/789-retry"
+    staged = re.compile(
+        "^" + re.escape(f"{_BASE}/root:/b.txt.mirage-") + "[0-9a-f]{32}$"
+    )
     with aioresponses() as m:
         m.post(
             _BASE + "/root:/a.txt:/copy",
@@ -165,23 +170,25 @@ async def test_copy_file_conflict_deletes_destination_and_retries(
             _BASE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_BASE + "/root:/b.txt", status=204)
         m.post(
             _BASE + "/root:/a.txt:/copy",
             status=202,
             headers={"Location": retry_monitor},
         )
         m.get(retry_monitor, payload={"status": "completed"})
+        m.delete(_BASE + "/root:/b.txt", status=204)
+        m.patch(staged, payload={"id": "3", "name": "b.txt", "file": {}})
         await copy(
             _accessor(),
             PathSpec.from_str_path("/a.txt"),
             PathSpec.from_str_path("/b.txt"),
         )
         assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
-        assert (
-            len(m.requests[("POST", URL(_BASE + "/root:/a.txt:/copy"))]) == 2
-        )
+        copies = m.requests[("POST", URL(_BASE + "/root:/a.txt:/copy"))]
+        assert len(copies) == 2
+        assert copies[1].kwargs["json"]["name"].startswith("b.txt.mirage-")
         assert ("GET", URL(retry_monitor)) in m.requests
+        assert [u for verb, u in m.requests if staged.match(str(u))]
 
 
 @pytest.mark.asyncio

@@ -38,9 +38,14 @@ async function copyChildren(drive: DriveApi, src: DriveNode, dstFolderId: string
 /**
  * Copy a file or folder server-side, handed what is at `src` and at `dst`
  * and its parent. `cp -r` merges into an existing folder and creates a
- * missing one, mirroring the msgraph copy_tree. Answers the stat of what the
- * copy made, null when it merged into a folder already there. Mirrors
- * Python's `copy`.
+ * missing one, mirroring the msgraph copy_tree. A file it replaces is deleted
+ * only once the copy has landed beside it, which Drive's two items of one name
+ * in a folder allow, so a refused copy leaves it as it was, and a refused
+ * delete drops the copy again. Both paths naming one item (Drive lists a
+ * legacy item under each of its parents) leaves nothing to copy; GNU cp
+ * refuses it by inode, which a Drive row lacks. Answers the stat of what the
+ * copy made, null when it merged into a folder already there or found the
+ * item itself. Mirrors Python's `copy`.
  */
 export const copy = eaccesOnDenied(async function (
   accessor: GDriveAccessor,
@@ -72,21 +77,24 @@ export const copy = eaccesOnDenied(async function (
     return made
   }
   if (dstEntry !== null && dstEntry.type === FileType.DIRECTORY) throw eisdir(dst)
-  let dstToDeleteId: string | null = null
-  if (dstEntry !== null) {
-    const dstFileId = dstEntry.extra.file_id as string
-    if (dstFileId !== srcNode.id) {
-      dstToDeleteId = dstFileId
-    }
-  }
+  if (dstEntry !== null && dstEntry.extra.file_id === srcNode.id) return null
   const [dstParentId] = await parentFolder(accessor, dst, handed.dstParent)
   const item = await drive.copyFile(
     srcNode.id,
     driveTargetName(basename, srcNode.mimeType),
     dstParentId,
   )
-  if (dstToDeleteId !== null) {
-    await drive.deleteFile(dstToDeleteId)
+  if (dstEntry !== null) {
+    try {
+      await drive.deleteFile(dstEntry.extra.file_id as string)
+    } catch (err) {
+      try {
+        await drive.deleteFile(item.id)
+      } catch (undo) {
+        console.debug(`could not drop the copy at ${dst.virtual}: ${String(undo)}`)
+      }
+      throw err
+    }
   }
   const copied: unknown = item
   return typeof copied === 'object' && copied !== null ? statFromItem(item) : null

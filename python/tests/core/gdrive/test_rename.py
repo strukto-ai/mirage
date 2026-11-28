@@ -18,10 +18,13 @@ import pytest
 
 from mirage.core.gdrive.readdir import readdir
 from mirage.core.gdrive.rename import rename
-from mirage.types import PathSpec
-from tests.fixtures.handed import call
+from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.handed import call, entry_at
 
 DOC_MIME = "application/vnd.google-apps.document"
+FILE = "/drive/v3/files/:id"
+DENIED = "The user does not have sufficient permissions for this file."
+REASON = "insufficientFilePermissions"
 
 
 def spec(virtual: str) -> PathSpec:
@@ -145,3 +148,93 @@ async def test_rename_native_strips_suffix(google_account):
         dst=spec("/Plan.gdoc.json"),
     )
     assert (await google_account.item(doc_id))["name"] == "Plan"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_keeps_the_destination(google_account):
+    src_id = await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.refuse("PATCH", FILE, 403, DENIED, REASON)
+    with pytest.raises(PermissionError):
+        await call(
+            rename,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    assert (await google_account.item(src_id))["name"] == "src.txt"
+    assert await google_account.content(dst_id) == b"old"
+
+
+@pytest.mark.asyncio
+async def test_rename_refused_delete_moves_the_item_back(google_account):
+    folder = await google_account.folder("a")
+    src_id = await google_account.upload("src.txt", b"new", folder)
+    dst_id = await google_account.upload("dst.txt", b"old")
+    before = await google_account.item(src_id)
+    await google_account.refuse("DELETE", FILE, 403, DENIED, REASON)
+    with pytest.raises(PermissionError):
+        await call(
+            rename,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/a/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    item = await google_account.item(src_id)
+    assert item["name"] == "src.txt"
+    assert item["parents"] == [folder]
+    assert item["modifiedTime"] == before["modifiedTime"]
+    assert await google_account.content(dst_id) == b"old"
+
+
+@pytest.mark.asyncio
+async def test_rename_keeps_a_folder_given_a_child_while_moving(
+    google_account,
+):
+    src_id = await google_account.folder("src")
+    dst_id = await google_account.folder("d")
+    # Another client writes into the folder after the first emptiness
+    # probe, while the move is on its way: the probe made just before the
+    # delete sees it, so the folder stays and the move is undone.
+    await google_account.run.before_next(
+        [("PATCH", FILE)],
+        lambda: google_account.upload("late.txt", b"x", dst_id),
+    )
+    with pytest.raises(OSError) as exc_info:
+        await call(
+            rename,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src"),
+            dst=spec("/d"),
+        )
+    assert exc_info.value.errno == errno.ENOTEMPTY
+    assert (await google_account.item(src_id))["name"] == "src"
+    late = await google_account.find("late.txt")
+    assert late is not None and late["parents"] == [dst_id]
+
+
+@pytest.mark.asyncio
+async def test_rename_onto_the_same_item_does_nothing(google_account):
+    file_id = await google_account.upload("f.txt", b"data")
+    accessor = google_account.drive_accessor()
+    entry = await entry_at(readdir, accessor, spec("/f.txt"))
+    # Drive lists a legacy item under each of its parents, so another
+    # folder's row can name this same id. A row naming no folder is taken
+    # as listed, which stands in for that second listing.
+    twin = FileStat(
+        name="f.txt", type=FileType.FILE, extra={"file_id": file_id}
+    )
+    await google_account.run.record_requests()
+    await rename(
+        accessor,
+        spec("/f.txt"),
+        spec("/b/f.txt"),
+        entry=entry,
+        dst_entry=twin,
+    )
+    assert await google_account.asked("PATCH", FILE) == []
+    assert await google_account.asked("DELETE", FILE) == []
+    assert await google_account.content(file_id) == b"data"

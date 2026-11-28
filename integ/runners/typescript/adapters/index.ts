@@ -151,9 +151,11 @@ import { buildSecretsEnv } from './secrets.ts'
 export interface Open {
   ws: ExecWorkspace
   cleanup: () => Promise<void>
-  // The target's kit fake for this run, where a case arms fault plans. Only
-  // gws sets it today; a case naming faults on any other target is refused
-  // rather than run unfaulted.
+  // The target's kit fake for this run, where a case arms fault plans: gws's
+  // run world, or the account a bearer-tenanted fake (box, dropbox, onedrive,
+  // sharepoint) reads off the first mount's token, as a `_tenant` query. A
+  // case naming faults on any other target is refused rather than run
+  // unfaulted.
   faults?: string
   shadow?: () => ExecWorkspace
   mutate?: (path: string, content: Uint8Array) => Promise<void>
@@ -1170,7 +1172,12 @@ async function openBox(target: Target, options?: OpenOptions): Promise<Open> {
     return mounts
   }
   const opened = openWorkspaces(build, options)
-  return { ws: opened.ws, shadow: opened.shadow, cleanup: () => opened.closeAll() }
+  return {
+    ws: opened.ws,
+    shadow: opened.shadow,
+    cleanup: () => opened.closeAll(),
+    faults: `${endpoint}?_tenant=${token}`,
+  }
 }
 
 async function openDropbox(target: Target, options?: OpenOptions): Promise<Open> {
@@ -1200,8 +1207,15 @@ async function openDropbox(target: Target, options?: OpenOptions): Promise<Open>
     }
     return mounts
   }
+  const first = target.mounts[0]
+  const tenant = `${id}-${String(first?.bucket ?? stripSlash(String(first?.path ?? '')))}`
   const opened = openWorkspaces(build, options)
-  return { ws: opened.ws, shadow: opened.shadow, cleanup: () => opened.closeAll() }
+  return {
+    ws: opened.ws,
+    shadow: opened.shadow,
+    cleanup: () => opened.closeAll(),
+    faults: `${endpoint}?_tenant=${tenant}`,
+  }
 }
 
 // The Graph service root, shared by the onedrive and the sharepoint targets:
@@ -1276,7 +1290,12 @@ async function openOneDrive(target: Target, options?: OpenOptions): Promise<Open
     return mounts
   }
   const opened = openWorkspaces(build, options)
-  return { ws: opened.ws, shadow: opened.shadow, cleanup: () => opened.closeAll() }
+  return {
+    ws: opened.ws,
+    shadow: opened.shadow,
+    cleanup: () => opened.closeAll(),
+    faults: `${base}?_tenant=${token}`,
+  }
 }
 
 async function openSharePoint(target: Target, options?: OpenOptions): Promise<Open> {
@@ -1301,7 +1320,12 @@ async function openSharePoint(target: Target, options?: OpenOptions): Promise<Op
     return mounts
   }
   const opened = openWorkspaces(build, options)
-  return { ws: opened.ws, shadow: opened.shadow, cleanup: () => opened.closeAll() }
+  return {
+    ws: opened.ws,
+    shadow: opened.shadow,
+    cleanup: () => opened.closeAll(),
+    faults: `${base}?_tenant=${token}`,
+  }
 }
 
 // The fixture's full-access token (integ/fixtures/airtable/v1.json). Airtable

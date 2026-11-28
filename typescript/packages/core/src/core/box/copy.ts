@@ -31,11 +31,47 @@ import {
   deleteFile,
   listFolderItems,
   refused,
+  updateFile,
   type BoxItem,
 } from './api.ts'
 import { liveOf } from './fingerprint.ts'
 import { statFromItem } from './readdir.ts'
 import { itemOf, liveItem, liveItemOf, parentFolder, pathParts } from './resolve.ts'
+
+/**
+ * What a copy or move onto `dst` is held to, refusing a stale one: the op's
+ * condition (null when unconditional), the file there as the condition saw
+ * it, and the etag its delete carries. Mirrors Python's `held_file`.
+ */
+export async function heldFile(
+  accessor: BoxAccessor,
+  dst: PathSpec,
+  lead: BoxItem | null,
+): Promise<[WriteCondition | null, BoxItem | null, string | null]> {
+  let existing = lead
+  const cond = await writeCondition(dst, 'copy')
+  if (cond !== null) existing = await liveItem(accessor, dst, existing)
+  const etag = await nativeCondition(dst, cond, liveOf(existing), 'copy')
+  return [cond, existing, etag]
+}
+
+/**
+ * Delete the file a copy or move replaces, held to `etag`. Mirrors Python's
+ * `clear_file`.
+ */
+export async function clearFile(
+  accessor: BoxAccessor,
+  dst: PathSpec,
+  existing: BoxItem,
+  cond: WriteCondition | null,
+  etag: string | null,
+): Promise<void> {
+  try {
+    await deleteFile(accessor.tokenManager, existing.id, etag)
+  } catch (err) {
+    throw (await refused(dst, err, cond, etag)) ?? err
+  }
+}
 
 /**
  * Clear the file a copy or move lands on, held to the version read. Returns
@@ -46,17 +82,8 @@ export async function replaceFile(
   dst: PathSpec,
   lead: BoxItem | null,
 ): Promise<WriteCondition | null> {
-  let existing = lead
-  const cond = await writeCondition(dst, 'copy')
-  if (cond !== null) existing = await liveItem(accessor, dst, existing)
-  const etag = await nativeCondition(dst, cond, liveOf(existing), 'copy')
-  if (existing !== null) {
-    try {
-      await deleteFile(accessor.tokenManager, existing.id, etag)
-    } catch (err) {
-      throw (await refused(dst, err, cond, etag)) ?? err
-    }
-  }
+  const [cond, existing, etag] = await heldFile(accessor, dst, lead)
+  if (existing !== null) await clearFile(accessor, dst, existing, cond, etag)
   return cond
 }
 
@@ -92,6 +119,47 @@ function landed(dst: PathSpec, whole: boolean, timer: OpTimer, upto: number): vo
  * folder `dst` lands in, `existing` what is at `dst`. Answers the copy's stat,
  * null for a merge or a reply that names none. Mirrors Python's `_copy_into`.
  */
+/**
+ * Copy a file onto the file that holds `dst`'s name. A stale destination is
+ * refused before anything is sent. Box refuses a taken name, so the copy lands
+ * beside it under a staged name first, the file it replaces goes next, held to
+ * the version read, and the copy takes the name last: a refused copy leaves
+ * the file as it was, and a refused delete or rename drops the copy again.
+ * Mirrors Python's `_copy_over`.
+ */
+async function copyOver(
+  accessor: BoxAccessor,
+  item: BoxItem,
+  dst: PathSpec,
+  folderId: string,
+  existing: BoxItem,
+): Promise<BoxItem> {
+  const tm = accessor.tokenManager
+  const dstParts = pathParts(dst)
+  const newName = dstParts[dstParts.length - 1] ?? ''
+  const [cond, live, etag] = await heldFile(accessor, dst, existing)
+  const name =
+    live === null ? newName : `${newName}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+  let made: BoxItem
+  try {
+    made = await copyFile(tm, item.id, folderId, name)
+  } catch (err) {
+    throw (await retaken(err, cond, dst)) ?? err
+  }
+  if (live === null) return made
+  try {
+    await clearFile(accessor, dst, live, cond, etag)
+    return await updateFile(tm, made.id, { name: newName })
+  } catch (err) {
+    try {
+      await deleteFile(tm, made.id)
+    } catch (undo) {
+      console.debug(`could not drop the copy at ${dst.virtual}: ${String(undo)}`)
+    }
+    throw (await retaken(err, cond, dst)) ?? err
+  }
+}
+
 async function copyInto(
   accessor: BoxAccessor,
   item: BoxItem,
@@ -126,7 +194,6 @@ async function copyInto(
   }
   const dstParts = pathParts(dst)
   const newName = dstParts[dstParts.length - 1] ?? ''
-  let cond: WriteCondition | null = null
   if (existing !== null && existing.id !== item.id) {
     // Folder onto folder already merged above, so what is left is a type
     // mismatch or a file replacing a file. cp refuses either mismatch
@@ -134,10 +201,12 @@ async function copyInto(
     // only a file gives way to a file.
     if (existing.type === 'folder') throw eisdir(dst.virtual)
     if (item.type === 'folder') throw enotdir(dst.virtual)
-    cond = await replaceFile(accessor, dst, existing)
-  } else if (existing === null && item.type === 'file') {
-    cond = await replaceFile(accessor, dst, null)
+    const made = await copyOver(accessor, item, dst, folderId, existing)
+    landed(dst, false, timer, upto)
+    return uploadStat(made, statFromItem, dst.virtual)
   }
+  const cond =
+    existing === null && item.type === 'file' ? await replaceFile(accessor, dst, null) : null
   let made: BoxItem
   try {
     if (item.type === 'folder') {

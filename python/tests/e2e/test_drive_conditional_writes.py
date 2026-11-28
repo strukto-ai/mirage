@@ -360,23 +360,27 @@ async def test_a_destination_changed_during_its_clear_is_refused(
 async def test_a_destination_recreated_after_its_clear_stays_refused(
     drive, workspace, verb
 ):
+    # The source lands beside g under a staged name and takes g's name once
+    # g is deleted, for cp as for mv: the name taken in between refuses
+    # that rename, and the landed item goes back (cp's copy is deleted).
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-    route = "copy" if verb == "cp" else drive.move
 
     async def take_name_after_the_clear() -> None:
-        await drive.before(route, lambda: drive.put("g", b"new\n"))
+        await drive.before(drive.move, lambda: drive.put("g", b"new\n"))
 
     await drive.before("delete", take_name_after_the_clear)
+    deletes = 2 if verb == "cp" else 1
     for _ in range(2):
         assert await _run(ws, f"{verb} {r}/f {r}/g") == (
             1,
             "",
             _refusal(drive, verb),
         )
-        assert await drive.count("delete") == 1
+        assert await drive.count("delete") == deletes
     assert await drive.read("g") == b"new\n"
+    assert await drive.read("f") == b"one\n"
     assert await _run(ws, f"echo x > {r}/f") == (0, "", "")
 
 
@@ -388,10 +392,9 @@ async def test_a_destination_a_folder_retook_after_its_clear_keeps_its_version(
     ws = workspace()
     r = drive.root
     await _run(ws, f"cat {r}/g")
-    route = "copy" if verb == "cp" else drive.move
 
     async def fold_after_the_clear() -> None:
-        await drive.before(route, lambda: drive.put("g/x", b"x\n"))
+        await drive.before(drive.move, lambda: drive.put("g/x", b"x\n"))
 
     await drive.before("delete", fold_after_the_clear)
     assert await _run(ws, f"{verb} {r}/f {r}/g") == (
@@ -615,10 +618,9 @@ async def test_a_box_destination_a_web_link_retook_keeps_its_version(
 ):
     ws = workspace()
     await _run(ws, "cat /box/g")
-    route = "copy" if verb == "cp" else "update"
 
     async def link_after_the_clear() -> None:
-        await drive.before(route, lambda: drive.box.web_link("g"))
+        await drive.before("update", lambda: drive.box.web_link("g"))
 
     await drive.before("delete", link_after_the_clear)
     assert await _run(ws, f"{verb} /box/f /box/g") == (
@@ -775,13 +777,19 @@ async def test_a_dropbox_destination_a_folder_took_is_refused_with_no_delete(
 
 @pytest.mark.asyncio
 @DROPBOX
-@pytest.mark.parametrize("verb", ["cp", "mv"])
-async def test_a_dropbox_source_gone_before_the_retry_is_named(
-    drive, workspace, verb
+@pytest.mark.parametrize("verb, route", [("cp", "copy"), ("mv", "move")])
+async def test_a_dropbox_source_gone_before_its_staged_landing_is_named(
+    drive, workspace, verb, route
 ):
+    # The first op meets g's name; the source goes before the op that lands
+    # it beside g, so g is never deleted.
     ws = workspace()
     await _run(ws, "cat /dbx/g")
-    await drive.before("delete", lambda: drive.drop("f"))
+
+    async def drop_before_the_landing() -> None:
+        await drive.before(route, lambda: drive.drop("f"))
+
+    await drive.before(route, drop_before_the_landing)
     missing = {
         "cp": "cp: cannot open '/dbx/f' for reading",
         "mv": "mv: cannot move '/dbx/f' to '/dbx/g'",
@@ -791,19 +799,22 @@ async def test_a_dropbox_source_gone_before_the_retry_is_named(
         "",
         f"{missing}: No such file or directory\n",
     )
-    assert await drive.count("delete") == 1
+    assert await drive.count("delete") == 0
+    assert await drive.read("g") == b"gee\n"
 
 
 @pytest.mark.asyncio
 @DROPBOX
-@pytest.mark.parametrize("verb, route", [("cp", "copy"), ("mv", "move")])
+@pytest.mark.parametrize("verb", ["cp", "mv"])
 async def test_an_unread_dropbox_destination_retaken_is_refused_once(
-    drive, workspace, verb, route
+    drive, workspace, verb
 ):
+    # After the clear, the staged entry takes g's name with a move, for cp
+    # as for mv.
     ws = workspace()
 
     async def take_name_after_the_clear() -> None:
-        await drive.before(route, lambda: drive.put("g", b"new\n"))
+        await drive.before("move", lambda: drive.put("g", b"new\n"))
 
     await drive.before("delete", take_name_after_the_clear)
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (

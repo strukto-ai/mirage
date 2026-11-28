@@ -455,16 +455,21 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
   it.each(['cp', 'mv'])(
     '%s stays refused on a destination recreated after its clear',
     async (verb) => {
+      // The source lands beside g under a staged name and takes g's name
+      // once g is deleted, for cp as for mv: the name taken in between
+      // refuses that rename, and the landed item goes back (cp's copy is
+      // deleted).
       const r = drive.root
       const ws = await workspace()
       await run(ws, `cat ${r}/g`)
-      const route = verb === 'cp' ? 'copy' : drive.move
-      await drive.before('delete', () => drive.before(route, () => drive.put('g', 'new\n')))
+      await drive.before('delete', () => drive.before(drive.move, () => drive.put('g', 'new\n')))
+      const deletes = verb === 'cp' ? 2 : 1
       for (let i = 0; i < 2; i++) {
         expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
-        expect(await drive.count('delete')).toBe(1)
+        expect(await drive.count('delete')).toBe(deletes)
       }
       expect(await drive.text('g')).toBe('new\n')
+      expect(await drive.text('f')).toBe('one\n')
       expect(await run(ws, `echo x > ${r}/f`)).toEqual([0, '', ''])
     },
   )
@@ -475,8 +480,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
       const r = drive.root
       const ws = await workspace()
       await run(ws, `cat ${r}/g`)
-      const route = verb === 'cp' ? 'copy' : drive.move
-      await drive.before('delete', () => drive.before(route, () => drive.put('g/x', 'x\n')))
+      await drive.before('delete', () => drive.before(drive.move, () => drive.put('g/x', 'x\n')))
       expect(await run(ws, `${verb} ${r}/f ${r}/g`)).toEqual([1, '', refusal(verb)])
       await drive.drop('g')
       await refusedUntilRead(ws, `${r}/g`)
@@ -884,8 +888,7 @@ describe('conditional writes only Box has', () => {
     async (verb) => {
       const ws = await workspace()
       await run(ws, 'cat /box/g')
-      const route = verb === 'cp' ? 'copy' : 'update'
-      await drive.before('delete', () => drive.before(route, () => drive.box.webLink('g')))
+      await drive.before('delete', () => drive.before('update', () => drive.box.webLink('g')))
       expect(await run(ws, `${verb} /box/f /box/g`)).toEqual([1, '', refusal(verb)])
       await drive.drop('g')
       await refusedUntilRead(ws, '/box/g')
@@ -1000,10 +1003,15 @@ describe('conditional writes only Dropbox has', () => {
     await refusedUntilRead(ws, '/dbx/g')
   })
 
-  it.each(['cp', 'mv'])('names a source gone before the retry for %s', async (verb) => {
+  it.each([
+    ['cp', 'copy'],
+    ['mv', 'move'],
+  ])('names a source gone before its staged landing for %s', async (verb, route) => {
+    // The first op meets g's name; the source goes before the op that lands
+    // it beside g, so g is never deleted.
     const ws = await workspace()
     await run(ws, 'cat /dbx/g')
-    await drive.before('delete', () => drive.drop('f'))
+    await drive.before(route, () => drive.before(route, () => drive.drop('f')))
     const missing =
       verb === 'cp'
         ? "cp: cannot open '/dbx/f' for reading"
@@ -1013,20 +1021,23 @@ describe('conditional writes only Dropbox has', () => {
       '',
       `${missing}: No such file or directory\n`,
     ])
-    expect(await drive.count('delete')).toBe(1)
+    expect(await drive.count('delete')).toBe(0)
+    expect(await drive.text('g')).toBe('gee\n')
   })
 
-  it.each([
-    ['cp', 'copy'],
-    ['mv', 'move'],
-  ])('refuses once %s onto an unread destination retaken after its clear', async (verb, route) => {
-    const ws = await workspace()
-    await drive.before('delete', () => drive.before(route, () => drive.put('g', 'new\n')))
-    expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([1, '', refusal(verb)])
-    expect(await drive.text('g')).toBe('new\n')
-    expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([0, '', ''])
-    expect(await drive.text('g')).toBe('one\n')
-  })
+  it.each(['cp', 'mv'])(
+    'refuses once %s onto an unread destination retaken after its clear',
+    async (verb) => {
+      // After the clear, the staged entry takes g's name with a move, for cp as
+      // for mv.
+      const ws = await workspace()
+      await drive.before('delete', () => drive.before('move', () => drive.put('g', 'new\n')))
+      expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([1, '', refusal(verb)])
+      expect(await drive.text('g')).toBe('new\n')
+      expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([0, '', ''])
+      expect(await drive.text('g')).toBe('one\n')
+    },
+  )
 })
 
 describe('partial Dropbox stream observations', () => {

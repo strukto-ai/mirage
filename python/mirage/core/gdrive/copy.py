@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
@@ -27,6 +28,8 @@ from mirage.core.gdrive.resolve import (
 )
 from mirage.errors.fs import eisdir, enoent, enotdir
 from mirage.types import FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 async def copy_children(
@@ -61,7 +64,12 @@ async def copy(
     """Copy a file or folder server-side.
 
     ``cp -r`` merges into an existing folder and creates a missing one,
-    mirroring the msgraph copy_tree.
+    mirroring the msgraph copy_tree. A file it replaces is deleted only
+    once the copy has landed beside it, which Drive's two items of one
+    name in a folder allow, so a refused copy leaves it as it was, and a
+    refused delete drops the copy again. Both paths naming one item
+    (Drive lists a legacy item under each of its parents) leaves nothing
+    to copy; GNU cp refuses it by inode, which a Drive row lacks.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
@@ -73,7 +81,7 @@ async def copy(
 
     Returns:
         FileStat | None: the stat of what the copy made, None when it
-            merged into a folder already there.
+            merged into a folder already there or found the item itself.
     """
     if entry is None:
         raise enoent(src.virtual)
@@ -97,14 +105,22 @@ async def copy(
         return made
     if dst_entry is not None and dst_entry.type is FileType.DIRECTORY:
         raise eisdir(dst.virtual)
-    dst_to_delete_id: str | None = None
-    if dst_entry is not None and dst_entry.extra.get("file_id") != src_node.id:
-        dst_to_delete_id = dst_entry.extra["file_id"]
+    if dst_entry is not None and dst_entry.extra["file_id"] == src_node.id:
+        return None
     dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
     name = drive_target_name(
         posixpath.basename(dst.vfs_path), src_node.mime_type
     )
     item = await drive.copy_file(src_node.id, name, dst_parent_id)
-    if dst_to_delete_id is not None:
-        await drive.delete_file(dst_to_delete_id)
+    if dst_entry is not None:
+        try:
+            await drive.delete_file(dst_entry.extra["file_id"])
+        except Exception:
+            try:
+                await drive.delete_file(item["id"])
+            except Exception as exc:
+                logger.debug(
+                    "could not drop the copy at %s: %s", dst.virtual, exc
+                )
+            raise
     return stat_from_item(item) if isinstance(item, dict) else None

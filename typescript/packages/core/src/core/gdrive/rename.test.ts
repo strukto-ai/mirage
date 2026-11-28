@@ -13,14 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
-import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { entryAt, handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
 import { rename } from './rename.ts'
 
 const DOC_MIME = 'application/vnd.google-apps.document'
+const FILE = '/drive/v3/files/:id'
+const DENIED = 'The user does not have sufficient permissions for this file.'
+const REASON = 'insufficientFilePermissions'
 
 let origin: string
 let account: GoogleAccount
@@ -114,37 +117,53 @@ describe('gdrive rename', () => {
     expect((await account.item(id)).name).toBe('Plan')
   })
 
-  it('failure preserves destination file', async () => {
-    const src = fake.add('src.txt', 'root', undefined, ENC.encode('src'))
-    const dst = fake.add('dst.txt', 'root', undefined, ENC.encode('dst'))
-    fake.patchFile = async () => {
-      throw new Error('patch failed')
-    }
-    await expect(
-      rename(
-        accessor,
-        spec('/src.txt'),
-        spec('/dst.txt'),
-        await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
-      ),
-    ).rejects.toThrow('patch failed')
-    expect(fake.items.get(dst)?.content).toEqual(ENC.encode('dst'))
-    expect(fake.items.get(src)?.content).toEqual(ENC.encode('src'))
+  it('a refused move keeps the destination', async () => {
+    const src = await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.refuse('PATCH', FILE, 403, DENIED, { reason: REASON })
+    await expect(renamed('/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    expect((await account.item(src)).name).toBe('src.txt')
+    expect(await account.content(dst)).toBe('old')
   })
 
-  it('same drive id does not delete file', async () => {
-    const folderA = fake.folder('a')
-    const folderB = fake.folder('b')
-    const fileId = fake.add('f.txt', folderA, undefined, ENC.encode('data'))
-    fake.items.get(fileId)?.parents.push(folderB)
+  it('a refused delete moves the item back', async () => {
+    const a = await account.folder('a')
+    const src = await account.upload('src.txt', 'new', a)
+    const dst = await account.upload('dst.txt', 'old')
+    const before = await account.item(src)
+    await account.refuse('DELETE', FILE, 403, DENIED, { reason: REASON })
+    await expect(renamed('/a/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    const item = await account.item(src)
+    expect(item.name).toBe('src.txt')
+    expect(item.parents).toEqual([a])
+    expect(item.modifiedTime).toBe(before.modifiedTime)
+    expect(await account.content(dst)).toBe('old')
+  })
 
-    await rename(
-      accessor,
-      spec('/a/f.txt'),
-      spec('/b/f.txt'),
-      await handedAt(readdir, accessor, spec('/a/f.txt'), spec('/b/f.txt')),
-    )
-    expect(fake.items.has(fileId)).toBe(true)
-    expect(fake.items.get(fileId)?.content).toEqual(ENC.encode('data'))
+  it('keeps a folder given a child while the item moves', async () => {
+    const src = await account.folder('src')
+    const d = await account.folder('d')
+    // Another client writes into the folder after the first emptiness probe,
+    // while the move is on its way: the probe made just before the delete
+    // sees it, so the folder stays and the move is undone.
+    await account.run.beforeNext([['PATCH', FILE]], () => account.upload('late.txt', 'x', d))
+    await expect(renamed('/src', '/d')).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect((await account.item(src)).name).toBe('src')
+    expect((await account.find('late.txt'))?.parents).toEqual([d])
+  })
+
+  it('does nothing onto the same item', async () => {
+    const id = await account.upload('f.txt', 'data')
+    const accessor = account.driveAccessor()
+    const entry = await entryAt(readdir, accessor, spec('/f.txt'))
+    // Drive lists a legacy item under each of its parents, so another
+    // folder's row can name this same id. A row naming no folder is taken as
+    // listed, which stands in for that second listing.
+    const twin = new FileStat({ name: 'f.txt', type: FileType.FILE, extra: { file_id: id } })
+    await account.run.recordRequests()
+    await rename(accessor, spec('/f.txt'), spec('/b/f.txt'), { entry, dstEntry: twin })
+    expect(await account.asked('PATCH', FILE)).toEqual([])
+    expect(await account.asked('DELETE', FILE)).toEqual([])
+    expect(await account.content(id)).toBe('data')
   })
 })

@@ -1,0 +1,308 @@
+{
+  "cases": [
+    {
+      "id": "cp_refused_landing_keeps_destination_gdrive",
+      "seq": 46100100,
+      "targets": [
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/drive/v3/files/:id/copy",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": 403,
+              "message": "This file cannot be copied by the user.",
+              "errors": [
+                {
+                  "domain": "global",
+                  "reason": "cannotCopyFile",
+                  "message": "This file cannot be copied by the user."
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_delete_keeps_destination_gdrive",
+      "seq": 46100101,
+      "targets": [
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "faults": [
+        {
+          "method": "DELETE",
+          "route": "/drive/v3/files/:id",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": 403,
+              "message": "The user does not have sufficient permissions for this file.",
+              "errors": [
+                {
+                  "domain": "global",
+                  "reason": "insufficientFilePermissions",
+                  "message": "The user does not have sufficient permissions for this file."
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_landing_keeps_destination_box",
+      "seq": 46100102,
+      "targets": [
+        "box"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/2.0/files/:file_id/copy",
+          "status": 403,
+          "body": {
+            "type": "error",
+            "status": 403,
+            "code": "access_denied_insufficient_permissions",
+            "message": "Access denied - insufficient permission"
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_delete_keeps_destination_box",
+      "seq": 46100103,
+      "targets": [
+        "box"
+      ],
+      "faults": [
+        {
+          "method": "DELETE",
+          "route": "/2.0/files/:file_id",
+          "status": 403,
+          "body": {
+            "type": "error",
+            "status": 403,
+            "code": "access_denied_insufficient_permissions",
+            "message": "Access denied - insufficient permission"
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_landing_keeps_destination_dropbox",
+      "seq": 46100104,
+      "targets": [
+        "dropbox",
+        "dropbox-root"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/2/files/copy_v2",
+          "status": 409,
+          "body": {
+            "error_summary": "to/conflict/file/.."
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/2/files/copy_v2",
+          "status": 409,
+          "body": {
+            "error_summary": "from_lookup/restricted_content/.."
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_delete_keeps_destination_dropbox",
+      "seq": 46100105,
+      "targets": [
+        "dropbox",
+        "dropbox-root"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/2/files/delete_v2",
+          "status": 409,
+          "body": {
+            "error_summary": "path_lookup/restricted_content/.."
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_landing_keeps_destination_onedrive",
+      "seq": 46100106,
+      "targets": [
+        "onedrive"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/me/drive/*rest",
+          "status": 409,
+          "body": {
+            "error": {
+              "code": "nameAlreadyExists",
+              "message": "Name already exists"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/me/drive/*rest",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": "accessDenied",
+              "message": "Access denied."
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_delete_keeps_destination_onedrive",
+      "seq": 46100107,
+      "targets": [
+        "onedrive"
+      ],
+      "faults": [
+        {
+          "method": "DELETE",
+          "route": "/me/drive/*rest",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": "accessDenied",
+              "message": "Access denied."
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_landing_keeps_destination_sharepoint",
+      "seq": 46100108,
+      "targets": [
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "faults": [
+        {
+          "method": "POST",
+          "route": "/drives/:drive/*rest",
+          "status": 409,
+          "body": {
+            "error": {
+              "code": "nameAlreadyExists",
+              "message": "Name already exists"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "route": "/drives/:drive/*rest",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": "accessDenied",
+              "message": "Access denied."
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "cp_refused_delete_keeps_destination_sharepoint",
+      "seq": 46100109,
+      "targets": [
+        "sharepoint",
+        "sharepoint-prefix"
+      ],
+      "faults": [
+        {
+          "method": "DELETE",
+          "route": "/drives/:drive/*rest",
+          "status": 403,
+          "body": {
+            "error": {
+              "code": "accessDenied",
+              "message": "Access denied."
+            }
+          }
+        }
+      ],
+      "command": "printf new > /data/rr_src.txt; printf old > /data/rr_dst.txt; cp /data/rr_src.txt /data/rr_dst.txt 2>/dev/null; echo \" exit=$?\"; cat /data/rr_dst.txt; echo; cat /data/rr_src.txt 2>/dev/null; echo; ls /data | grep '^rr_'; rm -f /data/rr_src.txt /data/rr_dst.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": " exit=1\nold\nnew\nrr_dst.txt\nrr_src.txt\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

@@ -21,9 +21,10 @@ import { replaceOnto } from './copy.ts'
 import { checkPath, dropboxPathOf } from './paths.ts'
 
 // move_v2 rejects an existing destination, but rename(2) replaces one:
-// a file outright, and a directory when it is empty. So a conflict
-// deletes the target and retries, except for a folder that still lists a
-// child, where the original error propagates and the generic mv reports
+// a file outright, and a directory when it is empty. So on a conflict the
+// source moves beside the target and takes its name once the target is
+// deleted, except for a folder that still lists a child, where the
+// original error propagates and the generic mv reports
 // "Directory not empty" (mirrors msgraph's renameReplace). The source moves
 // whole, so only a destination it replaces is held to its version.
 export async function rename(
@@ -38,7 +39,15 @@ export async function rename(
   const tm = accessor.tokenManager
   const timer = startOp()
   const upto = lostCount()
-  const [moved] = await replaceOnto(tm, src, dst, to, () => movePath(tm, from, to), true)
+  const [moved] = await replaceOnto(
+    tm,
+    src,
+    dst,
+    to,
+    (at) => movePath(tm, from, at),
+    (staged) => movePath(tm, staged, from),
+    true,
+  )
   const folder = moved['.tag'] !== 'file'
   const op = folder ? 'rename_prefix' : 'rename'
   record(op, src.virtual, 'dropbox', 0, timer)

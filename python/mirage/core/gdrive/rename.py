@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import posixpath
 
 from mirage.accessor.gdrive import GDriveAccessor
+from mirage.core.gdrive.api import DriveApi
 from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import (
     drive_target_name,
@@ -23,6 +25,27 @@ from mirage.core.gdrive.resolve import (
 )
 from mirage.errors.fs import enoent, enotempty
 from mirage.types import FileStat, FileType, PathSpec
+
+logger = logging.getLogger(__name__)
+
+
+async def _refuse_children(
+    drive: DriveApi, folder: FileStat, dst: PathSpec
+) -> None:
+    """Refuse a folder that holds anything, as mv's "Directory not empty".
+
+    Args:
+        drive (DriveApi): the Drive client.
+        folder (FileStat): the folder the move would replace.
+        dst (PathSpec): its path, for the error.
+    """
+    children = await drive.list_files(
+        folder_id=folder.extra["file_id"],
+        drive_id=folder.extra.get("drive_id"),
+        limit=1,
+    )
+    if children:
+        raise enotempty(dst)
 
 
 @eacces_on_denied
@@ -35,7 +58,15 @@ async def rename(
     dst_parent: FileStat | None = None,
     dst_entry: FileStat | None = None,
 ) -> FileStat | None:
-    """Move an item, replacing what is at the destination.
+    """Move an item, replacing a file or an empty folder at the destination.
+
+    Drive holds two items of one name in a folder, so the item moves first
+    and what it replaces is deleted after: a refused move leaves both as
+    they were, and a refused delete moves the item back. A folder is asked
+    for children again just before its delete, so one added while the item
+    moved is not deleted with it. Both paths naming one item (Drive lists a
+    legacy item under each of its parents) is rename(2) onto itself, which
+    does nothing; GNU mv refuses it by inode, which a Drive row lacks.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
@@ -50,29 +81,17 @@ async def rename(
     entry = await live_row(accessor, src, entry)
     if entry is None:
         raise enoent(src.virtual)
+    file_id = entry.extra["file_id"]
     dst_entry = await live_row(accessor, dst, dst_entry)
-    dst_to_delete_id: str | None = None
-    if dst_entry is not None:
-        # GNU mv overwrites the destination: drop a conflicting file (or
-        # empty folder) after the move succeeds. A non-empty folder conflict is mv's
-        # "Directory not empty", mirroring the msgraph rename_replace.
-        if dst_entry.type is FileType.DIRECTORY:
-            children = await drive.list_files(
-                folder_id=dst_entry.extra["file_id"],
-                drive_id=dst_entry.extra.get("drive_id"),
-                limit=1,
-            )
-            if children:
-                raise enotempty(dst)
-        if dst_entry.extra.get("file_id") != entry.extra.get("file_id"):
-            dst_to_delete_id = dst_entry.extra["file_id"]
+    if dst_entry is not None and dst_entry.extra["file_id"] == file_id:
+        return None
+    if dst_entry is not None and dst_entry.type is FileType.DIRECTORY:
+        await _refuse_children(drive, dst_entry, dst)
     src_parent_id, _ = await parent_folder(accessor, src, parent)
     dst_parent_id, _ = await parent_folder(accessor, dst, dst_parent)
-    name = drive_target_name(
-        posixpath.basename(dst.vfs_path), entry.extra.get("mime_type", "")
-    )
-    add_parents = dst_parent_id if dst_parent_id != src_parent_id else None
-    remove_parents = src_parent_id if add_parents else None
+    mime = entry.extra.get("mime_type", "")
+    name = drive_target_name(posixpath.basename(dst.vfs_path), mime)
+    moved = dst_parent_id != src_parent_id
     # Drive stamps a rename as an edit, so the time goes back as rename(2)
     # keeps it, as the live row just read it. Drive has no conditional
     # update; reading it just before leaves one request for another
@@ -81,11 +100,30 @@ async def rename(
     if entry.modified:
         body["modifiedTime"] = entry.modified
     item = await drive.patch_file(
-        entry.extra["file_id"],
+        file_id,
         body,
-        add_parents=add_parents,
-        remove_parents=remove_parents,
+        add_parents=dst_parent_id if moved else None,
+        remove_parents=src_parent_id if moved else None,
     )
-    if dst_to_delete_id is not None:
-        await drive.delete_file(dst_to_delete_id)
+    if dst_entry is None:
+        return stat_from_item(item) if isinstance(item, dict) else None
+    try:
+        if dst_entry.type is FileType.DIRECTORY:
+            await _refuse_children(drive, dst_entry, dst)
+        await drive.delete_file(dst_entry.extra["file_id"])
+    except Exception:
+        back = {
+            **body,
+            "name": drive_target_name(posixpath.basename(src.vfs_path), mime),
+        }
+        try:
+            await drive.patch_file(
+                file_id,
+                back,
+                add_parents=src_parent_id if moved else None,
+                remove_parents=dst_parent_id if moved else None,
+            )
+        except Exception as exc:
+            logger.debug("could not move %s back: %s", src.virtual, exc)
+        raise
     return stat_from_item(item) if isinstance(item, dict) else None

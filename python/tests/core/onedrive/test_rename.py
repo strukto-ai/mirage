@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from aioresponses import CallbackResult, aioresponses
 from yarl import URL
@@ -10,6 +12,12 @@ from mirage.types import PathSpec
 _BASE = "https://graph.microsoft.com/v1.0/me/drive"
 
 _CONFLICT = {"error": {"code": "nameAlreadyExists", "message": "x"}}
+
+
+def _staged(name: str) -> re.Pattern[str]:
+    return re.compile(
+        "^" + re.escape(f"{_BASE}/root:/{name}.mirage-") + "[0-9a-f]{32}$"
+    )
 
 
 def _accessor(**kw) -> OneDriveAccessor:
@@ -54,17 +62,19 @@ async def test_rename_same_parent_omits_parent_reference():
 
 
 @pytest.mark.asyncio
-async def test_rename_conflict_deletes_file_destination_and_retries(
+async def test_rename_conflict_lands_beside_then_deletes_file_destination(
     exact_cloud_paths,
 ):
+    staged = _staged("b.txt")
     with aioresponses() as m:
         m.patch(_BASE + "/root:/a.txt", status=409, payload=_CONFLICT)
         m.get(
             _BASE + "/root:/b.txt",
             payload={"id": "2", "name": "b.txt", "size": 1, "file": {}},
         )
-        m.delete(_BASE + "/root:/b.txt", status=204)
         m.patch(_BASE + "/root:/a.txt", status=200, payload={"id": "1"})
+        m.delete(_BASE + "/root:/b.txt", status=204)
+        m.patch(staged, status=200, payload={"id": "1", "name": "b.txt"})
         await rename(
             _accessor(),
             PathSpec.from_str_path("/a.txt"),
@@ -73,9 +83,13 @@ async def test_rename_conflict_deletes_file_destination_and_retries(
         # aioresponses' __exit__ only calls stop(), so registering the
         # DELETE proves nothing on its own: without these the test passes
         # when rename swallows the 409 and does neither the delete nor
-        # the retry.
+        # the move that lands beside it.
         assert ("DELETE", URL(_BASE + "/root:/b.txt")) in m.requests
-        assert len(m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]) == 2
+        moves = m.requests[("PATCH", URL(_BASE + "/root:/a.txt"))]
+        assert len(moves) == 2
+        assert moves[1].kwargs["json"]["name"].startswith("b.txt.mirage-")
+        named = [u for verb, u in m.requests if staged.match(str(u))]
+        assert len(named) == 1
 
 
 @pytest.mark.asyncio
@@ -89,14 +103,19 @@ async def test_rename_conflict_replaces_empty_dir_destination(
             payload={"id": "2", "name": "dst", "folder": {"childCount": 0}},
         )
         m.get(_BASE + "/root:/dst:/children", payload={"value": []})
-        m.delete(_BASE + "/root:/dst", status=204)
         m.patch(_BASE + "/root:/src", status=200, payload={"id": "1"})
+        m.get(_BASE + "/root:/dst:/children", payload={"value": []})
+        m.delete(_BASE + "/root:/dst", status=204)
+        m.patch(_staged("dst"), status=200, payload={"id": "1"})
         await rename(
             _accessor(),
             PathSpec.from_str_path("/src"),
             PathSpec.from_str_path("/dst"),
         )
-        assert ("GET", URL(_BASE + "/root:/dst:/children")) in m.requests
+        # The folder is asked for children twice: before the source moves
+        # beside it, and again just before its delete.
+        probes = m.requests[("GET", URL(_BASE + "/root:/dst:/children"))]
+        assert len(probes) == 2
         assert ("DELETE", URL(_BASE + "/root:/dst")) in m.requests
         assert len(m.requests[("PATCH", URL(_BASE + "/root:/src"))]) == 2
 

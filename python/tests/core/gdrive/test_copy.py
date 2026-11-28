@@ -16,8 +16,12 @@ import pytest
 
 from mirage.core.gdrive.copy import copy
 from mirage.core.gdrive.readdir import readdir
-from mirage.types import PathSpec
-from tests.fixtures.handed import call
+from mirage.types import FileStat, FileType, PathSpec
+from tests.fixtures.handed import call, entry_at
+
+FILE = "/drive/v3/files/:id"
+COPY = "/drive/v3/files/:id/copy"
+REASON = "insufficientFilePermissions"
 
 
 def spec(virtual: str) -> PathSpec:
@@ -137,3 +141,65 @@ async def test_copy_missing_src_raises(google_account):
             dst=spec("/dst.txt"),
         )
 
+
+@pytest.mark.asyncio
+async def test_copy_refused_keeps_the_destination(google_account):
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.refuse(
+        "POST", COPY, 403, "This file cannot be copied by the user.", REASON
+    )
+    with pytest.raises(PermissionError):
+        await call(
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    assert await google_account.content(dst_id) == b"old"
+    assert len(await google_account.items()) == 2
+
+
+@pytest.mark.asyncio
+async def test_copy_refused_delete_drops_the_copy(google_account):
+    await google_account.upload("src.txt", b"new")
+    dst_id = await google_account.upload("dst.txt", b"old")
+    await google_account.refuse(
+        "DELETE",
+        FILE,
+        403,
+        "The user does not have sufficient permissions for this file.",
+        REASON,
+        path=f"/drive/v3/files/{dst_id}",
+    )
+    with pytest.raises(PermissionError):
+        await call(
+            copy,
+            readdir,
+            google_account.drive_accessor(),
+            spec("/src.txt"),
+            dst=spec("/dst.txt"),
+        )
+    assert await google_account.content(dst_id) == b"old"
+    assert len(await google_account.items()) == 2
+
+
+@pytest.mark.asyncio
+async def test_copy_onto_the_same_item_does_nothing(google_account):
+    file_id = await google_account.upload("f.txt", b"data")
+    accessor = google_account.drive_accessor()
+    entry = await entry_at(readdir, accessor, spec("/f.txt"))
+    # Drive lists a legacy item under each of its parents, so another
+    # folder's row can name this same id. A row naming no folder is taken
+    # as listed, which stands in for that second listing.
+    twin = FileStat(
+        name="f.txt", type=FileType.FILE, extra={"file_id": file_id}
+    )
+    await google_account.run.record_requests()
+    await copy(
+        accessor, spec("/f.txt"), spec("/b/f.txt"), entry, dst_entry=twin
+    )
+    assert await google_account.asked("POST", COPY) == []
+    assert await google_account.asked("DELETE", FILE) == []
+    assert len(await google_account.items()) == 1

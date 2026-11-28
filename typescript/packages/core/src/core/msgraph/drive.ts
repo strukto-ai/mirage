@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { eexist, enoent, enotdir, enotsup, listingError } from '../../errors/fs.ts'
+import { eexist, enoent, enotdir, enotempty, enotsup, listingError } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool, sizeOf, sliceOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -100,6 +100,21 @@ export class DriveLoc {
     return parentPath(this.path)
   }
 
+  // A sibling under a staged name, where an item replacing this one lands
+  // before it takes this one's name.
+  staged(): DriveLoc {
+    const name = `${baseName(this.path)}.mirage-${crypto.randomUUID().replaceAll('-', '')}`
+    const path = rstripSlash(this.path)
+    const virtual = rstripSlash(this.virtual)
+    return new DriveLoc({
+      drive: this.drive,
+      path: path.slice(0, path.length - baseName(path).length) + name,
+      virtual: virtual.slice(0, virtual.length - baseName(virtual).length) + name,
+      url: this.url,
+      ref: this.ref,
+    })
+  }
+
   reference(folder = ''): string {
     return this.ref(folder)
   }
@@ -156,6 +171,16 @@ async function copyOnce(
 ): Promise<GraphError | null> {
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
+  return copyRequest(config, src, dst)
+}
+
+// One Graph copy request and its monitor, a conflict surfaced. Mirrors
+// Python's `_copy_request`.
+async function copyRequest(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  src: DriveLoc,
+  dst: DriveLoc,
+): Promise<GraphError | null> {
   try {
     const monitor = await graphPostMonitor(config, src.item('/copy'), {
       name: baseName(dst.path),
@@ -221,10 +246,25 @@ export async function copyTree(
   if (srcItem.folder !== undefined || dstItem.folder !== undefined) {
     throw new GraphError(409, conflict.code, conflict.message)
   }
-  await graphDelete(config, dst.item())
-  const secondConflict = await copyOnce(config, src, dst, srcVirtual, dstVirtual)
+  // Graph refuses a taken name, so the copy lands beside the file under a
+  // staged name, the file goes next and the copy takes its name last: a
+  // refused copy leaves the file as it was, a refused delete or rename drops
+  // the copy.
+  const staged = dst.staged()
+  const secondConflict = await copyRequest(config, src, staged)
   if (secondConflict !== null) {
     throw new GraphError(500, secondConflict.code, secondConflict.message)
+  }
+  try {
+    await graphDelete(config, dst.item())
+    await graphPatch(config, staged.item(), { name: baseName(dst.path) })
+  } catch (error) {
+    try {
+      await graphDelete(config, staged.item())
+    } catch (undo) {
+      console.debug(`could not drop the copy at ${staged.virtual}: ${String(undo)}`)
+    }
+    throw error
   }
 }
 
@@ -256,9 +296,12 @@ export async function renameReplace(
 ): Promise<MovedItem> {
   await checkItem(config, src, srcVirtual)
   await checkItem(config, dst, dstVirtual)
-  const body = moveBody(src, dst)
+  let destination: Record<string, unknown>
   try {
-    return { moved: await graphPatch(config, src.item(), body), replacedNonFile: false }
+    return {
+      moved: await graphPatch(config, src.item(), moveBody(src, dst)),
+      replacedNonFile: false,
+    }
   } catch (error) {
     if (
       !(error instanceof GraphError) ||
@@ -266,14 +309,51 @@ export async function renameReplace(
     ) {
       throw error
     }
-    const destination = await graphGet(config, dst.item())
+    // GNU mv overwrites the destination, but a Graph move has no
+    // conflictBehavior that works across account types: the item moves
+    // beside the conflicting file (or empty folder) and takes its name once
+    // that is deleted. A non-empty folder conflict keeps the original error,
+    // mirroring mv's "Directory not empty".
+    destination = await graphGet(config, dst.item())
     if (destination.folder !== undefined) {
       const children = await graphList(config, dst.item('/children'))
       if (children.length > 0) throw error
     }
+  }
+  const moved = await moveOver(config, src, dst, destination.folder !== undefined, dstVirtual)
+  return { moved, replacedNonFile: !('file' in destination) }
+}
+
+/**
+ * Move `src` onto the file or empty folder that holds `dst`. Graph refuses a
+ * taken name, so the item lands beside it under a staged name first, what it
+ * replaces goes next, and the item takes the name last: a refused move leaves
+ * both as they were, and a refused delete or rename moves the item back. A
+ * folder is asked for children again just before its delete, so one added
+ * while the item moved is not deleted with it. Mirrors Python's `_move_over`.
+ */
+async function moveOver(
+  config: ReturnType<typeof resolveMsGraphConfig>,
+  src: DriveLoc,
+  dst: DriveLoc,
+  folder: boolean,
+  dstVirtual: string | undefined,
+): Promise<Record<string, unknown>> {
+  const staged = dst.staged()
+  await graphPatch(config, src.item(), moveBody(src, staged))
+  try {
+    if (folder && (await graphList(config, dst.item('/children'))).length > 0) {
+      throw enotempty(dstVirtual ?? `/${stripSlash(dst.virtual)}`)
+    }
     await graphDelete(config, dst.item())
-    const replacedNonFile = !('file' in destination)
-    return { moved: await graphPatch(config, src.item(), body), replacedNonFile }
+    return await graphPatch(config, staged.item(), { name: baseName(dst.path) })
+  } catch (error) {
+    try {
+      await graphPatch(config, staged.item(), moveBody(staged, src))
+    } catch (undo) {
+      console.debug(`could not move ${src.virtual} back: ${String(undo)}`)
+    }
+    throw error
   }
 }
 

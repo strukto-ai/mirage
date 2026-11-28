@@ -13,12 +13,17 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { PathSpec } from '../../types.ts'
-import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { entryAt, handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { serve } from '../../../tests/fixtures/kit_fake.ts'
 import { GoogleAccount } from '../../../tests/core/google/account.ts'
 import { readdir } from './readdir.ts'
 import { copy } from './copy.ts'
+
+const FILE = '/drive/v3/files/:id'
+const COPY = '/drive/v3/files/:id/copy'
+const DENIED = 'The user does not have sufficient permissions for this file.'
+const REASON = 'insufficientFilePermissions'
 
 let origin: string
 let account: GoogleAccount
@@ -109,22 +114,44 @@ describe('gdrive copy', () => {
     await expect(copied('/missing.txt', '/dst.txt')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('failure preserves destination file', async () => {
-    const src = fake.add('src.txt', 'root', undefined, ENC.encode('src'))
-    const dst = fake.add('dst.txt', 'root', undefined, ENC.encode('dst'))
-    fake.copyFile = async () => {
-      throw new Error('copy failed')
-    }
-    await expect(
-      copy(
-        accessor,
-        spec('/src.txt'),
-        spec('/dst.txt'),
-        undefined,
-        await handedAt(readdir, accessor, spec('/src.txt'), spec('/dst.txt')),
-      ),
-    ).rejects.toThrow('copy failed')
-    expect(fake.items.get(dst)?.content).toEqual(ENC.encode('dst'))
-    expect(fake.items.get(src)?.content).toEqual(ENC.encode('src'))
+  it('a refused copy keeps the destination', async () => {
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.refuse('POST', COPY, 403, 'This file cannot be copied by the user.', {
+      reason: REASON,
+    })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    expect(await account.content(dst)).toBe('old')
+    expect(await account.items()).toHaveLength(2)
+  })
+
+  it('a refused delete drops the copy', async () => {
+    await account.upload('src.txt', 'new')
+    const dst = await account.upload('dst.txt', 'old')
+    await account.refuse('DELETE', FILE, 403, DENIED, {
+      reason: REASON,
+      path: `/drive/v3/files/${dst}`,
+    })
+    await expect(copied('/src.txt', '/dst.txt')).rejects.toMatchObject({ code: 'EACCES' })
+    expect(await account.content(dst)).toBe('old')
+    expect(await account.items()).toHaveLength(2)
+  })
+
+  it('does nothing onto the same item', async () => {
+    const id = await account.upload('f.txt', 'data')
+    const accessor = account.driveAccessor()
+    const entry = await entryAt(readdir, accessor, spec('/f.txt'))
+    // Drive lists a legacy item under each of its parents, so another
+    // folder's row can name this same id. A row naming no folder is taken as
+    // listed, which stands in for that second listing.
+    const twin = new FileStat({ name: 'f.txt', type: FileType.FILE, extra: { file_id: id } })
+    await account.run.recordRequests()
+    await copy(accessor, spec('/f.txt'), spec('/b/f.txt'), undefined, {
+      entry,
+      dstEntry: twin,
+    })
+    expect(await account.asked('POST', COPY)).toEqual([])
+    expect(await account.asked('DELETE', FILE)).toEqual([])
+    expect(await account.items()).toHaveLength(1)
   })
 })
