@@ -26,6 +26,8 @@ from typing import Any
 from mirage.errors.fs import eacces, ebadf, eexist, efbig, enoent
 from mirage.mount.constants import (
     FSPROTO_FRAME_BYTES,
+    FSPROTO_READ_CONCURRENCY,
+    FSPROTO_READ_OPS,
     FSPROTO_VERSION,
     FSPROTO_WHOLE_BYTES,
 )
@@ -215,9 +217,13 @@ class FsprotoServer:
 
     Every request lands on one MountCore bound to the session, so the
     machine sees exactly the tree, modes and policies a shell in that
-    session sees. Requests are answered one at a time in arrival order,
-    as SFTP's are, so a release never overtakes the writes it settles.
-    Each reply about a path says whether the client may keep it until
+    session sees. Requests that only read (FSPROTO_READ_OPS, an open
+    that neither writes nor truncates) are answered together, up to
+    FSPROTO_READ_CONCURRENCY at once; any other request waits for every
+    one before it and holds back every one after it, so answers are the
+    ones arrival order gives and a release never overtakes the writes it
+    settles. A read-only handle's release waits only for its own handle's
+    reads. Each reply about a path says whether the client may keep it until
     told otherwise (``k``): only for a backend nothing but the workspace
     changes (``BaseVFS.sole_writer``), whose every change this server pushes to
     the client as it is noted, and ``begin`` waits until the client has
@@ -257,6 +263,11 @@ class FsprotoServer:
         self._hid = 0
         self._ended = False
         self._keeping = False
+        self._slots = asyncio.Semaphore(FSPROTO_READ_CONCURRENCY)
+        self._barrier: asyncio.Task[None] | None = None
+        self._reading: dict[asyncio.Task[None], int | None] = {}
+        self._answering: set[asyncio.Task[None]] = set()
+        self._read_only: set[int] = set()
 
     async def serve(self, reader: ByteReader, writer: PipeWriter) -> None:
         """Answer the client's requests until it closes the pipe.
@@ -380,29 +391,111 @@ class FsprotoServer:
             self._requests.put_nowait(frame)
 
     async def _work(self) -> None:
-        """Answer the requests in the order they came, each reply waiting
-        for the pipe once the writer holds more unsent than it lets wait:
-        a client that asks ahead never has the host hold every reply it
-        asked for."""
-        while True:
-            frame = await self._requests.get()
-            if frame is None:
-                return
-            rid = frame.head["id"]
-            try:
-                task = self._answer(frame)
-                head, body = await (
-                    task if self._run is None else self._run(task)
+        """Take the requests in the order they came, and answer each once
+        what it waits for is answered: a request that only reads, once
+        the last request that changes something is; a read-only handle's
+        release, once that and its handle's reads are; any other request,
+        once every request before it is. A read holds one of
+        FSPROTO_READ_CONCURRENCY slots while it is out, so a client that
+        asks ahead has no more than that many answered at once."""
+        while (frame := await self._requests.get()) is not None:
+            after: set[asyncio.Task[None]] = set()
+            if self._barrier is not None:
+                after.add(self._barrier)
+            handle = num(frame.head.get("fh"))
+            fh = None if handle is None else int(handle)
+            if self._reads(frame):
+                await self._slots.acquire()
+                self._reading[self._start(frame, after, True)] = fh
+            elif frame.head.get("op") == "release" and fh in self._read_only:
+                after.update(
+                    t for t, held in self._reading.items() if held == fh
                 )
-                reply = bounded({**head, "id": rid}, body)
-            except Exception as err:
-                reply = encode_frame({"id": rid, "errno": condition(err)})
-            try:
-                self._write(reply)
-                if self._writer is not None and not self._ended:
-                    await self._writer.drain()
-            except Exception as err:
-                logger.debug("fsproto: answering %s failed: %r", rid, err)
+                self._reading[self._start(frame, after, False)] = fh
+            else:
+                after.update(self._reading)
+                self._reading.clear()
+                self._barrier = self._start(frame, after, False)
+        if self._answering:
+            await asyncio.wait(self._answering)
+
+    def _reads(self, frame: Frame) -> bool:
+        """Whether a request only reads: an FSPROTO_READ_OPS op, or an
+        open that neither writes nor truncates.
+
+        Args:
+            frame (Frame): the request.
+        """
+        h = frame.head
+        if h.get("op") == "open":
+            return h.get("write") is not True and h.get("truncate") is not True
+        return h.get("op") in FSPROTO_READ_OPS
+
+    def _start(
+        self, frame: Frame, after: set[asyncio.Task[None]], slot: bool
+    ) -> asyncio.Task[None]:
+        """Answer a request once the requests in ``after`` are answered.
+
+        Args:
+            frame (Frame): the request.
+            after (set[asyncio.Task[None]]): the answers it waits for.
+            slot (bool): whether it holds a read slot to give back.
+        """
+        task = asyncio.create_task(self._answer_after(frame, after, slot))
+        self._answering.add(task)
+        task.add_done_callback(self._answered)
+        return task
+
+    def _answered(self, task: asyncio.Task[None]) -> None:
+        self._answering.discard(task)
+        self._reading.pop(task, None)
+        if task is self._barrier:
+            self._barrier = None
+
+    async def _answer_after(
+        self, frame: Frame, after: set[asyncio.Task[None]], slot: bool
+    ) -> None:
+        try:
+            if after:
+                await asyncio.wait(after)
+            await self._reply(frame)
+        finally:
+            if slot:
+                self._slots.release()
+
+    async def _reply(self, frame: Frame) -> None:
+        """Answer one request, the reply waiting for the pipe once the
+        writer holds more unsent than it lets wait: a client that asks
+        ahead never has the host hold every reply it asked for. Only the
+        writer holds the reply's bytes while it waits, so answers in
+        flight together cost one copy each.
+
+        Args:
+            frame (Frame): the request.
+        """
+        try:
+            self._write(await self._framed(frame))
+            if self._writer is not None and not self._ended:
+                await self._writer.drain()
+        except Exception as err:
+            logger.debug(
+                "fsproto: answering %s failed: %r", frame.head["id"], err
+            )
+
+    async def _framed(self, frame: Frame) -> bytes:
+        """The reply to one request as a frame: its answer, or the errno
+        it failed with.
+
+        Args:
+            frame (Frame): the request.
+        """
+        rid = frame.head["id"]
+        try:
+            task = self._answer(frame)
+            head, body = await (task if self._run is None else self._run(task))
+            return bounded({**head, "id": rid}, body)
+        except Exception as err:
+            return encode_frame({"id": rid, "errno": condition(err)})
 
     def _rows(
         self, folder: str, rows: list[tuple[str, MountAttrs]], kept: bool
@@ -417,12 +510,39 @@ class FsprotoServer:
         """
         out: list[list[Any]] = []
         for name, a in rows:
-            row = wire(a)
+            row = self._wired(child(folder, name), a)
             if kept and stat.S_ISDIR(a.mode):
                 if not self._kept(child(folder, name)):
                     row["k"] = False
             out.append([name, row])
         return out
+
+    def _hello(self) -> Head:
+        """The reply to ``hello``: the protocol, that attributes carry
+        ``x`` (``_wired``), and the read-ahead the served prefix sets."""
+        head: Head = {"proto": FSPROTO_VERSION, "xattrs": True}
+        served = self._served
+        if served is not None and served.read_ahead is not None:
+            head["read_ahead"] = served.read_ahead
+        if served is not None and served.read_ahead_total is not None:
+            head["read_ahead_total"] = served.read_ahead_total
+        return head
+
+    def _wired(self, path: str, a: MountAttrs) -> Head:
+        """A path's attributes as fsproto carries them, with ``x`` when a
+        caller set an extended attribute on it, as ``getxattr`` finds it:
+        a client keeping the attributes answers "none" for the rest
+        itself.
+
+        Args:
+            path (str): the mount path the attributes are of.
+            a (MountAttrs): the attributes.
+        """
+        row = wire(a)
+        reader = reader_of(self._core.files)
+        if reader.has_xattrs(reader.follow(self._core.resolve(path))):
+            row["x"] = True
+        return row
 
     def _kept(self, path: str) -> bool:
         """Whether the client may keep its answer about ``path`` until
@@ -501,17 +621,17 @@ class FsprotoServer:
             self._inside(path)
         op = h.get("op")
         if op == "hello":
-            return {"proto": FSPROTO_VERSION}, EMPTY
+            return self._hello(), EMPTY
         if op == "getattr":
             fh = num(h.get("fh"))
             if fh is not None:
                 held = self._path_of(int(fh))
                 return {
-                    "a": wire(await core.fgetattr(held, int(fh))),
+                    "a": self._wired(held, await core.fgetattr(held, int(fh))),
                     **await self._keep(held),
                 }, EMPTY
             return {
-                "a": wire(await core.getattr(path)),
+                "a": self._wired(path, await core.getattr(path)),
                 **await self._keep(path),
             }, EMPTY
         if op == "list":
@@ -521,7 +641,10 @@ class FsprotoServer:
             return {"e": listed, **keep}, EMPTY
         if op == "readall":
             attrs, data = await self._whole(path)
-            return {"a": wire(attrs), **await self._keep(path)}, data
+            return {
+                "a": self._wired(path, attrs),
+                **await self._keep(path),
+            }, data
         if op == "readlink":
             return {"target": await core.readlink(path)}, EMPTY
         if op == "open":
@@ -535,6 +658,8 @@ class FsprotoServer:
                 binary=True,
             )
             fh = await core.open(path, mode)
+            if not mode.writable:
+                self._read_only.add(fh)
             keep = await self._keep(path)
             first = min(whole(h.get("first"), 0), FSPROTO_WHOLE_BYTES)
             if first > 0 and not mode.writable and not keep.get("w"):
@@ -566,7 +691,7 @@ class FsprotoServer:
             )
             return {
                 "fh": fh,
-                "a": wire(await core.fgetattr(path, fh)),
+                "a": self._wired(path, await core.fgetattr(path, fh)),
                 **await self._keep(path),
             }, EMPTY
         if op == "read":
@@ -593,6 +718,7 @@ class FsprotoServer:
             return {}, EMPTY
         if op == "release":
             fh = whole(h.get("fh"), -1)
+            self._read_only.discard(fh)
             held = self._path_of(fh)
             try:
                 await core.release(fh)
@@ -605,7 +731,7 @@ class FsprotoServer:
             perm = num(h.get("mode"))
             await core.mkdir(path, None if perm is None else int(perm))
             return {
-                "a": wire(await core.getattr(path)),
+                "a": self._wired(path, await core.getattr(path)),
                 **await self._keep(path),
             }, EMPTY
         if op == "unlink":
@@ -618,7 +744,7 @@ class FsprotoServer:
             target = h.get("target")
             await core.symlink(path, target if isinstance(target, str) else "")
             return {
-                "a": wire(await core.getattr(path)),
+                "a": self._wired(path, await core.getattr(path)),
                 **await self._keep(path),
             }, EMPTY
         if op == "rename":
@@ -691,7 +817,7 @@ class FsprotoServer:
             if fh is None
             else await core.fgetattr(path, int(fh))
         )
-        return {"a": wire(attrs), **await self._keep(path)}, EMPTY
+        return {"a": self._wired(path, attrs), **await self._keep(path)}, EMPTY
 
     async def _exists(self, path: str) -> bool:
         try:

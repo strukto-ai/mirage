@@ -250,6 +250,11 @@ export class Namespace {
     return new Map(this.nodeTable.get(path)?.xattrs ?? [])
   }
 
+  // Whether a caller set an extended attribute on a path.
+  hasXattrs(path: string): boolean {
+    return (this.nodeTable.get(path)?.xattrs?.size ?? 0) > 0
+  }
+
   // Store one extended attribute on a path's node.
   async setXattr(path: string, name: string, value: Uint8Array): Promise<void> {
     const meta = this.nodeTable.get(path) ?? {}

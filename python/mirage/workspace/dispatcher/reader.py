@@ -267,6 +267,19 @@ class NamespaceReader:
             if self.visible(posixpath.join(directory, name))
         }
 
+    def has_xattrs(self, path: str) -> bool:
+        """Whether a caller set an extended attribute on a path the
+        session sees.
+
+        Args:
+            path (str): absolute virtual path, already followed.
+        """
+        return (
+            self._links is not None
+            and self.visible(path)
+            and self._links.has_xattrs(path)
+        )
+
     def readlink(self, path: str) -> str | None:
         """A link's stored target, as typed; None where no link stands
         or the session cannot see it.

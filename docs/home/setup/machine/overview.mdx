@@ -293,10 +293,34 @@ machine serves, and rules that depend on which program opens a file.
 - Every other mount behaves as under `ssh`: the machine keeps an answer for
   a second.
 - A file a program opens only to read comes with its first 128 KiB, and a
-  file it reads in order is asked for up to 4 MiB ahead of its reads, so a
-  large file streams and a tree of small files takes about one round trip
-  per file. A change made on the machine through another open drops what
-  was asked, so the next read finds it.
+  file it reads in order is asked for up to 2 MiB ahead of its reads, 16 MiB
+  for all of a mount's files at once, so a large file streams and a tree of
+  small files takes about one round trip per file. Programs reading one
+  cached file share what was asked for it. A change made on the machine
+  through another open drops what was asked, so the next read finds it.
+  The machine entry's `read_ahead` and `read_ahead_total` set those two
+  sizes (`4M`, `32M`); `read_ahead: 0` asks for only what a program reads.
+  On a mount whose answers last a second, a stretch read more than a second
+  after it was asked is asked for again, so a link that moves less than
+  `read_ahead_total` in a second reads parallel files faster with a smaller
+  one:
+
+  ```yaml
+  machines:
+    box:
+      provider: docker
+      container: box
+      mount_type: mirage
+      read_ahead_total: 8M
+  ```
+
+- The host answers several reads at once, so programs reading different
+  files on a backend that answers over the network, such as S3, wait on it
+  together rather than one after another. A change waits for the reads
+  before it.
+- `ls -l` and other programs asking for a file's extended attributes are
+  answered on the machine when the attributes it keeps say the file has
+  none.
 - While a policy judges the session's file calls (`pre_vfs` or `post_vfs`),
   neither `mirage-fuse` nor the machine's kernel keeps an answer, not even
   for a second, so each call a program makes reaches it. A policy added

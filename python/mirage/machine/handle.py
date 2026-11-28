@@ -42,7 +42,11 @@ from mirage.execution.types import MachineName, MachinePid, MachineResources
 from mirage.io.errors import PipeClosed
 from mirage.io.pipe import BytePipe
 from mirage.io.types import ByteSource
-from mirage.machine.config import MachineConfig, check_mount_type
+from mirage.machine.config import (
+    MachineConfig,
+    check_mount_type,
+    read_ahead_bytes,
+)
 from mirage.machine.constants import (
     CHECK_LINE,
     CHECK_MARK,
@@ -381,6 +385,12 @@ class MachineHandle:
         # Whether the machine has a program, by name, asked once each.
         self._programs: dict[tuple[str, str | None, str | None], bool] = {}
         check_mount_type(self.provider, self.config.mount_type)
+        read_ahead = read_ahead_bytes(
+            self.provider, self.config.read_ahead, "read_ahead"
+        )
+        read_ahead_total = read_ahead_bytes(
+            self.provider, self.config.read_ahead_total, "read_ahead_total"
+        )
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
                 raise ValueError(
@@ -393,6 +403,8 @@ class MachineHandle:
                 self._setup,
                 self.open_pipe,
                 lambda: self._working > 0,
+                read_ahead,
+                read_ahead_total,
             )
 
     def _load_sdk(

@@ -13,13 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { MountMode } from '../types.ts'
+import { type FileStat, MountMode, type PathSpec } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import type { Action } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RecentChanges, SERVED_BY } from './changes.ts'
-import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './constants.ts'
+import {
+  FSPROTO_FRAME_BYTES,
+  FSPROTO_READ_CONCURRENCY,
+  FSPROTO_VERSION,
+  FSPROTO_WHOLE_BYTES,
+} from './constants.ts'
 import { type Frame, FrameReader, FsprotoServer, bounded, encodeFrame } from './fsproto.ts'
 
 const ENC = new TextEncoder()
@@ -93,14 +98,45 @@ function client() {
   }
 }
 
-async function served(changes: RecentChanges | null = null) {
-  const ws = new Workspace({ '/notes': new RAMVFS() }, { mode: MountMode.WRITE })
+/**
+ * A RAM store whose stat of `slow.txt` waits between `hold` and `go`, as a
+ * backend that answers over the network keeps a request out.
+ */
+class SlowStat extends RAMVFS {
+  private gate: Promise<void> = Promise.resolve()
+  private opened: () => void = () => undefined
+
+  hold(): void {
+    this.gate = new Promise<void>((resolve) => {
+      this.opened = resolve
+    })
+  }
+
+  go(): void {
+    this.opened()
+    this.gate = Promise.resolve()
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    if (path.virtual.endsWith('/slow.txt')) await this.gate
+    return super.stat(path)
+  }
+}
+
+async function served(
+  changes: RecentChanges | null = null,
+  vfs: RAMVFS = new RAMVFS(),
+  readAhead: [number | null, number | null] = [null, null],
+) {
+  const ws = new Workspace({ '/notes': vfs }, { mode: MountMode.WRITE })
   await ws.vfs.write('/notes/plan.txt', 'plan')
   await ws.session('agent')
   const server = new FsprotoServer(ws.vfs, ws.getSession('agent'), undefined, {
     prefix: '/notes',
     machine: 'dev',
     changes,
+    readAhead: readAhead[0],
+    readAheadTotal: readAhead[1],
   })
   const end = client()
   const serving = server.serve(end.reader, end.writer)
@@ -236,20 +272,103 @@ describe('FsprotoServer', () => {
     await serving
   })
 
-  it('holds back the next reply until the pipe takes the one before', async () => {
+  it('holds back reads past those at once while the pipe has not taken their replies', async () => {
     const { end, serving } = await served()
     const opened = await end.call({ op: 'open', path: '/notes/plan.txt' })
     const fh = opened.head.fh
     end.hold()
-    end.send({ op: 'read', fh, offset: 0, size: 2, id: 101 })
-    end.send({ op: 'read', fh, offset: 2, size: 2, id: 102 })
-    await end.until(() => end.replies.has(101))
+    const ids = Array.from({ length: FSPROTO_READ_CONCURRENCY + 2 }, (_, i) => 101 + i)
+    for (const id of ids) end.send({ op: 'read', fh, offset: 0, size: 2, id })
+    const answered = (): number => ids.filter((id) => end.replies.has(id)).length
+    await end.until(() => answered() === FSPROTO_READ_CONCURRENCY)
     await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(end.replies.has(102)).toBe(false)
+    expect(answered()).toBe(FSPROTO_READ_CONCURRENCY)
     end.release()
-    await end.until(() => end.replies.has(102))
-    expect([101, 102].map((id) => DEC.decode(end.replies.get(id)?.body))).toEqual(['pl', 'an'])
+    await end.until(() => answered() === ids.length)
+    expect(new Set(ids.map((id) => DEC.decode(end.replies.get(id)?.body)))).toEqual(new Set(['pl']))
     await end.call({ op: 'release', fh })
+    end.close()
+    await serving
+  })
+
+  it('answers a read without waiting for a slow read before it', async () => {
+    const vfs = new SlowStat()
+    const { ws, end, serving } = await served(null, vfs)
+    await ws.vfs.write('/notes/slow.txt', 'slow')
+    vfs.hold()
+    end.send({ op: 'getattr', path: '/notes/slow.txt', id: 101 })
+    end.send({ op: 'getattr', path: '/notes/plan.txt', id: 102 })
+    await end.until(() => end.replies.has(102))
+    expect(end.replies.has(101)).toBe(false)
+    vfs.go()
+    await end.until(() => end.replies.has(101))
+    end.close()
+    await serving
+  })
+
+  it('has a change wait for the reads before it and hold back those after', async () => {
+    const vfs = new SlowStat()
+    const { ws, end, serving } = await served(null, vfs)
+    await ws.vfs.write('/notes/slow.txt', 'slow')
+    vfs.hold()
+    end.send({ op: 'getattr', path: '/notes/slow.txt', id: 101 })
+    end.send({ op: 'mkdir', path: '/notes/made', mode: 0o755, id: 102 })
+    end.send({ op: 'getattr', path: '/notes/made', id: 103 })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(end.replies.size).toBe(0)
+    vfs.go()
+    await end.until(() => end.replies.has(103))
+    expect([...end.replies.keys()]).toEqual([101, 102, 103])
+    expect(end.replies.get(103)?.head.errno).toBeUndefined()
+    end.close()
+    await serving
+  })
+
+  it("has a read-only release wait for no other file's reads", async () => {
+    const vfs = new SlowStat()
+    const { ws, end, serving } = await served(null, vfs)
+    await ws.vfs.write('/notes/slow.txt', 'slow')
+    const opened = await end.call({ op: 'open', path: '/notes/plan.txt' })
+    vfs.hold()
+    end.send({ op: 'getattr', path: '/notes/slow.txt', id: 101 })
+    end.send({ op: 'release', fh: opened.head.fh, id: 102 })
+    await end.until(() => end.replies.has(102))
+    expect(end.replies.has(101)).toBe(false)
+    vfs.go()
+    await end.until(() => end.replies.has(101))
+    end.close()
+    await serving
+  })
+
+  it('says in hello that attributes mark attributes, with the read-ahead set', async () => {
+    const { end, serving } = await served(null, new RAMVFS(), [1 << 20, 8 << 20])
+    const hello = await end.call({ op: 'hello', proto: FSPROTO_VERSION })
+    expect(hello.head).toEqual({
+      id: hello.head.id,
+      proto: FSPROTO_VERSION,
+      xattrs: true,
+      read_ahead: 1 << 20,
+      read_ahead_total: 8 << 20,
+    })
+    const plain = await served()
+    const bare = await plain.end.call({ op: 'hello', proto: FSPROTO_VERSION })
+    expect([bare.head.read_ahead, bare.head.read_ahead_total]).toEqual([undefined, undefined])
+    end.close()
+    plain.end.close()
+    await Promise.all([serving, plain.serving])
+  })
+
+  it('marks the attributes of an entry that carries extended attributes', async () => {
+    const { ws, end, serving } = await served()
+    await ws.vfs.write('/notes/bare.txt', 'bare')
+    await ws.vfs.setxattr('/notes/plan.txt', 'user.k', ENC.encode('v'))
+    const listed = await end.call({ op: 'list', path: '/notes' })
+    const rows = new Map(listed.head.e as [string, Record<string, unknown>][])
+    expect([rows.get('plan.txt')?.x, rows.get('bare.txt')?.x]).toEqual([true, undefined])
+    const marked = await end.call({ op: 'getattr', path: '/notes/plan.txt' })
+    const bare = await end.call({ op: 'getattr', path: '/notes/bare.txt' })
+    const attrs = (frame: Frame) => frame.head.a as Record<string, unknown>
+    expect([attrs(marked).x, attrs(bare).x]).toEqual([true, undefined])
     end.close()
     await serving
   })

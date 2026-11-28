@@ -117,9 +117,17 @@ class ServedPrefix:
         watched (Callable[[str], Awaitable[bool]] | None): whether a
             policy judges a session's file calls, by its id; the client
             then keeps no answer, so every call it makes reaches them.
+        read_ahead (int | None): how many bytes past a read in order the
+            client asks for one file before the program reads them, 0 for
+            none; None leaves it to the client.
+        read_ahead_total (int | None): the most bytes the client holds
+            for all its files' reads ahead together; None leaves it to the
+            client.
     """
 
     prefix: str
     machine: str
     changes: RecentChanges | None
     watched: Callable[[str], Awaitable[bool]] | None = None
+    read_ahead: int | None = None
+    read_ahead_total: int | None = None

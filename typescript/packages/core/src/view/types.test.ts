@@ -32,6 +32,7 @@ const MEMBERS = [
   'symlinkTargets',
   'linkStatsBelow',
   'linkNamesUnder',
+  'hasXattrs',
 ] as const
 
 // An interface has no runtime shape, so order is read back off the

@@ -590,6 +590,10 @@ class MachineMounts:
             command in the machine with its stdin and stdout held open.
         working (Callable[[], bool] | None): whether Mirage has work on
             the machine now; None counts it as always working.
+        read_ahead (int | None): the machine's ``read_ahead`` in bytes,
+            which each mirage-fuse is told; None leaves it to mirage-fuse.
+        read_ahead_total (int | None): the machine's ``read_ahead_total``
+            in bytes, told the same way.
     """
 
     def __init__(
@@ -600,9 +604,13 @@ class MachineMounts:
         run: Callable[[str], Awaitable[RunAnswer]],
         open_pipe: Callable[[str], Awaitable[MachinePipe]],
         working: Callable[[], bool] | None = None,
+        read_ahead: int | None = None,
+        read_ahead_total: int | None = None,
     ) -> None:
         self._provider = provider
         self._working = working
+        self._read_ahead = read_ahead
+        self._read_ahead_total = read_ahead_total
         self._machine = machine
         self._mount_type = mount_type
         self._run = run
@@ -1226,6 +1234,8 @@ class MachineMounts:
                                 self._machine,
                                 binding.changes,
                                 binding.watched,
+                                self._read_ahead,
+                                self._read_ahead_total,
                             ),
                         ),
                         prefix,

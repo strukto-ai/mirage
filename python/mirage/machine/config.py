@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from mirage.machine.constants import MOUNT_TYPES
 from mirage.machine.types import MountType, PauseAction
 from mirage.runtime.config import RuntimeConfig
+from mirage.utils.size import parse_limit
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,11 +42,34 @@ class MachineConfig(RuntimeConfig):
         captures (tuple[str, ...] | None): the commands the machine
             runs, ``@external`` and ``@line`` among them; None for
             ``@external``, the programs nothing in Mirage resolves.
+        read_ahead (str | int | None): with ``mount_type`` mirage or
+            both, how far past a read in order mirage-fuse asks for one
+            file before the program reads it (``1M``, ``256K``); 0 asks
+            for only what is read. None takes mirage-fuse's own.
+        read_ahead_total (str | int | None): the most all of one mount's
+            files read ahead may hold together. None takes mirage-fuse's
+            own.
     """
 
     env: dict[str, str] = field(default_factory=dict)
     mount_type: MountType | None = None
     captures: tuple[str, ...] | None = None
+    read_ahead: str | int | None = None
+    read_ahead_total: str | int | None = None
+
+
+def read_ahead_bytes(
+    provider: str, value: str | int | None, name: str
+) -> int | None:
+    """A read-ahead setting in bytes, None when unset; fail loud on one
+    that is not a size.
+
+    Args:
+        provider (str): the machine's provider, for the message.
+        value (str | int | None): the configured value.
+        name (str): the setting's name, for the message.
+    """
+    return None if value is None else parse_limit(value, f"{provider} {name}")
 
 
 def check_mount_type(provider: str, mount_type: str | None) -> None:

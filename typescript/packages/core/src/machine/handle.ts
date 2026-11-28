@@ -36,7 +36,7 @@ import { concat, findBytes, startsWith } from '../utils/bytes.ts'
 import { boundSystemClock } from '../utils/clock.ts'
 import { shellQuote } from '../utils/quote.ts'
 import { rstripSlash } from '../utils/slash.ts'
-import { MachineConfig, checkMountType } from './config.ts'
+import { MachineConfig, checkMountType, readAheadBytes } from './config.ts'
 import {
   CHECK_LINE,
   CHECK_MARK,
@@ -341,6 +341,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
     const coerced = coerceRuntimeConfig(config, Object.keys(configFields), 'machine')
     this.config = { ...coerced, env: { ...coerced.env } }
     checkMountType(this.provider, coerced.mountType)
+    readAheadBytes(this.provider, coerced.readAhead, 'readAhead')
+    readAheadBytes(this.provider, coerced.readAheadTotal, 'readAheadTotal')
   }
 
   /** The machine's name with its provider, `<provider>:<name>`. */
@@ -769,6 +771,8 @@ export abstract class MachineHandle<C extends MachineConfig = MachineConfig> {
       this.setup.bind(this),
       this.openPipe.bind(this),
       () => this.working > 0,
+      readAheadBytes(this.provider, this.config.readAhead, 'readAhead'),
+      readAheadBytes(this.provider, this.config.readAheadTotal, 'readAheadTotal'),
     )
   }
 

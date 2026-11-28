@@ -139,9 +139,15 @@ class FakeMachine(MachineHandle, PipeTransportMixin):
     provider = "fake"
 
     def __init__(
-        self, mount_type, own=(), sshfs=True, sshfs_mounts=True, name="box"
+        self,
+        mount_type,
+        own=(),
+        sshfs=True,
+        sshfs_mounts=True,
+        name="box",
+        **config,
     ):
-        super().__init__(name, config={"mount_type": mount_type})
+        super().__init__(name, config={"mount_type": mount_type, **config})
         self.captures = ["python3"]
         self.table = {prefix: ("tmpfs", "tmpfs") for prefix in own}
         self.running: set[str] = set()
@@ -944,6 +950,35 @@ async def test_both_serves_what_the_sandbox_does_not_mount_itself(source):
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/my notes"]
     await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_each_served_prefix_carries_the_machines_read_ahead(monkeypatch):
+    prefixes = []
+
+    class Server(Drain):
+        def __init__(self, files, session, run, prefix):
+            super().__init__(files, session, run)
+            prefixes.append(prefix)
+
+    monkeypatch.setattr(mounts, "pipe_server", lambda transport: Server)
+    sandbox = FakeMachine("both", read_ahead="1M", read_ahead_total=8 << 20)
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert prefixes
+    assert {(p.read_ahead, p.read_ahead_total) for p in prefixes} == {
+        (1 << 20, 8 << 20)
+    }
+    await ws.close()
+
+
+def test_a_read_ahead_that_is_not_a_size_fails_when_the_machine_is_made():
+    with pytest.raises(
+        ValueError,
+        match='fake read_ahead must be a size like 100MB, got "lots"',
+    ):
+        FakeMachine("both", read_ahead="lots")
 
 
 @pytest.mark.asyncio
