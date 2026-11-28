@@ -104,6 +104,17 @@ class MirageSandboxSession(BaseSandboxSession):
     async def _prepare_backend_workspace(self) -> None:
         await self._mkdir_p(self.state.manifest.root)
 
+    def _should_compute_snapshot_fingerprint_on_persist(self) -> bool:
+        # The SDK fingerprints files under the manifest root. A Mirage
+        # archive also captures sibling mounts, sessions and runtime state.
+        return False
+
+    async def _can_skip_snapshot_restore_on_resume(
+        self, *, is_running: bool
+    ) -> bool:
+        # Older sessions may carry a fingerprint of only the manifest tree.
+        return False
+
     def _workspace_resume_mount_skip_relpaths(self) -> set[Path]:
         """What a resume leaves before it hydrates: the SDK's own mounts
         and every workspace mount, whose root no ``rm`` can take and

@@ -26,7 +26,11 @@ import json
 import subprocess
 from tempfile import TemporaryDirectory
 
+from agents.sandbox import Manifest
+from agents.sandbox.snapshot import LocalSnapshotSpec
+
 from mirage import Mount, MountMode, Workspace, build_vfs, register_vfs
+from mirage.agents.openai_agents import MirageSandboxClient
 from mirage.cache.index import IndexConfig
 from mirage.vfs.ram import RAMVFS
 
@@ -105,6 +109,43 @@ async def read(path: Path) -> None:
         await ws.close()
 
 
+async def agent_archive(path: Path, command: list[str], cwd: Path) -> None:
+    ws = Workspace(
+        {p: RAMVFS() for p in ("/", "/workspace", "/data")},
+        mode=MountMode.WRITE,
+    )
+    try:
+        client = MirageSandboxClient(ws)
+        session = await client.create(
+            manifest=Manifest(root="/workspace"),
+            snapshot=LocalSnapshotSpec(base_path=path.parent),
+        )
+        await session.start()
+        await check(ws, "echo task > /workspace/task")
+        await check(ws, "echo python > /data/value")
+        await session.stop()
+        assert not any(
+            "workspace-fingerprint" in event.get("command", "")
+            for event in await ws.observer.events()
+        )
+        snapshot = session.state.snapshot
+        with await snapshot.restore() as archive:
+            path.write_bytes(archive.read())
+        await client.delete(session)
+        subprocess.run(
+            [*command, "agent", str(path)], cwd=cwd, check=True, timeout=60
+        )
+        with path.open("rb") as archive:
+            await snapshot.persist(archive)
+        resumed = await client.resume(session.state)
+        await resumed.start()
+        await check(
+            ws, "cat /workspace/task /data/value", "task\ntypescript\n"
+        )
+    finally:
+        await ws.close()
+
+
 async def main() -> None:
     register_vfs("portable-ram", PortableRAM)
     here = Path(__file__).resolve().parent
@@ -132,9 +173,10 @@ async def main() -> None:
             timeout=60,
         )
         await read(path)
+        await agent_archive(path, command, here.parent / "typescript")
     print(
         "Snapshot smoke passed in both directions: "
-        "direct/registered mounts and portable functions"
+        "direct/registered mounts, portable functions and OpenAI agent archives"
     )
 
 

@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
+import { MirageSandboxClient } from '@struktoai/mirage-openai-agents'
 import { buildVfs, Mount, MountMode, RAMVFS, registerVfs, Workspace } from '@struktoai/mirage-node'
 
 class PortableRAM extends RAMVFS {}
@@ -94,9 +95,27 @@ async function read(path: string): Promise<void> {
   }
 }
 
+async function roundTripAgentArchive(path: string): Promise<void> {
+  const ws = new Workspace(
+    { '/': new RAMVFS(), '/workspace': new RAMVFS(), '/data': new RAMVFS() },
+    { mode: MountMode.WRITE },
+  )
+  try {
+    const session = await new MirageSandboxClient(ws).create({ manifest: { root: '/workspace' } })
+    await check(ws, 'echo drift > /data/value')
+    await session.hydrateWorkspace(await readFile(path))
+    await check(ws, 'cat /workspace/task /data/value', 'task\npython\n')
+    await check(ws, 'echo typescript > /data/value')
+    await writeFile(path, await session.persistWorkspace())
+  } finally {
+    await ws.close()
+  }
+}
+
 registerVfs('portable-ram', () => Promise.resolve(new PortableRAM()))
 const [role, path] = process.argv.slice(2)
 assert(path !== undefined, 'snapshot path is required')
 if (role === 'write') await write(path)
 else if (role === 'read') await read(path)
+else if (role === 'agent') await roundTripAgentArchive(path)
 else throw new Error(`unknown role: ${String(role)}`)

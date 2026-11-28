@@ -68,6 +68,7 @@
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
+    "@struktoai/mirage-openai-agents": "workspace:*",
     "@struktoai/mirage-server": "workspace:*",
     "chromadb": "^3.4.3",
     "graphql": "16.11.0",
