@@ -152,11 +152,12 @@ struct Open {
 }
 
 /// Where one stretch a reader asked for stands: about to be asked, on its
-/// way (taken while one read waits for its reply), come, and when, or
-/// refused.
+/// way (taken while one read waits for its reply), come, or refused. On
+/// its way and come carry when it was asked for, before the host read its
+/// bytes, as a reply can wait unread for as long as the program pauses.
 enum Part {
     Unsent,
-    Sent(Option<Sent>),
+    Sent(Option<Sent>, Instant),
     Held(Arc<Vec<u8>>, Instant),
     Failed,
 }
@@ -209,14 +210,14 @@ impl Reader {
             .is_some_and(|(end, when)| end == offset && when.elapsed() < SHORT)
     }
 
-    /// Whether a stretch a read from `offset` to `stop` needs came longer
-    /// ago than an answer on its mount is kept.
+    /// Whether a stretch a read from `offset` to `stop` needs was asked for
+    /// longer ago than an answer on its mount is kept, come or not.
     fn stale(&self, offset: u64, stop: u64) -> bool {
         !self.kept
             && self.windows.iter().any(|w| {
                 w.end() > offset
                     && w.offset < stop
-                    && matches!(w.part, Part::Held(_, came) if came.elapsed() >= SHORT)
+                    && matches!(w.part, Part::Held(_, asked) | Part::Sent(_, asked) if asked.elapsed() >= SHORT)
             })
     }
 
@@ -1141,7 +1142,7 @@ impl MirageFs {
                     None => Step::Gather(stop),
                     Some(window) => match &mut window.part {
                         Part::Failed => Step::Forget,
-                        Part::Sent(sent) => match sent.take() {
+                        Part::Sent(sent, _) => match sent.take() {
                             Some(sent) => Step::Receive(sent, window.offset, window.size),
                             None => Step::Wait,
                         },
@@ -1217,6 +1218,7 @@ impl MirageFs {
         };
         for (at, window) in wanted {
             let args = json!({ "fh": host, "offset": at, "size": window });
+            let asked = Instant::now();
             let sent = self.link.ask("read", args, &[]);
             let mut st = self.st();
             if let Some(w) = st
@@ -1226,7 +1228,7 @@ impl MirageFs {
                 .and_then(|r| r.windows.iter_mut().find(|w| w.offset == at))
             {
                 w.part = match sent {
-                    Ok(sent) => Part::Sent(Some(sent)),
+                    Ok(sent) => Part::Sent(Some(sent), asked),
                     Err(_) => Part::Failed,
                 };
             }
@@ -1374,18 +1376,21 @@ fn landed(
     let Some(i) = reader.windows.iter().position(|w| w.offset == offset) else {
         return;
     };
+    let Part::Sent(_, sent_at) = reader.windows[i].part else {
+        return;
+    };
     let Ok(frame) = reply else {
         reader.windows[i].part = Part::Failed;
         return;
     };
     let got = frame.body.len() as u64;
-    reader.windows[i].part = Part::Held(Arc::new(frame.body), Instant::now());
+    reader.windows[i].part = Part::Held(Arc::new(frame.body), sent_at);
     if got < asked {
         let past: u64 = reader.windows.iter().skip(i + 1).map(|w| w.size).sum();
         reader.windows.truncate(i + 1);
         reader.windows[i].size = got;
         reader.next = offset + got;
-        reader.end = Some((offset + got, Instant::now()));
+        reader.end = Some((offset + got, sent_at));
         st.read_bytes -= (asked - got + past) as usize;
     }
 }
@@ -2525,14 +2530,30 @@ mod tests {
         assert!(st.reads[&fh].windows.is_empty());
     }
 
-    /// Make every stretch open `fh`'s reader holds older than SHORT.
+    /// Make every stretch open `fh`'s reader asked for, come or on its way,
+    /// asked longer than SHORT ago.
     fn age(fs: &Arc<MirageFs>, fh: u64) {
         let mut st = locked(&fs.shared.state);
         for window in &mut st.reads.get_mut(&fh).unwrap().windows {
-            if let Part::Held(_, came) = &mut window.part {
-                *came = Instant::now() - SHORT;
+            if let Part::Held(_, asked) | Part::Sent(_, asked) = &mut window.part {
+                *asked = Instant::now() - SHORT;
             }
         }
+    }
+
+    /// `read_ahead_of` answers the stretch [12, 20) too, whose reply waits
+    /// unread for a read that needs it.
+    #[test]
+    fn a_reply_ahead_left_unread_past_a_second_is_asked_again_on_a_mount_that_is_not_kept() {
+        let (fs, mut host) = hosted();
+        let fh = fs.opened("/w/a", Some(7), None, false, false, unwatched(0));
+        read_ahead_of(&fs, &mut host, fh, CONTENT);
+        age(&fs, fh);
+        let read = reading(&fs, fh, 12, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 12, 4));
+        answer_read(&mut host, &sent, b"abcdefghijklWXYZ");
+        assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
     }
 
     #[test]

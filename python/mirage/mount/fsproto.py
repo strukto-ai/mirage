@@ -530,11 +530,13 @@ class FsprotoServer:
             )
             fh = await core.open(path, mode)
             keep = await self._keep(path)
-            first = whole(h.get("first"), 0)
+            first = min(whole(h.get("first"), 0), FSPROTO_WHOLE_BYTES)
             if first > 0 and not mode.writable and not keep.get("w"):
                 # A read-only open's first bytes, read with it, so its
                 # first read costs no trip of its own. A read that fails
-                # leaves the open as it is, for that read to meet.
+                # leaves the open as it is, for that read to meet. They
+                # are at most what a whole read carries, so the reply
+                # fits a frame and the client gets its handle.
                 try:
                     data = await core.read(path, first, 0, fh)
                 except Exception as err:

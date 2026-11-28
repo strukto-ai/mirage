@@ -20,7 +20,11 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.mount.changes import SERVED_BY, RecentChanges
-from mirage.mount.constants import FSPROTO_VERSION
+from mirage.mount.constants import (
+    FSPROTO_FRAME_BYTES,
+    FSPROTO_VERSION,
+    FSPROTO_WHOLE_BYTES,
+)
 from mirage.mount.fsproto import (
     Frame,
     FrameReader,
@@ -191,6 +195,23 @@ async def test_a_read_only_open_carries_the_first_bytes_it_asks_for():
     ]
     for r in (some, whole, plain, writes):
         await end.call({"op": "release", "fh": r.head["fh"]})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_an_open_carries_no_more_first_bytes_than_a_whole_read():
+    ws, server, end, serving = await served()
+    path = "/notes/big.bin"
+    await ws.vfs.write(path, b"x" * (FSPROTO_WHOLE_BYTES + 1))
+    opened = await end.call(
+        {"op": "open", "path": path, "first": FSPROTO_FRAME_BYTES}
+    )
+    assert (opened.head.get("first"), len(opened.body)) == (
+        True,
+        FSPROTO_WHOLE_BYTES,
+    )
+    released = await end.call({"op": "release", "fh": opened.head["fh"]})
+    assert "errno" not in released.head
     await end.end(serving)
 
 

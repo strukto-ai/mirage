@@ -19,7 +19,7 @@ import type { Action } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { RecentChanges, SERVED_BY } from './changes.ts'
-import { FSPROTO_VERSION } from './constants.ts'
+import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './constants.ts'
 import { type Frame, FrameReader, FsprotoServer, bounded, encodeFrame } from './fsproto.ts'
 
 const ENC = new TextEncoder()
@@ -215,6 +215,18 @@ describe('FsprotoServer', () => {
       [undefined, ''],
     ])
     for (const r of [some, whole, plain, writes]) await end.call({ op: 'release', fh: r.head.fh })
+    end.close()
+    await serving
+  })
+
+  it('carries no more first bytes than a whole read', async () => {
+    const { ws, end, serving } = await served()
+    const path = '/notes/big.bin'
+    await ws.vfs.write(path, new Uint8Array(FSPROTO_WHOLE_BYTES + 1).fill(120))
+    const opened = await end.call({ op: 'open', path, first: FSPROTO_FRAME_BYTES })
+    expect([opened.head.first, opened.body.byteLength]).toEqual([true, FSPROTO_WHOLE_BYTES])
+    const released = await end.call({ op: 'release', fh: opened.head.fh })
+    expect(released.head.errno).toBeUndefined()
     end.close()
     await serving
   })

@@ -449,11 +449,12 @@ export class FsprotoServer {
         }
         const fd = await core.open(path, mode)
         const keep = await this.keep(path)
-        const first = whole(h.first, 0)
+        const first = Math.min(whole(h.first, 0), FSPROTO_WHOLE_BYTES)
         if (first > 0 && !mode.writable && keep.w !== true) {
           // A read-only open's first bytes, read with it, so its first read
           // costs no trip of its own. A read that fails leaves the open as it
-          // is, for that read to meet.
+          // is, for that read to meet. They are at most what a whole read
+          // carries, so the reply fits a frame and the client gets its handle.
           try {
             const data = await core.read(path, fd, 0, first)
             return [{ fh: fd, first: true, ...keep }, data]
