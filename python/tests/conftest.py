@@ -126,6 +126,22 @@ def graph_origin() -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
+def hub_origin() -> Iterator[str]:
+    """The integ Hugging Face Hub (model, dataset and space repos) fake's
+    origin, one fake for every test that asks."""
+    with serve("hf_hub") as origin:
+        yield origin
+
+
+@pytest.fixture(scope="session")
+def hf_origin() -> Iterator[str]:
+    """The integ Hugging Face buckets fake's origin, one fake for every test
+    that asks."""
+    with serve("hf") as origin:
+        yield origin
+
+
+@pytest.fixture(scope="session")
 def github_origin() -> Iterator[str]:
     """The integ GitHub fake's origin, one fake for every test that asks."""
     with serve("github") as origin:

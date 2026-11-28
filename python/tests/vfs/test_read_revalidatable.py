@@ -82,8 +82,8 @@ from tests.fixtures.google_account import FILES, GoogleAccount
 from tests.fixtures.google_account import TOKEN as GOOGLE_TOKEN
 from tests.fixtures.graph_drive import DRIVE_NAME, ONEDRIVE, GraphDrive
 from tests.fixtures.handed import ListFn, entry_at
-from tests.fixtures.hf_buckets_opendal import FakeAsyncOperator
-from tests.fixtures.hf_hub_api import FakeHub, blob_oid, serve, xet_hash
+from tests.fixtures.hf_bucket import HfBucket
+from tests.fixtures.hub_repo import blob_oid, made_repo, xet_hash
 from tests.fixtures.kit_fake import KitRun, LoopThread
 from tests.fixtures.vfs_io import vfs_over
 
@@ -298,8 +298,8 @@ class Fake:
     # How many Drive listings the mount has asked, for a Google app, whose
     # listing is a Drive search.
     searched: Callable[[], int] | None = None
-    # What Graph answers for the key's item now, for a Graph row: a test
-    # reads its cTag and eTag there.
+    # What the service answers for the key's item now, for a Graph or a
+    # bucket row: a test reads its tokens there.
     item: Callable[[], dict[str, Any]] | None = None
 
     def slot(self) -> str:
@@ -519,41 +519,58 @@ def _watch_walks(vfs: BaseVFS, monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return reach
 
 
+async def _hub_seeded(kind: str, origin: str, files: dict[str, bytes]):
+    """A repository of ``kind`` holding ``files``, made on the running loop,
+    its requests recorded from then on."""
+    repo = await made_repo(origin, kind)
+    await repo.commit(files)
+    await repo.run.record_requests()
+    return repo
+
+
 @contextmanager
 def _hf_fake(
-    name: str, shape: str, data: bytes, monkeypatch: pytest.MonkeyPatch
+    name: str,
+    shape: str,
+    data: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
 ) -> Iterator[Fake]:
     key = KEYS[shape]
     prefix = PREFIX if shape == "prefixed" else None
     stored = (prefix or "") + key
     files = {stored: data}
-    config: dict[str, str] = {"repo_id": "acme/widget"}
     if prefix is not None:
         files[key] = DECOY
-        config["key_prefix"] = prefix
-    # Files are served Xet-shaped, so the download's ETag is the xet hash,
-    # not the oid stat stamps: a read that trusted only the oid would stamp
-    # nothing. The repo is filed under the family's own API segment, so a
-    # request built for another repo type gets no answer.
-    hub = FakeHub(repos={(HF_FAMILY[name], "acme/widget"): files})
-    with serve(hub):
-        vfs = build_vfs(name, {**config, "endpoint": hub.url})
-        assert vfs.accessor.key_prefix == (prefix or "")
-        reach = _watch_walks(vfs, monkeypatch)
-
-        def rewrite(new: bytes) -> None:
-            files[stored] = new
-
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: hub.count("resolve"),
-            rewrite=rewrite,
-            reach=reach.copy,
-            read_mod=hf_read,
-            stream_mod=hf_stream,
-            readdir=hf_readdir,
-        )
+    # Files are stored on Xet, so the download's ETag is the xet hash, not
+    # the oid stat stamps: a read that trusted only the oid would stamp
+    # nothing. The repo is made under the family's own kind, so a request
+    # built for another repo type gets no answer. The repo runs on a loop
+    # of its own, as Dropbox's does.
+    thread = LoopThread()
+    try:
+        repo = thread.run(_hub_seeded(HF_FAMILY[name], origin, files))
+        try:
+            config = repo.config()
+            if prefix is not None:
+                config["key_prefix"] = prefix
+            vfs = build_vfs(name, config)
+            assert vfs.accessor.key_prefix == (prefix or "")
+            reach = _watch_walks(vfs, monkeypatch)
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(repo.count("resolve")),
+                rewrite=lambda new: thread.run(repo.commit({stored: new})),
+                reach=reach.copy,
+                read_mod=hf_read,
+                stream_mod=hf_stream,
+                readdir=hf_readdir,
+            )
+        finally:
+            thread.run(repo.run.close())
+    finally:
+        thread.close()
 
 
 async def _graph_drive(drive: str, origin: str) -> GraphDrive:
@@ -779,41 +796,61 @@ def _gapps_fake(name: str, data: bytes, origin: str) -> Iterator[Fake]:
         thread.close()
 
 
+async def _bucket_seeded(origin: str, files: dict[str, bytes]) -> HfBucket:
+    """A bucket holding ``files``, made on the running loop, its requests
+    recorded from then on."""
+    bucket = HfBucket(origin)
+    await bucket.reset()
+    await bucket.put(**files)
+    await bucket.run.record_requests()
+    return bucket
+
+
 @contextmanager
-def _hf_buckets_fake(shape: str, data: bytes) -> Iterator[Fake]:
+def _hf_buckets_fake(shape: str, data: bytes, origin: str) -> Iterator[Fake]:
     key = KEYS[shape]
     prefix = PREFIX if shape == "prefixed" else None
     stored = (prefix or "") + key
     files = {stored: data}
-    config: dict[str, str] = {"bucket": "acme/bkt"}
     if prefix is not None:
         files[key] = DECOY
-        config["key_prefix"] = prefix
-    # One dict behind both entry points: the Hub serves it over HTTP and the
-    # opendal fake lists and writes it. The opendal fake refuses every read,
-    # so a stat or read that fell back to opendal fails here.
-    hub = FakeHub(repos={("buckets", "acme/bkt"): files})
-    with serve(hub):
-        vfs = build_vfs("hf_buckets", {**config, "endpoint": hub.url})
-        assert vfs.accessor.config.key_prefix == prefix
-        reach: list[str] = []
-        op = FakeAsyncOperator(
-            files=files, root=vfs.accessor._root() or "", reach=reach
-        )
-        vfs.accessor.operator = lambda: op
+    # A stat or read that fell back to opendal would answer the same
+    # bytes, so its reads are what the bucket's request list is watched
+    # for. The bucket runs on a loop of its own, as Dropbox's does.
+    reached: list[str] | None = None
 
-        def rewrite(new: bytes) -> None:
-            files[stored] = new
+    def reach() -> list[str]:
+        if reached is not None:
+            return reached
+        reads = thread.run(bucket.count("opendal_read"))
+        return ["read through opendal"] * reads
 
-        yield Fake(
-            vfs=vfs,
-            key=key,
-            fetches=lambda: hub.count("bucket_resolve"),
-            rewrite=rewrite,
-            reach=reach.copy,
-            read_mod=hf_buckets_read,
-            stream_mod=hf_buckets_stream,
-        )
+    thread = LoopThread()
+    try:
+        bucket = thread.run(_bucket_seeded(origin, files))
+        try:
+            vfs = build_vfs(
+                "hf_buckets",
+                bucket.fields(
+                    **({} if prefix is None else {"key_prefix": prefix})
+                ),
+            )
+            assert vfs.accessor.config.key_prefix == prefix
+            yield Fake(
+                vfs=vfs,
+                key=key,
+                fetches=lambda: thread.run(bucket.count("resolve")),
+                rewrite=lambda new: thread.run(bucket.write(stored, new)),
+                reach=reach,
+                read_mod=hf_buckets_read,
+                stream_mod=hf_buckets_stream,
+                item=lambda: thread.run(bucket.row(stored)),
+            )
+            reached = reach()
+        finally:
+            thread.run(bucket.close())
+    finally:
+        thread.close()
 
 
 @contextmanager
@@ -989,7 +1026,9 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "hf_buckets":
-        with _hf_buckets_fake(shape, data) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("hf_origin")
+        with _hf_buckets_fake(shape, data, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "github":
@@ -1017,7 +1056,9 @@ def _fake(
             yield fake
         return
     if HARNESSES[name] == "hf_models":
-        with _hf_fake(name, shape, data, monkeypatch) as fake:
+        assert request is not None, name
+        origin = request.getfixturevalue("hub_origin")
+        with _hf_fake(name, shape, data, monkeypatch, origin) as fake:
             yield fake
         return
     if HARNESSES[name] == "gridfs":
@@ -1753,14 +1794,16 @@ def test_the_contract_goes_red_on_a_backend_with_two_token_kinds(monkeypatch):
     assert refetched > 0
 
 
-def test_the_contract_goes_red_on_hf_stamping_another_kind(monkeypatch):
+def test_the_contract_goes_red_on_hf_stamping_another_kind(
+    monkeypatch, request
+):
     # hf forced to stamp the download's own ETag (the xet hash) while stat
     # reports the git oid: both tokens exist and differ, the mismatch the
     # verified stamp exists to prevent.
     def raw_etag(_entry, etag: str) -> str:
         return etag_value(etag)
 
-    with _fake("hf_models", "root", SEED, monkeypatch) as fake:
+    with _fake("hf_models", "root", SEED, monkeypatch, request) as fake:
         monkeypatch.setitem(vars(hf_read), "row_token", raw_etag)
         monkeypatch.setitem(vars(hf_stream), "row_token", raw_etag)
         virtual = "/m/" + fake.key
@@ -1830,7 +1873,7 @@ def test_the_contract_goes_red_on_msgraph_stamping_another_kind(
 
 
 def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
-    monkeypatch,
+    monkeypatch, request
 ):
     # hf_buckets forced to stamp a hash of the header rather than the token
     # stat reports: both exist and differ, so the entry must never be
@@ -1838,11 +1881,13 @@ def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
     def other_kind(raw: str) -> str:
         return hashlib.sha1(raw.encode()).hexdigest()
 
-    with _fake("hf_buckets", "root", SEED, monkeypatch) as fake:
+    with _fake("hf_buckets", "root", SEED, monkeypatch, request) as fake:
+        assert fake.item is not None
+        xet = fake.item()["xetHash"]
         monkeypatch.setitem(vars(hf_buckets_read), "read_token", other_kind)
         monkeypatch.setitem(vars(hf_buckets_stream), "read_token", other_kind)
         virtual = "/m/" + fake.key
-        served = f'"{xet_hash(SEED)}"'
+        served = f'"{xet}"'
 
         async def run():
             ws = _fresh_workspace(fake.vfs)
@@ -1867,7 +1912,7 @@ def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
         holds_read_token, fingerprint, fresh, refetched = asyncio.run(run())
 
     assert holds_read_token
-    assert fingerprint == xet_hash(SEED)
+    assert fingerprint == xet
     assert not fresh
     assert refetched == 1
 

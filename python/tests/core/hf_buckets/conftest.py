@@ -12,46 +12,42 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
-import pytest
 import pytest_asyncio
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from tests.fixtures.hf_buckets_opendal import (
-    BUCKET,
-    FakeAsyncOperator,
-    _FakeEntry,
-    _FakeMetadata,
-    make_accessor,
-)
-from tests.fixtures.hf_hub_api import FakeHub, serve
+from tests.fixtures.hf_bucket import OWN, HfBucket, bucket
 
-__all__ = [
-    "BUCKET",
-    "FakeAsyncOperator",
-    "_FakeEntry",
-    "_FakeMetadata",
-    "make_accessor",
-]
-
-
-@pytest.fixture
-def fake_hub() -> Iterator[FakeHub]:
-    with serve(FakeHub()) as hub:
-        yield hub
+__all__ = ["bucket"]
 
 
 @pytest_asyncio.fixture
 async def make_acc(
-    fake_hub: FakeHub,
-) -> AsyncIterator[Callable[..., HfBucketsAccessor]]:
-    # Each accessor owns an HTTP pool; close them on the loop that opened
-    # them, so no session outlives its test.
+    bucket: HfBucket,
+) -> AsyncIterator[Callable[..., Awaitable[HfBucketsAccessor]]]:
+    """An accessor on the test's bucket after another client wrote
+    ``files`` to it, the requests recorded from then on.
+
+    Each accessor owns an HTTP pool; close them on the loop that opened
+    them, so no session outlives its test.
+
+    Args:
+        bucket (HfBucket): the test's bucket.
+    """
     made: list[HfBucketsAccessor] = []
 
-    def build(*args, **kwargs) -> HfBucketsAccessor:
-        acc = make_accessor(*args, hub=fake_hub, **kwargs)
+    async def build(
+        files: dict[str, bytes] | None = None,
+        *,
+        key_prefix: str | None = None,
+        token: Any = OWN,
+    ) -> HfBucketsAccessor:
+        for key, data in (files or {}).items():
+            await bucket.write(key, data)
+        await bucket.run.record_requests()
+        acc = bucket.accessor(key_prefix, token)
         made.append(acc)
         return acc
 

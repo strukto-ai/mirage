@@ -125,6 +125,21 @@ async function main(): Promise<void> {
     await op.write('a.txt', Buffer.from('abc'))
     await op.write('d/x.txt', Buffer.from('x'))
 
+    // An untyped JSON body reads as a form naming no paths, which the Hub
+    // refuses with 400 (measured 2026-09-25) rather than reporting every path
+    // missing.
+    const untyped = await fetch(`${fake.endpoint}/api/buckets/${BUCKET}/paths-info`, {
+      method: 'POST',
+      headers: AUTH,
+      body: JSON.stringify({ paths: ['a.txt'] }),
+    })
+    const refusal = (await untyped.json()) as { error?: string }
+    check(
+      'an untyped paths-info body is 400 Invalid input',
+      untyped.status === 400 && refusal.error === '✖ Invalid input\n  → at paths',
+      `${String(untyped.status)} ${JSON.stringify(refusal)}`,
+    )
+
     const rows = await pathsInfo(fake.endpoint, ['a.txt', '/a.txt', 'd', 'd/'])
     check('only the exact file path answers a row', rows.length === 1, JSON.stringify(rows))
     const row = rows[0] ?? {}

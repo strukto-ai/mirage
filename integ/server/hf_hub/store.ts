@@ -29,8 +29,8 @@ const REPO =
   'trendingScore, gated, seq FROM HfRepo'
 const REF = 'SELECT tenant, repo, refType, name, sha, message FROM HfRef'
 const BLOB =
-  'SELECT tenant, repo, sha, path, content, oid, lfsOid, pointerSize, lastCommit, lastModified, ' +
-  'seq FROM HfBlob'
+  'SELECT tenant, repo, sha, path, content, oid, lfsOid, pointerSize, xetHash, lastCommit, ' +
+  'lastModified, seq FROM HfBlob'
 
 interface CommitRow {
   sha: string
@@ -246,6 +246,17 @@ export async function blobsAt(db: Db, tenant: string, repo: string, sha: string)
   )
 }
 
+/** The content stored on Xet under `hash` in the account, null when none is. */
+export async function xetContent(db: Db, tenant: string, hash: string): Promise<Uint8Array | null> {
+  const row = one<{ content: Uint8Array }>(
+    db,
+    'SELECT content FROM HfBlob WHERE tenant = ? AND xetHash = ? LIMIT 1',
+    tenant,
+    hash,
+  )
+  return row === null ? null : row.content
+}
+
 export async function blobAt(
   db: Db,
   tenant: string,
@@ -380,6 +391,7 @@ export async function commitChanges(
       oid: gitOid(content),
       lfsOid: '',
       pointerSize: 0,
+      xetHash: '',
       lastCommit: sha,
       lastModified: now,
       seq: minter.next('blob'),
@@ -389,7 +401,7 @@ export async function commitChanges(
     exec(
       db,
       'INSERT INTO HfBlob (tenant, repo, sha, path, content, oid, lfsOid, pointerSize, ' +
-        `lastCommit, lastModified, seq) VALUES (?, ?, ?, ?, ${BYTES}, ?, ?, ?, ?, ?, ?)`,
+        `xetHash, lastCommit, lastModified, seq) VALUES (?, ?, ?, ?, ${BYTES}, ?, ?, ?, ?, ?, ?, ?)`,
       tenant,
       repo,
       sha,
@@ -398,6 +410,7 @@ export async function commitChanges(
       blob.oid,
       blob.lfsOid,
       blob.pointerSize,
+      blob.xetHash,
       blob.lastCommit,
       blob.lastModified,
       blob.seq,

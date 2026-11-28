@@ -18,7 +18,7 @@ from mirage.core.hf_buckets.read import read
 from mirage.core.hf_hub.client import HfHubError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
-from tests.fixtures.hf_hub_api import NO_ETAG, xet_hash
+from tests.fixtures.hf_bucket import CDN
 
 SEED = b"name,age\nalice,30\n"
 
@@ -34,28 +34,28 @@ async def _stamped(acc, path: str, **window) -> tuple[bytes, list]:
 
 @pytest.mark.asyncio
 async def test_read_bytes_whole_file(make_acc):
-    acc = make_acc({"greet.txt": b"hello world"})
+    acc = await make_acc({"greet.txt": b"hello world"})
     out = await read(acc, PathSpec.from_str_path("/greet.txt"))
     assert out == b"hello world"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_size_returns_slice(make_acc):
-    acc = make_acc({"x": b"abcdef"})
+    acc = await make_acc({"x": b"abcdef"})
     out = await read(acc, PathSpec.from_str_path("/x"), offset=2, size=4)
     assert out == b"cdef"
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_missing_raises_filenotfound(make_acc):
-    acc = make_acc({})
+    acc = await make_acc({})
     with pytest.raises(FileNotFoundError):
         await read(acc, PathSpec.from_str_path("/nope"))
 
 
 @pytest.mark.asyncio
 async def test_read_bytes_offset_only(make_acc):
-    acc = make_acc({"x": b"abcdef"})
+    acc = await make_acc({"x": b"abcdef"})
     out = await read(acc, PathSpec.from_str_path("/x"), offset=3)
     assert out == b"def"
 
@@ -63,7 +63,7 @@ async def test_read_bytes_offset_only(make_acc):
 @pytest.mark.asyncio
 async def test_read_records_the_virtual_path(make_acc):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
-    acc = make_acc({"m/k.txt": b"hello"})
+    acc = await make_acc({"m/k.txt": b"hello"})
     spec = PathSpec(
         virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
     )
@@ -81,20 +81,21 @@ async def test_read_records_the_virtual_path(make_acc):
     "window,expected", [({}, SEED), ({"offset": 5, "size": 3}, SEED[5:8])]
 )
 async def test_a_read_stamps_the_download_etag(
-    make_acc, fake_hub, window, expected
+    make_acc, bucket, window, expected
 ):
-    acc = make_acc({"a.txt": SEED})
-    acc._fake.reach = []
+    acc = await make_acc({"a.txt": SEED})
+    row = await bucket.row("a.txt")
+    await bucket.run.record_requests()
     out, stamps = await _stamped(acc, "/a.txt", **window)
     assert out == expected
     # The strong ETag the bytes came with is the xet hash stat reports, for
     # a ranged 206 as for a whole read (measured 2026-09-25).
-    assert stamps == [xet_hash(SEED)]
+    assert stamps == [row["xetHash"]]
     assert (
-        fake_hub.count("bucket_resolve"),
-        fake_hub.count("bucket_paths_info"),
-    ) == (1, 0)
-    assert acc._fake.reach == []
+        await bucket.count("resolve"),
+        await bucket.count("paths_info"),
+        await bucket.count("opendal_read"),
+    ) == (1, 0, 0)
 
 
 @pytest.mark.asyncio
@@ -102,19 +103,21 @@ async def test_a_read_stamps_the_download_etag(
     "served,stamp",
     [
         ('"other"', "other"),
-        (f'W/"{xet_hash(SEED)}"', None),
+        ("weak", None),
         ('""', None),
-        (NO_ETAG, None),
+        (None, None),
     ],
 )
 async def test_the_stamp_is_the_responses_own_strong_etag(
-    make_acc, fake_hub, served, stamp
+    make_acc, bucket, served, stamp
 ):
     # "other" proves the token rides the read itself rather than a second
     # request; a weak validator does not vouch for bytes, and an empty or
     # missing one stamps nothing rather than "".
-    fake_hub.etags["a.txt"] = served
-    acc = make_acc({"a.txt": SEED})
+    acc = await make_acc({"a.txt": SEED})
+    if served == "weak":
+        served = f'W/"{(await bucket.row("a.txt"))["xetHash"]}"'
+    await bucket.serve_etag(SEED, served)
     _, stamps = await _stamped(acc, "/a.txt")
     assert stamps == [stamp]
 
@@ -131,12 +134,12 @@ async def test_the_stamp_is_the_responses_own_strong_etag(
     ],
 )
 async def test_only_a_missing_entry_is_absent(
-    make_acc, fake_hub, status, code, raised
+    make_acc, bucket, status, code, raised
 ):
     # A 404 without EntryNotFound (a CDN or bucket-level one) must not read
     # as a deleted file: reconcile would drop the overlay for it.
-    acc = make_acc({"a.txt": SEED})
-    fake_hub.fail["bucket_resolve"] = (status, code)
+    acc = await make_acc({"a.txt": SEED})
+    await bucket.refuse("resolve", status, code)
     with pytest.raises(raised) as info:
         await read(acc, PathSpec.from_str_path("/a.txt"))
     # The raw error must not be an OSError either: every file tool reads
@@ -150,56 +153,59 @@ async def test_only_a_missing_entry_is_absent(
 
 @pytest.mark.asyncio
 async def test_the_mount_root_is_a_directory_even_under_a_prefix(
-    make_acc, fake_hub
+    make_acc, bucket
 ):
     # The prefix stem is itself a readable file; a read of the mount root
     # must not serve it.
-    acc = make_acc({"pfx": b"stem", "pfx/a.txt": SEED}, key_prefix="pfx/")
+    acc = await make_acc(
+        {"pfx": b"stem", "pfx/a.txt": SEED}, key_prefix="pfx/"
+    )
     with pytest.raises(IsADirectoryError):
         await read(acc, PathSpec.from_str_path("/"))
-    assert fake_hub.count("bucket_resolve") == 0
+    assert await bucket.count("resolve") == 0
 
 
 @pytest.mark.asyncio
 async def test_a_directory_key_read_directly_is_absent(make_acc):
     # resolve on a directory key answers 404 EntryNotFound (measured
     # 2026-09-25).
-    acc = make_acc({"d/x.txt": b"x"})
+    acc = await make_acc({"d/x.txt": b"x"})
     with pytest.raises(FileNotFoundError):
         await read(acc, PathSpec.from_str_path("/d"))
 
 
 @pytest.mark.asyncio
-async def test_a_window_past_eof_is_empty_and_stamps_nothing(
-    make_acc, fake_hub
-):
-    acc = make_acc({"a.txt": b"abc"})
+async def test_a_window_past_eof_is_empty_and_stamps_nothing(make_acc, bucket):
+    acc = await make_acc({"a.txt": b"abc"})
+    await bucket.run.record_requests("range")
     out, stamps = await _stamped(acc, "/a.txt", offset=99, size=5)
     assert (out, stamps) == (b"", [None])
     # The Hub answers 416 here (measured 2026-09-25); the fold is the
     # read's own, since a caller reading the range directly has no other.
-    assert ("bucket_cdn", 416) in fake_hub.statuses
+    assert await bucket.run.headers("GET", CDN) == [{"range": "bytes=99-103"}]
     short, _ = await _stamped(acc, "/a.txt", offset=0, size=100)
     assert short == b"abc"
 
 
 @pytest.mark.asyncio
-async def test_a_prefixed_read_serves_the_prefixed_object(make_acc):
-    acc = make_acc({"pfx/a.txt": SEED, "a.txt": b"decoy"}, key_prefix="pfx/")
+async def test_a_prefixed_read_serves_the_prefixed_object(make_acc, bucket):
+    acc = await make_acc(
+        {"pfx/a.txt": SEED, "a.txt": b"decoy"}, key_prefix="pfx/"
+    )
     assert await read(acc, PathSpec.from_str_path("/a.txt")) == SEED
     assert (
         await read(acc, PathSpec.from_str_path("/a.txt"), offset=5, size=3)
         == SEED[5:8]
     )
     # A write through opendal lands where an HTTP read looks.
-    await acc._fake.write("b.txt", b"written")
-    assert acc._fake.files["pfx/b.txt"] == b"written"
+    await acc.operator().write("b.txt", b"written")
+    assert (await bucket.files())["pfx/b.txt"] == b"written"
     assert await read(acc, PathSpec.from_str_path("/b.txt")) == b"written"
 
 
 @pytest.mark.asyncio
 async def test_a_name_that_needs_encoding_reads_whole(make_acc):
-    acc = make_acc({"dir/Inkling_o (1)#.png": SEED})
+    acc = await make_acc({"dir/Inkling_o (1)#.png": SEED})
     assert (
         await read(acc, PathSpec.from_str_path("/dir/Inkling_o (1)#.png"))
         == SEED
@@ -208,17 +214,17 @@ async def test_a_name_that_needs_encoding_reads_whole(make_acc):
 
 @pytest.mark.asyncio
 async def test_a_zero_length_window_is_empty_but_still_checks_the_file(
-    make_acc, fake_hub
+    make_acc, bucket
 ):
     # The VFS range read reaches here with no factory short-circuit, and
     # a zero-length Range header is not one the client can build; the read
     # still has to say whether the file is there, as opendal's open did.
-    acc = make_acc({"a.txt": SEED})
+    acc = await make_acc({"a.txt": SEED})
     assert (
         await read(acc, PathSpec.from_str_path("/a.txt"), offset=3, size=0)
         == b""
     )
-    assert fake_hub.count("bucket_resolve") == 1
+    assert await bucket.count("resolve") == 1
     with pytest.raises(FileNotFoundError):
         await read(
             acc, PathSpec.from_str_path("/missing.txt"), offset=0, size=0

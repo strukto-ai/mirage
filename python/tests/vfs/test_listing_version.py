@@ -33,8 +33,7 @@ from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from mirage.workspace.reconcile import Reconciler
 from tests.core.github.conftest import TOKEN, GitHubRepo
-from tests.fixtures.hf_hub_api import FakeHub
-from tests.fixtures.hf_hub_api import serve as serve_hub
+from tests.fixtures.hub_repo import HubRepo, made_repo
 from tests.fixtures.kit_fake import LoopThread
 
 disk_readdir = importlib.import_module("mirage.core.disk.readdir")
@@ -122,6 +121,10 @@ async def _github(request: pytest.FixtureRequest) -> AsyncIterator[Harness]:
         thread.close()
 
 
+async def _hub_counts(hub: HubRepo) -> tuple[int, int]:
+    return (await hub.count("revision"), await hub.count("tree"))
+
+
 def _hf(
     name: str, segment: str
 ) -> Callable[[pytest.FixtureRequest], AsyncIterator[Harness]]:
@@ -129,35 +132,40 @@ def _hf(
     async def harness(
         request: pytest.FixtureRequest,
     ) -> AsyncIterator[Harness]:
-        repo = (segment, "acme/widget")
-        hub = FakeHub(
-            repos={repo: {"docs/sub/a.txt": b"a\n", "top.txt": b"t\n"}}
-        )
-        with serve_hub(hub):
-            vfs = build_vfs(
-                name, {"repo_id": "acme/widget", "endpoint": hub.url}
-            )
-            ws = Workspace(
-                {
-                    "/m": Mount(
-                        vfs=vfs,
-                        mode=MountMode.READ,
-                        read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
-                    )
-                }
-            )
+        # The repository runs on a loop of its own, as GitHub's does.
+        origin = request.getfixturevalue("hub_origin")
+        thread = LoopThread()
+        try:
+            hub = thread.run(made_repo(origin, segment))
             try:
-                yield Harness(
-                    ws=ws,
-                    key="/m",
-                    nested="/m/docs/sub",
-                    counts=lambda: (hub.count("revision"), hub.count("tree")),
-                    change=lambda: hub.repos[repo].__setitem__(
-                        "docs/new.txt", b"n\n"
-                    ),
+                thread.run(
+                    hub.commit({"docs/sub/a.txt": b"a\n", "top.txt": b"t\n"})
                 )
+                ws = Workspace(
+                    {
+                        "/m": Mount(
+                            vfs=build_vfs(name, hub.config()),
+                            mode=MountMode.READ,
+                            read=ReadSpec(policy=ReadPolicy.FRESH, ttl=600),
+                        )
+                    }
+                )
+                try:
+                    yield Harness(
+                        ws=ws,
+                        key="/m",
+                        nested="/m/docs/sub",
+                        counts=lambda: thread.run(_hub_counts(hub)),
+                        change=lambda: thread.run(
+                            hub.commit({"docs/new.txt": b"n\n"})
+                        ),
+                    )
+                finally:
+                    await ws.close()
             finally:
-                await ws.close()
+                thread.run(hub.run.close())
+        finally:
+            thread.close()
 
     return harness
 

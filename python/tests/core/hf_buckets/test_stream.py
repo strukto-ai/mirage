@@ -18,14 +18,13 @@ from mirage.core.hf_buckets.stream import read_stream
 from mirage.core.hf_hub.client import HfHubError
 from mirage.observe.context import RecordingScope, recording_active
 from mirage.types import PathSpec
-from tests.fixtures.hf_hub_api import NO_ETAG, xet_hash
 
 BIG = (b"x" * 1023 + b"\n") * 300
 
 
 @pytest.mark.asyncio
 async def test_read_stream_yields_chunks(make_acc):
-    acc = make_acc({"x": b"abcdefgh"})
+    acc = await make_acc({"x": b"abcdefgh"})
     chunks = []
     async for c in read_stream(
         acc, PathSpec.from_str_path("/x"), chunk_size=3
@@ -37,7 +36,7 @@ async def test_read_stream_yields_chunks(make_acc):
 
 @pytest.mark.asyncio
 async def test_read_stream_handles_empty_file(make_acc):
-    acc = make_acc({"empty": b""})
+    acc = await make_acc({"empty": b""})
     chunks = [
         c async for c in read_stream(acc, PathSpec.from_str_path("/empty"))
     ]
@@ -47,7 +46,7 @@ async def test_read_stream_handles_empty_file(make_acc):
 @pytest.mark.asyncio
 async def test_stream_records_the_virtual_path(make_acc):
     # A key named like its mount: neither m/k.txt nor /m/k.txt is virtual.
-    acc = make_acc({"m/k.txt": b"hello"})
+    acc = await make_acc({"m/k.txt": b"hello"})
     spec = PathSpec(
         virtual="/m/m/k.txt", directory="/m/m/", vfs_path="m/k.txt"
     )
@@ -61,9 +60,10 @@ async def test_stream_records_the_virtual_path(make_acc):
 
 
 @pytest.mark.asyncio
-async def test_a_stream_is_stamped_before_its_first_chunk(make_acc):
-    acc = make_acc({"big.bin": BIG})
-    acc._fake.reach = []
+async def test_a_stream_is_stamped_before_its_first_chunk(make_acc, bucket):
+    acc = await make_acc({"big.bin": BIG})
+    row = await bucket.row("big.bin")
+    await bucket.run.record_requests()
     scope = RecordingScope()
     try:
         chunks = read_stream(
@@ -72,17 +72,18 @@ async def test_a_stream_is_stamped_before_its_first_chunk(make_acc):
         first = await anext(chunks)
         # Stamped while suspended at the first yield: a consumer that stops
         # here (head -c) still leaves a record that names the bytes.
-        assert [r.fingerprint for r in scope.records] == [xet_hash(BIG)]
+        assert [r.fingerprint for r in scope.records] == [row["xetHash"]]
         rest = [c async for c in chunks]
     finally:
         scope.close()
     assert first + b"".join(rest) == BIG
-    assert acc._fake.reach == []
+    assert await bucket.count("opendal_read") == 0
 
 
 @pytest.mark.asyncio
-async def test_an_empty_stream_is_still_stamped(make_acc):
-    acc = make_acc({"empty": b""})
+async def test_an_empty_stream_is_still_stamped(make_acc, bucket):
+    acc = await make_acc({"empty": b""})
+    row = await bucket.row("empty")
     scope = RecordingScope()
     try:
         assert [
@@ -90,12 +91,12 @@ async def test_an_empty_stream_is_still_stamped(make_acc):
         ] == []
     finally:
         scope.close()
-    assert [r.fingerprint for r in scope.records] == [xet_hash(b"")]
+    assert [r.fingerprint for r in scope.records] == [row["xetHash"]]
 
 
 @pytest.mark.asyncio
 async def test_a_stream_with_no_recorder_does_not_crash(make_acc):
-    acc = make_acc({"x": b"abc"})
+    acc = await make_acc({"x": b"abc"})
     assert not recording_active()
     assert (
         b"".join(
@@ -106,12 +107,12 @@ async def test_a_stream_with_no_recorder_does_not_crash(make_acc):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("served", ['W/"abc"', NO_ETAG])
+@pytest.mark.parametrize("served", ['W/"abc"', None])
 async def test_a_stream_without_a_strong_etag_stamps_nothing(
-    make_acc, fake_hub, served
+    make_acc, bucket, served
 ):
-    fake_hub.etags["x"] = served
-    acc = make_acc({"x": b"abc"})
+    acc = await make_acc({"x": b"abc"})
+    await bucket.serve_etag(b"abc", served)
     scope = RecordingScope()
     try:
         _ = [c async for c in read_stream(acc, PathSpec.from_str_path("/x"))]
@@ -132,10 +133,10 @@ async def test_a_stream_without_a_strong_etag_stamps_nothing(
     ],
 )
 async def test_a_stream_is_absent_only_for_a_missing_entry(
-    make_acc, fake_hub, status, code, raised
+    make_acc, bucket, status, code, raised
 ):
-    acc = make_acc({"a.txt": b"abc"})
-    fake_hub.fail["bucket_resolve"] = (status, code)
+    acc = await make_acc({"a.txt": b"abc"})
+    await bucket.refuse("resolve", status, code)
     with pytest.raises(raised) as info:
         _ = [
             c async for c in read_stream(acc, PathSpec.from_str_path("/a.txt"))
@@ -148,16 +149,18 @@ async def test_a_stream_is_absent_only_for_a_missing_entry(
 
 
 @pytest.mark.asyncio
-async def test_a_stream_of_the_mount_root_is_a_directory(make_acc, fake_hub):
-    acc = make_acc({"pfx": b"stem", "pfx/a.txt": b"a"}, key_prefix="pfx/")
+async def test_a_stream_of_the_mount_root_is_a_directory(make_acc, bucket):
+    acc = await make_acc(
+        {"pfx": b"stem", "pfx/a.txt": b"a"}, key_prefix="pfx/"
+    )
     with pytest.raises(IsADirectoryError):
         _ = [c async for c in read_stream(acc, PathSpec.from_str_path("/"))]
-    assert fake_hub.count("bucket_resolve") == 0
+    assert await bucket.count("resolve") == 0
 
 
 @pytest.mark.asyncio
 async def test_a_prefixed_stream_serves_the_prefixed_object(make_acc):
-    acc = make_acc(
+    acc = await make_acc(
         {"pfx/a.txt": b"seed", "a.txt": b"decoy"}, key_prefix="pfx/"
     )
     assert (

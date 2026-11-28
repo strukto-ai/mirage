@@ -22,19 +22,18 @@ from mirage.vfs.registry import build_vfs
 from mirage.workspace import Workspace
 from mirage.workspace.mount import Mount
 from tests.fixtures.expired_index import expired_on_arrival
-from tests.fixtures.hf_hub_api import FakeHub, serve
+from tests.fixtures.hub_repo import HubRepo
 
-REPO = ("models", "acme/widget")
-
-
-def _hub() -> FakeHub:
-    return FakeHub(repos={REPO: {"a.txt": b"alpha\n", "d/b.txt": b"bravo\n"}})
+FILES = {"a.txt": b"alpha\n", "d/b.txt": b"bravo\n"}
 
 
-def _vfs(hub: FakeHub):
-    return build_vfs(
-        "hf_models", {"repo_id": "acme/widget", "endpoint": hub.url}
-    )
+async def _seeded(hub: HubRepo) -> None:
+    await hub.commit(FILES)
+    await hub.run.record_requests()
+
+
+def _vfs(hub: HubRepo):
+    return build_vfs("hf_models", hub.config())
 
 
 def _ws(vfs, ttl: int = 600) -> Workspace:
@@ -53,70 +52,70 @@ async def _out(ws: Workspace, line: str, session_id: str | None = None):
 
 
 @pytest.mark.asyncio
-async def test_a_reader_arriving_mid_listing_waits_for_it(monkeypatch):
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub))
-        first = second = None
-        release = asyncio.Event()
-        try:
-            for session_id in ("s0", "s1"):
-                ws.create_session(session_id)
-            assert await _out(ws, "ls /m/d") == b"b.txt\n"
-            await ws._registry.mount_for("/m/d").index.invalidate()
-            walks = hub.count("tree")
-            walking = asyncio.Event()
-            original = readdir_module.fetch_tree
+async def test_a_reader_arriving_mid_listing_waits_for_it(hub, monkeypatch):
+    await _seeded(hub)
+    ws = _ws(_vfs(hub))
+    first = second = None
+    release = asyncio.Event()
+    try:
+        for session_id in ("s0", "s1"):
+            ws.create_session(session_id)
+        assert await _out(ws, "ls /m/d") == b"b.txt\n"
+        await ws._registry.mount_for("/m/d").index.invalidate()
+        walks = await hub.count("tree")
+        walking = asyncio.Event()
+        original = readdir_module.fetch_tree
 
-            async def gated(*args, **kwargs):
-                if not walking.is_set():
-                    walking.set()
-                    await release.wait()
-                return await original(*args, **kwargs)
+        async def gated(*args, **kwargs):
+            if not walking.is_set():
+                walking.set()
+                await release.wait()
+            return await original(*args, **kwargs)
 
-            monkeypatch.setattr(readdir_module, "fetch_tree", gated)
-            first = asyncio.ensure_future(_out(ws, "ls /m/d", "s0"))
-            await asyncio.wait_for(walking.wait(), 5)
-            second = asyncio.ensure_future(_out(ws, "ls /m/d", "s1"))
-            await asyncio.sleep(0.02)
-            waited = not second.done()
-            release.set()
-            outs = await asyncio.wait_for(asyncio.gather(first, second), 5)
-            assert hub.count("tree") - walks == 1
-            assert outs == [b"b.txt\n", b"b.txt\n"]
-            assert waited
-        finally:
-            release.set()
-            await asyncio.gather(
-                *(task for task in (first, second) if task),
-                return_exceptions=True,
-            )
-            await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_ls_answers_from_the_refill_it_just_made():
-    with serve(_hub()) as hub:
-        vfs = _vfs(hub)
-        store = expired_on_arrival()
-        ws = _ws(vfs)
-        ws.mount("/m").index_store = store
-        ws._registry._attach_manager(ws.mount("/m"))
-        try:
-            assert ws._registry.mount_for("/m/d").index_store is store
-            assert await _out(ws, "ls /m/d") == b"b.txt\n"
-        finally:
-            await ws.close()
+        monkeypatch.setattr(readdir_module, "fetch_tree", gated)
+        first = asyncio.ensure_future(_out(ws, "ls /m/d", "s0"))
+        await asyncio.wait_for(walking.wait(), 5)
+        second = asyncio.ensure_future(_out(ws, "ls /m/d", "s1"))
+        await asyncio.sleep(0.02)
+        waited = not second.done()
+        release.set()
+        outs = await asyncio.wait_for(asyncio.gather(first, second), 5)
+        assert await hub.count("tree") - walks == 1
+        assert outs == [b"b.txt\n", b"b.txt\n"]
+        assert waited
+    finally:
+        release.set()
+        await asyncio.gather(
+            *(task for task in (first, second) if task),
+            return_exceptions=True,
+        )
+        await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_listing_is_served_until_the_mount_ttl_then_refetched():
-    with serve(_hub()) as hub:
-        ws = _ws(_vfs(hub), ttl=1)
-        try:
-            assert await _out(ws, "ls /m/d") == b"b.txt\n"
-            hub.repos[REPO]["d/c.txt"] = b"charlie\n"
-            assert await _out(ws, "ls /m/d") == b"b.txt\n"
-            await asyncio.sleep(1.1)
-            assert await _out(ws, "ls /m/d") == b"b.txt\nc.txt\n"
-        finally:
-            await ws.close()
+async def test_ls_answers_from_the_refill_it_just_made(hub):
+    await _seeded(hub)
+    vfs = _vfs(hub)
+    store = expired_on_arrival()
+    ws = _ws(vfs)
+    ws.mount("/m").index_store = store
+    ws._registry._attach_manager(ws.mount("/m"))
+    try:
+        assert ws._registry.mount_for("/m/d").index_store is store
+        assert await _out(ws, "ls /m/d") == b"b.txt\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_listing_is_served_until_the_mount_ttl_then_refetched(hub):
+    await _seeded(hub)
+    ws = _ws(_vfs(hub), ttl=1)
+    try:
+        assert await _out(ws, "ls /m/d") == b"b.txt\n"
+        await hub.commit({"d/c.txt": b"charlie\n"})
+        assert await _out(ws, "ls /m/d") == b"b.txt\n"
+        await asyncio.sleep(1.1)
+        assert await _out(ws, "ls /m/d") == b"b.txt\nc.txt\n"
+    finally:
+        await ws.close()

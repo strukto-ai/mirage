@@ -267,6 +267,7 @@ class KitRun:
         path: str | None = None,
         query: str | None = None,
         delay_ms: int = 0,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Answer the next ``times`` requests to ``route`` with ``status``.
 
@@ -284,6 +285,7 @@ class KitRun:
                 for none; any if None.
             delay_ms (int): how long each request waits before it is
                 answered.
+            headers (dict[str, str] | None): headers the answer carries.
         """
         plan: dict[str, Any] = {
             "method": method,
@@ -293,6 +295,8 @@ class KitRun:
         }
         if status is not None:
             plan["status"] = status
+        if headers is not None:
+            plan["headers"] = headers
         if path is not None:
             plan["path"] = path
         if query is not None:
@@ -392,16 +396,22 @@ class KitRun:
             snapshot["db"] = base64.b64encode(db.read_bytes()).decode()
         await self.call("POST", f"{ops}/load", json=snapshot)
 
-    async def close(self) -> None:
-        """Drop the run and what it holds, and raise what a change raised."""
+    async def close(self, drop: bool = True) -> None:
+        """Drop the run and what it holds, and raise what a change raised.
+
+        Args:
+            drop (bool): drop the run; False keeps it, for a run other
+                tests share.
+        """
         for task in self.changes:
             if not task.done():
                 task.cancel()
         done = await asyncio.gather(*self.changes, return_exceptions=True)
-        async with self.http.delete(
-            f"{self.origin}/_kit/runs/{self.name}"
-        ) as resp:
-            assert resp.status == 204, await resp.text()
+        if drop:
+            async with self.http.delete(
+                f"{self.origin}/_kit/runs/{self.name}"
+            ) as resp:
+                assert resp.status == 204, await resp.text()
         await self.http.close()
         if self.failed:
             raise self.failed[0]
