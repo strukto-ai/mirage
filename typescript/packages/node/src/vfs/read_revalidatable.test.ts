@@ -46,14 +46,7 @@ import { fakeHfOperator } from '../../tests/core/hf_buckets/mock.ts'
 import { FakeHub, blobOid, serveHub, xetHash } from '../../tests/core/hf_hub/_test_util.ts'
 import { readdir as hfReaddir } from '@struktoai/mirage-core/core/hf_hub/readdir'
 import type { HfHubVFS } from '@struktoai/mirage-core/vfs/hf_hub/base'
-import {
-  DRIVE_ID,
-  DRIVE_NAME,
-  FakeGraph,
-  ME,
-  SITE_NAME,
-  serveGraph,
-} from '../../tests/core/msgraph/_test_util.ts'
+import { DRIVE_NAME, GraphDrive, ONEDRIVE } from '../../../core/tests/fixtures/graph_drive.ts'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames } from './registry.ts'
 import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
@@ -444,7 +437,7 @@ const GAPPS: Record<string, [string, (title: string, id: string, modified: strin
 // The drive each Graph backend addresses in the fake: OneDrive the signed-in
 // user's own, SharePoint one library of one site, mounted scoped so the keys
 // stay drive-relative (unscoped, `a.txt` would name a site).
-const GRAPH: Record<string, string> = { onedrive: ME, sharepoint: DRIVE_ID }
+const GRAPH: Record<string, string> = { onedrive: ONEDRIVE, sharepoint: DRIVE_NAME }
 
 const DEEP = 'a/b/c.txt'
 
@@ -555,6 +548,17 @@ interface Fake {
   // How many Drive listings the mount has asked, for a Google app, whose
   // listing is a Drive search.
   searched?: () => Promise<number>
+  // What the reads reached that they should not, where a kit fake's request
+  // list shows it; the in-process fakes push into H.reach as it happens.
+  reached?: () => Promise<string[]>
+  // What Graph answers for the key's item now, for a Graph row: a test reads
+  // its cTag and eTag there.
+  item?: () => Promise<Record<string, unknown>>
+}
+
+// Everything the reads reached that they should not, so far.
+async function reachOf(fake: Fake): Promise<string[]> {
+  return [...H.reach, ...((await fake.reached?.()) ?? [])]
 }
 
 // What a read of the fake's key answers once `data` is its content.
@@ -678,7 +682,6 @@ function md5Hex(data: Uint8Array): string {
 
 let s3: S3Mock
 let hubs: FakeHub[] = []
-let graphs: FakeGraph[] = []
 let runs: KitRun[] = []
 
 async function requestsTo(run: KitRun, [method, route]: [string, string]): Promise<number> {
@@ -860,24 +863,22 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
   const stored = (prefix ?? '') + key
   const drive = GRAPH[name]
   if (drive !== undefined) {
-    const files: Record<string, Uint8Array> = { [stored]: data }
-    if (prefix !== null) files[key] = DECOY
+    const graph = new GraphDrive(await serve('onedrive'), drive)
+    runs.push(graph.run)
+    await graph.reset()
+    await graph.write(stored, data)
+    if (prefix !== null) await graph.write(key, DECOY)
+    await graph.run.recordRequests()
+    const vfs = await buildVfs(
+      name,
+      graph.config(name, prefix === null ? {} : { key_prefix: prefix }),
+    )
+    expect(vfs.readRevalidatable).toBe(true)
+    const rewrite = (next: Uint8Array): Promise<void> => graph.write(stored, next)
     // A children listing is a walk no read or stat should make; the listed
     // shape's own `ls` is the one allowed.
-    const graph = await serveGraph(new FakeGraph({ [drive]: files }, H.reach))
-    graph.childrenAllowed = shape === 'listed' ? 1 : 0
-    graphs.push(graph)
-    const vfs = await buildVfs(name, {
-      access_token: 't',
-      graph_base_url: graph.url,
-      ...(name === 'sharepoint' ? { site: SITE_NAME, drive: DRIVE_NAME } : {}),
-      ...(prefix === null ? {} : { key_prefix: prefix }),
-    })
-    expect(vfs.readRevalidatable).toBe(true)
-    const before = graph.fetches()
-    const rewrite = (next: Uint8Array): void => {
-      graph.write(drive, stored, next)
-    }
+    const reached = (): Promise<string[]> => graph.reach(shape === 'listed' ? 1 : 0)
+    const item = (): Promise<Record<string, unknown>> => graph.itemAt(stored)
     if (name === 'onedrive') {
       const accessor = vfs.accessor as OneDriveAccessor
       expect(accessor.config.keyPrefix).toBe(prefix === null ? '' : 'pfx')
@@ -885,8 +886,10 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
         vfs,
         accessor,
         key,
-        fetches: () => graph.fetches() - before,
+        fetches: () => graph.fetches(),
         rewrite,
+        reached,
+        item,
         readBytes: (p) => ownReads(vfs).readBytes(p),
         readStream: (p) => ownReads(vfs).readStream(p),
         stat: (p) => ownReads(vfs).stat(p),
@@ -899,8 +902,10 @@ async function makeFake(name: string, shape: Shape, data: Uint8Array): Promise<F
       vfs,
       accessor,
       key,
-      fetches: () => graph.fetches() - before,
+      fetches: () => graph.fetches(),
       rewrite,
+      reached,
+      item,
       readBytes: (p) => ownReads(vfs).readBytes(p),
       readStream: (p) => ownReads(vfs).readStream(p),
       stat: (p) => ownReads(vfs).stat(p),
@@ -1303,8 +1308,6 @@ describe('the read-token contract', () => {
     vi.unstubAllGlobals()
     await Promise.all(hubs.map((hub) => hub.close()))
     hubs = []
-    await Promise.all(graphs.map((graph) => graph.close()))
-    graphs = []
     // Detached first, so a close that throws leaves the next test none.
     const closing = runs
     runs = []
@@ -1408,7 +1411,7 @@ describe('the read-token contract', () => {
       const ws = freshWorkspace(fake.vfs)
       try {
         await line(ws, `echo new | tee ${virtual}`)
-        const written = [...H.reach]
+        const written = await reachOf(fake)
         const before = await fake.fetches()
         expect(new TextDecoder().decode(await line(ws, `cat ${virtual}`))).toBe('new\n')
         expect((await fake.fetches()) - before).toBe(WRITE_EXCEPTIONS[family] ?? 0)
@@ -1416,7 +1419,7 @@ describe('the read-token contract', () => {
         // folder, a dispatcher the read rows refuse; the read itself reaches nothing.
         const statMiss = family === 'gridfs' && target === 'new'
         expect(written).toEqual(statMiss ? ['filesColl'] : [])
-        expect(H.reach).toEqual(written)
+        expect(await reachOf(fake)).toEqual(written)
       } finally {
         await ws.close()
       }
@@ -1482,7 +1485,7 @@ describe('the read-token contract', () => {
         const second = await readRow(ws, row, virtual)
         expect(await fake.fetches()).toBe(renders ? 2 : 1)
         expect(second).toEqual(await expectedOf(fake, data))
-        expect(H.reach).toEqual([])
+        expect(await reachOf(fake)).toEqual([])
       } finally {
         await ws.close()
       }
@@ -1501,7 +1504,7 @@ describe('the read-token contract', () => {
         expect(await ws.cache.get(virtual)).toBeNull()
         expect(await line(ws, `cat ${virtual}`)).toEqual(BIG)
         expect(await fake.fetches()).toBe(2)
-        expect(H.reach).toEqual([])
+        expect(await reachOf(fake)).toEqual([])
       } finally {
         await ws.close()
       }
@@ -1563,7 +1566,7 @@ describe('the read-token contract', () => {
         before = await fake.fetches()
         expect(await line(ws, `cat ${virtual}`)).toEqual(await expectedOf(fake, CHANGED))
         expect((await fake.fetches()) - before).toBe(0)
-        expect(H.reach).toEqual([])
+        expect(await reachOf(fake)).toEqual([])
       } finally {
         await ws.close()
       }
@@ -1688,14 +1691,18 @@ describe('the read-token contract', () => {
     // contract must call the entry stale. A bytes read, because the override
     // replaces only what `record` stamps.
     const fake = await makeFake('onedrive', 'root', SEED)
-    H.stampOverride = 'e1'
+    const item = await fake.item?.()
+    if (item === undefined) throw new Error('a Graph row answers its item')
+    const [ctag, etag] = [String(item.cTag), String(item.eTag)]
+    expect(ctag).not.toBe(etag)
+    H.stampOverride = etag
     const virtual = '/m/a.txt'
     const ws = freshWorkspace(fake.vfs)
     try {
       await ws.vfs.read(virtual)
-      expect(await ws.cache.isFresh(virtual, 'e1')).toBe(true)
+      expect(await ws.cache.isFresh(virtual, etag)).toBe(true)
       const stat = await reconcileStat(ws, fake, virtual)
-      expect(stat.fingerprint).toBe('c1')
+      expect(stat.fingerprint).toBe(ctag)
       expect(await ws.cache.isFresh(virtual, stat.fingerprint ?? '')).toBe(false)
     } finally {
       await ws.close()

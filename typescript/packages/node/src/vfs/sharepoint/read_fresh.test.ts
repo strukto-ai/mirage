@@ -22,14 +22,9 @@ import {
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { afterEach, describe, expect, it } from 'vitest'
-import {
-  DRIVE_ID,
-  DRIVE_NAME,
-  FakeGraph,
-  SITE_NAME,
-  serveGraph,
-} from '../../../tests/core/msgraph/_test_util.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { DRIVE_NAME, GraphDrive, SITE_NAME } from '../../../../core/tests/fixtures/graph_drive.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
 
@@ -40,26 +35,32 @@ const NEW = ENC.encode('version two, longer\n')
 const SCOPED = '/m/a.txt'
 const UNSCOPED = `/m/${SITE_NAME}/${DRIVE_NAME}/a.txt`
 
-let graphs: FakeGraph[] = []
+let origin = ''
+let drives: GraphDrive[] = []
 
-afterEach(async () => {
-  await Promise.all(graphs.map((graph) => graph.close()))
-  graphs = []
+beforeAll(async () => {
+  origin = await serve('onedrive')
 })
 
-async function graphOf(data: Uint8Array, childrenAllowed = 0): Promise<FakeGraph> {
-  const graph = new FakeGraph({ [DRIVE_ID]: { 'a.txt': data } })
-  graph.childrenAllowed = childrenAllowed
-  graphs.push(graph)
-  return serveGraph(graph)
+afterEach(async () => {
+  await Promise.all(drives.map((drive) => drive.run.close()))
+  drives = []
+})
+
+// A library of its own holding `data` at a.txt, its requests recorded from
+// after it.
+async function driveOf(data: Uint8Array): Promise<GraphDrive> {
+  const drive = new GraphDrive(origin, DRIVE_NAME)
+  drives.push(drive)
+  await drive.reset()
+  await drive.write('a.txt', data)
+  await drive.run.recordRequests()
+  return drive
 }
 
-function vfsOf(graph: FakeGraph, scoped = true): Promise<BaseVFS> {
-  return buildVfs('sharepoint', {
-    access_token: 't',
-    graph_base_url: graph.url,
-    ...(scoped ? { site: SITE_NAME, drive: DRIVE_NAME } : {}),
-  })
+function vfsOf(drive: GraphDrive, scoped = true): Promise<BaseVFS> {
+  if (scoped) return buildVfs('sharepoint', drive.config('sharepoint'))
+  return buildVfs('sharepoint', { access_token: drive.token, graph_base_url: drive.run.url })
 }
 
 function ws(vfs: BaseVFS): Workspace {
@@ -93,13 +94,13 @@ describe('sharepoint under read: fresh', () => {
   it.each([false, true])(
     'keeps hidden sites inaccessible by internal name (warm=%s)',
     async (warm) => {
-      const graph = await graphOf(OLD)
-      const w = ws(await vfsOf(graph, false))
+      const drive = await driveOf(OLD)
+      const w = ws(await vfsOf(drive, false))
       try {
         if (warm) expect(await out(w, `cat ${UNSCOPED}`)).toBe(DEC.decode(OLD))
         w.createSession('hidden', { profile: { paths: { hide: [`/m/${SITE_NAME}`] } } })
-        const token = graph.ctag(DRIVE_ID, 'a.txt')
-        graph.log.length = 0
+        const token = await drive.ctag('a.txt')
+        await drive.run.recordRequests()
         const alias = `/m/${SITE_NAME.toLowerCase()}/${DRIVE_NAME}`
         for (const command of [`cat ${alias}/a.txt`, `echo changed > ${alias}/a.txt`]) {
           const result = await w.shell(command, { sessionId: 'hidden' })
@@ -108,10 +109,10 @@ describe('sharepoint under read: fresh', () => {
         }
         const listing = await w.shell(`ls ${alias}`, { sessionId: 'hidden' })
         expect(DEC.decode(listing.stdout)).toBe('')
-        expect(graph.ctag(DRIVE_ID, 'a.txt')).toBe(token)
-        expect(graph.fetches()).toBe(0)
-        expect(graph.count('children')).toBe(0)
-        expect(graph.count('drives')).toBe(0)
+        expect(await drive.ctag('a.txt')).toBe(token)
+        expect(await drive.fetches()).toBe(0)
+        expect(await drive.count('children')).toBe(0)
+        expect(await drive.count('drives')).toBe(0)
         expect(await out(w, `cat ${UNSCOPED}`)).toBe(DEC.decode(OLD))
       } finally {
         await w.close()
@@ -122,22 +123,21 @@ describe('sharepoint under read: fresh', () => {
   it.each(ROWS)(
     'refetches a write between the token and the bytes (%s)',
     async (_id, scoped, template) => {
-      const graph = await graphOf(OLD)
-      const w = ws(await vfsOf(graph, scoped))
+      const drive = await driveOf(OLD)
+      const first = await drive.ctag('a.txt')
+      const w = ws(await vfsOf(drive, scoped))
       const command = template.replace('{v}', scoped ? SCOPED : UNSCOPED)
       try {
         // The file changes after the bytes are taken and before they are sent,
         // so the read holds OLD while Graph already holds NEW. A token read
         // after the bytes would label OLD with NEW's cTag.
-        graph.onBytes(() => {
-          graph.write(DRIVE_ID, 'a.txt', NEW)
-        })
+        await drive.writeAfterTheBytes('a.txt', NEW)
         expect(await out(w, command)).toBe(DEC.decode(OLD))
-        expect(graph.hookFired).toBe(1)
-        const before = graph.fetches()
+        expect(await drive.ctag('a.txt')).not.toBe(first)
+        const before = await drive.fetches()
         expect(await out(w, command)).toBe(DEC.decode(NEW))
-        expect(graph.fetches() - before).toBe(1)
-        expect(graph.reach).toEqual([])
+        expect((await drive.fetches()) - before).toBe(1)
+        expect(await drive.reach()).toEqual([])
       } finally {
         await w.close()
       }
@@ -145,44 +145,44 @@ describe('sharepoint under read: fresh', () => {
   )
 
   it('a listed cTag never answers for a changed file', async () => {
-    const graph = await graphOf(OLD, 1)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf(OLD)
+    const first = await drive.ctag('a.txt')
+    const w = ws(await vfsOf(drive))
     try {
-      // The listing leaves c1 in the mount index. A probe that trusted it
-      // would match the c1 the cache holds and serve OLD.
+      // The listing leaves the first cTag in the mount index. A probe that
+      // trusted it would match the one the cache holds and serve OLD.
       await out(w, 'ls /m')
-      // The fixture held: the mount index answers a stat with c1 and no
-      // request of its own, so there is a stale row to trust.
+      // The fixture held: the mount index answers a stat with that cTag and
+      // no request of its own, so there is a stale row to trust.
       const mount = w.mount('/m')
       const index = mount.index
-      const items = graph.count('item')
+      const items = await drive.count('item')
       const listed = (await mount.callKeyed(
         'stat',
         new PathSpec({ virtual: '/m/a.txt', directory: '/m/', vfsPath: 'a.txt' }),
         [],
         { index },
       )) as FileStat
-      expect([listed.fingerprint, graph.count('item')]).toEqual(['c1', items])
+      expect([listed.fingerprint, await drive.count('item')]).toEqual([first, items])
       expect(await out(w, `cat ${SCOPED}`)).toBe(DEC.decode(OLD))
-      graph.write(DRIVE_ID, 'a.txt', NEW)
+      await drive.write('a.txt', NEW)
       expect(await out(w, `cat ${SCOPED}`)).toBe(DEC.decode(NEW))
-      expect([graph.count('children'), graph.reach]).toEqual([1, []])
+      expect([await drive.count('children'), await drive.reach(1)]).toEqual([1, []])
     } finally {
       await w.close()
     }
   })
 
   it('a metadata edit does not refetch', async () => {
-    const graph = await graphOf(OLD)
-    const w = ws(await vfsOf(graph))
+    const drive = await driveOf(OLD)
+    const w = ws(await vfsOf(drive))
     try {
       await out(w, `cat ${SCOPED}`)
       // A rename or a property edit moves the eTag and the stamp, never the
       // cTag, so the cached bytes are still current.
-      graph.touch(DRIVE_ID, 'a.txt')
-      const before = graph.fetches()
+      await drive.touch('a.txt')
       expect(await out(w, `cat ${SCOPED}`)).toBe(DEC.decode(OLD))
-      expect(graph.fetches() - before).toBe(0)
+      expect(await drive.fetches()).toBe(0)
     } finally {
       await w.close()
     }

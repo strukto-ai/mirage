@@ -17,29 +17,27 @@ import pytest
 from mirage.core.sharepoint.events import build_delta_hook
 from mirage.types import FileChangeKind, PathSpec
 from mirage.vfs.registry import build_vfs
-from tests.fixtures.msgraph_api import (
-    DRIVE_ID,
-    DRIVE_NAME,
-    SITE_NAME,
-    FakeGraph,
-    serve,
-)
+from tests.fixtures.graph_drive import DRIVE_NAME, SITE_NAME
 
 
 @pytest.mark.asyncio
-async def test_an_unscoped_root_reads_every_library():
-    with serve(FakeGraph(drives={DRIVE_ID: {"a.txt": b"one\n"}})) as graph:
-        accessor = build_vfs(
-            "sharepoint", {"access_token": "t", "graph_base_url": graph.url}
-        ).accessor
-        hook = build_delta_hook(accessor)
-        root = PathSpec.from_str_path("/")
-        try:
-            baseline = await hook.pull(root, None)
-            graph.write(DRIVE_ID, "a.txt", b"two\n")
-            changed = await hook.pull(root, baseline.checkpoint)
-        finally:
-            await accessor.close()
+async def test_an_unscoped_root_reads_every_library(sharepoint):
+    await sharepoint.write("a.txt", b"one\n")
+    accessor = build_vfs(
+        "sharepoint",
+        {
+            "access_token": sharepoint.token,
+            "graph_base_url": sharepoint.run.url,
+        },
+    ).accessor
+    hook = build_delta_hook(accessor)
+    root = PathSpec.from_str_path("/")
+    try:
+        baseline = await hook.pull(root, None)
+        await sharepoint.write("a.txt", b"two\n")
+        changed = await hook.pull(root, baseline.checkpoint)
+    finally:
+        await accessor.close()
     assert baseline.changes == ()
     assert [(e.kind, e.path.virtual) for e in changed.changes] == [
         (FileChangeKind.UPDATE, f"/{SITE_NAME}/{DRIVE_NAME}/a.txt")

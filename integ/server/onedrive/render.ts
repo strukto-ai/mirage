@@ -17,6 +17,7 @@ import { baseName, dirName, joinPath, norm } from './paths.ts'
 import {
   childNames,
   dirAt,
+  dirStamps,
   driveIndex,
   fileAt,
   fileId,
@@ -25,7 +26,7 @@ import {
   versionsFor,
   versionsOf,
 } from './store.ts'
-import type { Db, FileRow } from './store.ts'
+import type { Db, DirStamps, FileRow } from './store.ts'
 
 // A type rather than an interface: it goes into a JsonValue, whose index
 // signature an interface does not satisfy.
@@ -64,8 +65,10 @@ function fileJson(tenant: string, origin: string, row: FileMeta, versions: Versi
     file: { mimeType: 'application/octet-stream' },
     // Pre-authenticated, like the vendor's own: it is fetched with no bearer,
     // so the account is a path segment rather than something the handler on
-    // the other end can read off a header.
-    '@microsoft.graph.downloadUrl': `${origin}/download/${encodeURIComponent(tenant)}/${row.drive}/${row.path}`,
+    // the other end can read off a header. The kit's `_tenant` names it too,
+    // so a test's request list, holds and answers see the download under the
+    // account that minted it.
+    '@microsoft.graph.downloadUrl': `${origin}/download/${encodeURIComponent(tenant)}/${row.drive}/${row.path}?_tenant=${encodeURIComponent(tenant)}`,
     versions,
   }
 }
@@ -76,7 +79,7 @@ function fileJson(tenant: string, origin: string, row: FileMeta, versions: Versi
 function folderJson(
   drive: string,
   p: string,
-  modified: string,
+  stamps: DirStamps,
   size: number,
   childCount: number,
 ): JsonValue {
@@ -84,7 +87,8 @@ function folderJson(
     id: folderId(drive, p),
     name: p === '' ? 'root' : baseName(p),
     size,
-    lastModifiedDateTime: modified,
+    createdDateTime: stamps.created,
+    lastModifiedDateTime: stamps.modified,
     folder: { childCount },
     ...(p === '' ? { root: {} } : { parentReference: parentOf(drive, p) }),
   }
@@ -100,16 +104,24 @@ export async function fileItem(
   return fileJson(tenant, origin, { ...row, size: row.content.length }, versions)
 }
 
+// The drive root has no folder row; it is older than anything a run
+// writes, so its times are the `root` stamp the caller names.
+function rootStamps(root: string): DirStamps {
+  return { created: root, modified: root }
+}
+
 export async function folderItem(
   db: Db,
   tenant: string,
   drive: string,
   path: string,
-  modified: string,
+  root: string,
 ): Promise<JsonValue> {
   const p = norm(path)
+  const stamps = p === '' ? rootStamps(root) : await dirStamps(db, tenant, drive, p)
+  if (stamps === null) throw new Error(`no folder at ${drive}:${p}`)
   const size = await folderSize(db, tenant, drive, p)
-  return folderJson(drive, p, modified, size, (await childNames(db, tenant, drive, p)).length)
+  return folderJson(drive, p, stamps, size, (await childNames(db, tenant, drive, p)).length)
 }
 
 export async function itemAt(
@@ -118,12 +130,12 @@ export async function itemAt(
   origin: string,
   drive: string,
   path: string,
-  modified: string,
+  root: string,
 ): Promise<JsonValue | null> {
   const p = norm(path)
   const file = await fileAt(db, tenant, drive, p)
   if (file !== null) return fileItem(db, tenant, origin, file)
-  if (await dirAt(db, tenant, drive, p)) return folderItem(db, tenant, drive, p, modified)
+  if (await dirAt(db, tenant, drive, p)) return folderItem(db, tenant, drive, p, root)
   return null
 }
 
@@ -133,7 +145,7 @@ export async function itemAt(
 // few hundred entries took a second and some 1,700 queries.
 interface Drive {
   files: Map<string, FileMeta>
-  dirs: Set<string>
+  dirs: Map<string, DirStamps>
   names: Map<string, Set<string>>
   sizes: Map<string, number>
 }
@@ -160,10 +172,10 @@ async function readDrive(db: Db, tenant: string, drive: string): Promise<Drive> 
       sizes.set(cur, (sizes.get(cur) ?? 0) + row.size)
     }
   }
-  const dirs = new Set<string>()
-  for (const path of index.dirs) {
-    dirs.add(path)
-    if (path !== '') name(path)
+  const dirs = new Map<string, DirStamps>()
+  for (const row of index.dirs) {
+    dirs.set(row.path, row)
+    if (row.path !== '') name(row.path)
   }
   return { files, dirs, names, sizes }
 }
@@ -172,8 +184,10 @@ function namesIn(d: Drive, dir: string): string[] {
   return [...(d.names.get(dir) ?? [])].sort()
 }
 
-function folderIn(d: Drive, drive: string, p: string, modified: string): JsonValue {
-  return folderJson(drive, p, modified, d.sizes.get(p) ?? 0, namesIn(d, p).length)
+function folderIn(d: Drive, drive: string, p: string, root: string): JsonValue {
+  const stamps = p === '' ? rootStamps(root) : d.dirs.get(p)
+  if (stamps === undefined) throw new Error(`no folder at ${drive}:${p}`)
+  return folderJson(drive, p, stamps, d.sizes.get(p) ?? 0, namesIn(d, p).length)
 }
 
 // The children of `dir` as itemAt renders each of them, in name order.
@@ -183,7 +197,7 @@ export async function childItems(
   origin: string,
   drive: string,
   dir: string,
-  modified: string,
+  root: string,
 ): Promise<JsonValue[]> {
   const p = norm(dir)
   const d = await readDrive(db, tenant, drive)
@@ -198,7 +212,7 @@ export async function childItems(
   for (const path of paths) {
     const file = d.files.get(path)
     if (file !== undefined) value.push(fileJson(tenant, origin, file, versions.get(path) ?? []))
-    else if (d.dirs.has(path)) value.push(folderIn(d, drive, path, modified))
+    else if (d.dirs.has(path)) value.push(folderIn(d, drive, path, root))
   }
   return value
 }
@@ -211,14 +225,14 @@ export async function scopeItems(
   origin: string,
   drive: string,
   scope: string,
-  modified: string,
+  root: string,
 ): Promise<JsonValue[]> {
   const inside = (path: string): boolean =>
     scope === '' || path === scope || path.startsWith(`${scope}/`)
   const d = await readDrive(db, tenant, drive)
-  const folders = new Set([scope, ...[...d.dirs].filter(inside)])
+  const folders = new Set([scope, ...[...d.dirs.keys()].filter(inside)])
   const value: JsonValue[] = []
-  for (const path of [...folders].sort()) value.push(folderIn(d, drive, path, modified))
+  for (const path of [...folders].sort()) value.push(folderIn(d, drive, path, root))
   const files = [...d.files.values()]
     .sort((a, b) => (a.path < b.path ? -1 : 1))
     .filter((row) => inside(row.path))

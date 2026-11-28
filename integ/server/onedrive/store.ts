@@ -132,13 +132,47 @@ export async function dirAt(db: Db, tenant: string, drive: string, path: string)
   )
 }
 
-function insertDir(ctx: Ctx0, drive: string, path: string): void {
+/** A folder's own times, ISO 8601 to the second. */
+export interface DirStamps {
+  created: string
+  modified: string
+}
+
+/**
+ * The times a folder row holds, or null when no folder is at `path`. The
+ * drive root has no row: it is older than anything in the run, so the caller
+ * names its times.
+ */
+export async function dirStamps(
+  db: Db,
+  tenant: string,
+  drive: string,
+  path: string,
+): Promise<DirStamps | null> {
+  return one<DirStamps>(
+    db,
+    'SELECT created, modified FROM GraphDir WHERE tenant = ? AND drive = ? AND path = ?',
+    tenant,
+    drive,
+    norm(path),
+  )
+}
+
+function madeNow(ctx: Ctx0): DirStamps {
+  const now = ctx.clock.nowIso(false)
+  return { created: now, modified: now }
+}
+
+// A new folder is made now; a moved one brings the times it had.
+function insertDir(ctx: Ctx0, drive: string, path: string, stamps: DirStamps = madeNow(ctx)): void {
   exec(
     ctx.db,
-    'INSERT INTO GraphDir (tenant, drive, path, seq) VALUES (?, ?, ?, ?)',
+    'INSERT INTO GraphDir (tenant, drive, path, created, modified, seq) VALUES (?, ?, ?, ?, ?, ?)',
     ctx.tenant,
     drive,
     path,
+    stamps.created,
+    stamps.modified,
     ctx.minter.next('dir'),
   )
 }
@@ -309,6 +343,10 @@ export async function writeFile(
   await ensureParents(ctx, drive, p)
   const body = enrich ? enriched(p, content) : content
   const tag = `${drive}-tag${String(ctx.minter.next('tag'))}`
+  // The vendor's cTag is never its eTag's string, even right after a write
+  // ("c:{id},n" beside "{id},n"), so a client that reads one for the other
+  // finds them unequal here too.
+  const ctag = `c:${tag}`
   const prior =
     one<{ n: number }>(
       ctx.db,
@@ -338,21 +376,21 @@ export async function writeFile(
       path: p,
       content: body,
       size: body.length,
-      ctag: tag,
+      ctag,
       etag: tag,
       modified: stamp,
       seq: created,
     }
     insertFile(ctx, row)
   } else {
-    row = { ...was, content: body, size: body.length, ctag: tag, etag: tag, modified: stamp }
+    row = { ...was, content: body, size: body.length, ctag, etag: tag, modified: stamp }
     exec(
       ctx.db,
       `UPDATE GraphFile SET content = ${BYTES}, size = ?, ctag = ?, etag = ?, modified = ? ` +
         'WHERE tenant = ? AND drive = ? AND path = ?',
       ...bytes(body),
       body.length,
-      tag,
+      ctag,
       tag,
       stamp,
       ctx.tenant,
@@ -508,11 +546,21 @@ async function moveVersions(ctx: Ctx0, drive: string, src: string, dest: string)
   }
 }
 
+// A folder a move brings to `path`, with the times it had there.
+async function placeDir(ctx: Ctx0, drive: string, path: string, stamps: DirStamps): Promise<void> {
+  await ensureParents(ctx, drive, path)
+  insertDir(ctx, drive, path, stamps)
+  await noteChange(ctx, drive, folderId(drive, path), path)
+}
+
 // A folder move relocates the folder row, every descendant row, and every
-// descendant's versions, so a rename does not silently drop history.
+// descendant's versions, so a rename does not silently drop history. The
+// moved folder itself is changed by the move and takes a new modified time;
+// what is inside it only changes path and keeps its own.
 export async function moveDir(ctx: Ctx0, drive: string, src: string, dest: string): Promise<void> {
   const tenant = ctx.tenant
   const prefix = `${src}/`
+  const was = await dirStamps(ctx.db, tenant, drive, src)
   exec(
     ctx.db,
     'DELETE FROM GraphDir WHERE tenant = ? AND drive = ? AND path = ?',
@@ -521,10 +569,12 @@ export async function moveDir(ctx: Ctx0, drive: string, src: string, dest: strin
     src,
   )
   await noteChange(ctx, drive, folderId(drive, src), src)
-  await addDir(ctx, drive, dest)
-  const dirs = all<{ path: string }>(
+  const moved =
+    was === null ? madeNow(ctx) : { created: was.created, modified: ctx.clock.nowIso(false) }
+  await placeDir(ctx, drive, dest, moved)
+  const dirs = all<{ path: string } & DirStamps>(
     ctx.db,
-    `SELECT path FROM ${under('GraphDir')}`,
+    `SELECT path, created, modified FROM ${under('GraphDir')} ORDER BY seq`,
     tenant,
     drive,
     like(prefix),
@@ -537,7 +587,7 @@ export async function moveDir(ctx: Ctx0, drive: string, src: string, dest: strin
       drive,
       row.path,
     )
-    await addDir(ctx, drive, `${dest}${row.path.slice(src.length)}`)
+    await placeDir(ctx, drive, `${dest}${row.path.slice(src.length)}`, row)
   }
   const files = all<FileRow>(
     ctx.db,
@@ -660,25 +710,25 @@ export async function driveFiles(db: Db, tenant: string, drive: string): Promise
   return all<FileRow>(db, `${FILE} WHERE tenant = ? AND drive = ?`, tenant, drive)
 }
 
-/** Every file's metadata in a drive, without its bytes, and every folder path. */
+/** Every file's metadata in a drive, without its bytes, and every folder with its times. */
 export async function driveIndex(
   db: Db,
   tenant: string,
   drive: string,
-): Promise<{ files: Omit<FileRow, 'content'>[]; dirs: string[] }> {
+): Promise<{ files: Omit<FileRow, 'content'>[]; dirs: ({ path: string } & DirStamps)[] }> {
   const files = all<Omit<FileRow, 'content'>>(
     db,
     'SELECT drive, path, size, ctag, etag, modified, seq FROM GraphFile WHERE tenant = ? AND drive = ?',
     tenant,
     drive,
   )
-  const dirs = all<{ path: string }>(
+  const dirs = all<{ path: string } & DirStamps>(
     db,
-    'SELECT path FROM GraphDir WHERE tenant = ? AND drive = ?',
+    'SELECT path, created, modified FROM GraphDir WHERE tenant = ? AND drive = ?',
     tenant,
     drive,
   )
-  return { files, dirs: dirs.map((row) => row.path) }
+  return { files, dirs }
 }
 
 export async function saveMonitor(ctx: Ctx0, payload: JsonValue): Promise<string> {
