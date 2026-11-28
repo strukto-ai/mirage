@@ -269,7 +269,7 @@ async function holdCaptureForDownload(status?: number): Promise<void> {
   const downloaded = new Promise<void>((resolve) => {
     downloading = resolve
   })
-  await account.run.beforeNext([['GET', FILE]], () => downloading(), undefined, MEDIA_QUERY)
+  await account.run.beforeNext([['GET', FILE]], downloading, undefined, MEDIA_QUERY)
   await account.run.beforeNext([['GET', FILE]], () => downloaded, status)
 }
 
