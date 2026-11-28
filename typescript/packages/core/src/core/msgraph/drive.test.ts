@@ -724,6 +724,10 @@ it('resolves the parent of a directory with a trailing slash', () => {
   expect(parentPath('parent/nested/')).toBe('parent')
 })
 
+function text(bytes: Uint8Array): string {
+  return new TextDecoder().decode(bytes)
+}
+
 describe('a replace on the Graph fake', () => {
   const ITEM = '/me/drive/*rest'
   const DENIED = { error: { code: 'accessDenied', message: 'Access denied.' } }
@@ -755,10 +759,6 @@ describe('a replace on the Graph fake', () => {
       graphBaseUrl: drive.run.url,
     })
     await op(odConfig, driveLoc(odConfig, src), driveLoc(odConfig, dst), `/${src}`, `/${dst}`)
-  }
-
-  function text(bytes: Uint8Array): string {
-    return new TextDecoder().decode(bytes)
   }
 
   it.each([
