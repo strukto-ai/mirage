@@ -12,25 +12,33 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { FakeDiscordTransport } from '../../../tests/vfs/discord/_test_util.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DiscordGuild } from '../../../tests/core/discord/guild.ts'
 import { runDiscord } from '../../../tests/workspace/fixtures/chat_fixture.ts'
 
-const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2016-04-30/chat.jsonl'
+// general's 2024-01-15: hello, then files.
+const CHAT = '/mnt/discord/My Server__111/channels/general__211/2024-01-15/chat.jsonl'
+
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('discord jq', () => {
   it('extracts .content from each jsonl message', async () => {
-    const transport = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/channels/C1/messages') {
-        return [
-          { id: '175928847299117056', content: 'hello' },
-          { id: '175928847299117057', content: 'world' },
-        ]
-      }
-      return null
-    })
-    const out = await runDiscord(transport, `jq -r .content "${CHAT}"`, ['2016-04-30'])
-    const lines = out.stdout.split('\n').filter((s) => s !== '')
-    expect(lines).toEqual(['hello', 'world'])
+    const out = await runDiscord(guild.accessor(), `jq -r .content "${CHAT}"`)
+    expect(out.stdout.split('\n').filter((s) => s !== '')).toEqual(['hello', 'files'])
   })
 })

@@ -1,0 +1,122 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+from datetime import datetime, timezone
+
+from mirage.core.api.errors import ApiError
+from mirage.core.discord.history import snowflake_at
+
+GUILD = {"id": "G001", "name": "My Server"}
+CHANNELS = [
+    {
+        "id": "C001",
+        "name": "general",
+        "type": 0,
+        "last_message_id": str(
+            snowflake_at(
+                datetime(2024, 1, 15, tzinfo=timezone.utc).timestamp()
+            )
+        ),
+    },
+    {"id": "C002", "name": "random", "type": 0},
+]
+MEMBERS = [{"user": {"id": "U001", "username": "alice"}, "nick": "al"}]
+
+MESSAGES = [
+    {"id": "1", "content": "hello", "author": {"username": "alice"}},
+    {
+        "id": "2",
+        "content": "files",
+        "author": {"username": "bob"},
+        "attachments": [
+            {
+                "id": "A1",
+                "filename": "kept.txt",
+                "url": "https://cdn.example/kept.txt",
+                "size": 5,
+                "content_type": "text/plain",
+            },
+            {
+                "id": "A2",
+                "filename": "tombstoned.txt",
+            },
+            {
+                "id": "A3",
+                "filename": "sizeless.txt",
+                "url": "https://cdn.example/sizeless.txt",
+            },
+            {
+                "id": "A4",
+                "filename": "urlless.txt",
+                "size": 9,
+            },
+        ],
+    },
+]
+
+DAY = "2024-01-15"
+SEALED_DAY = "2024-01-13"
+BROKEN_DAY = "2024-01-12"
+GONE_DAY = "2024-01-11"
+THROTTLED_DAY = "2024-01-10"
+
+
+def _http_error(status: int) -> ApiError:
+    return ApiError(f"HTTP {status}", status)
+
+
+class FakeDiscordApi:
+    """The Discord API the sim's server answers in memory: one guild, its
+    channels and member, a day of messages, and one day per refusal.
+
+    The sim runs on a loop that refuses real I/O, so it cannot reach the
+    integ Discord fake the unit tests use.
+    """
+
+    def __init__(self) -> None:
+        self.day_fetches: list[tuple[str, str]] = []
+        self.downloads: list[tuple[str, int, int | None]] = []
+
+    async def list_guilds(self, accessor):
+        return [dict(GUILD)]
+
+    async def list_channels(self, accessor, guild_id):
+        assert guild_id == GUILD["id"]
+        return [dict(c) for c in CHANNELS]
+
+    async def list_members(self, accessor, guild_id, stop_at=None):
+        assert guild_id == GUILD["id"]
+        return [dict(m) for m in MEMBERS]
+
+    async def list_messages_for_day(
+        self, accessor, channel_id, date_str, scope
+    ):
+        self.day_fetches.append((channel_id, date_str))
+        if date_str == SEALED_DAY:
+            raise _http_error(403)
+        if date_str == BROKEN_DAY:
+            raise _http_error(500)
+        if date_str == GONE_DAY:
+            raise _http_error(404)
+        if date_str == THROTTLED_DAY:
+            raise _http_error(429)
+        if channel_id == "C001" and date_str == DAY:
+            return [dict(m) for m in MESSAGES]
+        return []
+
+    async def download_file(self, accessor, url, offset=0, size=None):
+        self.downloads.append((url, offset, size))
+        data = b"0123456789"
+        end = len(data) if size is None else offset + size
+        return data[offset:end]

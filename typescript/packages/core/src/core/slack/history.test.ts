@@ -12,119 +12,110 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { HISTORY, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { fetchRecentMessages, getHistoryJsonl } from './history.ts'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(
-    private readonly responder: (call: number, params?: Record<string, string>) => SlackResponse,
-  ) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length, params))
-  }
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// general's first day: the deploy at 00:01, then ben's coffee at 01:00.
+const DEPLOY = '1762128060.000001'
+const DAY = {
+  channel: 'C1',
+  oldest: '1762128000.000000',
+  latest: '1762214400.000000',
+  inclusive: 'true',
 }
-
 const decoder = new TextDecoder()
+
+function texts(bytes: Uint8Array): string[] {
+  return decoder
+    .decode(bytes)
+    .trim()
+    .split('\n')
+    .map((line) => (JSON.parse(line) as { text: string }).text)
+}
 
 describe('getHistoryJsonl', () => {
   it('returns JSONL bytes with one message per line, trailing newline', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      messages: [
-        { ts: '1776988810.0', user: 'U1', text: 'hi' },
-        { ts: '1776988820.0', user: 'U2', text: 'yo' },
-      ],
-      has_more: false,
-    }))
-    const bytes = await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
+    const bytes = await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-03')
     const text = decoder.decode(bytes)
     expect(text.endsWith('\n')).toBe(true)
     const lines = text.trim().split('\n')
     expect(lines).toHaveLength(2)
-    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1776988810.0', user: 'U1' })
+    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: DEPLOY, user: 'U1' })
   })
 
   it('sorts messages by ts (numeric ascending)', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      messages: [
-        { ts: '1776988820.0', text: 'second' },
-        { ts: '1776988810.0', text: 'first' },
-      ],
-      has_more: false,
-    }))
-    const bytes = await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
-    const lines = decoder.decode(bytes).trim().split('\n')
-    expect((JSON.parse(lines[0] ?? '') as { text: string }).text).toBe('first')
-    expect((JSON.parse(lines[1] ?? '') as { text: string }).text).toBe('second')
+    // Slack answers newest first.
+    expect(texts(await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-03'))).toEqual([
+      'the deploy is done at acme',
+      'coffee is ready',
+    ])
   })
 
   it('returns empty bytes when no messages', async () => {
-    const t = new FakeTransport(() => ({ ok: true, messages: [], has_more: false }))
-    const bytes = await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
+    const bytes = await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-10')
     expect(bytes.length).toBe(0)
   })
 
   it('paginates when has_more is true', async () => {
-    let calls = 0
-    const t = new FakeTransport((n) => {
-      calls = n
-      if (n === 1) {
-        return {
-          ok: true,
-          messages: [{ ts: '1776988801.0', text: 'a' }],
-          has_more: true,
-          response_metadata: { next_cursor: 'c2' },
-        }
-      }
-      return { ok: true, messages: [{ ts: '1776988802.0', text: 'b' }], has_more: false }
-    })
-    const bytes = await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
-    expect(calls).toBe(2)
-    expect(t.calls[1]?.params?.cursor).toBe('c2')
-    const lines = decoder.decode(bytes).trim().split('\n')
-    expect(lines).toHaveLength(2)
+    await workspace.firstPage(HISTORY, 1, DAY)
+    const bytes = await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-03')
+    const asked = await workspace.run.params('GET', HISTORY)
+    expect(asked).toHaveLength(2)
+    expect(asked[1]?.cursor).not.toBe('')
+    expect(texts(bytes)).toHaveLength(2)
   })
 
   it('sends correct oldest/latest from date_str (UTC start/end-of-day)', async () => {
-    const t = new FakeTransport(() => ({ ok: true, messages: [], has_more: false }))
-    await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
-    const params = t.calls[0]?.params
-    expect(params).toBeDefined()
+    await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-03')
+    const [params] = await workspace.run.params('GET', HISTORY)
     expect(params?.channel).toBe('C1')
     expect(params?.inclusive).toBe('true')
     expect(params?.limit).toBe('200')
-    expect(Math.floor(Number(params?.oldest))).toBe(1776988800)
-    expect(Math.floor(Number(params?.latest))).toBe(1777075200)
+    expect(Math.floor(Number(params?.oldest))).toBe(1762128000)
+    expect(Math.floor(Number(params?.latest))).toBe(1762214400)
   })
 
   it('breaks pagination when has_more=true but next_cursor is empty', async () => {
-    let calls = 0
-    const t = new FakeTransport((n) => {
-      calls = n
-      return {
-        ok: true,
-        messages: [{ ts: '1776988801.0' }],
-        has_more: true,
-        response_metadata: { next_cursor: '' },
-      }
-    })
-    await getHistoryJsonl(new SlackAccessor(t), 'C1', '2026-04-24')
-    expect(calls).toBe(1)
+    // Slack's own page, saying there is more but naming no cursor.
+    const query = new URLSearchParams(DAY).toString()
+    const page = await workspace.run.call<Record<string, unknown>>('GET', `${HISTORY}?${query}`)
+    await workspace.run.answerNext('GET', HISTORY, 200, {
+      ...page,
+      has_more: true,
+      response_metadata: { next_cursor: '' },
+    } as never)
+    await getHistoryJsonl(workspace.accessor(), 'C1', '2025-11-03')
+    expect(await workspace.count(HISTORY)).toBe(1)
   })
 })
 
 describe('fetchRecentMessages', () => {
   it('fetches one page and sorts ascending by ts', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      messages: [{ ts: '1776988803.0' }, { ts: '1776988801.0' }, { ts: '1776988802.0' }],
-    }))
-    const messages = await fetchRecentMessages(new SlackAccessor(t), 'C1', 3)
-    expect(messages.map((m) => m.ts)).toEqual(['1776988801.0', '1776988802.0', '1776988803.0'])
+    // general's three latest: the plan upload, the second deploy, the files.
+    const messages = await fetchRecentMessages(workspace.accessor(), 'C1', 3)
+    expect(messages.map((m) => m.ts)).toEqual([
+      '1762300860.000001',
+      '1762387260.000001',
+      '1762560060.000001',
+    ])
+    expect(await workspace.count(HISTORY)).toBe(1)
   })
 })

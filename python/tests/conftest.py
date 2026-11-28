@@ -156,6 +156,20 @@ def gws_origin() -> Iterator[str]:
         yield origin
 
 
+@pytest.fixture(scope="session")
+def discord_origin() -> Iterator[str]:
+    """The integ Discord fake's origin, one fake for every test that asks."""
+    with serve("discord") as origin:
+        yield origin
+
+
+@pytest.fixture(scope="session")
+def slack_origin() -> Iterator[str]:
+    """The integ Slack fake's origin, one fake for every test that asks."""
+    with serve("slack") as origin:
+        yield origin
+
+
 @pytest.fixture
 def redis_prefix() -> str:
     """A Redis key prefix that belongs to this one test.

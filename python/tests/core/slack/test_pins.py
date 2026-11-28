@@ -12,74 +12,49 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.pins import list_pins, pin_message, unpin_message
+from tests.fixtures.slack_workspace import PINS, PINS_ADD, PINS_REMOVE
 
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
-
-
-@pytest.mark.asyncio
-async def test_pin_message_posts_pins_add():
-    with patch(
-        "mirage.core.slack.pins.slack_post",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as post:
-        result = await pin_message(ACCESSOR, "C001", "111.222")
-    post.assert_awaited_once_with(
-        ACCESSOR,
-        "pins.add",
-        {
-            "channel": "C001",
-            "timestamp": "111.222",
-        },
-    )
-    assert result == {"ok": True}
+# "lunch at noon" in general.
+LUNCH = "1762214460.000001"
 
 
 @pytest.mark.asyncio
-async def test_unpin_message_posts_pins_remove():
-    with patch(
-        "mirage.core.slack.pins.slack_post",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ) as post:
-        await unpin_message(ACCESSOR, "C001", "111.222")
-    post.assert_awaited_once_with(
-        ACCESSOR,
-        "pins.remove",
-        {
-            "channel": "C001",
-            "timestamp": "111.222",
-        },
-    )
+async def test_pin_message_posts_pins_add(slack_workspace):
+    accessor = slack_workspace.accessor()
+    result = await pin_message(accessor, "C1", LUNCH)
+    assert result["ok"] is True
+    assert await slack_workspace.run.bodies("POST", PINS_ADD) == [
+        {"channel": "C1", "timestamp": LUNCH}
+    ]
+    pinned = await list_pins(accessor, "C1")
+    assert [item["message"]["ts"] for item in pinned] == [LUNCH]
 
 
 @pytest.mark.asyncio
-async def test_list_pins_returns_items():
-    with patch(
-        "mirage.core.slack.pins.slack_get",
-        new_callable=AsyncMock,
-        return_value={
-            "ok": True,
-            "items": [{"type": "message"}],
-        },
-    ) as get:
-        items = await list_pins(ACCESSOR, "C001")
-    get.assert_awaited_once_with(ACCESSOR, "pins.list", {"channel": "C001"})
-    assert items == [{"type": "message"}]
+async def test_unpin_message_posts_pins_remove(slack_workspace):
+    await slack_workspace.pin("C1", LUNCH)
+    accessor = slack_workspace.accessor()
+    await unpin_message(accessor, "C1", LUNCH)
+    assert await slack_workspace.run.bodies("POST", PINS_REMOVE) == [
+        {"channel": "C1", "timestamp": LUNCH}
+    ]
+    assert await list_pins(accessor, "C1") == []
 
 
 @pytest.mark.asyncio
-async def test_list_pins_tolerates_missing_items():
-    with patch(
-        "mirage.core.slack.pins.slack_get",
-        new_callable=AsyncMock,
-        return_value={"ok": True},
-    ):
-        assert await list_pins(ACCESSOR, "C001") == []
+async def test_list_pins_returns_items(slack_workspace):
+    await slack_workspace.pin("C1", LUNCH)
+    items = await list_pins(slack_workspace.accessor(), "C1")
+    assert [(i["type"], i["message"]["text"]) for i in items] == [
+        ("message", "lunch at noon")
+    ]
+    assert await slack_workspace.run.params("GET", PINS) == [{"channel": "C1"}]
+
+
+@pytest.mark.asyncio
+async def test_list_pins_tolerates_missing_items(slack_workspace):
+    await slack_workspace.run.answer_next("GET", PINS, 200, {"ok": True})
+    assert await list_pins(slack_workspace.accessor(), "C1") == []

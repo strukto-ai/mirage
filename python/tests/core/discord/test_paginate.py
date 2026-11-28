@@ -1,62 +1,49 @@
 import pytest
 
 from mirage.core.discord.paginate import after_id_pages
+from tests.fixtures.discord_guild import GENERAL, GUILD, MEMBERS, MESSAGES
 
 
 @pytest.mark.asyncio
 async def test_after_id_pages_advances_with_newest_id_on_newest_first(
-    monkeypatch,
+    discord_guild,
 ):
     # Discord answers GET /channels/{id}/messages newest-first, so the cursor
     # is the first item; taking the last one would re-request the same window.
-    calls: list[str] = []
-    pages = {
-        "0": [{"id": str(200 - i)} for i in range(2)],
-        "200": [{"id": "300"}],
-    }
-
-    async def fake_get(accessor, method, endpoint, params=None):
-        calls.append(str(params["after"]))
-        return pages.get(str(params["after"]), [])
-
-    monkeypatch.setattr(
-        "mirage.core.discord.paginate.discord_request", fake_get
-    )
+    # Two a page: files and hello, then morning.
     out = []
     async for page in after_id_pages(
-        None,
-        "/channels/C/messages",
+        discord_guild.accessor(),
+        f"/channels/{GENERAL}/messages",
         base_params={},
         last_id_fn=lambda m: m["id"],
         page_size=2,
         newest_first=True,
     ):
         out.append(page)
-    assert calls == ["0", "200"]
-    assert [m["id"] for page in out for m in page] == ["200", "199", "300"]
+    contents = [m["content"] for page in out for m in page]
+    assert contents == ["files", "hello", "morning"]
+    files = out[0][0]["id"]
+    asked = await discord_guild.run.params("GET", MESSAGES)
+    assert [p["after"] for p in asked] == ["0", files]
 
 
 @pytest.mark.asyncio
-async def test_after_id_pages_advances_with_last_id_by_default(monkeypatch):
+async def test_after_id_pages_advances_with_last_id_by_default(discord_guild):
     # Members and guilds come back ascending, so the newest id is the last.
-    calls: list[str] = []
-    pages = {"0": [{"id": "1"}, {"id": "2"}], "2": [{"id": "3"}]}
-
-    async def fake_get(accessor, method, endpoint, params=None):
-        calls.append(str(params["after"]))
-        return pages.get(str(params["after"]), [])
-
-    monkeypatch.setattr(
-        "mirage.core.discord.paginate.discord_request", fake_get
-    )
     out = []
     async for page in after_id_pages(
-        None,
-        "/guilds/G/members",
+        discord_guild.accessor(),
+        f"/guilds/{GUILD}/members",
         base_params={},
-        last_id_fn=lambda m: m["id"],
+        last_id_fn=lambda m: m["user"]["id"],
         page_size=2,
     ):
         out.append(page)
-    assert calls == ["0", "2"]
-    assert [m["id"] for page in out for m in page] == ["1", "2", "3"]
+    assert [m["user"]["id"] for page in out for m in page] == [
+        "311",
+        "312",
+        "911",
+    ]
+    asked = await discord_guild.run.params("GET", MEMBERS)
+    assert [p["after"] for p in asked] == ["0", "312"]

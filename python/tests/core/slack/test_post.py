@@ -12,55 +12,35 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.post import upload_file
+from tests.fixtures.slack_workspace import COMPLETE, UPLOAD_URL
 
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
+# "lunch at noon" in general, the thread the file is posted in.
+LUNCH = "1762214460.000001"
 
 
 @pytest.mark.asyncio
-async def test_upload_file_asks_sends_then_completes():
-    ticket = {
-        "ok": True,
-        "upload_url": "https://files.example/u/1",
-        "file_id": "F1",
-    }
-    shared = {"ok": True, "files": [{"id": "F1", "title": "reply.wav"}]}
-    with (
-        patch(
-            "mirage.core.slack.post.slack_get",
-            new=AsyncMock(return_value=ticket),
-        ) as get,
-        patch("mirage.core.slack.post.upload_bytes", new=AsyncMock()) as send,
-        patch(
-            "mirage.core.slack.post.slack_post",
-            new=AsyncMock(return_value=shared),
-        ) as complete,
-    ):
-        result = await upload_file(
-            ACCESSOR, "C1", "reply.wav", b"RIFF", "here", "9.9"
-        )
-    assert result == shared
-    get.assert_awaited_once_with(
-        ACCESSOR,
-        "files.getUploadURLExternal",
-        {"filename": "reply.wav", "length": 4},
+async def test_upload_file_asks_sends_then_completes(slack_workspace):
+    result = await upload_file(
+        slack_workspace.accessor(), "C1", "reply.wav", b"RIFF", "here", LUNCH
     )
-    send.assert_awaited_once_with(
-        ACCESSOR, "https://files.example/u/1", b"RIFF"
-    )
-    complete.assert_awaited_once_with(
-        ACCESSOR,
-        "files.completeUploadExternal",
+    [shared] = result["files"]
+    assert shared["title"] == "reply.wav"
+    assert await slack_workspace.run.params("GET", UPLOAD_URL) == [
+        {"filename": "reply.wav", "length": "4"}
+    ]
+    assert await slack_workspace.run.bodies("POST", COMPLETE) == [
         {
-            "files": [{"id": "F1", "title": "reply.wav"}],
+            "files": [{"id": shared["id"], "title": "reply.wav"}],
             "channel_id": "C1",
             "initial_comment": "here",
-            "thread_ts": "9.9",
-        },
+            "thread_ts": LUNCH,
+        }
+    ]
+    # The bytes sent to the upload URL are the file's.
+    assert (
+        await slack_workspace.run.read(f"/files/download/{shared['id']}")
+        == b"RIFF"
     )

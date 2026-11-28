@@ -12,58 +12,43 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace, USERS } from '../../../tests/core/slack/workspace.ts'
 import { listUsersStream } from './users.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(private readonly responder: (call: number) => SlackResponse) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length))
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 describe('listUsersStream', () => {
   it('filters bots/deleted/USLACKBOT per page before yielding', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [
-        { id: 'U1', name: 'alice' },
-        { id: 'U2', name: 'bot', is_bot: true },
-        { id: 'USLACKBOT', name: 'slackbot' },
-        { id: 'U3', name: 'gone', deleted: true },
-      ],
-      response_metadata: { next_cursor: '' },
-    }))
-    const collected: { id: string }[][] = []
-    for await (const page of listUsersStream(new SlackAccessor(t))) {
-      collected.push(page as { id: string }[])
+    const collected: (string | undefined)[][] = []
+    for await (const page of listUsersStream(workspace.accessor())) {
+      collected.push(page.map((u) => u.id))
     }
-    expect(collected).toEqual([[{ id: 'U1', name: 'alice' }]])
+    expect(collected).toEqual([['U1', 'U2']])
   })
 
   it('walks all pages', async () => {
-    const pages: SlackResponse[] = [
-      {
-        ok: true,
-        members: [{ id: 'U1', name: 'alice' }],
-        response_metadata: { next_cursor: 'c2' },
-      },
-      {
-        ok: true,
-        members: [{ id: 'U2', name: 'bob' }],
-        response_metadata: { next_cursor: '' },
-      },
-    ]
-    const t = new FakeTransport((call) => pages[call - 1] ?? { ok: false })
-    const ids: string[] = []
-    for await (const page of listUsersStream(new SlackAccessor(t))) {
-      for (const u of page) ids.push((u as { id: string }).id)
+    await workspace.firstPage(USERS, 1)
+    const ids: (string | undefined)[] = []
+    for await (const page of listUsersStream(workspace.accessor())) {
+      for (const u of page) ids.push(u.id)
     }
     expect(ids).toEqual(['U1', 'U2'])
-    expect(t.calls).toHaveLength(2)
+    expect(await workspace.count(USERS)).toBe(2)
   })
 })

@@ -25,11 +25,11 @@ from mirage.core.github.config import GitHubConfig
 from mirage.core.github.tree_entry import TreeEntry
 from mirage.types import ReadPolicy, ReadSpec
 from mirage.vfs.github.github import GitHubVFS
-from tests.core.discord.conftest import DAY, FakeDiscordApi
-from tests.core.slack.conftest import FakeSlack
+from tests.sim.discord import DAY, FakeDiscordApi
 from tests.sim.gdrive import FakeGDrive
 from tests.sim.github import FakeGitHubApi
 from tests.sim.seam import Exponential, Leg, Match
+from tests.sim.slack import FakeSlack
 from tests.sim.trace import StepRef
 from tests.sim.world import Sim, simulate
 

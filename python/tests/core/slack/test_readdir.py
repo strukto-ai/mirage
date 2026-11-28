@@ -13,30 +13,22 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from datetime import date, datetime, timezone
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.hierarchy.probe import rows_of
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.readdir import _date_range, readdir
 from mirage.core.time_range import TimeRange
 from mirage.types import DirListing, FileStat, FileType, PathSpec
+from tests.fixtures.slack_workspace import HISTORY
 
-
-@pytest.fixture
-def config():
-    return SlackConfig(token="xoxb-test-token")
-
-
-@pytest.fixture
-def accessor(config):
-    return SlackAccessor(config=config)
+# general is created on 2025-11-03 and its latest message is on 11-08.
+START = 1762128000
 
 
 def _channel(
-    dirname: str = "general__C001", created: int = 0, name: str = "general"
+    dirname: str = "general__C1", created: int = START, name: str = "general"
 ) -> FileStat:
     """A conversation's row as its container's listing names it."""
     return FileStat(
@@ -50,9 +42,10 @@ def _channel(
     )
 
 
-DAY = FileStat(
-    name="2026-04-10", type=FileType.DIRECTORY, extra={"channel_id": "C001"}
-)
+def _day(name: str) -> FileStat:
+    return FileStat(
+        name=name, type=FileType.DIRECTORY, extra={"channel_id": "C1"}
+    )
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -66,63 +59,49 @@ def _paths(listed: list[FileStat] | DirListing, folder: str) -> list[str]:
 
 
 @pytest.mark.asyncio
-async def test_readdir_root(accessor):
-    result = await readdir(accessor, _spec("/"))
+async def test_readdir_root(slack_workspace):
+    result = await readdir(slack_workspace.accessor(), _spec("/"))
     assert _paths(result, "/") == ["/channels", "/dms", "/users"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_channels(accessor):
-    channels = [
-        {"id": "C001", "name": "general"},
-        {"id": "C002", "name": "random"},
-    ]
-    with patch(
-        "mirage.core.slack.readdir.list_channels",
-        new_callable=AsyncMock,
-        return_value=channels,
-    ):
-        result = _paths(
-            await readdir(accessor, _spec("/channels")), "/channels"
-        )
-
-    assert "/channels/general__C001" in result
-    assert "/channels/random__C002" in result
+async def test_readdir_channels(slack_workspace):
+    result = _paths(
+        await readdir(slack_workspace.accessor(), _spec("/channels")),
+        "/channels",
+    )
+    assert result == ["/channels/general__C1", "/channels/random__C2"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_users(accessor):
-    users = [
-        {"id": "U001", "name": "alice"},
-        {"id": "U002", "name": "bob"},
-    ]
-    with patch(
-        "mirage.core.slack.readdir.list_users",
-        new_callable=AsyncMock,
-        return_value=users,
-    ):
-        result = _paths(await readdir(accessor, _spec("/users")), "/users")
-
-    assert "/users/alice__U001.json" in result
-    assert "/users/bob__U002.json" in result
+async def test_readdir_users(slack_workspace):
+    # The people only: the bot, the deactivated user and Slackbot are not
+    # listed.
+    result = _paths(
+        await readdir(slack_workspace.accessor(), _spec("/users")), "/users"
+    )
+    assert result == ["/users/ana__U1.json", "/users/ben__U2.json"]
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_dates(accessor):
-    now = datetime.now(timezone.utc)
-    with patch(
-        "mirage.core.slack.readdir._latest_message_ts",
-        new_callable=AsyncMock,
-        return_value=now.timestamp(),
-    ):
-        listed = await readdir(
-            accessor, _spec("/channels/general__C001"), _channel()
-        )
-    result = _paths(listed, "/channels/general__C001")
-    assert len(result) >= 1
-    assert all(not r.endswith(".jsonl") for r in result)
-    assert result[0].endswith(now.strftime("%Y-%m-%d"))
-    assert listed.entries[0].extra == {"channel_id": "C001"}
+async def test_readdir_channel_dates(slack_workspace):
+    listed = await readdir(
+        slack_workspace.accessor(), _spec("/channels/general__C1"), _channel()
+    )
+    result = _paths(listed, "/channels/general__C1")
+    # Newest first, from the day of the latest message back to creation.
+    assert [r.rsplit("/", 1)[1] for r in result] == [
+        "2025-11-08",
+        "2025-11-07",
+        "2025-11-06",
+        "2025-11-05",
+        "2025-11-04",
+        "2025-11-03",
+    ]
+    assert listed.entries[0].extra == {"channel_id": "C1"}
+    assert await slack_workspace.run.params("GET", HISTORY) == [
+        {"channel": "C1", "limit": "1"}
+    ]
 
 
 def test_date_range_recent():
@@ -176,242 +155,166 @@ def test_date_range_glob_span_outside_the_channel_is_empty():
 
 
 @pytest.mark.asyncio
-async def test_readdir_channels_keeps_created(accessor):
-    channels = [
-        {"id": "C001", "name": "general", "created": 1700000000},
-    ]
-    with patch(
-        "mirage.core.slack.readdir.list_channels",
-        new_callable=AsyncMock,
-        return_value=channels,
-    ):
-        (row,) = await readdir(accessor, _spec("/channels"))
-    assert row.extra["created"] == 1700000000
-    assert row.modified is not None
+async def test_readdir_channels_keeps_created(slack_workspace):
+    rows = await readdir(slack_workspace.accessor(), _spec("/channels"))
+    general = next(row for row in rows if row.name == "general__C1")
+    assert general.extra["created"] == START
+    assert general.modified is not None
 
 
 @pytest.mark.asyncio
-async def test_readdir_channel_dates_with_created(accessor):
-    now = datetime.now(timezone.utc)
-    with patch(
-        "mirage.core.slack.readdir._latest_message_ts",
-        new_callable=AsyncMock,
-        return_value=now.timestamp(),
-    ):
-        listed = await readdir(
-            accessor,
-            _spec("/channels/general__C001"),
-            _channel(created=1700000000),
-        )
-    result = _paths(listed, "/channels/general__C001")
+async def test_readdir_channel_dates_with_created(slack_workspace):
+    # Created two years before its latest message, so the listing is the
+    # last 90 days only.
+    listed = await readdir(
+        slack_workspace.accessor(),
+        _spec("/channels/general__C1"),
+        _channel(created=1700000000),
+    )
+    result = _paths(listed, "/channels/general__C1")
     assert len(result) == 90
     assert all(not r.endswith(".jsonl") for r in result)
-    assert result[0].endswith(now.strftime("%Y-%m-%d"))
+    assert result[0].endswith("2025-11-08")
 
 
 @pytest.mark.asyncio
-async def test_readdir_date_dir_returns_chat_and_files(accessor):
-    with patch(
-        "mirage.core.slack.readdir.fetch_messages_for_day",
-        new_callable=AsyncMock,
-        return_value=[],
-    ):
-        listed = await readdir(
-            accessor,
-            _spec("/channels/general__C001/2026-04-10"),
-            DAY,
-        )
-
-    assert sorted(_paths(listed, "/channels/general__C001/2026-04-10")) == [
-        "/channels/general__C001/2026-04-10/chat.jsonl",
-        "/channels/general__C001/2026-04-10/files",
+async def test_readdir_date_dir_returns_chat_and_files(slack_workspace):
+    # 2025-11-07 holds no general message.
+    listed = await readdir(
+        slack_workspace.accessor(),
+        _spec("/channels/general__C1/2025-11-07"),
+        _day("2025-11-07"),
+    )
+    assert sorted(_paths(listed, "/channels/general__C1/2025-11-07")) == [
+        "/channels/general__C1/2025-11-07/chat.jsonl",
+        "/channels/general__C1/2025-11-07/files",
     ]
 
 
 @pytest.mark.asyncio
-async def test_readdir_skips_unreadable_file_payloads(accessor):
+async def test_readdir_skips_unreadable_file_payloads(slack_workspace):
     # Tombstoned and access-restricted file payloads carry an id but no
     # download URL and no size; they must not be listed, or sizes_always_known
-    # would be false and read() would ENOENT on a listed file.
-    messages = [
-        {
-            "ts": "1775000000.000100",
-            "files": [
-                {
-                    "id": "F1",
-                    "name": "report.pdf",
-                    "size": 12,
-                    "url_private_download": "https://files.slack.test/F1",
-                },
-                {
-                    "id": "F2",
-                    "mode": "tombstone",
-                },
-                {
-                    "id": "F3",
-                    "name": "restricted.docx",
-                    "file_access": "check_file_info",
-                },
-            ],
-        }
-    ]
-    with patch(
-        "mirage.core.slack.readdir.fetch_messages_for_day",
-        new_callable=AsyncMock,
-        return_value=messages,
-    ):
-        listed = await readdir(
-            accessor,
-            _spec("/channels/general__C001/2026-04-10"),
-            DAY,
-        )
-    (blob,) = listed.seeds["files"]
-    assert blob.name == "report__F1.pdf"
-    assert blob.size == 12
-
-
-def _dm_without_created() -> SlackAccessor:
-    return SlackAccessor(
-        SlackConfig(token="xoxb-test-token"),
-        TimeRange.from_strings(None, "2026-06-02T00:00:00Z"),
+    # would be false and read() would ENOENT on a listed file. Slack's own
+    # page for the day, with two of its three files made so.
+    page = await slack_workspace.run.call(
+        "GET",
+        HISTORY,
+        params={
+            "channel": "C1",
+            "oldest": "1762560000",
+            "latest": "1762646400",
+            "inclusive": "true",
+        },
     )
+    files = page["messages"][0]["files"]
+    files[1] = {"id": files[1]["id"], "mode": "tombstone"}
+    files[2] = {
+        "id": files[2]["id"],
+        "name": files[2]["name"],
+        "file_access": "check_file_info",
+    }
+    await slack_workspace.run.answer_next("GET", HISTORY, 200, page)
+    listed = await readdir(
+        slack_workspace.accessor(),
+        _spec("/channels/general__C1/2025-11-08"),
+        _day("2025-11-08"),
+    )
+    (blob,) = listed.seeds["files"]
+    assert blob.name == "report__F2.pdf"
+    assert blob.size == len(b"%PDF-1.4 the report\n")
 
 
-DM = _channel("alice__D001", name="alice")
+# ana's DM: a message on 2025-11-03 and one on 11-06. Its row names no
+# creation, so a bare listing must find the first message.
+DM = _channel("ana__D1", created=0, name="ana")
+END = "2025-11-05T00:00:00Z"
+
+
+def _scoped(workspace) -> SlackAccessor:
+    return SlackAccessor(workspace.config(), TimeRange.from_strings(None, END))
 
 
 @pytest.mark.asyncio
-async def test_end_scoped_glob_listing_skips_the_history_scan():
-    accessor = _dm_without_created()
-    latest = datetime(2026, 6, 20, tzinfo=timezone.utc).timestamp()
-    with (
-        patch(
-            "mirage.core.slack.readdir._latest_message_ts",
-            new_callable=AsyncMock,
-            return_value=latest,
+async def test_end_scoped_glob_listing_skips_the_history_scan(
+    slack_workspace,
+):
+    listed = await readdir(
+        _scoped(slack_workspace),
+        PathSpec(
+            virtual="/dms/ana__D1/2025-10-*",
+            directory="/dms/ana__D1/",
+            vfs_path="dms/ana__D1/2025-10-*",
+            pattern="2025-10-*",
         ),
-        patch("mirage.core.slack.readdir.cursor_pages") as pages,
-    ):
-        listed = await readdir(
-            accessor,
-            PathSpec(
-                virtual="/dms/alice__D001/2026-05-*",
-                directory="/dms/alice__D001/",
-                vfs_path="dms/alice__D001/2026-05-*",
-                pattern="2026-05-*",
-            ),
-            DM,
-        )
-    pages.assert_not_called()
-    result = _paths(listed, "/dms/alice__D001")
+        DM,
+    )
+    # Only the latest message is asked for, never the history before it.
+    assert await slack_workspace.run.params("GET", HISTORY) == [
+        {"channel": "D1", "limit": "1"}
+    ]
+    result = _paths(listed, "/dms/ana__D1")
     assert len(result) == 31
-    assert result[0] == "/dms/alice__D001/2026-05-31"
-    assert result[-1] == "/dms/alice__D001/2026-05-01"
+    assert result[0] == "/dms/ana__D1/2025-10-31"
+    assert result[-1] == "/dms/ana__D1/2025-10-01"
 
 
 @pytest.mark.asyncio
-async def test_end_scoped_bare_listing_pages_only_history_before_the_end():
-    accessor = _dm_without_created()
-    latest = datetime(2026, 6, 20, tzinfo=timezone.utc).timestamp()
-    first = datetime(2026, 5, 30, 12, tzinfo=timezone.utc).timestamp()
-    end = datetime(2026, 6, 2, tzinfo=timezone.utc).timestamp()
-    asked = []
-
-    async def pages(accessor, endpoint, params, items_key):
-        asked.append(params)
-        yield [{"ts": f"{first + 3600:.6f}"}, {"ts": f"{first:.6f}"}]
-
-    with (
-        patch(
-            "mirage.core.slack.readdir._latest_message_ts",
-            new_callable=AsyncMock,
-            return_value=latest,
-        ),
-        patch("mirage.core.slack.readdir.cursor_pages", new=pages),
-    ):
-        listed = await readdir(accessor, _spec("/dms/alice__D001"), DM)
-    assert asked == [{"channel": "D001", "limit": 200, "latest": f"{end:.6f}"}]
-    assert _paths(listed, "/dms/alice__D001") == [
-        "/dms/alice__D001/2026-06-01",
-        "/dms/alice__D001/2026-05-31",
-        "/dms/alice__D001/2026-05-30",
+async def test_end_scoped_bare_listing_pages_only_history_before_the_end(
+    slack_workspace,
+):
+    listed = await readdir(_scoped(slack_workspace), _spec("/dms/ana__D1"), DM)
+    end = datetime(2025, 11, 5, tzinfo=timezone.utc).timestamp()
+    assert await slack_workspace.run.params("GET", HISTORY) == [
+        {"channel": "D1", "limit": "1"},
+        {"channel": "D1", "limit": "200", "latest": f"{end:.6f}"},
+    ]
+    assert _paths(listed, "/dms/ana__D1") == [
+        "/dms/ana__D1/2025-11-04",
+        "/dms/ana__D1/2025-11-03",
     ]
 
 
 @pytest.mark.asyncio
-async def test_a_channel_listing_is_a_window(accessor):
+async def test_a_channel_listing_is_a_window(slack_workspace):
     # The bare listing covers the last 90 days only; a day that falls out
     # of it still exists and is still readable by path.
-    now = datetime.now(timezone.utc)
-    with patch(
-        "mirage.core.slack.readdir._latest_message_ts",
-        new_callable=AsyncMock,
-        return_value=now.timestamp(),
-    ):
-        listed = await readdir(
-            accessor, _spec("/channels/general__C001"), _channel()
-        )
+    listed = await readdir(
+        slack_workspace.accessor(), _spec("/channels/general__C1"), _channel()
+    )
     assert listed.window is True
 
 
-FILES_DIR = "/channels/general__C001/2026-04-10/files"
-REPORT = {
-    "id": "F1ABC",
-    "name": "report.pdf",
-    "title": "report.pdf",
-    "filetype": "pdf",
-    "mimetype": "application/pdf",
-    "size": 4096,
-    "url_private_download": (
-        "https://files.slack.com/files-pri/T1-F1ABC/download/report.pdf"
-    ),
-    "timestamp": 1712707200,
-}
-
-
-async def _list_files_dir(accessor, messages) -> list[FileStat]:
+async def _list_files_dir(workspace, day: str) -> list[FileStat]:
     files = FileStat(
         name="files",
         type=FileType.DIRECTORY,
-        extra={"channel_id": "C001", "date": "2026-04-10"},
+        extra={"channel_id": "C1", "date": day},
     )
-    with patch(
-        "mirage.core.slack.readdir.fetch_messages_for_day",
-        new_callable=AsyncMock,
-        return_value=messages,
-    ):
-        return rows_of(await readdir(accessor, _spec(FILES_DIR), files))
+    folder = f"/channels/general__C1/{day}/files"
+    return rows_of(await readdir(workspace.accessor(), _spec(folder), files))
 
 
 @pytest.mark.asyncio
-async def test_files_dir_lists_attachments_and_keeps_their_url(accessor):
-    messages = [
-        {
-            "type": "message",
-            "user": "U1",
-            "ts": "1712707200.0",
-            "files": [REPORT],
-        },
-        {
-            "type": "message",
-            "user": "U2",
-            "ts": "1712707260.0",
-            "text": "no file here",
-        },
+async def test_files_dir_lists_attachments_and_keeps_their_url(
+    slack_workspace,
+):
+    blobs = await _list_files_dir(slack_workspace, "2025-11-08")
+    assert [b.name for b in blobs] == [
+        "report__F2.pdf",
+        "notes__F3.txt",
+        "data__F4.bin",
     ]
-    (blob,) = await _list_files_dir(accessor, messages)
-    assert blob.name == "report__F1ABC.pdf"
-    assert blob.extra["file_id"] == "F1ABC"
-    assert blob.size == 4096
-    assert blob.extra["mimetype"] == "application/pdf"
-    assert "url_private_download" in blob.extra
-    assert blob.extra["filetype"] == "pdf"
-    assert blob.extra["ts"] == "1712707200.0"
+    report = blobs[0]
+    assert report.extra["file_id"] == "F2"
+    assert report.size == len(b"%PDF-1.4 the report\n")
+    assert report.extra["mimetype"] == "application/pdf"
+    assert report.extra["url_private_download"].endswith("/files/download/F2")
+    assert report.extra["filetype"] == "pdf"
+    assert report.extra["ts"] == "1762560060.000001"
 
 
 @pytest.mark.asyncio
-async def test_files_dir_empty_on_no_attachments(accessor):
-    messages = [
-        {"type": "message", "user": "U1", "ts": "1712707200.0", "text": "hi"}
-    ]
-    assert await _list_files_dir(accessor, messages) == []
+async def test_files_dir_empty_on_no_attachments(slack_workspace):
+    # 2025-11-04 holds "lunch at noon" and no file.
+    assert await _list_files_dir(slack_workspace, "2025-11-04") == []

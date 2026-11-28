@@ -28,6 +28,7 @@ import { slackFake } from './fake.ts'
 type Json = Record<string, JsonValue>
 
 const TENANT = 'selftest-slack'
+const UNIT = 'selftest-unit'
 const THREAD = '1762352718.000015'
 const REPLY = '1762352873.000016'
 
@@ -413,6 +414,133 @@ async function main(): Promise<void> {
       await call('conversations.replies', { channel: 'C1', ts: '1762186002.000001' })
     ).messages as Json[]
     eq('replies preserve the parent subtype', replies[0]!.subtype, 'channel_convert_to_private')
+
+    // The unit world: random (C2) is private to ana (U1), D1 is ana's DM, and
+    // plan.txt is uploaded in general and shared again in random two days on.
+    await fetch(`${fake.endpoint}/_run/${UNIT}/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenants: [UNIT], fixture: 'unit' }),
+    })
+    const unit = async (
+      token: string,
+      method: string,
+      form: Record<string, string>,
+    ): Promise<Json> => {
+      const response = await fetch(`${fake.endpoint}/_run/${UNIT}/api/${method}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(form).toString(),
+      })
+      return (await response.json()) as Json
+    }
+    const unitListing = async (token: string): Promise<JsonValue> =>
+      (
+        (await unit(token, 'conversations.list', { types: 'public_channel,private_channel,im' }))
+          .channels as Json[]
+      ).map((c) => c.id!)
+    eq('a token naming no one lists every conversation', await unitListing(`xoxp-${UNIT}`), [
+      'C1',
+      'C2',
+      'D1',
+    ])
+    eq('a holder lists only what they are in', await unitListing(`xoxp-${UNIT}.U2`), ['C1'])
+    const unitFound = async (token: string): Promise<JsonValue> =>
+      (
+        ((await unit(token, 'search.messages', { query: 'deploy' })).messages as Json)
+          .matches as Json[]
+      )
+        .map((m) => String((m.channel as Json).id))
+        .sort()
+    eq('a holder searches only what they are in', await unitFound(`xoxp-${UNIT}.U2`), ['C1', 'C1'])
+    eq('a token naming no one searches everything', await unitFound(`xoxp-${UNIT}`), [
+      'C1',
+      'C1',
+      'C2',
+      'D1',
+    ])
+    eq(
+      'a holder outside a private channel does not find it',
+      (await unit(`xoxp-${UNIT}.U2`, 'conversations.history', { channel: 'C2' })).error,
+      'channel_not_found',
+    )
+    eq(
+      'conversations.info renders one conversation as the listing does',
+      ((await unit(`xoxb-${UNIT}`, 'conversations.info', { channel: 'D1' })).channel as Json).user,
+      'U1',
+    )
+    eq(
+      'conversations.info does not find a private channel for one outside it',
+      (await unit(`xoxp-${UNIT}.U2`, 'conversations.info', { channel: 'C2' })).error,
+      'channel_not_found',
+    )
+    const plan = (
+      ((await unit(`xoxp-${UNIT}`, 'search.files', { query: 'Launch' })).files as Json)
+        .matches as Json[]
+    )[0]!
+    eq('a shared file names every message that shares it', plan.shares, {
+      public: { C1: [{ ts: '1762300860.000001', channel_name: 'general' }] },
+      private: { C2: [{ ts: '1762473660.000001', channel_name: 'random' }] },
+    })
+    eq('a shared file keeps its upload time', plan.timestamp, 1762300860)
+    const shared = (await unit(`xoxb-${UNIT}`, 'conversations.history', { channel: 'C2' }))
+      .messages as Json[]
+    eq(
+      'a share shows the file on its message, downloaded under the run',
+      ((shared[0]!.files as Json[])[0] as Json).url_private_download,
+      `${fake.endpoint}/_run/${UNIT}/files/download/F1`,
+    )
+    eq(
+      'a holder sees a shared file only where they see a share',
+      (
+        ((await unit(`xoxp-${UNIT}.U2`, 'search.files', { query: 'Launch' })).files as Json)
+          .matches as Json[]
+      ).map((f) => f.shares!),
+      [{ public: { C1: [{ ts: '1762300860.000001', channel_name: 'general' }] } }],
+    )
+    const scoped = async (query: string): Promise<JsonValue> =>
+      ((await unit(`xoxp-${UNIT}.U2`, 'search.files', { query })).files as Json).total!
+    eq('a holder finds no file in a channel they do not see', await scoped('Launch in:#random'), 0)
+    eq('a holder finds a file in a channel they see', await scoped('Launch in:#general'), 1)
+    const db = fake.runtime.pool.sql(UNIT)
+    const people = async (form: Record<string, string>): Promise<Json> =>
+      await unit(`xoxb-${UNIT}`, 'users.list', form)
+    const seeded = ((await people({})).members as Json[]).length
+    const add = db.prepare(
+      'INSERT INTO User (tenant, id, name, realName, email, seq) VALUES (?, ?, ?, ?, ?, ?)',
+    )
+    for (let n = 0; n < 1000; n++)
+      add.run(UNIT, `UMANY${String(n)}`, `many${String(n)}`, '', '', 100 + n)
+    const everyone = await people({})
+    eq(
+      'users.list with no limit answers everyone, past a page',
+      [(everyone.members as Json[]).length, (everyone.response_metadata as Json).next_cursor!],
+      [seeded + 1000, ''],
+    )
+    eq(
+      'users.list caps an asked limit at 1000',
+      ((await people({ limit: '5000' })).members as Json[]).length,
+      1000,
+    )
+    const shareTs = '1762473660.000001'
+    db.prepare("UPDATE Message SET userId = 'UBOT' WHERE tenant = ? AND ts = ?").run(UNIT, shareTs)
+    const deleted = await fetch(`${fake.endpoint}/_run/${UNIT}/api/chat.delete`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer xoxb-${UNIT}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'C2', ts: shareTs }),
+    })
+    eq('a bot deletes a sharing message it posted', ((await deleted.json()) as Json).ok, true)
+    eq(
+      'a deleted message no longer shares its file',
+      (
+        ((await unit(`xoxp-${UNIT}`, 'search.files', { query: 'Launch' })).files as Json)
+          .matches as Json[]
+      ).map((f) => f.shares!),
+      [{ public: { C1: [{ ts: '1762300860.000001', channel_name: 'general' }] } }],
+    )
     process.stdout.write(`slack selftest: ${String(checks)} checks passed\n`)
   } finally {
     await fake.close()

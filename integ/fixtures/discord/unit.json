@@ -1,0 +1,112 @@
+{
+  "bot_user": {
+    "id": "911",
+    "username": "mirage-bot"
+  },
+  "guilds": [
+    {
+      "id": "111",
+      "name": "My Server",
+      "channels": [
+        {
+          "id": "211",
+          "name": "general",
+          "type": 0,
+          "topic": "",
+          "position": 0
+        },
+        {
+          "id": "212",
+          "name": "random",
+          "type": 0,
+          "topic": "",
+          "position": 1
+        }
+      ],
+      "members": [
+        {
+          "user": {
+            "id": "311",
+            "username": "alice",
+            "global_name": "Alice",
+            "bot": false
+          },
+          "nick": "al",
+          "roles": [],
+          "joined_at": "2023-06-01T00:00:00.000000+00:00",
+          "deaf": false,
+          "mute": false
+        },
+        {
+          "user": {
+            "id": "312",
+            "username": "bob",
+            "global_name": "Bob",
+            "bot": false
+          },
+          "nick": null,
+          "roles": [],
+          "joined_at": "2023-06-01T00:00:00.000000+00:00",
+          "deaf": false,
+          "mute": false
+        },
+        {
+          "user": {
+            "id": "911",
+            "username": "mirage-bot",
+            "global_name": null,
+            "bot": true
+          },
+          "nick": null,
+          "roles": [],
+          "joined_at": "2023-06-01T00:00:00.000000+00:00",
+          "deaf": false,
+          "mute": false
+        }
+      ],
+      "messages": {
+        "211": [
+          {
+            "id": "1196393339289600000",
+            "author": "311",
+            "content": "hello",
+            "timestamp": "2024-01-15T10:00:00.000000+00:00"
+          },
+          {
+            "id": "1196408438784000000",
+            "author": "312",
+            "content": "files",
+            "timestamp": "2024-01-15T11:00:00.000000+00:00",
+            "attachments": [
+              {
+                "id": "A1",
+                "filename": "kept.txt",
+                "content_type": "text/plain",
+                "body": "0123456789"
+              },
+              {
+                "id": "A2",
+                "filename": "tombstoned.txt",
+                "tombstoned": true
+              }
+            ]
+          },
+          {
+            "id": "1196619831705600000",
+            "author": "311",
+            "content": "morning",
+            "timestamp": "2024-01-16T01:00:00.000000+00:00"
+          }
+        ],
+        "212": [
+          {
+            "id": "1196015851929600000",
+            "author": "312",
+            "content": "random chatter",
+            "timestamp": "2024-01-14T09:00:00.000000+00:00"
+          }
+        ]
+      }
+    }
+  ]
+}

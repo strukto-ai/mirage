@@ -12,44 +12,58 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { PINS, PINS_ADD, PINS_REMOVE, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { listPins, pinMessage, unpinMessage } from './pins.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
-    []
-  constructor(private readonly response: SlackResponse = { ok: true }) {}
-  call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse> {
-    this.calls.push({
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.response)
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+// "lunch at noon" in general, which ana reacted to with a rocket.
+const LUNCH = '1762214460.000001'
 
 describe('pins', () => {
   it('pinMessage POSTs pins.add', async () => {
-    const t = new FakeTransport()
-    await pinMessage(new SlackAccessor(t), 'C1', '1.0')
-    expect(t.calls[0]?.endpoint).toBe('pins.add')
-    expect(t.calls[0]?.body).toEqual({ channel: 'C1', timestamp: '1.0' })
+    const accessor = workspace.accessor()
+    await pinMessage(accessor, 'C1', LUNCH)
+    expect(await workspace.run.bodies('POST', PINS_ADD)).toEqual([
+      { channel: 'C1', timestamp: LUNCH },
+    ])
+    const pinned = (await listPins(accessor, 'C1')) as { message: { ts: string } }[]
+    expect(pinned.map((item) => item.message.ts)).toEqual([LUNCH])
   })
 
   it('unpinMessage POSTs pins.remove', async () => {
-    const t = new FakeTransport()
-    await unpinMessage(new SlackAccessor(t), 'C1', '1.0')
-    expect(t.calls[0]?.endpoint).toBe('pins.remove')
+    await workspace.pin('C1', LUNCH)
+    const accessor = workspace.accessor()
+    await unpinMessage(accessor, 'C1', LUNCH)
+    expect(await workspace.run.bodies('POST', PINS_REMOVE)).toEqual([
+      { channel: 'C1', timestamp: LUNCH },
+    ])
+    expect(await listPins(accessor, 'C1')).toEqual([])
   })
 
   it('listPins returns items and tolerates a missing key', async () => {
-    const withItems = new FakeTransport({ ok: true, items: [{ type: 'message' }] })
-    expect(await listPins(new SlackAccessor(withItems), 'C1')).toEqual([{ type: 'message' }])
-    expect(withItems.calls[0]?.params).toEqual({ channel: 'C1' })
-    const without = new FakeTransport({ ok: true })
-    expect(await listPins(new SlackAccessor(without), 'C1')).toEqual([])
+    await workspace.pin('C1', LUNCH)
+    const accessor = workspace.accessor()
+    const items = (await listPins(accessor, 'C1')) as { type: string; message: { text: string } }[]
+    expect(items.map((i) => [i.type, i.message.text])).toEqual([['message', 'lunch at noon']])
+    expect(await workspace.run.params('GET', PINS)).toEqual([{ channel: 'C1' }])
+    await workspace.run.answerNext('GET', PINS, 200, { ok: true })
+    expect(await listPins(accessor, 'C1')).toEqual([])
   })
 })

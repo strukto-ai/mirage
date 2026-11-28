@@ -23,6 +23,8 @@ export const DISCORD_EPOCH = 1420070400000n
 export const POST_SNOWFLAKE_BASE = 1780444800000n
 export const MESSAGES_MAX_LIMIT = 100
 export const MEMBERS_MAX_LIMIT = 1000
+// Discord answers a message search 25 hits at a time.
+export const SEARCH_PAGE_LIMIT = 25
 export const POST_TIMESTAMP = '2026-06-03T00:00:00.000000+00:00'
 export const EDIT_TIMESTAMP = '2026-06-03T00:05:00.000000+00:00'
 export const BASE_TOKEN = '{base}'

@@ -27,8 +27,10 @@ export const config = parseConfig({
   // `xoxp-<id>` for search.*, because real Slack requires a user token to
   // search. Taking the bearer verbatim would make those two different tenants
   // and every search would read an empty workspace, so the actor type is
-  // stripped and both spellings land on the same one.
-  tenantTokenPattern: '^xox[a-z]-(.+)$',
+  // stripped and both spellings land on the same one. A user token may name
+  // its holder after a dot (`xoxp-<id>.<user>`, see holderOf), which is not
+  // part of the workspace either.
+  tenantTokenPattern: '^xox[a-z]-([^.]+)(?:\\.[A-Z0-9]+)?$',
   // Per-kind, NOT the kit's global default: chat.postMessage's ts counter was
   // its own `postSeq` in the fake this replaces, so sharing one counter with
   // the pin ids made the first posted message land on .000002 whenever a pin

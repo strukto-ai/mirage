@@ -16,35 +16,24 @@ import json
 
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.commands.cli.builtin.slack.delete_message import delete_message
 from mirage.commands.config import Context
-from mirage.core.slack.config import SlackConfig
 from mirage.io.types import materialize
-
-ACCESSOR = SlackAccessor(SlackConfig(token="xoxb-test"))
 
 
 @pytest.mark.asyncio
-async def test_deletes_the_named_message(monkeypatch):
-    seen = []
-
-    async def fake(accessor, channel, ts):
-        seen.append((channel, ts))
-        return {"ok": True}
-
-    monkeypatch.setitem(
-        delete_message.__globals__, "delete_message_core", fake
-    )
+async def test_deletes_the_named_message(slack_workspace):
+    # A bot token may delete only what the bot posted.
+    ts = await slack_workspace.post("C1", "gone soon")
     spec = next(
         s for s in SLACK.spec.subcommands if s.name == "delete-message"
     )
     out, _ = await delete_message(
-        ACCESSOR,
+        slack_workspace.accessor(),
         [],
         [],
-        Context(flags={"channel": "C1", "ts": "1.5"}, spec=spec),
+        Context(flags={"channel": "C1", "ts": ts}, spec=spec),
     )
-    assert seen == [("C1", "1.5")]
-    assert json.loads(await materialize(out)) == {"ok": True}
+    assert json.loads(await materialize(out))["ok"] is True
+    assert ts not in [m["ts"] for m in await slack_workspace.history("C1")]

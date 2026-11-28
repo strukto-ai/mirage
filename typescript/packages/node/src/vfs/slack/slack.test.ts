@@ -17,9 +17,11 @@ import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { SlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { LISTING, SlackWorkspace } from '../../../../core/tests/fixtures/slack_workspace.ts'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -28,18 +30,6 @@ function jsonResponse(body: unknown): Response {
 }
 
 describe('SlackVFS (node)', () => {
-  const originalFetch = globalThis.fetch
-
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(() =>
-      Promise.resolve(jsonResponse({ ok: true })),
-    ) as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   it('constructs with token and exposes expected fields', () => {
     const r = new SlackVFS({ token: 'xoxb-test' })
     expect(r.name).toBe(VFSName.SLACK)
@@ -71,33 +61,35 @@ describe('SlackVFS (node)', () => {
   })
 
   it('readdir(/channels/) calls conversations.list and returns names', async () => {
-    const fetchMock = vi.fn((url: string | URL | Request) => {
-      const u = url instanceof URL ? url.href : url instanceof Request ? url.url : url
-      if (u.includes('conversations.list')) {
-        return Promise.resolve(
-          jsonResponse({
-            ok: true,
-            channels: [
-              { id: 'C1', name: 'general', created: 1700000000 },
-              { id: 'C2', name: 'eng', created: 1700001000 },
-            ],
-            response_metadata: { next_cursor: '' },
-          }),
-        )
-      }
-      return Promise.resolve(jsonResponse({ ok: true }))
-    })
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-    const r = new SlackVFS({ token: 'xoxb-test' })
-    const out = await ops(r).readdir(
-      new PathSpec({
-        virtual: '/channels',
-        directory: '/channels',
-        vfsPath: 'channels',
-      }),
+    const workspace = new SlackWorkspace(await serve('slack'))
+    try {
+      await workspace.reset()
+      const out = await ops(new SlackVFS(workspace.config())).readdir(
+        new PathSpec({ virtual: '/channels', directory: '/channels', vfsPath: 'channels' }),
+      )
+      expect(out).toEqual(['/channels/general__C1', '/channels/random__C2'])
+      expect(await workspace.count(LISTING)).toBe(1)
+    } finally {
+      await workspace.close()
+    }
+  })
+
+  it('reaches slack.com/api when no base URL is set', async () => {
+    // Only the URL is checked, so the answer names no channel.
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn((_url: string | URL | Request) =>
+      Promise.resolve(
+        jsonResponse({ ok: true, channels: [], response_metadata: { next_cursor: '' } }),
+      ),
     )
-    expect(out).toEqual(['/channels/general__C1', '/channels/eng__C2'])
-    expect(fetchMock).toHaveBeenCalled()
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    try {
+      await ops(new SlackVFS({ token: 'xoxb-test' })).readdir(
+        new PathSpec({ virtual: '/channels', directory: '/channels', vfsPath: 'channels' }),
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
     const firstArg = (fetchMock.mock.calls[0] as unknown[])[0]
     const firstUrl =
       firstArg instanceof URL
@@ -105,8 +97,7 @@ describe('SlackVFS (node)', () => {
         : firstArg instanceof Request
           ? firstArg.url
           : String(firstArg)
-    expect(firstUrl).toContain('conversations.list')
-    expect(firstUrl).toContain('slack.com/api')
+    expect(firstUrl).toContain('slack.com/api/conversations.list')
   })
 })
 

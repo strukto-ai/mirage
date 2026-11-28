@@ -12,38 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.guilds import list_guilds
-
-
-@pytest.fixture
-def accessor():
-    return DiscordAccessor(DiscordConfig(token="test-bot-token"))
+from tests.fixtures.discord_guild import GUILD, GUILDS
 
 
 @pytest.mark.asyncio
-async def test_list_guilds(accessor):
-    mock_data = [
-        {"id": "G001", "name": "My Server"},
-        {"id": "G002", "name": "Another Server"},
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ) as mock_get:
-        result = await list_guilds(accessor)
-
-    assert len(result) == 2
-    assert result[0]["name"] == "My Server"
-    assert result[1]["id"] == "G002"
-    mock_get.assert_called_once()
-    args, kwargs = mock_get.call_args
-    assert args[1:] == ("GET", "/users/@me/guilds")
-    assert kwargs["params"]["after"] == "0"
-    assert kwargs["params"]["limit"] == 200
+async def test_list_guilds(discord_guild):
+    result = await list_guilds(discord_guild.accessor())
+    assert [(g["id"], g["name"]) for g in result] == [(GUILD, "My Server")]
+    [params] = await discord_guild.run.params("GET", GUILDS)
+    assert (params["after"], params["limit"]) == ("0", "200")

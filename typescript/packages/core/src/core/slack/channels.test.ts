@@ -12,84 +12,62 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { LISTING, SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
 import { listChannels, listDms } from './channels.ts'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string>; body?: unknown }[] =
-    []
-  constructor(
-    private readonly responder: (call: number, params?: Record<string, string>) => SlackResponse,
-  ) {}
-  call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse> {
-    this.calls.push({
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder(this.calls.length, params))
-  }
-}
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+const TYPES = 'public_channel,private_channel'
 
 describe('listChannels', () => {
   it('paginates conversations.list using response_metadata.next_cursor', async () => {
-    const t = new FakeTransport((n) => {
-      if (n === 1) {
-        return {
-          ok: true,
-          channels: [{ id: 'C1', name: 'a' }],
-          response_metadata: { next_cursor: 'curs2' },
-        }
-      }
-      return {
-        ok: true,
-        channels: [{ id: 'C2', name: 'b' }],
-        response_metadata: { next_cursor: '' },
-      }
-    })
-    const out = await listChannels(new SlackAccessor(t))
-    expect(out.map((c) => (c as { id: string }).id)).toEqual(['C1', 'C2'])
-    expect(t.calls[0]?.params).toMatchObject({
-      types: 'public_channel,private_channel',
-      limit: '200',
-      exclude_archived: 'true',
-    })
-    expect(t.calls[1]?.params).toMatchObject({ cursor: 'curs2' })
-    expect(t.calls[0]?.endpoint).toBe('conversations.list')
+    await workspace.firstPage(LISTING, 1, { types: TYPES })
+    const out = await listChannels(workspace.accessor())
+    expect(out.map((c) => c.id)).toEqual(['C1', 'C2'])
+    const [first, second] = await workspace.run.params('GET', LISTING)
+    expect(first).toMatchObject({ types: TYPES, limit: '200', exclude_archived: 'true' })
+    expect(second?.cursor).not.toBe('')
   })
 
   it('uses custom types and limit', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      channels: [],
-      response_metadata: { next_cursor: '' },
-    }))
-    await listChannels(new SlackAccessor(t), { types: 'public_channel', limit: 50 })
-    expect(t.calls[0]?.params).toMatchObject({ types: 'public_channel', limit: '50' })
+    // random is private, so the public channels alone are general.
+    const out = await listChannels(workspace.accessor(), { types: 'public_channel', limit: 50 })
+    expect(out.map((c) => c.id)).toEqual(['C1'])
+    expect((await workspace.run.params('GET', LISTING))[0]).toMatchObject({
+      types: 'public_channel',
+      limit: '50',
+    })
   })
 
   it('returns empty array when no channels', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      channels: [],
-      response_metadata: { next_cursor: '' },
-    }))
-    const out = await listChannels(new SlackAccessor(t))
-    expect(out).toEqual([])
+    // The workspace holds no group DM.
+    expect(await listChannels(workspace.accessor(), { types: 'mpim' })).toEqual([])
   })
 })
 
 describe('listDms', () => {
   it('calls conversations.list with types=im,mpim', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      channels: [{ id: 'D1', user: 'U1' }],
-      response_metadata: { next_cursor: '' },
-    }))
-    const out = await listDms(new SlackAccessor(t))
-    expect(t.calls[0]?.params).toMatchObject({ types: 'im,mpim', limit: '200' })
-    expect(out).toEqual([{ id: 'D1', user: 'U1' }])
+    const out = await listDms(workspace.accessor())
+    expect((await workspace.run.params('GET', LISTING))[0]).toMatchObject({
+      types: 'im,mpim',
+      limit: '200',
+    })
+    expect(out.map((c) => [c.id, (c as { user?: string }).user])).toEqual([['D1', 'U1']])
   })
 })

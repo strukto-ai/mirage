@@ -12,82 +12,55 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.history import (
     fetch_messages_for_day,
     stream_messages_for_day,
 )
 from mirage.core.time_range import TimeRange
+from tests.fixtures.slack_workspace import HISTORY
+
+DAY = {
+    "channel": "C1",
+    "oldest": "1762128000.000000",
+    "latest": "1762214400.000000",
+    "inclusive": "true",
+}
 
 
 @pytest.mark.asyncio
-async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
-    pages = [
-        {
-            "messages": [{"ts": "1778371201.0", "text": "a"}],
-            "response_metadata": {"next_cursor": "cur1"},
-        },
-        {
-            "messages": [{"ts": "1778371202.0", "text": "b"}],
-            "response_metadata": {"next_cursor": ""},
-        },
-    ]
-    calls = []
-
-    async def fake_get(_acc, method, params=None):
-        assert method == "conversations.history"
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        seen = []
+async def test_stream_messages_for_day_applies_day_bounds_and_yields_pages(
+    slack_workspace,
+):
+    # Slack's first page holds one message, newest first, so the day comes
+    # in two pages.
+    await slack_workspace.first_page(HISTORY, 1, **DAY)
+    seen = [
+        page
         async for page in stream_messages_for_day(
-            acc, "C1", "2026-05-10", TimeRange()
-        ):
-            seen.append(page)
-
-    assert [m["text"] for m in seen[0]] == ["a"]
-    assert [m["text"] for m in seen[1]] == ["b"]
-    assert calls[0]["channel"] == "C1"
-    assert calls[0]["inclusive"] == "true"
-    assert calls[0]["oldest"] == "1778371200.000000"
-    assert calls[0]["latest"] == "1778457600.000000"
-    assert calls[1]["cursor"] == "cur1"
+            slack_workspace.accessor(), "C1", "2025-11-03", TimeRange()
+        )
+    ]
+    assert [[m["text"] for m in page] for page in seen] == [
+        ["coffee is ready"],
+        ["the deploy is done at acme"],
+    ]
+    first, second = await slack_workspace.run.params("GET", HISTORY)
+    assert {key: first[key] for key in DAY} == DAY
+    assert second["cursor"] != ""
 
 
 @pytest.mark.asyncio
-async def test_fetch_messages_for_day_collects_and_sorts_across_pages():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
-    pages = [
-        {
-            "messages": [{"ts": "1778371203.0"}, {"ts": "1778371201.0"}],
-            "response_metadata": {"next_cursor": "cur1"},
-        },
-        {
-            "messages": [{"ts": "1778371202.0"}],
-            "response_metadata": {"next_cursor": ""},
-        },
-    ]
-    calls = {"n": 0}
-
-    async def fake_get(_acc, _method, params=None):
-        page = pages[calls["n"]]
-        calls["n"] += 1
-        return page
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        result = await fetch_messages_for_day(
-            acc, "C1", "2026-05-10", TimeRange()
-        )
-
+async def test_fetch_messages_for_day_collects_and_sorts_across_pages(
+    slack_workspace,
+):
+    await slack_workspace.first_page(HISTORY, 1, **DAY)
+    result = await fetch_messages_for_day(
+        slack_workspace.accessor(), "C1", "2025-11-03", TimeRange()
+    )
     assert [m["ts"] for m in result] == [
-        "1778371201.0",
-        "1778371202.0",
-        "1778371203.0",
+        "1762128060.000001",
+        "1762131600.000001",
     ]
+    assert len(await slack_workspace.run.params("GET", HISTORY)) == 2

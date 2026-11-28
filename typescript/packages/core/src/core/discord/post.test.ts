@@ -12,110 +12,96 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordFile, DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DAY, DiscordGuild, GENERAL, MESSAGE, MESSAGES } from '../../../tests/core/discord/guild.ts'
 import { deleteMessage, editMessage, sendMessage, sendPoll } from './post.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(private readonly responder: () => unknown = () => ({ id: 'M1' })) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder())
-  }
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
+
+async function hello(): Promise<string> {
+  return (await guild.day(GENERAL, DAY))[0]?.id ?? ''
 }
 
 describe('sendMessage', () => {
   it('POSTs to /channels/<id>/messages with content body', async () => {
-    const t = new FakeDiscordTransport(() => ({ id: 'M1' }))
-    const out = await sendMessage(new DiscordAccessor(t), 'C1', 'hello')
-    expect(t.calls[0]?.method).toBe('POST')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages')
-    expect(t.calls[0]?.params).toBeUndefined()
-    expect(t.calls[0]?.body).toEqual({ content: 'hello' })
-    expect(out).toMatchObject({ id: 'M1' })
+    const out = (await sendMessage(guild.accessor(), GENERAL, 'hello')) as { id: string }
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([{ content: 'hello' }])
+    expect(await guild.run.params('POST', MESSAGES)).toEqual([{}])
+    expect((await guild.message(GENERAL, out.id)).content).toBe('hello')
   })
 
   it('adds message_reference when messageReferenceId is provided', async () => {
-    const t = new FakeDiscordTransport()
-    await sendMessage(new DiscordAccessor(t), 'C1', 'reply', 'M0')
-    expect(t.calls[0]?.body).toEqual({
-      content: 'reply',
-      message_reference: { message_id: 'M0' },
-    })
+    const id = await hello()
+    await sendMessage(guild.accessor(), GENERAL, 'reply', id)
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([
+      { content: 'reply', message_reference: { message_id: id } },
+    ])
   })
 
   it('posts a file as multipart through the transport', async () => {
-    const posted: [string, Record<string, unknown>, readonly DiscordFile[]][] = []
-    class Uploading extends FakeDiscordTransport {
-      postFiles(
-        endpoint: string,
-        body: Record<string, unknown>,
-        files: readonly DiscordFile[],
-      ): Promise<unknown> {
-        posted.push([endpoint, body, files])
-        return Promise.resolve({ id: 'M3' })
-      }
-    }
-    const t = new Uploading()
     const file = { name: 'reply.wav', data: new TextEncoder().encode('RIFF') }
-    const out = await sendMessage(new DiscordAccessor(t), 'C1', '', undefined, file)
-    expect(t.calls).toEqual([])
-    expect(posted).toEqual([['/channels/C1/messages', { content: '' }, [file]]])
-    expect(out).toMatchObject({ id: 'M3' })
+    const out = (await sendMessage(guild.accessor(), GENERAL, '', undefined, file)) as {
+      id: string
+    }
+    const [attached] = (await guild.message(GENERAL, out.id)).attachments as {
+      filename: string
+      url: string
+    }[]
+    expect(attached?.filename).toBe('reply.wav')
+    const path = (attached?.url ?? '').split('/attachments/')[1]?.split('?')[0] ?? ''
+    expect(await guild.run.read(`/attachments/${path}`)).toEqual(file.data)
   })
 
   it('omits message_reference when messageReferenceId is empty string', async () => {
-    const t = new FakeDiscordTransport()
-    await sendMessage(new DiscordAccessor(t), 'C1', 'hi', '')
-    expect(t.calls[0]?.body).toEqual({ content: 'hi' })
+    await sendMessage(guild.accessor(), GENERAL, 'hi', '')
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([{ content: 'hi' }])
   })
 })
 
 describe('editMessage / deleteMessage / sendPoll', () => {
   it('editMessage PATCHes the message content', async () => {
-    const t = new FakeDiscordTransport()
-    await editMessage(new DiscordAccessor(t), 'C1', 'M1', 'edited')
-    expect(t.calls[0]?.method).toBe('PATCH')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1')
-    expect(t.calls[0]?.body).toEqual({ content: 'edited' })
+    // A bot may edit only what it posted.
+    const mine = await guild.post(GENERAL, 'draft')
+    await editMessage(guild.accessor(), GENERAL, mine.id, 'edited')
+    expect(await guild.run.bodies('PATCH', MESSAGE)).toEqual([{ content: 'edited' }])
+    expect((await guild.message(GENERAL, mine.id)).content).toBe('edited')
   })
 
   it('deleteMessage DELETEs the message', async () => {
-    const t = new FakeDiscordTransport()
-    await deleteMessage(new DiscordAccessor(t), 'C1', 'M1')
-    expect(t.calls[0]?.method).toBe('DELETE')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1')
+    const mine = await guild.post(GENERAL, 'gone soon')
+    await deleteMessage(guild.accessor(), GENERAL, mine.id)
+    expect(await guild.count(MESSAGE, 'DELETE')).toBe(1)
+    const gone = await guild.run.request('GET', `/api/v10/channels/${GENERAL}/messages/${mine.id}`)
+    expect(gone.status).toBe(404)
+    await gone.text()
   })
 
   it('sendPoll shapes the poll object', async () => {
-    const t = new FakeDiscordTransport()
-    await sendPoll(new DiscordAccessor(t), 'C1', 'Lunch?', ['Pizza', 'Sushi'], 48, true)
-    expect(t.calls[0]?.body).toEqual({
-      poll: {
-        question: { text: 'Lunch?' },
-        answers: [{ poll_media: { text: 'Pizza' } }, { poll_media: { text: 'Sushi' } }],
-        duration: 48,
-        allow_multiselect: true,
+    await sendPoll(guild.accessor(), GENERAL, 'Lunch?', ['Pizza', 'Sushi'], 48, true)
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([
+      {
+        poll: {
+          question: { text: 'Lunch?' },
+          answers: [{ poll_media: { text: 'Pizza' } }, { poll_media: { text: 'Sushi' } }],
+          duration: 48,
+          allow_multiselect: true,
+        },
       },
-    })
+    ])
   })
 })

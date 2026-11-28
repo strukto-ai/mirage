@@ -12,49 +12,48 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DAY, DiscordGuild, GENERAL } from '../../../tests/core/discord/guild.ts'
 import { addReaction } from './react.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(null)
-  }
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
+
+async function reacted(): Promise<string[]> {
+  const hello = (await guild.day(GENERAL, DAY))[0]?.id ?? ''
+  const message = await guild.message(GENERAL, hello)
+  return ((message.reactions ?? []) as { emoji: { name: string } }[]).map((r) => r.emoji.name)
 }
 
 describe('addReaction', () => {
   it('PUTs to the reaction endpoint with URL-encoded emoji', async () => {
-    const t = new FakeDiscordTransport()
-    await addReaction(new DiscordAccessor(t), 'C1', 'M1', '\u{1F44D}')
-    expect(t.calls[0]?.method).toBe('PUT')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1/reactions/%F0%9F%91%8D/@me')
-    expect(t.calls[0]?.params).toBeUndefined()
-    expect(t.calls[0]?.body).toBeUndefined()
+    const hello = (await guild.day(GENERAL, DAY))[0]?.id ?? ''
+    await addReaction(guild.accessor(), GENERAL, hello, '\u{1F44D}')
+    expect(await guild.run.requests()).toEqual([
+      `PUT /api/v10/channels/${GENERAL}/messages/${hello}/reactions/%F0%9F%91%8D/@me`,
+    ])
+    expect(await reacted()).toEqual(['\u{1F44D}'])
   })
 
   it('encodes ASCII emoji shortcode-style strings', async () => {
-    const t = new FakeDiscordTransport()
-    await addReaction(new DiscordAccessor(t), 'C1', 'M1', 'name:123')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages/M1/reactions/name%3A123/@me')
+    const hello = (await guild.day(GENERAL, DAY))[0]?.id ?? ''
+    await addReaction(guild.accessor(), GENERAL, hello, 'name:123')
+    expect(await guild.run.requests()).toEqual([
+      `PUT /api/v10/channels/${GENERAL}/messages/${hello}/reactions/name%3A123/@me`,
+    ])
   })
 })

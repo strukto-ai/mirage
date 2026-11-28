@@ -12,38 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { ALICE, DAY, DiscordGuild, GENERAL, MESSAGES } from '../../../tests/core/discord/guild.ts'
 import { DISCORD_EPOCH, fetchRecentMessages, getHistoryJsonl, snowflakeAt } from './history.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(
-    private readonly responder: (n: number, params?: Record<string, string | number>) => unknown,
-  ) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder(this.calls.length, params))
-  }
-}
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('snowflakeAt', () => {
   it('matches the (ms - epoch) << 22 formula', () => {
@@ -52,82 +40,70 @@ describe('snowflakeAt', () => {
   })
 })
 
+function contents(out: Uint8Array): string[] {
+  return new TextDecoder()
+    .decode(out)
+    .trimEnd()
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => (JSON.parse(line) as { content: string }).content)
+}
+
 describe('getHistoryJsonl', () => {
   it('paginates until a short batch is returned', async () => {
-    // Discord answers newest-first, so a full page is descending and the
-    // cursor for the next one is its first (newest) id.
-    const firstPage = Array.from({ length: 100 }, (_, i) => ({
-      id: String(snowflakeAt(Date.UTC(2026, 3, 25) / 1000) + BigInt(100 - i)),
-      content: `msg${String(100 - i)}`,
-    }))
-    const secondPage = [
-      {
-        id: String(snowflakeAt(Date.UTC(2026, 3, 25) / 1000) + 200n),
-        content: 'tail',
-      },
-    ]
-    const t = new FakeDiscordTransport((n) => {
-      if (n === 1) return firstPage
-      if (n === 2) return secondPage
-      return []
-    })
-    const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
-    expect(t.calls.length).toBe(2)
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/messages')
-    expect(t.calls[0]?.params).toMatchObject({ limit: 100 })
-    expect(t.calls[1]?.params?.after).toBe(firstPage[0]?.id)
+    // A day of 101 messages: a full page of 100, newest first, then one.
+    const start = Date.UTC(2024, 0, 20)
+    await guild.addMessages(
+      GENERAL,
+      ALICE,
+      Array.from({ length: 101 }, (_, i): [Date, string] => [
+        new Date(start + i * 1000),
+        `msg${String(i)}`,
+      ]),
+    )
+    const out = await getHistoryJsonl(guild.accessor(), GENERAL, '2024-01-20')
+    const asked = await guild.run.params('GET', MESSAGES)
+    expect(asked).toHaveLength(2)
+    expect(asked[0]?.limit).toBe('100')
+    // Discord answers newest-first, so the cursor for the next page is the
+    // newest id of the first.
+    expect(asked[1]?.after).toBe(String(snowflakeAt((start + 99 * 1000) / 1000)))
     const text = new TextDecoder().decode(out)
-    const lines = text.trimEnd().split('\n')
-    expect(lines.length).toBe(101)
+    expect(text.trimEnd().split('\n')).toHaveLength(101)
     expect(text.endsWith('\n')).toBe(true)
   })
 
   it('filters out messages whose id is past the end-of-day snowflake', async () => {
-    const beforeBig = snowflakeAt(Date.UTC(2026, 3, 26) / 1000)
-    const inside = { id: String(beforeBig - 10n), content: 'in' }
-    const outside = { id: String(beforeBig + 10n), content: 'out' }
-    const t = new FakeDiscordTransport((n) => {
-      if (n === 1) return [inside, outside]
-      return []
-    })
-    const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
-    const text = new TextDecoder().decode(out)
-    expect(text).toContain('"in"')
-    expect(text).not.toContain('"out"')
+    // morning is general's next day.
+    const out = contents(await getHistoryJsonl(guild.accessor(), GENERAL, DAY))
+    expect(out).toContain('hello')
+    expect(out).not.toContain('morning')
   })
 
   it('returns empty Uint8Array when there are no messages', async () => {
-    const t = new FakeDiscordTransport(() => [])
-    const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
+    const out = await getHistoryJsonl(guild.accessor(), GENERAL, '2024-01-10')
     expect(out).toBeInstanceOf(Uint8Array)
     expect(out.length).toBe(0)
   })
 
   it('sorts messages ascending by snowflake id across pages', async () => {
-    const after = snowflakeAt(Date.UTC(2026, 3, 25) / 1000)
-    const m1 = { id: String(after + 5n), content: 'a' }
-    const m2 = { id: String(after + 3n), content: 'b' }
-    const t = new FakeDiscordTransport((n) => {
-      if (n === 1) return [m1, m2]
-      return []
-    })
-    const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
-    const lines = new TextDecoder().decode(out).trimEnd().split('\n')
-    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ content: 'b' })
-    expect(JSON.parse(lines[1] ?? '{}')).toMatchObject({ content: 'a' })
+    expect(contents(await getHistoryJsonl(guild.accessor(), GENERAL, DAY))).toEqual([
+      'hello',
+      'files',
+    ])
   })
 
   it('breaks when the response is null', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    const out = await getHistoryJsonl(new DiscordAccessor(t), 'C1', '2026-04-25')
+    await guild.run.answerNext('GET', MESSAGES, 200, null)
+    const out = await getHistoryJsonl(guild.accessor(), GENERAL, DAY)
     expect(out.length).toBe(0)
   })
 })
 
 describe('fetchRecentMessages', () => {
   it('fetches one page and sorts oldest-first', async () => {
-    const t = new FakeDiscordTransport(() => [{ id: '30' }, { id: '10' }, { id: '20' }])
-    const messages = await fetchRecentMessages(new DiscordAccessor(t), 'C1', 3)
-    expect(messages.map((m) => m.id)).toEqual(['10', '20', '30'])
+    const messages = await fetchRecentMessages(guild.accessor(), GENERAL, 3)
+    expect(messages.map((m) => m.content)).toEqual(['hello', 'files', 'morning'])
+    expect(await guild.count(MESSAGES)).toBe(1)
   })
 })

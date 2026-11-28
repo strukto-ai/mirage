@@ -37,11 +37,13 @@ import {
   EDIT_TIMESTAMP,
   MEMBERS_MAX_LIMIT,
   MESSAGES_MAX_LIMIT,
+  SEARCH_PAGE_LIMIT,
   POST_TIMESTAMP,
   baseOf,
   bodyObject,
   cdnQuery,
   clamp,
+  pyInt,
   cursor,
   invalidFormBody,
   isObject,
@@ -79,7 +81,8 @@ function authed(ctx: Ctx<C>): boolean {
 const GUILD =
   'SELECT tenant, id, seq, CAST(idNum AS TEXT) AS idNum, name, members, messages FROM DiscordGuild'
 const CHANNEL =
-  'SELECT tenant, id, guildId, seq, name, type, topic, position, lastMessageId, botHidden ' +
+  'SELECT tenant, id, guildId, seq, name, type, topic, position, lastMessageId, parentId, ' +
+  'botHidden ' +
   'FROM DiscordChannel'
 const MEMBER =
   'SELECT pk, tenant, guildId, seq, userId, CAST(userIdNum AS TEXT) AS userIdNum, username, ' +
@@ -456,6 +459,16 @@ async function guildInfo(ctx: Ctx<C>): Promise<Reply> {
   return { status: 200, body: renderGuild(toGuild(row)) }
 }
 
+// One channel by id, a thread naming its parent. One the bot cannot see is
+// Missing Access, as reading it is.
+async function channelInfo(ctx: Ctx<C>): Promise<Reply> {
+  if (!authed(ctx)) return unauthorized()
+  const row = await channelRow(ctx, ctx.params.channel_id ?? '')
+  if (row === null) return unknownChannel()
+  if (row.botHidden) return missingAccess()
+  return { status: 200, body: renderChannel(row) }
+}
+
 async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
   if (!authed(ctx)) return unauthorized()
   const guildId = ctx.params.guild_id ?? ''
@@ -473,7 +486,14 @@ async function searchMessages(ctx: Ctx<C>): Promise<Reply> {
       contexts.push([resolveBase(renderMessage(row), base, query)])
     }
   }
-  return { status: 200, body: { total_results: contexts.length, messages: contexts } }
+  // A page of at most 25 hits from `offset`, as Discord answers one, and the
+  // count of every hit, so a client knows how far to page.
+  const offset = Math.max(0, pyInt(ctx.query.get('offset') ?? '0') ?? 0)
+  const limit = clamp(ctx.query.get('limit'), SEARCH_PAGE_LIMIT, SEARCH_PAGE_LIMIT)
+  return {
+    status: 200,
+    body: { total_results: contexts.length, messages: contexts.slice(offset, offset + limit) },
+  }
 }
 
 async function addReaction(ctx: Ctx<C>): Promise<Reply> {
@@ -625,6 +645,7 @@ export const discordFake: Fake<C> = {
     route('GET', '/api/v10/guilds/:guild_id/members', guildMembers),
     route('GET', '/api/v10/guilds/:guild_id/messages/search', searchMessages),
     route('GET', '/api/v10/guilds/:guild_id', guildInfo),
+    route('GET', '/api/v10/channels/:channel_id', channelInfo),
     route('GET', '/api/v10/channels/:channel_id/messages/pins', channelPins),
     route('PUT', '/api/v10/channels/:channel_id/messages/pins/:message_id', addPin, {
       write: true,

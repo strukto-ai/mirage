@@ -12,38 +12,24 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.channels import list_channels_stream
-from mirage.core.slack.config import SlackConfig
+from tests.fixtures.slack_workspace import LISTING
 
 
 @pytest.mark.asyncio
-async def test_list_channels_stream_yields_pages():
-    acc = SlackAccessor(SlackConfig(token="xoxb-t"))
-    pages = [
-        {
-            "channels": [{"id": "C1"}, {"id": "C2"}],
-            "response_metadata": {"next_cursor": "cur1"},
-        },
-        {"channels": [{"id": "C3"}], "response_metadata": {"next_cursor": ""}},
+async def test_list_channels_stream_yields_pages(slack_workspace):
+    types = "public_channel,private_channel"
+    await slack_workspace.first_page(LISTING, 1, types=types)
+    seen = [
+        page async for page in list_channels_stream(slack_workspace.accessor())
     ]
-    calls = []
-
-    async def fake_get(_acc, method, params=None):
-        assert method == "conversations.list"
-        calls.append(dict(params or {}))
-        return pages[len(calls) - 1]
-
-    with patch("mirage.core.slack.paginate.slack_get", new=fake_get):
-        seen = []
-        async for page in list_channels_stream(acc):
-            seen.append(page)
-    assert [ch["id"] for ch in seen[0]] == ["C1", "C2"]
-    assert [ch["id"] for ch in seen[1]] == ["C3"]
-    assert calls[0]["types"] == "public_channel,private_channel"
-    assert calls[0]["exclude_archived"] == "true"
-    assert calls[0]["limit"] == 200
+    assert [[ch["id"] for ch in page] for page in seen] == [["C1"], ["C2"]]
+    first, second = await slack_workspace.run.params("GET", LISTING)
+    assert (first["types"], first["exclude_archived"], first["limit"]) == (
+        types,
+        "true",
+        "200",
+    )
+    assert second["cursor"] != ""

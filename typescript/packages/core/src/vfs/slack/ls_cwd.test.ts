@@ -12,31 +12,34 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { FakeSlackTransport, makeFakeVfs } from '../../../tests/vfs/slack/_test_util.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../tests/core/slack/workspace.ts'
+import { SlackVFS } from './slack.ts'
+
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 // Regression guard for the Python-side bug fixed in PR #48: `ls` (no args)
 // after `cd /slack/...` would return [] because the cwd PathSpec was rebuilt
 // without preserving the mount prefix.
 describe('slack ls (no args) after cd preserves mount prefix', () => {
   it('cwd=/slack/channels/general__C1 returns date entries', async () => {
-    const channelsPage = {
-      ok: true,
-      channels: [{ id: 'C1', name: 'general', created: 1700000000 }],
-      response_metadata: { next_cursor: '' },
-    }
-    const historyPage = {
-      ok: true,
-      messages: [{ ts: '1700050000.0', text: 'hi' }],
-      has_more: false,
-    }
-    const transport = new FakeSlackTransport((endpoint) => {
-      if (endpoint === 'conversations.list') return channelsPage
-      if (endpoint === 'conversations.history') return historyPage
-      throw new Error(`unexpected ${endpoint}`)
-    })
-    const ws = new Workspace({ '/slack/': makeFakeVfs(transport) })
+    const ws = new Workspace({ '/slack/': new SlackVFS({ accessor: workspace.accessor() }) })
     try {
       const io = await ws.shell('cd /slack/channels/general__C1 && ls')
       const stdout = new TextDecoder().decode(io.stdout)

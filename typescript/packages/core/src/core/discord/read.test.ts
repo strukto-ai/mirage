@@ -12,119 +12,115 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { commandScope } from '../../cache/index/scope.ts'
 import { FileStat, FileType, PathSpec, ReadPolicy } from '../../types.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
-import { snowflakeAt } from './history.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  ALICE,
+  DAY as DATE,
+  DiscordGuild,
+  GENERAL,
+  MEMBERS,
+  MESSAGES,
+  PAGE,
+} from '../../../tests/core/discord/guild.ts'
+import { jsonlBytes } from '../render/json.ts'
 import { follow, read, readMany, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(
-    private readonly responder: (method: DiscordMethod, endpoint: string) => unknown = () => null,
-  ) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder(method, endpoint))
-  }
-}
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 const decoder = new TextDecoder()
-
-const CHAT = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15/chat.jsonl'
-const MEMBER = '/mnt/discord/My Server__G1/members/alice__U1.json'
+const CHANNEL = '/mnt/discord/My Server__111/channels/general__211'
+const CHAT = `${CHANNEL}/${DATE}/chat.jsonl`
+const MEMBER = '/mnt/discord/My Server__111/members/alice__311.json'
 
 // The rows the listings name: chat.jsonl and its day carry their channel.
 const chatRow = new FileStat({
   name: 'chat.jsonl',
   type: FileType.FILE,
-  extra: { channel_id: 'C1' },
+  extra: { channel_id: GENERAL },
 })
-const dayRow = new FileStat({
-  name: '2024-01-15',
-  type: FileType.DIRECTORY,
-  extra: { channel_id: 'C1' },
-})
+
+function dayRowOf(name: string): FileStat {
+  return new FileStat({ name, type: FileType.DIRECTORY, extra: { channel_id: GENERAL } })
+}
+
+const dayRow = dayRowOf(DATE)
+
 const aliceRow = new FileStat({
-  name: 'alice__U1.json',
+  name: 'alice__311.json',
   type: FileType.FILE,
-  extra: { user_id: 'U1' },
+  extra: { user_id: ALICE },
 })
+
+function contents(body: Uint8Array | undefined): string[] {
+  return decoder
+    .decode(body)
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => (JSON.parse(line) as { content: string }).content)
+}
 
 describe('read history jsonl branch', () => {
   it('reads channel jsonl bytes for the channel its row names', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/channels/C1/messages') {
-        return [
-          { id: '1196300000000000000', content: 'hello' },
-          { id: '1196400000000000000', content: 'world' },
-        ]
-      }
-      return null
-    })
-    const out = await read(new DiscordAccessor(t), spec(CHAT, '/mnt/discord'), chatRow, dayRow)
-    const text = decoder.decode(out).trimEnd()
-    const lines = text.split('\n')
-    expect(lines).toHaveLength(2)
-    const first = JSON.parse(lines[0] ?? '') as { content: string }
-    expect(first.content).toBe('hello')
-    const histCall = t.calls.find((c) => c.endpoint === '/channels/C1/messages')
-    expect(histCall).toBeDefined()
+    const out = await read(guild.accessor(), spec(CHAT, '/mnt/discord'), chatRow, dayRow)
+    expect(contents(out)).toEqual(['hello', 'files'])
+    expect(await guild.dayFetches()).toEqual([[GENERAL, DATE]])
+  })
+
+  it('walks every page of a busy day', async () => {
+    // More messages in one day than Discord answers a page: the read walks
+    // on past the first page and keeps them all, oldest first.
+    const busy = '2024-01-17'
+    const start = Date.parse(`${busy}T08:00:00Z`)
+    const posts = Array.from({ length: PAGE + 5 }, (_, n): [Date, string] => [
+      new Date(start + n * 1000),
+      `busy ${String(n)}`,
+    ])
+    await guild.addMessages(GENERAL, ALICE, posts)
+    const out = await read(
+      guild.accessor(),
+      spec(`${CHANNEL}/${busy}/chat.jsonl`, '/mnt/discord'),
+      chatRow,
+      dayRowOf(busy),
+    )
+    expect(contents(out)).toEqual(posts.map(([, text]) => text))
+    expect(out).toEqual(jsonlBytes(await guild.day(GENERAL, busy)))
   })
 
   it('throws ENOENT for jsonl path when no row names its channel', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    await expect(read(new DiscordAccessor(t), spec(CHAT, '/mnt/discord'))).rejects.toMatchObject({
+    await expect(read(guild.accessor(), spec(CHAT, '/mnt/discord'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 })
 
-const DAY = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15'
-const OTHER_DAY = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-14'
-const otherDayRow = new FileStat({
-  name: '2024-01-14',
-  type: FileType.DIRECTORY,
-  extra: { channel_id: 'C1' },
-})
+const OTHER_DAY = `${CHANNEL}/2024-01-14`
 
-function history(): FakeDiscordTransport {
-  return new FakeDiscordTransport((_m, endpoint) =>
-    endpoint === '/channels/C1/messages' ? [{ id: '1196300000000000000', content: 'hello' }] : null,
-  )
-}
-
-function fetched(t: FakeDiscordTransport): (string | number | undefined)[] {
-  return t.calls.filter((c) => c.endpoint === '/channels/C1/messages').map((c) => c.params?.after)
-}
-
-function listDay(accessor: DiscordAccessor, day = DAY, row = dayRow) {
+function listDay(accessor: DiscordAccessor, day = `${CHANNEL}/${DATE}`, row = dayRow) {
   return readdir(accessor, spec(day, '/mnt/discord'), row)
 }
 
@@ -135,35 +131,35 @@ function readChat(accessor: DiscordAccessor): Promise<Uint8Array> {
 describe('a read after its day listing', () => {
   // Twin of test_a_read_takes_the_day_its_listing_fetched.
   it('takes the messages the listing fetched', async () => {
-    const t = history()
-    const accessor = new DiscordAccessor(t)
+    const accessor = guild.accessor()
     await commandScope(async () => {
       await listDay(accessor)
       expect(decoder.decode(await readChat(accessor))).toContain('hello')
     })
-    expect(fetched(t)).toHaveLength(1)
+    expect(await guild.dayFetches()).toHaveLength(1)
   })
 
   // Twin of test_only_the_last_listed_day_is_kept_for_one_read.
   it('keeps only the last listed day, for one read', async () => {
-    const t = history()
-    const accessor = new DiscordAccessor(t)
+    const accessor = guild.accessor()
     await commandScope(async () => {
       await listDay(accessor)
       await readChat(accessor)
       await readChat(accessor)
-      await listDay(accessor, OTHER_DAY, otherDayRow)
+      await listDay(accessor, OTHER_DAY, dayRowOf('2024-01-14'))
       await readChat(accessor)
     })
-    const [day, , other] = fetched(t)
-    expect(fetched(t)).toEqual([day, day, other, day])
-    expect(other).not.toBe(day)
+    expect(await guild.dayFetches()).toEqual([
+      [GENERAL, DATE],
+      [GENERAL, DATE],
+      [GENERAL, '2024-01-14'],
+      [GENERAL, DATE],
+    ])
   })
 
   // Twin of test_a_dropped_or_expired_day_is_fetched_again.
   it.each(['forget', 'fresh', 'late'])('fetches the day again after %s', async (drop) => {
-    const t = history()
-    const accessor = new DiscordAccessor(t)
+    const accessor = guild.accessor()
     if (drop === 'fresh') accessor.govern?.({ policy: ReadPolicy.FRESH, ttl: 600 })
     const realNow = Date.now.bind(Date)
     try {
@@ -178,7 +174,7 @@ describe('a read after its day listing', () => {
     } finally {
       vi.restoreAllMocks()
     }
-    expect(fetched(t)).toHaveLength(2)
+    expect(await guild.dayFetches()).toHaveLength(2)
   })
 
   // Twin of test_only_the_listing_command_takes_the_day.
@@ -186,75 +182,66 @@ describe('a read after its day listing', () => {
     ['the next command', commandScope],
     ['no command', (fn) => fn()],
   ]
+
   it.each(scopes)('fetches the day again for a read in %s', async (_name, scope) => {
-    const t = history()
-    const accessor = new DiscordAccessor(t)
+    const accessor = guild.accessor()
     await scope(() => listDay(accessor))
     await scope(() => readChat(accessor))
-    expect(fetched(t)).toHaveLength(2)
+    expect(await guild.dayFetches()).toHaveLength(2)
   })
 })
 
 describe('read members branch', () => {
   it('returns JSON-stringified member bytes for matching user id', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/guilds/G1/members') {
-        return [
-          { user: { id: 'U2', username: 'bob' }, nick: 'Bob' },
-          { user: { id: 'U1', username: 'alice' }, nick: 'Alice' },
-        ]
-      }
-      return null
-    })
-    const out = await read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'), aliceRow)
+    const out = await read(guild.accessor(), spec(MEMBER, '/mnt/discord'), aliceRow)
     const parsed = JSON.parse(decoder.decode(out)) as Record<string, unknown>
-    expect(parsed).toMatchObject({
-      user: { id: 'U1', username: 'alice' },
-      nick: 'Alice',
-    })
-    const memCall = t.calls.find((c) => c.endpoint === '/guilds/G1/members')
-    expect(memCall).toBeDefined()
+    expect(parsed).toMatchObject({ user: { id: ALICE, username: 'alice' }, nick: 'al' })
+    expect(await guild.count(MEMBERS)).toBe(1)
   })
 
   it('throws ENOENT for members path when no row is handed', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    await expect(read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'))).rejects.toMatchObject({
+    await expect(read(guild.accessor(), spec(MEMBER, '/mnt/discord'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 
   it('throws ENOENT when no member matches the handed user id', async () => {
-    const t = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint === '/guilds/G1/members') {
-        return [{ user: { id: 'U2', username: 'bob' } }]
-      }
-      return null
+    const stranger = new FileStat({
+      name: 'carol__399.json',
+      type: FileType.FILE,
+      extra: { user_id: '399' },
     })
     await expect(
-      read(new DiscordAccessor(t), spec(MEMBER, '/mnt/discord'), aliceRow),
+      read(
+        guild.accessor(),
+        spec('/mnt/discord/My Server__111/members/carol__399.json', '/mnt/discord'),
+        stranger,
+      ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('read unknown', () => {
   it('throws ENOENT for unknown path shape', async () => {
-    const t = new FakeDiscordTransport(() => null)
     await expect(
-      read(new DiscordAccessor(t), spec('/mnt/discord/My Server__G1/foo/bar', '/mnt/discord')),
+      read(guild.accessor(), spec('/mnt/discord/My Server__111/foo/bar', '/mnt/discord')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('throws EISDIR for root', async () => {
     // The root exists by construction, so reading it as a file is the one
     // shape the kit reports as a directory rather than absent.
-    const t = new FakeDiscordTransport(() => null)
     await expect(
-      read(new DiscordAccessor(t), spec('/mnt/discord', '/mnt/discord')),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+      read(guild.accessor(), spec('/mnt/discord', '/mnt/discord')),
+    ).rejects.toMatchObject({
+      code: 'EISDIR',
+    })
   })
 })
 
 it('closes an attachment stream before fetching its tail', async () => {
+  // The download is staged: over the wire, a read closed after its first
+  // chunk cannot be told from one that fetched the rest.
   let closed = false
   const body = new ReadableStream<Uint8Array>(
     {
@@ -275,7 +262,7 @@ it('closes an attachment stream before fetching its tail', async () => {
     extra: { attachment_id: 'F1', url: 'https://cdn.test/report' },
   })
   try {
-    const stream = readStream(new DiscordAccessor(new FakeDiscordTransport()), path, row)
+    const stream = readStream(guild.accessor(), path, row)
     const first = await stream.next()
     if (first.done) throw new Error('attachment stream ended before its first chunk')
     expect(new TextDecoder().decode(first.value)).toBe('first\n')
@@ -288,20 +275,9 @@ it('closes an attachment stream before fetching its tail', async () => {
 
 describe('follow', () => {
   it('prints the last lines, then asks after the last one seen', async () => {
-    const day = [
-      { id: '1196400000000000000', content: 'world' },
-      { id: '1196300000000000000', content: 'hello' },
-    ]
-    const later = { id: '1196450000000000000', content: 'later' }
-    const t: FakeDiscordTransport = new FakeDiscordTransport((_m, endpoint) => {
-      if (endpoint !== '/channels/C1/messages') return null
-      // `later` lands once the day has been read, so only a poll sees it.
-      const after = BigInt(t.calls[t.calls.length - 1]?.params?.after ?? 0)
-      const posted = after >= BigInt(day[0]?.id ?? 0) ? [later] : day
-      return posted.filter((m) => BigInt(m.id) > after)
-    })
+    const day = await guild.day(GENERAL, DATE)
     const stream = await follow(
-      new DiscordAccessor(t),
+      guild.accessor(),
       spec(CHAT, '/mnt/discord'),
       1,
       0.001,
@@ -310,49 +286,42 @@ describe('follow', () => {
     )
     if (stream === null) throw new Error('the chat day was not followed')
     const it = stream[Symbol.asyncIterator]()
-    const contents = async (): Promise<string[]> =>
-      decoder
-        .decode(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
-        .trimEnd()
-        .split('\n')
-        .map((line) => (JSON.parse(line) as { content: string }).content)
-    expect(await contents()).toEqual(['world'])
-    expect(await contents()).toEqual(['later'])
+    const next = async (): Promise<string[]> =>
+      contents(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
+    expect(await next()).toEqual(['files'])
+    // Another client posts on the day; storing it reloads the run, so the
+    // recording restarts after.
+    await guild.addMessage(GENERAL, new Date(Date.UTC(2024, 0, 15, 12)), ALICE, 'later')
+    expect(await next()).toEqual(['later'])
     const idle = it.next()
     await it.return?.()
     expect((await idle).done).toBe(true)
-    const asked = t.calls.filter((c) => c.endpoint === '/channels/C1/messages')
-    expect(asked.map((c) => c.params?.after)).toContain('1196400000000000000')
+    const asked = await guild.run.params('GET', MESSAGES)
+    expect(asked.map((p) => p.after)).toContain(day.at(-1)?.id)
   })
 })
 
-// Twin of test_a_batch_walks_a_run_of_days_once.
+// Twin of test_a_batch_walks_a_run_of_days_once: 2024-01-15 and 01-16 are one
+// run of days, walked by one listing.
 it('walks a run of days of a batch once', async () => {
-  const channels = '/mnt/discord/My Server__G1/channels'
-  const days = ['2024-01-15', '2024-01-16']
+  const days = [DATE, '2024-01-16']
   const chat = new FileStat({
     name: 'chat.jsonl',
     type: FileType.FILE,
-    extra: { channel_id: 'C1' },
+    extra: { channel_id: GENERAL },
   })
-  const [onDay, later] = [
-    [Date.UTC(2024, 0, 15, 10), 'a'],
-    [Date.UTC(2024, 0, 16, 1), 'b'],
-  ].map(([at, text]) => ({ id: snowflakeAt(Number(at) / 1000).toString(), content: text }))
-  const t = new FakeDiscordTransport(() => [onDay, later])
-  const chats = days.map((day) => `${channels}/general__C1/${day}/chat.jsonl`)
+  const chats = days.map((day) => `${CHANNEL}/${day}/chat.jsonl`)
   const answers = await readMany(
-    new DiscordAccessor(t),
+    guild.accessor(),
     chats.map((v) => spec(v, '/mnt/discord')),
     1 << 20,
     chats.map(() => ({ entry: chat })),
   )
-  const lines = (body: Uint8Array | undefined): unknown[] =>
-    decoder
-      .decode(body)
-      .split('\n')
-      .filter((line) => line !== '')
-      .map((line) => JSON.parse(line) as unknown)
-  expect(chats.map((chat) => lines(answers.get(chat)))).toEqual([[onDay], [later]])
-  expect(t.calls.filter((call) => call.endpoint === '/channels/C1/messages')).toHaveLength(1)
+  const expected = await Promise.all(
+    days.map(async (day) => jsonlBytes(await guild.day(GENERAL, day))),
+  )
+  expect(chats.map((c) => decoder.decode(answers.get(c)))).toEqual(
+    expected.map((bytes) => decoder.decode(bytes)),
+  )
+  expect(await guild.dayFetches()).toEqual([[GENERAL, DATE]])
 })

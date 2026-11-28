@@ -14,151 +14,80 @@
 
 import { SLACK } from '@struktoai/mirage-core/commands/cli/builtin/slack/index'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { SlackWorkspace } from '../../../../core/tests/fixtures/slack_workspace.ts'
 
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    headers: { 'content-type': 'application/json' },
-  })
-}
+let origin = ''
+let workspace: SlackWorkspace
 
-function urlOf(arg: unknown): string {
-  if (arg instanceof URL) return arg.href
-  if (arg instanceof Request) return arg.url
-  return String(arg)
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+function mounted(): Workspace {
+  return new Workspace({ '/slack': new SlackVFS(workspace.config()) }, { mode: MountMode.READ })
 }
 
 describe('SlackVFS integration', () => {
-  const originalFetch = globalThis.fetch
-
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(() =>
-      Promise.resolve(jsonResponse({ ok: true })),
-    ) as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   it('ls /slack/channels/ returns channel directory names', async () => {
-    globalThis.fetch = vi.fn((url: string | URL | Request) => {
-      const u = urlOf(url)
-      if (u.includes('conversations.list')) {
-        return Promise.resolve(
-          jsonResponse({
-            ok: true,
-            channels: [
-              { id: 'C1', name: 'general', created: 1700000000 },
-              { id: 'C2', name: 'eng', created: 1700001000 },
-            ],
-            response_metadata: { next_cursor: '' },
-          }),
-        )
-      }
-      return Promise.resolve(jsonResponse({ ok: true }))
-    }) as unknown as typeof fetch
-
-    const slack = new SlackVFS({ token: 'xoxb-test' })
-    const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+    const ws = mounted()
     try {
       const result = await ws.shell('ls /slack/channels/')
       if (result.exitCode !== 0) {
         throw new Error(`ls failed: ${result.stderrText} | stdout: ${result.stdoutText}`)
       }
-      const out = result.stdoutText
-      expect(out).toContain('general__C1')
-      expect(out).toContain('eng__C2')
+      expect(result.stdoutText).toContain('general__C1')
+      expect(result.stdoutText).toContain('random__C2')
     } finally {
       await ws.close()
     }
   })
 
   it('cat reads jsonl history for a channel/date', async () => {
-    const created = Date.UTC(2024, 0, 1) / 1000
-    const latest = Date.UTC(2024, 0, 1, 12) / 1000
-    globalThis.fetch = vi.fn((url: string | URL | Request) => {
-      const u = urlOf(url)
-      if (u.includes('conversations.list')) {
-        return Promise.resolve(
-          jsonResponse({
-            ok: true,
-            channels: [{ id: 'C1', name: 'general', created }],
-            response_metadata: { next_cursor: '' },
-          }),
-        )
-      }
-      if (u.includes('conversations.history')) {
-        if (u.includes('limit=1')) {
-          return Promise.resolve(jsonResponse({ ok: true, messages: [{ ts: String(latest) }] }))
-        }
-        return Promise.resolve(
-          jsonResponse({
-            ok: true,
-            messages: [
-              { ts: String(latest - 30), user: 'U1', text: 'first' },
-              { ts: String(latest), user: 'U2', text: 'second' },
-            ],
-            has_more: false,
-          }),
-        )
-      }
-      return Promise.resolve(jsonResponse({ ok: true }))
-    }) as unknown as typeof fetch
-
-    const slack = new SlackVFS({ token: 'xoxb-test' })
-    const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+    const ws = mounted()
     try {
       const ls = await ws.shell('ls /slack/channels/general__C1/')
       if (ls.exitCode !== 0) {
         throw new Error(`ls failed: ${ls.stderrText} | stdout: ${ls.stdoutText}`)
       }
-      expect(ls.stdoutText).toContain('2024-01-01')
-      const cat = await ws.shell('cat /slack/channels/general__C1/2024-01-01/chat.jsonl')
+      expect(ls.stdoutText).toContain('2025-11-03')
+      const cat = await ws.shell('cat /slack/channels/general__C1/2025-11-03/chat.jsonl')
       expect(cat.exitCode).toBe(0)
       const lines = cat.stdoutText
         .trim()
         .split('\n')
         .filter((l) => l !== '')
-      expect(lines).toHaveLength(2)
-      const first = JSON.parse(lines[0] ?? '{}') as { user?: string; text?: string }
-      const second = JSON.parse(lines[1] ?? '{}') as { user?: string; text?: string }
-      expect(first.text).toBe('first')
-      expect(second.text).toBe('second')
+        .map((l) => JSON.parse(l) as { user?: string; text?: string })
+      expect(lines.map((m) => [m.user, m.text])).toEqual([
+        ['U1', 'the deploy is done at acme'],
+        ['U2', 'coffee is ready'],
+      ])
     } finally {
       await ws.close()
     }
   })
 
   it('the slack CLI list-members verb returns filtered users', async () => {
-    globalThis.fetch = vi.fn((url: string | URL | Request) => {
-      const u = urlOf(url)
-      if (u.includes('users.list')) {
-        return Promise.resolve(
-          jsonResponse({
-            ok: true,
-            members: [
-              { id: 'U1', name: 'alice', real_name: 'Alice Liddell' },
-              { id: 'U2', name: 'bob', real_name: 'Bob Jones' },
-              { id: 'U3', name: 'carol', real_name: 'Carol Smith' },
-            ],
-          }),
-        )
-      }
-      return Promise.resolve(jsonResponse({ ok: true }))
-    }) as unknown as typeof fetch
-
-    const slack = new SlackVFS({ token: 'xoxb-test' })
-    const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
-    ws.registerCli('slack', SLACK, { token: 'xoxb-test' })
+    const ws = mounted()
+    const { token, baseUrl } = workspace.config()
+    ws.registerCli('slack', SLACK, { token, baseUrl })
     try {
-      const result = await ws.shell('slack list-members --query alice')
+      const result = await ws.shell('slack list-members --query ana')
       expect(result.exitCode).toBe(0)
       const users = JSON.parse(result.stdoutText) as { id: string; name: string }[]
-      expect(users).toHaveLength(1)
-      expect(users[0]?.name).toBe('alice')
+      expect(users.map((u) => u.name)).toEqual(['ana'])
     } finally {
       await ws.close()
     }

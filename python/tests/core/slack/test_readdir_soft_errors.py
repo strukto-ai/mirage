@@ -12,33 +12,20 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.client import SlackApiError
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.read import read
 from mirage.core.slack.readdir import readdir
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.slack import SlackVFS
 from tests.fixtures.mounted import Mounted
+from tests.fixtures.slack_workspace import HISTORY, SlackWorkspace
 
-CHANNEL = "/slack/channels/private__C_INACCESSIBLE"
-DAY = f"{CHANNEL}/2026-05-10"
-
-
-@pytest.fixture
-def accessor():
-    return SlackAccessor(SlackConfig(token="xoxb-test"))
-
-
-def _refused(code: str) -> SlackApiError:
-    return SlackApiError(
-        f"Slack API error (conversations.history): {code}", slack_error=code
-    )
+CHANNEL = "/slack/channels/random__C2"
+DAY = f"{CHANNEL}/2025-11-04"
+UNTIL_CLEARED = 1_000_000
 
 
 def _spec(virtual: str) -> PathSpec:
@@ -49,22 +36,15 @@ def _spec(virtual: str) -> PathSpec:
     )
 
 
-def _history_fails(err: SlackApiError):
-    channels_page = {
-        "channels": [
-            {"id": "C_INACCESSIBLE", "name": "private", "created": 1}
-        ],
-        "response_metadata": {"next_cursor": ""},
-    }
-
-    async def fake_get(_accessor, method, params=None):
-        if method == "conversations.list":
-            return channels_page
-        if method == "conversations.history":
-            raise err
-        raise AssertionError(f"unexpected {method}")
-
-    return fake_get
+async def _history_refused(workspace: SlackWorkspace, code: str) -> None:
+    # Slack refuses in a 200 body, the way every refusal comes.
+    await workspace.run.answer_next(
+        "GET",
+        HISTORY,
+        200,
+        {"ok": False, "error": code},
+        times=UNTIL_CLEARED,
+    )
 
 
 @pytest.mark.asyncio
@@ -78,63 +58,47 @@ def _history_fails(err: SlackApiError):
         "not_authed",
     ],
 )
-async def test_a_channel_slack_refuses_is_eacces(accessor, code):
-    fake_get = _history_fails(_refused(code))
-    mounted = Mounted(SlackVFS, accessor, "/slack")
-    with (
-        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
-        patch("mirage.core.slack.readdir.slack_get", new=fake_get),
-    ):
-        await mounted.readdir(_spec("/slack/channels"))
-        with pytest.raises(PermissionError) as raised:
-            await mounted.readdir(_spec(CHANNEL))
+async def test_a_channel_slack_refuses_is_eacces(slack_workspace, code):
+    mounted = Mounted(SlackVFS, slack_workspace.accessor(), "/slack")
+    await mounted.readdir(_spec("/slack/channels"))
+    await _history_refused(slack_workspace, code)
+    with pytest.raises(PermissionError) as raised:
+        await mounted.readdir(_spec(CHANNEL))
     assert raised.value.filename == CHANNEL
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("below", ["", "/files"])
-async def test_a_day_slack_refuses_is_eacces(accessor, below):
-    async def fake_history(_accessor, channel_id, date_str, _scope):
-        raise _refused("not_in_channel")
-
+async def test_a_day_slack_refuses_is_eacces(slack_workspace, below):
+    await _history_refused(slack_workspace, "not_in_channel")
     own = FileStat(
-        name="files" if below else "2026-05-10",
+        name="files" if below else "2025-11-04",
         type=FileType.DIRECTORY,
-        extra={"channel_id": "C_INACCESSIBLE"},
+        extra={"channel_id": "C2"},
     )
-    with patch(
-        "mirage.core.slack.readdir.fetch_messages_for_day", new=fake_history
-    ):
-        with pytest.raises(PermissionError) as raised:
-            await readdir(accessor, _spec(DAY + below), own)
+    with pytest.raises(PermissionError) as raised:
+        await readdir(slack_workspace.accessor(), _spec(DAY + below), own)
     assert raised.value.filename == DAY + below
 
 
 @pytest.mark.asyncio
-async def test_reading_a_refused_day_is_eacces(accessor):
+async def test_reading_a_refused_day_is_eacces(slack_workspace):
+    await _history_refused(slack_workspace, "not_in_channel")
     chat = f"{DAY}/chat.jsonl"
     day = FileStat(
-        name="2026-05-10",
+        name="2025-11-04",
         type=FileType.DIRECTORY,
-        extra={"channel_id": "C_INACCESSIBLE"},
+        extra={"channel_id": "C2"},
     )
-    with patch(
-        "mirage.core.slack.read.get_history_jsonl",
-        new=AsyncMock(side_effect=_refused("not_in_channel")),
-    ):
-        with pytest.raises(PermissionError) as raised:
-            await read(accessor, _spec(chat), None, day)
+    with pytest.raises(PermissionError) as raised:
+        await read(slack_workspace.accessor(), _spec(chat), None, day)
     assert raised.value.filename == chat
 
 
 @pytest.mark.asyncio
-async def test_other_slack_errors_propagate(accessor):
-    fake_get = _history_fails(_refused("ratelimited"))
-    mounted = Mounted(SlackVFS, accessor, "/slack")
-    with (
-        patch("mirage.core.slack.paginate.slack_get", new=fake_get),
-        patch("mirage.core.slack.readdir.slack_get", new=fake_get),
-    ):
-        await mounted.readdir(_spec("/slack/channels"))
-        with pytest.raises(SlackApiError, match="ratelimited"):
-            await mounted.readdir(_spec(CHANNEL))
+async def test_other_slack_errors_propagate(slack_workspace):
+    mounted = Mounted(SlackVFS, slack_workspace.accessor(), "/slack")
+    await mounted.readdir(_spec("/slack/channels"))
+    await _history_refused(slack_workspace, "ratelimited")
+    with pytest.raises(SlackApiError, match="ratelimited"):
+        await mounted.readdir(_spec(CHANNEL))

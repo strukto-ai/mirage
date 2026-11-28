@@ -12,119 +12,70 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timedelta, timezone
 
-from mirage.accessor.discord import DiscordAccessor
-from mirage.core.discord.config import DiscordConfig
+import pytest
+
 from mirage.core.discord.search import search_guild
+from tests.fixtures.discord_guild import ALICE, GENERAL, GUILD, SEARCH
+
+pytestmark = pytest.mark.asyncio
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def _contents(results) -> list[str]:
+    return [m["content"] for m in results]
 
 
-def _accessor():
-    return DiscordAccessor(DiscordConfig(token="test-token"))
+async def _thirty(guild) -> None:
+    # More hits than one search page holds.
+    start = datetime(2024, 1, 20, tzinfo=timezone.utc)
+    await guild.add_messages(
+        GENERAL,
+        ALICE,
+        [(start + timedelta(minutes=i), f"msg{i}") for i in range(30)],
+    )
 
 
-def _make_search_response(messages, total=None):
-    hits = [[msg] for msg in messages]
-    return {"messages": hits, "total_results": total or len(messages)}
+async def test_search_returns_messages(discord_guild):
+    results = await search_guild(discord_guild.accessor(), GUILD, "hello")
+    assert _contents(results) == ["hello"]
 
 
-def test_search_returns_messages():
-    msgs = [
-        {"id": "100", "content": "hello world", "author": {"username": "a"}},
-        {"id": "200", "content": "hello again", "author": {"username": "b"}},
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=_make_search_response(msgs),
-    ):
-        results = _run(search_guild(_accessor(), "G1", "hello"))
-    assert len(results) == 2
-    assert results[0]["id"] == "100"
-    assert results[1]["id"] == "200"
+async def test_search_with_channel_filter(discord_guild):
+    # random's chatter matches too, outside the channel asked for.
+    results = await search_guild(
+        discord_guild.accessor(), GUILD, "o", channel_id=GENERAL
+    )
+    assert _contents(results) == ["hello", "morning"]
+    [params] = await discord_guild.run.params("GET", SEARCH)
+    assert (params["channel_id"], params["content"]) == (GENERAL, "o")
 
 
-def test_search_with_channel_filter():
-    msgs = [{"id": "300", "content": "test", "author": {"username": "c"}}]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=_make_search_response(msgs),
-    ) as mock:
-        results = _run(
-            search_guild(_accessor(), "G1", "test", channel_id="C1")
-        )
-    assert len(results) == 1
-    call_params = mock.call_args[1].get("params") or mock.call_args[0][3]
-    assert call_params["channel_id"] == "C1"
-    assert call_params["content"] == "test"
+async def test_search_empty_results(discord_guild):
+    assert (
+        await search_guild(discord_guild.accessor(), GUILD, "nonexistent")
+        == []
+    )
 
 
-def test_search_empty_results():
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value={"messages": [], "total_results": 0},
-    ):
-        results = _run(search_guild(_accessor(), "G1", "nonexistent"))
-    assert results == []
+async def test_search_sorted_oldest_first(discord_guild):
+    # random's chatter on 2024-01-14, then general's hello and morning.
+    results = await search_guild(discord_guild.accessor(), GUILD, "o")
+    assert _contents(results) == ["random chatter", "hello", "morning"]
 
 
-def test_search_sorted_oldest_first():
-    msgs = [
-        {"id": "500", "content": "newer", "author": {"username": "a"}},
-        {"id": "100", "content": "older", "author": {"username": "b"}},
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=_make_search_response(msgs),
-    ):
-        results = _run(search_guild(_accessor(), "G1", "hello"))
-    assert results[0]["id"] == "100"
-    assert results[1]["id"] == "500"
-
-
-def test_search_respects_limit():
-    msgs = [
-        {"id": str(i), "content": f"msg{i}", "author": {"username": "a"}}
-        for i in range(10)
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        return_value=_make_search_response(msgs, total=10),
-    ):
-        results = _run(search_guild(_accessor(), "G1", "msg", limit=3))
+async def test_search_respects_limit(discord_guild):
+    await _thirty(discord_guild)
+    results = await search_guild(
+        discord_guild.accessor(), GUILD, "msg", limit=3
+    )
     assert len(results) == 3
 
 
-def test_search_paginates():
-    page1 = [
-        {"id": str(i), "content": f"msg{i}", "author": {"username": "a"}}
-        for i in range(25)
-    ]
-    page2 = [
-        {
-            "id": str(i + 25),
-            "content": f"msg{i + 25}",
-            "author": {"username": "a"},
-        }
-        for i in range(5)
-    ]
-    responses = [
-        _make_search_response(page1, total=30),
-        _make_search_response(page2, total=30),
-    ]
-    with patch(
-        "mirage.core.discord.paginate.discord_request",
-        new_callable=AsyncMock,
-        side_effect=responses,
-    ):
-        results = _run(search_guild(_accessor(), "G1", "msg", limit=100))
-    assert len(results) == 30
+async def test_search_paginates(discord_guild):
+    await _thirty(discord_guild)
+    results = await search_guild(
+        discord_guild.accessor(), GUILD, "msg", limit=100
+    )
+    assert sorted(_contents(results)) == sorted(f"msg{i}" for i in range(30))
+    assert await discord_guild.count(SEARCH) == 2

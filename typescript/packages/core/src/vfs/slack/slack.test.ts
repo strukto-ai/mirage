@@ -1,5 +1,4 @@
 import { expect, it, vi } from 'vitest'
-import { seedChannel } from '../../../tests/vfs/slack/_test_util.ts'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { NodeSlackTransport } from '../../core/slack/client.ts'
 import { FileStat, FileType } from '../../types.ts'
@@ -43,7 +42,15 @@ it.each([false, true])(
     const ws = new Workspace({ '/chat': vfs })
     const path = '/chat/channels/general__C1/2026-04-24/files/report__F1.txt'
     const index = ws.mount('/chat').index
-    await seedChannel(index, '/chat', 'general__C1', 'C1', { dates: ['2026-04-24'] })
+    // The rows the listings above the attachment name, as its Python twin
+    // seeds them: its day's files directory, then the attachment.
+    const files = path.slice(0, path.lastIndexOf('/'))
+    await index.setDir(files.slice(0, files.lastIndexOf('/')), [
+      [
+        'files',
+        new FileStat({ name: 'files', type: FileType.DIRECTORY, extra: { channel_id: 'C1' } }),
+      ],
+    ])
     await index.setDir(path.slice(0, path.lastIndexOf('/')), [
       [
         'report__F1.txt',

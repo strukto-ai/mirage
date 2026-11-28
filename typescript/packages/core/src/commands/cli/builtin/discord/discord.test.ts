@@ -13,9 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { compileSpec } from '../../../spec/compile.ts'
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor, discordAccessor } from '../../../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from '../../../../core/discord/client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { discordAccessor } from '../../../../accessor/discord.ts'
 import { cliSpecFor } from '../../specs.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
@@ -31,6 +30,17 @@ import { send } from './send.ts'
 import { serverInfo } from './server_info.ts'
 import { threadCreate } from './thread_create.ts'
 import { context } from '../../../../../tests/workspace/fixtures/context.ts'
+import { serve } from '../../../../../tests/fixtures/kit_fake.ts'
+import {
+  DAY,
+  DiscordGuild,
+  FROM_MESSAGE,
+  GENERAL,
+  GUILD,
+  MESSAGE,
+  MESSAGES,
+  SEARCH,
+} from '../../../../../tests/core/discord/guild.ts'
 import type { FlagValue } from '../../../spec/types.ts'
 
 function leafContext(leaf: string, flags: Record<string, FlagValue> = {}): Context {
@@ -41,34 +51,29 @@ function leafContext(leaf: string, flags: Record<string, FlagValue> = {}): Conte
 
 const DEC = new TextDecoder()
 
-interface Recorded {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
+
+async function hello(): Promise<string> {
+  return (await guild.day(GENERAL, DAY))[0]?.id ?? ''
 }
 
-const CALLS: Recorded[] = []
-let RESPONSE: unknown = { id: 'M1' }
-
-class FakeTransport implements DiscordTransport {
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    CALLS.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(RESPONSE)
-  }
+function json(out: ByteSource | null): unknown {
+  return JSON.parse(DEC.decode(out as Uint8Array))
 }
-
-const ACCESSOR = new DiscordAccessor(new FakeTransport())
 
 function unwrap(result: CommandFnResult): [ByteSource | null, IOResult] {
   if (result === null) throw new Error('expected a result tuple')
@@ -125,120 +130,139 @@ describe('discord tree', () => {
 
 describe('discord verbs', () => {
   it('send forwards --reply-to as a message reference', async () => {
-    CALLS.length = 0
-    await send(ACCESSOR, [], [], leafContext('send', { channel: 'C1', text: 're', reply_to: 'M0' }))
-    expect(CALLS[0]?.body).toEqual({ content: 're', message_reference: { message_id: 'M0' } })
+    const id = await hello()
+    await send(
+      guild.accessor(),
+      [],
+      [],
+      leafContext('send', { channel: GENERAL, text: 're', reply_to: id }),
+    )
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([
+      { content: 're', message_reference: { message_id: id } },
+    ])
   })
 
   it('read sorts oldest-first', async () => {
-    CALLS.length = 0
-    RESPONSE = [{ id: '20' }, { id: '10' }]
-    const [out] = unwrap(await read(ACCESSOR, [], [], leafContext('read', { channel: 'C1' })))
-    expect(CALLS[0]?.params).toEqual({ limit: 20 })
-    expect(
-      (JSON.parse(DEC.decode(out as Uint8Array)) as { id: string }[]).map((m) => m.id),
-    ).toEqual(['10', '20'])
-    RESPONSE = { id: 'M1' }
+    const [out] = unwrap(
+      await read(guild.accessor(), [], [], leafContext('read', { channel: GENERAL })),
+    )
+    expect(await guild.run.params('GET', MESSAGES)).toEqual([{ limit: '20' }])
+    expect((json(out) as { content: string }[]).map((m) => m.content)).toEqual([
+      'hello',
+      'files',
+      'morning',
+    ])
   })
 
   it('delete DELETEs and reports ok', async () => {
-    CALLS.length = 0
-    RESPONSE = null
+    // A bot may delete only what it posted.
+    const mine = await guild.post(GENERAL, 'gone soon')
     const [out] = unwrap(
-      await deleteVerb(ACCESSOR, [], [], leafContext('delete', { channel: 'C1', message: 'M1' })),
+      await deleteVerb(
+        guild.accessor(),
+        [],
+        [],
+        leafContext('delete', { channel: GENERAL, message: mine.id }),
+      ),
     )
-    expect(CALLS[0]?.method).toBe('DELETE')
-    expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ ok: true })
-    RESPONSE = { id: 'M1' }
+    expect(await guild.count(MESSAGE, 'DELETE')).toBe(1)
+    expect(json(out)).toEqual({ ok: true })
   })
 
   it('thread-create starts from a message when given', async () => {
-    CALLS.length = 0
+    const id = await hello()
     await threadCreate(
-      ACCESSOR,
+      guild.accessor(),
       [],
       [],
-      leafContext('thread-create', { channel: 'C1', name: 'topic', message: 'M1' }),
+      leafContext('thread-create', { channel: GENERAL, name: 'topic', message: id }),
     )
-    expect(CALLS[0]?.endpoint).toBe('/channels/C1/messages/M1/threads')
+    expect(await guild.run.bodies('POST', FROM_MESSAGE)).toEqual([{ name: 'topic' }])
   })
 
   it('poll shapes the poll object with defaults', async () => {
-    CALLS.length = 0
     await poll(
-      ACCESSOR,
+      guild.accessor(),
       [],
       [],
-      leafContext('poll', { channel: 'C1', question: 'Lunch?', answer: ['A', 'B'] }),
+      leafContext('poll', { channel: GENERAL, question: 'Lunch?', answer: ['A', 'B'] }),
     )
-    expect(CALLS[0]?.body).toEqual({
-      poll: {
-        question: { text: 'Lunch?' },
-        answers: [{ poll_media: { text: 'A' } }, { poll_media: { text: 'B' } }],
-        duration: 24,
-        allow_multiselect: false,
+    expect(await guild.run.bodies('POST', MESSAGES)).toEqual([
+      {
+        poll: {
+          question: { text: 'Lunch?' },
+          answers: [{ poll_media: { text: 'A' } }, { poll_media: { text: 'B' } }],
+          duration: 24,
+          allow_multiselect: false,
+        },
       },
-    })
+    ])
   })
 
   it('edit PATCHes the message text', async () => {
-    CALLS.length = 0
-    await edit(ACCESSOR, [], [], leafContext('edit', { channel: 'C1', message: 'M1', text: 'new' }))
-    expect(CALLS[0]?.method).toBe('PATCH')
-    expect(CALLS[0]?.endpoint).toBe('/channels/C1/messages/M1')
-    expect(CALLS[0]?.body).toEqual({ content: 'new' })
+    // A bot may edit only what it posted.
+    const mine = await guild.post(GENERAL, 'draft')
+    await edit(
+      guild.accessor(),
+      [],
+      [],
+      leafContext('edit', { channel: GENERAL, message: mine.id, text: 'new' }),
+    )
+    expect(await guild.run.bodies('PATCH', MESSAGE)).toEqual([{ content: 'new' }])
+    expect((await guild.message(GENERAL, mine.id)).content).toBe('new')
   })
 
   it('react PUTs the encoded emoji', async () => {
-    CALLS.length = 0
+    const id = await hello()
     await react(
-      ACCESSOR,
+      guild.accessor(),
       [],
       [],
-      leafContext('react', { channel: 'C1', message: 'M1', emoji: 'x' }),
+      leafContext('react', { channel: GENERAL, message: id, emoji: 'x' }),
     )
-    expect(CALLS[0]?.method).toBe('PUT')
-    expect(CALLS[0]?.endpoint).toBe('/channels/C1/messages/M1/reactions/x/@me')
+    expect(await guild.run.requests()).toEqual([
+      `PUT /api/v10/channels/${GENERAL}/messages/${id}/reactions/x/@me`,
+    ])
   })
 
   it('search forwards the channel filter', async () => {
-    CALLS.length = 0
-    RESPONSE = { messages: [[{ id: 'M1' }]], total_results: 1 }
     const [out] = unwrap(
       await search(
-        ACCESSOR,
+        guild.accessor(),
         [],
         [],
-        leafContext('search', { guild: 'G1', query: 'q', channel: 'C1' }),
+        leafContext('search', { guild: GUILD, query: 'o', channel: GENERAL }),
       ),
     )
-    expect(CALLS[0]?.endpoint).toBe('/guilds/G1/messages/search')
-    expect(CALLS[0]?.params).toMatchObject({ content: 'q', channel_id: 'C1' })
-    expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual([{ id: 'M1' }])
-    RESPONSE = { id: 'M1' }
+    expect((await guild.run.params('GET', SEARCH))[0]).toMatchObject({
+      content: 'o',
+      channel_id: GENERAL,
+    })
+    // random's chatter matches too, outside the channel asked for.
+    expect((json(out) as { content: string }[]).map((m) => m.content)).toEqual(['hello', 'morning'])
   })
 
   it('members lists, or searches with --query', async () => {
-    CALLS.length = 0
-    RESPONSE = [{ user: { id: 'U1' } }]
-    await members(ACCESSOR, [], [], leafContext('members', { guild: 'G1' }))
-    await members(ACCESSOR, [], [], leafContext('members', { guild: 'G1', query: 'al' }))
-    expect(CALLS.map((c) => c.endpoint)).toEqual([
-      '/guilds/G1/members',
-      '/guilds/G1/members/search',
+    const accessor = guild.accessor()
+    await members(accessor, [], [], leafContext('members', { guild: GUILD }))
+    await members(accessor, [], [], leafContext('members', { guild: GUILD, query: 'al' }))
+    const asked = (await guild.run.requests()).map((r) => r.split(' ')[1]?.split('?')[0])
+    expect(asked).toEqual([
+      `/api/v10/guilds/${GUILD}/members`,
+      `/api/v10/guilds/${GUILD}/members/search`,
     ])
-    expect(CALLS[1]?.params).toMatchObject({ query: 'al' })
-    RESPONSE = { id: 'M1' }
+    expect(
+      (await guild.run.params('GET', '/api/v10/guilds/:guild_id/members/search'))[0],
+    ).toMatchObject({
+      query: 'al',
+    })
   })
 
   it('server-info GETs the guild', async () => {
-    CALLS.length = 0
-    RESPONSE = { id: 'G1' }
     const [out] = unwrap(
-      await serverInfo(ACCESSOR, [], [], leafContext('server-info', { guild: 'G1' })),
+      await serverInfo(guild.accessor(), [], [], leafContext('server-info', { guild: GUILD })),
     )
-    expect(CALLS[0]?.endpoint).toBe('/guilds/G1')
-    expect(JSON.parse(DEC.decode(out as Uint8Array))).toEqual({ id: 'G1' })
-    RESPONSE = { id: 'M1' }
+    expect(await guild.run.requests()).toEqual([`GET /api/v10/guilds/${GUILD}`])
+    expect((json(out) as { id: string }).id).toBe(GUILD)
   })
 })

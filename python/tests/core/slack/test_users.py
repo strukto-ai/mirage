@@ -12,165 +12,42 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock, patch
-
 import pytest
 
-from mirage.accessor.slack import SlackAccessor
-from mirage.core.slack.config import SlackConfig
 from mirage.core.slack.users import get_user_profile, list_users, search_users
-
-
-@pytest.fixture
-def accessor():
-    return SlackAccessor(SlackConfig(token="xoxb-test-token"))
+from tests.fixtures.slack_workspace import USERS
 
 
 @pytest.mark.asyncio
-async def test_list_users(accessor):
-    mock_data = {
-        "ok": True,
-        "members": [
-            {"id": "U001", "name": "alice", "deleted": False, "is_bot": False},
-            {
-                "id": "U002",
-                "name": "bot-helper",
-                "deleted": False,
-                "is_bot": True,
-            },
-            {"id": "U003", "name": "gone", "deleted": True, "is_bot": False},
-            {
-                "id": "USLACKBOT",
-                "name": "slackbot",
-                "deleted": False,
-                "is_bot": False,
-            },
-            {"id": "U004", "name": "bob", "deleted": False, "is_bot": False},
-        ],
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ):
-        result = await list_users(accessor)
-
-    assert len(result) == 2
-    names = [u["name"] for u in result]
-    assert "alice" in names
-    assert "bob" in names
-    assert "bot-helper" not in names
-    assert "gone" not in names
-    assert "slackbot" not in names
+async def test_list_users(slack_workspace):
+    # The workspace also holds a bot, a deactivated user and Slackbot,
+    # none of whom is a person to list.
+    result = await list_users(slack_workspace.accessor())
+    assert [u["name"] for u in result] == ["ana", "ben"]
 
 
 @pytest.mark.asyncio
-async def test_search_users(accessor):
-    mock_data = {
-        "ok": True,
-        "members": [
-            {
-                "id": "U001",
-                "name": "alice",
-                "real_name": "Alice Smith",
-                "deleted": False,
-                "is_bot": False,
-                "profile": {"email": "alice@example.com"},
-            },
-            {
-                "id": "U002",
-                "name": "bob",
-                "real_name": "Bob Jones",
-                "deleted": False,
-                "is_bot": False,
-                "profile": {"email": "bob@example.com"},
-            },
-        ],
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ):
-        result = await search_users(accessor, "alice")
-
-    assert len(result) == 1
-    assert result[0]["name"] == "alice"
+async def test_search_users(slack_workspace):
+    result = await search_users(slack_workspace.accessor(), "ana")
+    assert [u["name"] for u in result] == ["ana"]
 
 
 @pytest.mark.asyncio
-async def test_search_users_by_email(accessor):
-    mock_data = {
-        "ok": True,
-        "members": [
-            {
-                "id": "U001",
-                "name": "alice",
-                "real_name": "Alice Smith",
-                "deleted": False,
-                "is_bot": False,
-                "profile": {"email": "alice@example.com"},
-            },
-            {
-                "id": "U002",
-                "name": "bob",
-                "real_name": "Bob Jones",
-                "deleted": False,
-                "is_bot": False,
-                "profile": {"email": "bob@example.com"},
-            },
-        ],
-    }
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ):
-        result = await search_users(accessor, "bob@example")
-
-    assert len(result) == 1
-    assert result[0]["name"] == "bob"
+async def test_search_users_by_email(slack_workspace):
+    result = await search_users(slack_workspace.accessor(), "ben@example")
+    assert [u["name"] for u in result] == ["ben"]
 
 
 @pytest.mark.asyncio
-async def test_get_user_profile(accessor):
-    mock_data = {
-        "ok": True,
-        "user": {
-            "id": "U001",
-            "name": "alice",
-            "real_name": "Alice Smith",
-            "profile": {"email": "alice@example.com"},
-        },
-    }
-    with patch(
-        "mirage.core.slack.users.slack_get",
-        new_callable=AsyncMock,
-        return_value=mock_data,
-    ):
-        result = await get_user_profile(accessor, "U001")
-
-    assert result["id"] == "U001"
-    assert result["name"] == "alice"
+async def test_get_user_profile(slack_workspace):
+    result = await get_user_profile(slack_workspace.accessor(), "U1")
+    assert (result["id"], result["name"]) == ("U1", "ana")
 
 
 # A walk's limit stops the paging at the page that brings that many.
 @pytest.mark.asyncio
-async def test_list_users_pages_no_further_than_stop_at(accessor):
-    pages = [
-        {
-            "ok": True,
-            "members": [{"id": "U001", "name": "alice"}],
-            "response_metadata": {"next_cursor": "next"},
-        },
-        {"ok": True, "members": [{"id": "U002", "name": "bob"}]},
-    ]
-    with patch(
-        "mirage.core.slack.paginate.slack_get",
-        new_callable=AsyncMock,
-        side_effect=pages,
-    ) as asked:
-        result = await list_users(accessor, stop_at=1)
-
-    assert [u["name"] for u in result] == ["alice"]
-    assert asked.await_count == 1
+async def test_list_users_pages_no_further_than_stop_at(slack_workspace):
+    await slack_workspace.first_page(USERS, 1)
+    result = await list_users(slack_workspace.accessor(), stop_at=1)
+    assert [u["name"] for u in result] == ["ana"]
+    assert await slack_workspace.count(USERS) == 1

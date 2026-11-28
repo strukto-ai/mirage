@@ -18,9 +18,11 @@ import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { DiscordConfig } from '@struktoai/mirage-core/vfs/discord/config'
 import { parseConfigWithSchema, redactedConfigDump } from '@struktoai/mirage-core/vfs/secrets'
 import { backendCommands } from '@struktoai/mirage-core/workspace/mount/backends'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
 import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { CHANNELS, DiscordGuild, GUILDS } from '../../../../core/tests/fixtures/discord_guild.ts'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -35,16 +37,6 @@ function urlOf(arg: unknown): string {
 }
 
 describe('DiscordVFS (node)', () => {
-  const originalFetch = globalThis.fetch
-
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(() => Promise.resolve(jsonResponse([]))) as unknown as typeof fetch
-  })
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-  })
-
   it('constructs with token and exposes expected fields', () => {
     const r = new DiscordVFS({ token: 'bot-test' })
     expect(r.name).toBe(VFSName.DISCORD)
@@ -69,52 +61,60 @@ describe('DiscordVFS (node)', () => {
   })
 
   it('readdir(/<guild>/channels) calls /users/@me/guilds then /guilds/<gid>/channels', async () => {
-    const fetchMock = vi.fn((url: string | URL | Request) => {
-      const u = urlOf(url)
-      if (u.includes('/users/@me/guilds')) {
-        return Promise.resolve(jsonResponse([{ id: 'G1', name: 'My Server' }]))
-      }
-      if (u.includes('/guilds/G1/channels')) {
-        return Promise.resolve(
-          jsonResponse([
-            { id: 'C1', name: 'general', type: 0 },
-            { id: 'C2', name: 'eng', type: 0 },
-          ]),
-        )
-      }
-      return Promise.resolve(jsonResponse([]))
-    })
+    const guild = new DiscordGuild(await serve('discord'))
+    try {
+      await guild.reset()
+      const out = await ops(new DiscordVFS(guild.config())).readdir(
+        new PathSpec({
+          virtual: '/My Server__111/channels',
+          directory: '/My Server__111/channels',
+          vfsPath: 'My Server__111/channels',
+        }),
+      )
+      expect(out).toEqual([
+        '/My Server__111/channels/general__211',
+        '/My Server__111/channels/random__212',
+      ])
+      expect([await guild.count(GUILDS), await guild.count(CHANNELS)]).toEqual([1, 1])
+    } finally {
+      await guild.close()
+    }
+  })
+
+  it('reaches discord.com/api when no base URL is set', async () => {
+    // Only the URL is checked, so the answer names no guild.
+    const originalFetch = globalThis.fetch
+    const fetchMock = vi.fn((_url: string | URL | Request) => Promise.resolve(jsonResponse([])))
     globalThis.fetch = fetchMock as unknown as typeof fetch
-    const r = new DiscordVFS({ token: 'bot-test' })
-    const out = await ops(r).readdir(
-      new PathSpec({
-        virtual: '/My Server__G1/channels',
-        directory: '/My Server__G1/channels',
-        vfsPath: 'My Server__G1/channels',
-      }),
-    )
-    expect(out).toEqual(['/My Server__G1/channels/general__C1', '/My Server__G1/channels/eng__C2'])
+    try {
+      await ops(new DiscordVFS({ token: 'bot-test' })).readdir(
+        new PathSpec({ virtual: '/', directory: '/', vfsPath: '' }),
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
     const calls = fetchMock.mock.calls.map((c) => urlOf((c as unknown[])[0]))
-    expect(calls.some((u) => u.includes('/users/@me/guilds'))).toBe(true)
-    expect(calls.some((u) => u.includes('/guilds/G1/channels'))).toBe(true)
-    expect(calls.every((u) => u.includes('discord.com/api'))).toBe(true)
+    expect(calls).toEqual(['https://discord.com/api/v10/users/@me/guilds?after=0&limit=200'])
   })
 
   it('sends Authorization: Bot <token> header', async () => {
-    const fetchMock = vi.fn(() => Promise.resolve(jsonResponse([])))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-    const r = new DiscordVFS({ token: 'sekret-token' })
-    await ops(r).readdir(
-      new PathSpec({
-        virtual: '/mnt/discord',
-        directory: '/mnt/discord',
-        vfsPath: mountKey('/mnt/discord', '/mnt/discord'),
-      }),
-    )
-    expect(fetchMock).toHaveBeenCalled()
-    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit | undefined
-    const headers = (init?.headers ?? {}) as Record<string, string>
-    expect(headers.Authorization).toBe('Bot sekret-token')
+    const guild = new DiscordGuild(await serve('discord'))
+    try {
+      await guild.reset()
+      await guild.run.recordRequests('authorization')
+      await ops(new DiscordVFS(guild.config())).readdir(
+        new PathSpec({
+          virtual: '/mnt/discord',
+          directory: '/mnt/discord',
+          vfsPath: mountKey('/mnt/discord', '/mnt/discord'),
+        }),
+      )
+      expect(await guild.run.headers('GET', GUILDS)).toEqual([
+        { authorization: `Bot ${guild.config().token}` },
+      ])
+    } finally {
+      await guild.close()
+    }
   })
 })
 

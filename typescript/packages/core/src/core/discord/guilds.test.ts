@@ -12,52 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DiscordGuild, GUILD, GUILDS } from '../../../tests/core/discord/guild.ts'
 import { listGuilds } from './guilds.ts'
 
-interface RecordedCall {
-  method: DiscordMethod
-  endpoint: string
-  params?: Record<string, string | number>
-  body?: Record<string, unknown>
-}
+let origin = ''
+let guild: DiscordGuild
 
-class FakeDiscordTransport implements DiscordTransport {
-  public readonly calls: RecordedCall[] = []
-  constructor(private readonly responder: () => unknown = () => null) {}
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({
-      method,
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder())
-  }
-}
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('listGuilds', () => {
   it('GETs /users/@me/guilds and returns the array', async () => {
-    const t = new FakeDiscordTransport(() => [{ id: 'G1', name: 'My Server' }])
-    const out = await listGuilds(new DiscordAccessor(t))
-    expect(t.calls[0]?.method).toBe('GET')
-    expect(t.calls[0]?.endpoint).toBe('/users/@me/guilds')
-    expect(t.calls[0]?.params?.after).toBe('0')
-    expect(t.calls[0]?.params?.limit).toBe(200)
-    expect(t.calls[0]?.body).toBeUndefined()
-    expect(out).toEqual([{ id: 'G1', name: 'My Server' }])
+    const out = await listGuilds(guild.accessor())
+    const [params] = await guild.run.params('GET', GUILDS)
+    expect([params?.after, params?.limit]).toEqual(['0', '200'])
+    expect(out.map((g) => [g.id, g.name])).toEqual([[GUILD, 'My Server']])
   })
 
   it('returns empty array when response is not an array', async () => {
-    const t = new FakeDiscordTransport(() => null)
-    const out = await listGuilds(new DiscordAccessor(t))
-    expect(out).toEqual([])
+    await guild.run.answerNext('GET', GUILDS, 200, null)
+    expect(await listGuilds(guild.accessor())).toEqual([])
   })
 })

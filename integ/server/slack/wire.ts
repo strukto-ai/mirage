@@ -93,6 +93,23 @@ export function requestToken(
   )
 }
 
+// The user a user token belongs to, when it names one (`xoxp-<id>.<user>`).
+// Search runs as that user, who sees every public channel but only the private
+// channels and DMs they are in. A token naming no one reads as the workspace's
+// installing user, who is in every conversation the fixture holds.
+export function holderOf(ctx: Ctx<C>): string | undefined {
+  const token = requestToken(ctx.headers, ctx.url, ctx.body) ?? ''
+  return /^xox[pc]-[^.]+\.([A-Z0-9]+)$/.exec(token)?.[1]
+}
+
+// Whether `holder` sees the conversation: a public channel, or one they are a
+// member of. A DM's other side is its `dmUserId`.
+export function seenBy(holder: string | undefined, c: ChannelRow): boolean {
+  if (holder === undefined || (c.kind === 'channel' && !c.isPrivate)) return true
+  if (c.dmUserId === holder) return true
+  return (JSON.parse(c.membersJson) as string[]).includes(holder)
+}
+
 // Slack answers 200 for a refused call and puts the failure in the body, so
 // `ok: false` is a normal reply here and never an HTTP error.
 export function fail(error: string): { status: number; body: JsonValue } {
@@ -139,7 +156,9 @@ function textField(value: string): JsonValue {
   return { value, creator: '', last_set: 0 }
 }
 
-export function fileMeta(f: FileRow, origin: string): JsonValue {
+// `base` is the fake's origin under the request's run, where the download
+// is served.
+export function fileMeta(f: FileRow, base: string): JsonValue {
   return {
     id: f.id,
     name: f.name,
@@ -148,7 +167,7 @@ export function fileMeta(f: FileRow, origin: string): JsonValue {
     filetype: f.filetype,
     size: f.size,
     timestamp: f.timestamp,
-    url_private_download: `${origin}/files/download/${f.id}`,
+    url_private_download: `${base}/files/download/${f.id}`,
   }
 }
 
@@ -166,17 +185,17 @@ export function messageJson(
     reactionsJson: string | null
   },
   files: FileRow[],
-  origin: string,
+  base: string,
 ): JsonValue {
-  const base: Record<string, JsonValue> = { type: m.type, user: m.userId, text: m.text, ts: m.ts }
-  if (m.subtype) base.subtype = m.subtype
-  if (m.threadTs !== null && m.threadTs !== '') base.thread_ts = m.threadTs
+  const out: Record<string, JsonValue> = { type: m.type, user: m.userId, text: m.text, ts: m.ts }
+  if (m.subtype) out.subtype = m.subtype
+  if (m.threadTs !== null && m.threadTs !== '') out.thread_ts = m.threadTs
   const rs = reactionsOf(m.reactionsJson)
   if (rs.length > 0) {
-    base.reactions = rs.map((r) => ({ name: r.name, users: r.users, count: r.count }))
+    out.reactions = rs.map((r) => ({ name: r.name, users: r.users, count: r.count }))
   }
-  if (files.length > 0) base.files = files.map((f) => fileMeta(f, origin))
-  return base
+  if (files.length > 0) out.files = files.map((f) => fileMeta(f, base))
+  return out
 }
 
 export const CUSTOM_EMOJI: Record<string, JsonValue> = {

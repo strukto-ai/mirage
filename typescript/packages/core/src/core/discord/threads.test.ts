@@ -12,39 +12,47 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordMethod, DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import {
+  DAY,
+  DiscordGuild,
+  FROM_MESSAGE,
+  GENERAL,
+  THREADS,
+} from '../../../tests/core/discord/guild.ts'
 import { createThread } from './threads.ts'
 
-class FakeTransport implements DiscordTransport {
-  public readonly calls: { method: DiscordMethod; endpoint: string; body?: unknown }[] = []
-  call(
-    method: DiscordMethod,
-    endpoint: string,
-    _params?: Record<string, string | number>,
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    this.calls.push({ method, endpoint, ...(body !== undefined ? { body } : {}) })
-    return Promise.resolve({ id: 'T1' })
-  }
-}
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('createThread', () => {
   it('creates from a message when messageId is given', async () => {
-    const t = new FakeTransport()
-    await createThread(new DiscordAccessor(t), 'C1', 'topic', 'M1')
-    expect(t.calls[0]).toEqual({
-      method: 'POST',
-      endpoint: '/channels/C1/messages/M1/threads',
-      body: { name: 'topic' },
-    })
+    const hello = (await guild.day(GENERAL, DAY))[0]?.id ?? ''
+    const out = (await createThread(guild.accessor(), GENERAL, 'topic', hello)) as Record<
+      string,
+      unknown
+    >
+    expect(await guild.run.bodies('POST', FROM_MESSAGE)).toEqual([{ name: 'topic' }])
+    expect([out.name, out.parent_id]).toEqual(['topic', GENERAL])
   })
 
   it('creates standalone without a messageId', async () => {
-    const t = new FakeTransport()
-    await createThread(new DiscordAccessor(t), 'C1', 'topic')
-    expect(t.calls[0]?.endpoint).toBe('/channels/C1/threads')
-    expect(t.calls[0]?.body).toEqual({ name: 'topic', type: 11 })
+    const out = (await createThread(guild.accessor(), GENERAL, 'topic')) as Record<string, unknown>
+    expect(await guild.run.bodies('POST', THREADS)).toEqual([{ name: 'topic', type: 11 }])
+    expect([out.type, out.parent_id]).toEqual([11, GENERAL])
   })
 })

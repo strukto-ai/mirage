@@ -12,29 +12,48 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
-import { DiscordAccessor } from '../../accessor/discord.ts'
-import type { DiscordTransport } from './client.ts'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { DAY, DiscordGuild, GENERAL, PINS } from '../../../tests/core/discord/guild.ts'
 import { listPins } from './pins.ts'
+
+let origin = ''
+let guild: DiscordGuild
+
+beforeAll(async () => {
+  origin = await serve('discord')
+})
+
+beforeEach(async () => {
+  guild = new DiscordGuild(origin)
+  await guild.reset()
+})
+
+afterEach(async () => {
+  await guild.close()
+})
 
 describe('listPins', () => {
   it('pages back from the oldest pin seen', async () => {
-    const seen: (string | undefined)[] = []
-    const transport: DiscordTransport = {
-      call(_method, _endpoint, params) {
-        const before = params?.before as string | undefined
-        seen.push(before)
-        return Promise.resolve(
-          before === undefined
-            ? { items: [{ pinned_at: 't2' }], has_more: true }
-            : { items: [{ pinned_at: 't1' }], has_more: false },
-        )
-      },
+    const [hello, files] = await guild.day(GENERAL, DAY)
+    for (const message of [hello, files]) {
+      await guild.run.call('PUT', `/api/v10/channels/${GENERAL}/messages/pins/${message?.id ?? ''}`)
     }
+    // Discord's own first page holds the newer pin and says there is more.
+    const own = await guild.run.call<{ items: Record<string, unknown>[] }>(
+      'GET',
+      `/api/v10/channels/${GENERAL}/messages/pins?limit=50`,
+    )
+    const newest = own.items[0] ?? {}
+    await guild.run.answerNext('GET', PINS, 200, { items: [newest], has_more: true } as never)
 
-    const pins = await listPins(new DiscordAccessor(transport), 'c1')
+    const pins = await listPins(guild.accessor(), GENERAL)
 
-    expect(pins.map((pin) => pin.pinned_at)).toEqual(['t2', 't1'])
-    expect(seen).toEqual([undefined, 't2'])
+    expect(pins.map((pin) => (pin.message as { content: string }).content)).toEqual([
+      'files',
+      'hello',
+    ])
+    const asked = await guild.run.params('GET', PINS)
+    expect(asked.map((p) => p.before)).toEqual([undefined, String(newest.pinned_at)])
   })
 })

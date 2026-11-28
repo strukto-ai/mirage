@@ -12,54 +12,57 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mountKey } from '../../utils/key_prefix.ts'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SlackAccessor } from '../../accessor/slack.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
+import { mountKey } from '../../utils/key_prefix.ts'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { HISTORY, SlackWorkspace, USER as INFO } from '../../../tests/core/slack/workspace.ts'
 import { follow, read, readMany, readStream } from './read.ts'
 
-interface Call {
-  endpoint: string
-  params?: Record<string, string>
-  body?: unknown
-}
+let origin = ''
+let workspace: SlackWorkspace
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: Call[] = []
-  constructor(
-    private readonly responder: (
-      endpoint: string,
-      params?: Record<string, string>,
-    ) => SlackResponse,
-  ) {}
-  call(endpoint: string, params?: Record<string, string>, body?: unknown): Promise<SlackResponse> {
-    this.calls.push({
-      endpoint,
-      ...(params !== undefined ? { params } : {}),
-      ...(body !== undefined ? { body } : {}),
-    })
-    return Promise.resolve(this.responder(endpoint, params))
-  }
-}
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
 
 function spec(virtual: string, prefix = ''): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: mountKey(virtual, prefix) })
 }
 
 const decoder = new TextDecoder()
+// general's first day ends with ben's coffee.
+const COFFEE = '1762131600.000001'
+
+function texts(bytes: Uint8Array | undefined): string[] {
+  return decoder
+    .decode(bytes)
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => (JSON.parse(line) as { text: string }).text)
+}
 
 // A day's row as its conversation's listing names it, carrying the channel.
-function dayRow(channel: string): FileStat {
+function dayRow(channel: string, name = '2025-11-03'): FileStat {
   return new FileStat({
-    name: '2026-04-24',
+    name,
     type: FileType.DIRECTORY,
     extra: { channel_id: channel },
   })
 }
 
 // A user's row as the users listing names it.
-const USER = new FileStat({ name: 'alice__U1.json', type: FileType.FILE, extra: { user_id: 'U1' } })
+const USER = new FileStat({ name: 'ana__U1.json', type: FileType.FILE, extra: { user_id: 'U1' } })
 
 // An attachment's row as its day's files listing names it.
 const BLOB = new FileStat({
@@ -70,58 +73,32 @@ const BLOB = new FileStat({
 
 describe('read jsonl branch', () => {
   it('reads channel jsonl bytes through the channel its day carries', async () => {
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
-        return {
-          ok: true,
-          messages: [
-            { ts: '1776988900.0', text: 'hello' },
-            { ts: '1776989000.0', text: 'world' },
-          ],
-        }
-      }
-      return { ok: true }
-    })
     const out = await read(
-      new SlackAccessor(t),
-      spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+      workspace.accessor(),
+      spec('/mnt/slack/channels/general__C1/2025-11-03/chat.jsonl', '/mnt/slack'),
       null,
       dayRow('C1'),
     )
-    const text = decoder.decode(out)
-    const lines = text.trimEnd().split('\n')
-    expect(lines).toHaveLength(2)
-    expect(JSON.parse(lines[0] ?? '')).toMatchObject({ ts: '1776988900.0', text: 'hello' })
-    expect(JSON.parse(lines[1] ?? '')).toMatchObject({ ts: '1776989000.0', text: 'world' })
-    const histCall = t.calls.find((c) => c.endpoint === 'conversations.history')
-    expect(histCall?.params?.channel).toBe('C1')
+    expect(texts(out)).toEqual(['the deploy is done at acme', 'coffee is ready'])
+    expect((await workspace.run.params('GET', HISTORY))[0]?.channel).toBe('C1')
   })
 
   it('reads dm jsonl bytes through the dm its day carries', async () => {
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'conversations.history') {
-        return { ok: true, messages: [{ ts: '1776988850.0', text: 'hi' }] }
-      }
-      return { ok: true }
-    })
     const out = await read(
-      new SlackAccessor(t),
-      spec('/mnt/slack/dms/alice__D1/2026-04-24/chat.jsonl', '/mnt/slack'),
+      workspace.accessor(),
+      spec('/mnt/slack/dms/ana__D1/2025-11-03/chat.jsonl', '/mnt/slack'),
       null,
       dayRow('D1'),
     )
-    const text = decoder.decode(out).trimEnd()
-    expect(JSON.parse(text)).toMatchObject({ ts: '1776988850.0', text: 'hi' })
-    const histCall = t.calls.find((c) => c.endpoint === 'conversations.history')
-    expect(histCall?.params?.channel).toBe('D1')
+    expect(texts(out)).toEqual(['deploy in a dm'])
+    expect((await workspace.run.params('GET', HISTORY))[0]?.channel).toBe('D1')
   })
 
   it('throws ENOENT for a chat.jsonl no listing names', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
     await expect(
       read(
-        new SlackAccessor(t),
-        spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+        workspace.accessor(),
+        spec('/mnt/slack/channels/general__C1/2025-11-03/chat.jsonl', '/mnt/slack'),
       ),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
@@ -129,53 +106,42 @@ describe('read jsonl branch', () => {
 
 describe('read users branch', () => {
   it('returns JSON-stringified user profile bytes', async () => {
-    const t = new FakeTransport((endpoint) => {
-      if (endpoint === 'users.info') {
-        return {
-          ok: true,
-          user: { id: 'U1', name: 'alice', real_name: 'Alice A' },
-        }
-      }
-      return { ok: true }
-    })
     const out = await read(
-      new SlackAccessor(t),
-      spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
+      workspace.accessor(),
+      spec('/mnt/slack/users/ana__U1.json', '/mnt/slack'),
       USER,
     )
     const parsed = JSON.parse(decoder.decode(out)) as Record<string, unknown>
-    expect(parsed).toMatchObject({ id: 'U1', name: 'alice', real_name: 'Alice A' })
-    const infoCall = t.calls.find((c) => c.endpoint === 'users.info')
-    expect(infoCall?.params?.user).toBe('U1')
+    expect(parsed).toMatchObject({ id: 'U1', name: 'ana', real_name: 'Ana Lima' })
+    expect(await workspace.run.params('GET', INFO)).toEqual([{ user: 'U1' }])
   })
 
   it('throws ENOENT for a user no listing names', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
     await expect(
-      read(new SlackAccessor(t), spec('/mnt/slack/users/alice__U1.json', '/mnt/slack')),
+      read(workspace.accessor(), spec('/mnt/slack/users/ana__U1.json', '/mnt/slack')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
 
 describe('read unknown', () => {
   it('throws ENOENT for unknown path shape', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
     await expect(
-      read(new SlackAccessor(t), spec('/mnt/slack/foo/bar', '/mnt/slack')),
+      read(workspace.accessor(), spec('/mnt/slack/foo/bar', '/mnt/slack')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('throws EISDIR for root', async () => {
     // The root exists by construction, so reading it as a file is the one
     // shape the kit reports as a directory rather than absent.
-    const t = new FakeTransport(() => ({ ok: true }))
     await expect(
-      read(new SlackAccessor(t), spec('/mnt/slack', '/mnt/slack')),
+      read(workspace.accessor(), spec('/mnt/slack', '/mnt/slack')),
     ).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })
 
 it('closes an attachment stream before fetching its tail', async () => {
+  // The download is staged: over the wire, a read closed after its first
+  // chunk cannot be told from one that fetched the rest.
   let closed = false
   async function* source() {
     try {
@@ -203,6 +169,7 @@ it('closes an attachment stream before fetching its tail', async () => {
 })
 
 it('uses bounded buffered downloads when a custom transport has no stream method', async () => {
+  // A transport of its own: the HTTP one always streams.
   const path = spec('/channels/general__C1/2026-04-24/files/report__F1.txt')
   const bytes = new Uint8Array(40_000).fill(65)
   const downloadFile = vi.fn().mockResolvedValue(bytes)
@@ -220,22 +187,9 @@ it('uses bounded buffered downloads when a custom transport has no stream method
 
 describe('follow', () => {
   it('prints the last lines, then asks after the last one seen', async () => {
-    const t = new FakeTransport((endpoint, params) => {
-      if (endpoint !== 'conversations.history') return { ok: true }
-      if (params?.oldest === '1776989000.0') {
-        return { ok: true, messages: [{ ts: '1776989100.0', text: 'later' }] }
-      }
-      return {
-        ok: true,
-        messages: [
-          { ts: '1776988900.0', text: 'hello' },
-          { ts: '1776989000.0', text: 'world' },
-        ],
-      }
-    })
     const stream = await follow(
-      new SlackAccessor(t),
-      spec('/mnt/slack/channels/general__C1/2026-04-24/chat.jsonl', '/mnt/slack'),
+      workspace.accessor(),
+      spec('/mnt/slack/channels/general__C1/2025-11-03/chat.jsonl', '/mnt/slack'),
       1,
       0.001,
       null,
@@ -243,76 +197,74 @@ describe('follow', () => {
     )
     if (stream === null) throw new Error('the chat day was not followed')
     const it = stream[Symbol.asyncIterator]()
-    const texts = async (): Promise<string[]> =>
-      decoder
-        .decode(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
-        .trimEnd()
-        .split('\n')
-        .map((line) => (JSON.parse(line) as { text: string }).text)
-    expect(await texts()).toEqual(['world'])
-    expect(await texts()).toEqual(['later'])
+    const next = async (): Promise<string[]> =>
+      texts(((await it.next()).value as Uint8Array | undefined) ?? new Uint8Array())
+    expect(await next()).toEqual(['coffee is ready'])
+    // Another client posts on the day; executing it reloads the run, so the
+    // recording restarts after.
+    await workspace.run.execute(
+      'INSERT INTO Message (tenant, channelId, ts, userId, text, seq) ' +
+        "VALUES ('unit', 'C1', '1762135200.000001', 'U2', 'tea too', 99)",
+    )
+    await workspace.record()
+    expect(await next()).toEqual(['tea too'])
     const idle = it.next()
     await it.return?.()
     expect((await idle).done).toBe(true)
-    const asked = t.calls.filter((c) => c.endpoint === 'conversations.history')
-    expect(asked.map((c) => c.params?.oldest)).toContain('1776989000.0')
+    expect((await workspace.run.params('GET', HISTORY))[0]?.oldest).toBe(COFFEE)
   })
 
   it('follows only a chat day', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
     expect(
-      await follow(
-        new SlackAccessor(t),
-        spec('/mnt/slack/users/alice__U1.json', '/mnt/slack'),
-        1,
-        1,
-      ),
+      await follow(workspace.accessor(), spec('/mnt/slack/users/ana__U1.json', '/mnt/slack'), 1, 1),
     ).toBeNull()
   })
 })
 
-// Twin of test_a_batch_walks_each_run_of_days_once.
+// Twin of test_a_batch_walks_each_run_of_days_once: 2025-11-03 and 11-04 are
+// one run of days, walked by one listing; 11-07 holds no general message and
+// is walked on its own.
 it('walks each run of days of a batch once', async () => {
+  const accessor = workspace.accessor()
   const channel = '/mnt/slack/channels/general__C1'
-  const days = ['2026-04-24', '2026-04-25', '2026-04-27']
+  const days = ['2025-11-03', '2025-11-04', '2025-11-07']
   const chat = new FileStat({
     name: 'chat.jsonl',
     type: FileType.FILE,
     extra: { channel_id: 'C1' },
   })
-  const on24 = { ts: '1776988900.000000', text: 'a' }
-  const on25 = { ts: '1777075300.000000', text: 'b' }
-  const t = new FakeTransport(() => ({ ok: true, messages: [on24, on25] }))
   const chats = days.map((day) => `${channel}/${day}/chat.jsonl`)
+  const each = new Map<string, Uint8Array>()
+  for (const [i, day] of days.entries()) {
+    const path = chats[i] ?? ''
+    each.set(path, await read(accessor, spec(path, '/mnt/slack'), chat, dayRow('C1', day)))
+  }
+  await workspace.record()
   const answers = await readMany(
-    new SlackAccessor(t),
-    [...chats, '/mnt/slack/users/alice__U1.json'].map((v) => spec(v, '/mnt/slack')),
+    accessor,
+    [...chats, '/mnt/slack/users/ana__U1.json'].map((v) => spec(v, '/mnt/slack')),
     1 << 20,
     [...chats.map(() => ({ entry: chat })), {}],
   )
-  const lines = (body: Uint8Array | undefined): unknown[] =>
-    decoder
-      .decode(body)
-      .split('\n')
-      .filter((line) => line !== '')
-      .map((line) => JSON.parse(line) as unknown)
-  expect(chats.map((chat) => lines(answers.get(chat)))).toEqual([[on24], [on25], []])
+  expect(chats.map((c) => texts(answers.get(c)))).toEqual(chats.map((c) => texts(each.get(c))))
   expect(answers.size).toBe(3)
-  expect(t.calls.filter((call) => call.endpoint === 'conversations.history')).toHaveLength(2)
-  // A day past the limit is left out; a run past the limit a day stops walking
-  // and is left out whole.
-  const big = { ts: on24.ts, text: 'a'.repeat(12) }
-  const sized = new FakeTransport((_endpoint, params) => ({
-    ok: true,
-    messages: Number(params?.oldest) < Date.parse('2026-04-26T00:00:00Z') / 1000 ? [big, on25] : [],
-  }))
-  const limit = new TextEncoder().encode(`${JSON.stringify(on25)}\n`).byteLength + 10
+  expect((await workspace.run.params('GET', HISTORY)).map((p) => [p.oldest, p.latest])).toEqual([
+    ['1762128000.000000', '1762300800.000000'],
+    ['1762473600.000000', '1762560000.000000'],
+  ])
+  // A day past the limit is left out: the first day's two messages pass a
+  // limit the second day's one fits. A run whose messages pass the limit a day
+  // stops walking and is left out whole, the second day too though it would
+  // fit on its own.
+  const first = each.get(chats[0] ?? '')?.byteLength ?? 0
+  const second = each.get(chats[1] ?? '')?.byteLength ?? 0
   for (const [size, kept] of [
-    [limit, [chats[1], chats[2]]],
+    [first - 1, [chats[1], chats[2]]],
+    [Math.floor((first + second) / 2) - 1, [chats[2]]],
     [1, [chats[2]]],
   ] as const) {
     const got = await readMany(
-      new SlackAccessor(sized),
+      accessor,
       chats.map((v) => spec(v, '/mnt/slack')),
       size,
       chats.map(() => ({ entry: chat })),

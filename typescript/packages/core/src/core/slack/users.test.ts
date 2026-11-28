@@ -12,161 +12,102 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { serve } from '../../../tests/fixtures/kit_fake.ts'
+import { SlackWorkspace, USER, USERS } from '../../../tests/core/slack/workspace.ts'
 import { getUserProfile, listUsers, searchUsers } from './users.ts'
-import { SlackAccessor } from '../../accessor/slack.ts'
-import type { SlackResponse, SlackTransport } from './client.ts'
 
-class FakeTransport implements SlackTransport {
-  public readonly calls: { endpoint: string; params?: Record<string, string> }[] = []
-  constructor(private readonly responder: (call: number) => SlackResponse) {}
-  call(endpoint: string, params?: Record<string, string>): Promise<SlackResponse> {
-    this.calls.push({ endpoint, ...(params !== undefined ? { params } : {}) })
-    return Promise.resolve(this.responder(this.calls.length))
-  }
+let origin = ''
+let workspace: SlackWorkspace
+
+beforeAll(async () => {
+  origin = await serve('slack')
+})
+
+beforeEach(async () => {
+  workspace = new SlackWorkspace(origin)
+  await workspace.reset()
+})
+
+afterEach(async () => {
+  await workspace.close()
+})
+
+function ids(users: { id?: string }[]): (string | undefined)[] {
+  return users.map((u) => u.id)
 }
 
 describe('listUsers', () => {
   it('calls users.list with limit=200 by default', async () => {
-    const t = new FakeTransport(() => ({ ok: true, members: [] }))
-    await listUsers(new SlackAccessor(t))
-    expect(t.calls[0]?.endpoint).toBe('users.list')
-    expect(t.calls[0]?.params).toMatchObject({ limit: '200' })
+    await listUsers(workspace.accessor())
+    expect((await workspace.run.params('GET', USERS))[0]).toMatchObject({ limit: '200' })
   })
 
   it('filters out deleted, bots, and USLACKBOT', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [
-        { id: 'U1', name: 'alice' },
-        { id: 'U2', name: 'deleted-user', deleted: true },
-        { id: 'U3', name: 'bot', is_bot: true },
-        { id: 'USLACKBOT', name: 'slackbot' },
-        { id: 'U4', name: 'bob' },
-      ],
-    }))
-    const out = await listUsers(new SlackAccessor(t))
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1', 'U4'])
+    // The workspace also holds a bot, a deactivated user and Slackbot.
+    expect(ids(await listUsers(workspace.accessor()))).toEqual(['U1', 'U2'])
   })
 
   it('returns empty when members missing', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
-    const out = await listUsers(new SlackAccessor(t))
-    expect(out).toEqual([])
+    await workspace.run.answerNext('GET', USERS, 200, { ok: true })
+    expect(await listUsers(workspace.accessor())).toEqual([])
   })
 
   it('respects custom limit', async () => {
-    const t = new FakeTransport(() => ({ ok: true, members: [] }))
-    await listUsers(new SlackAccessor(t), { limit: 50 })
-    expect(t.calls[0]?.params).toMatchObject({ limit: '50' })
+    await listUsers(workspace.accessor(), { limit: 50 })
+    expect((await workspace.run.params('GET', USERS))[0]).toMatchObject({ limit: '50' })
   })
 
   it('paginates via response_metadata.next_cursor across pages', async () => {
-    const t = new FakeTransport((call) => {
-      if (call === 1) {
-        return {
-          ok: true,
-          members: [{ id: 'U1', name: 'alice' }],
-          response_metadata: { next_cursor: 'c2' },
-        }
-      }
-      if (call === 2) {
-        return {
-          ok: true,
-          members: [{ id: 'U2', name: 'bob' }],
-          response_metadata: { next_cursor: '' },
-        }
-      }
-      throw new Error('unexpected extra call')
-    })
-    const out = await listUsers(new SlackAccessor(t))
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1', 'U2'])
-    expect(t.calls).toHaveLength(2)
-    expect(t.calls[1]?.params?.cursor).toBe('c2')
+    await workspace.firstPage(USERS, 1)
+    expect(ids(await listUsers(workspace.accessor()))).toEqual(['U1', 'U2'])
+    const asked = await workspace.run.params('GET', USERS)
+    expect(asked).toHaveLength(2)
+    expect(asked[1]?.cursor).not.toBe('')
   })
 
   it('stops paginating when next_cursor is empty / missing', async () => {
-    let calls = 0
-    const t = new FakeTransport(() => {
-      calls++
-      return { ok: true, members: [] }
-    })
-    await listUsers(new SlackAccessor(t))
-    expect(calls).toBe(1)
+    await listUsers(workspace.accessor())
+    expect(await workspace.count(USERS)).toBe(1)
   })
 })
 
 describe('getUserProfile', () => {
   it('calls users.info with the user id', async () => {
-    const t = new FakeTransport(() => ({ ok: true, user: { id: 'U1', name: 'alice' } }))
-    const out = await getUserProfile(new SlackAccessor(t), 'U1')
-    expect(t.calls[0]?.endpoint).toBe('users.info')
-    expect(t.calls[0]?.params).toMatchObject({ user: 'U1' })
-    expect(out).toEqual({ id: 'U1', name: 'alice' })
+    const out = await getUserProfile(workspace.accessor(), 'U1')
+    expect(await workspace.run.params('GET', USER)).toEqual([{ user: 'U1' }])
+    expect([out.id, out.name]).toEqual(['U1', 'ana'])
   })
 
   it('returns empty object when user missing in response', async () => {
-    const t = new FakeTransport(() => ({ ok: true }))
-    const out = await getUserProfile(new SlackAccessor(t), 'U1')
-    expect(out).toEqual({})
+    await workspace.run.answerNext('GET', USER, 200, { ok: true })
+    expect(await getUserProfile(workspace.accessor(), 'U1')).toEqual({})
   })
 })
 
 describe('searchUsers', () => {
   it('matches case-insensitive on name', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [
-        { id: 'U1', name: 'alice', real_name: 'Alice Cooper' },
-        { id: 'U2', name: 'bob', real_name: 'Bob Dylan' },
-      ],
-    }))
-    const out = await searchUsers(new SlackAccessor(t), 'ALI')
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1'])
+    expect(ids(await searchUsers(workspace.accessor(), 'ANA'))).toEqual(['U1'])
   })
 
   it('matches on real_name', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [
-        { id: 'U1', name: 'alice', real_name: 'Alice Cooper' },
-        { id: 'U2', name: 'bob', real_name: 'Bob Dylan' },
-      ],
-    }))
-    const out = await searchUsers(new SlackAccessor(t), 'dylan')
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U2'])
+    expect(ids(await searchUsers(workspace.accessor(), 'ito'))).toEqual(['U2'])
   })
 
   it('matches on profile.email', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [{ id: 'U1', name: 'alice', profile: { email: 'alice@example.com' } }],
-    }))
-    const out = await searchUsers(new SlackAccessor(t), 'example.com')
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1'])
+    expect(ids(await searchUsers(workspace.accessor(), 'ben@example.com'))).toEqual(['U2'])
   })
 
   it('respects deleted/bot/USLACKBOT filter (transitively via listUsers)', async () => {
-    const t = new FakeTransport(() => ({
-      ok: true,
-      members: [
-        { id: 'U1', name: 'alice' },
-        { id: 'U2', name: 'alice-bot', is_bot: true },
-      ],
-    }))
-    const out = await searchUsers(new SlackAccessor(t), 'alice')
-    expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1'])
+    // bot-helper is the bot's name.
+    expect(await searchUsers(workspace.accessor(), 'bot')).toEqual([])
   })
 })
 
 // Twin of test_list_users_pages_no_further_than_stop_at.
 it('pages users no further than stopAt', async () => {
-  const t = new FakeTransport((call) => ({
-    ok: true,
-    members: [{ id: `U${String(call)}`, name: `user${String(call)}` }],
-    response_metadata: { next_cursor: 'next' },
-  }))
-  const users = await listUsers(new SlackAccessor(t), { stopAt: 1 })
-  expect(users.map((u) => u.name)).toEqual(['user1'])
-  expect(t.calls).toHaveLength(1)
+  await workspace.firstPage(USERS, 1)
+  const users = await listUsers(workspace.accessor(), { stopAt: 1 })
+  expect(users.map((u) => u.name)).toEqual(['ana'])
+  expect(await workspace.count(USERS)).toBe(1)
 })
