@@ -292,6 +292,11 @@ machine serves, and rules that depend on which program opens a file.
   before its next program starts.
 - Every other mount behaves as under `ssh`: the machine keeps an answer for
   a second.
+- A file a program opens only to read comes with its first 128 KiB, and a
+  file it reads in order is asked for up to 4 MiB ahead of its reads, so a
+  large file streams and a tree of small files takes about one round trip
+  per file. A change made on the machine through another open drops what
+  was asked, so the next read finds it.
 - While a policy judges the session's file calls (`pre_vfs` or `post_vfs`),
   neither `mirage-fuse` nor the machine's kernel keeps an answer, not even
   for a second, so each call a program makes reaches it. A policy added

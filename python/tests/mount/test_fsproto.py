@@ -172,6 +172,29 @@ async def test_a_file_reads_whole_and_a_write_lands_by_its_release():
 
 
 @pytest.mark.asyncio
+async def test_a_read_only_open_carries_the_first_bytes_it_asks_for():
+    ws, server, end, serving = await served()
+    path = "/notes/plan.txt"
+    some = await end.call({"op": "open", "path": path, "first": 3})
+    whole = await end.call({"op": "open", "path": path, "first": 100})
+    plain = await end.call({"op": "open", "path": path})
+    writes = await end.call(
+        {"op": "open", "path": path, "write": True, "first": 100}
+    )
+    assert [(r.head.get("first"), r.body) for r in (some, whole)] == [
+        (True, b"pla"),
+        (True, b"plan"),
+    ]
+    assert [(r.head.get("first"), r.body) for r in (plain, writes)] == [
+        (None, b""),
+        (None, b""),
+    ]
+    for r in (some, whole, plain, writes):
+        await end.call({"op": "release", "fh": r.head["fh"]})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
 async def test_a_rename_with_noreplace_refuses_an_existing_target():
     ws, server, end, serving = await served()
     made = await end.call(
@@ -275,6 +298,22 @@ async def test_while_a_policy_judges_file_calls_nothing_is_kept():
         (False, True)
     ] * 3
     assert watch.asked == ["agent"] * 3
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_while_a_policy_judges_file_calls_an_open_reads_nothing_with_it():
+    watch = Watch()
+    watch.on = True
+    server, end, serving = await watched(watch)
+    opened = await end.call(
+        {"op": "open", "path": "/notes/plan.txt", "first": 100}
+    )
+    assert (opened.head.get("first"), opened.head["w"], opened.body) == (
+        None,
+        True,
+        b"",
+    )
     await end.end(serving)
 
 

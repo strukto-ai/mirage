@@ -529,7 +529,19 @@ class FsprotoServer:
                 binary=True,
             )
             fh = await core.open(path, mode)
-            return {"fh": fh, **await self._keep(path)}, EMPTY
+            keep = await self._keep(path)
+            first = whole(h.get("first"), 0)
+            if first > 0 and not mode.writable and not keep.get("w"):
+                # A read-only open's first bytes, read with it, so its
+                # first read costs no trip of its own. A read that fails
+                # leaves the open as it is, for that read to meet.
+                try:
+                    data = await core.read(path, first, 0, fh)
+                except Exception as err:
+                    logger.debug("fsproto: reading %s at open: %r", path, err)
+                else:
+                    return {"fh": fh, "first": True, **keep}, data
+            return {"fh": fh, **keep}, EMPTY
         if op == "create":
             mode = OpenMode(
                 readable=True,

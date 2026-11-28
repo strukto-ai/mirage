@@ -448,7 +448,20 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode)
-        return [{ fh: fd, ...(await this.keep(path)) }, EMPTY]
+        const keep = await this.keep(path)
+        const first = whole(h.first, 0)
+        if (first > 0 && !mode.writable && keep.w !== true) {
+          // A read-only open's first bytes, read with it, so its first read
+          // costs no trip of its own. A read that fails leaves the open as it
+          // is, for that read to meet.
+          try {
+            const data = await core.read(path, fd, 0, first)
+            return [{ fh: fd, first: true, ...keep }, data]
+          } catch (err) {
+            console.debug(`fsproto: reading ${path} at open`, err)
+          }
+        }
+        return [{ fh: fd, ...keep }, EMPTY]
       }
       case 'create': {
         const mode: OpenMode = {

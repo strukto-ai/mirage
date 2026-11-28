@@ -26,6 +26,9 @@ same mounts served by mirage-fuse, which answers alike except that a write into 
 read-only mount says `Read-only file system`, as Mirage does, where sshfs can only say
 `Permission denied`. mirage-fuse sends a file's writes ahead of their answers and its close
 waits for them, so a file written in many writes, or past the 8 MiB it sends ahead, lands whole.
+It asks for what follows a file read in order before the program reads it, up to 4 MiB
+ahead, so a file read far past that reads back whole, and a change made through another
+open meanwhile reaches the reading open's next read.
 `both` serves the rest through mirage-fuse, so a box running
 these cases needs sshfs and mirage-fuse; CI builds mirage-fuse and copies it in.
 
