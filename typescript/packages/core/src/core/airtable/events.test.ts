@@ -93,8 +93,13 @@ function pairs(delta: Delta): [FileChangeKind, string][] {
 
 describe('AirtableDeltaHook', () => {
   it('starts a baseline at the present and reads on at each ping', async () => {
+    // The payload before the baseline changes the table's description, which no
+    // later payload touches, so a baseline that read from the webhook's first
+    // payload would name the table.json too.
     const world = await worldOf()
-    await world.account.push(world.hook, records())
+    await world.account.push(world.hook, {
+      changedTablesById: { [FEATURES_ID]: { changedMetadata: { current: { description: 'd' } } } },
+    })
     const hook = hookFor(world)
     const base = await hook.pull(root(), null)
     expect(base.changes).toEqual([])

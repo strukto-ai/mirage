@@ -102,7 +102,18 @@ def _pairs(delta) -> list[tuple[FileChangeKind, str]]:
 async def test_a_baseline_starts_at_the_present_and_each_ping_reads_on(
     world,
 ):
-    await world.push(_records())
+    # The payload before the baseline changes the table's description,
+    # which no later payload touches, so a baseline that read from the
+    # webhook's first payload would name the table.json too.
+    await world.push(
+        {
+            "changedTablesById": {
+                FEATURES_ID: {
+                    "changedMetadata": {"current": {"description": "d"}}
+                }
+            }
+        }
+    )
     hook = _hook(world)
     base = await hook.pull(_root(), None)
     assert base.changes == ()

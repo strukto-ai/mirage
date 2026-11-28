@@ -17,7 +17,7 @@ import { all, exec, one } from '../kit/typescript/index.ts'
 import type { Ctx, JsonValue, Reply } from '../kit/typescript/index.ts'
 import { authenticate, baseFor, onlyQuery, requireIds } from './access.ts'
 import type { C } from './config.ts'
-import { WEBHOOK, hooksOf, lastCursor } from './payloads.ts'
+import { WEBHOOK, hooksOf } from './payloads.ts'
 import { changeOne } from './store.ts'
 import { bodyOf, guard, invalidRequest, isObject, notFound, ok, refuse } from './wire.ts'
 import { mintId } from './writes.ts'
@@ -72,7 +72,7 @@ export const listWebhooks = guard(async (ctx: Ctx<C>): Promise<Reply> => {
     webhooks.push({
       id: hook.id,
       areNotificationsEnabled: hook.url !== null,
-      cursorForNextPayload: (await lastCursor(ctx.sql, ctx.tenant, hook.id)) + 1,
+      cursorForNextPayload: hook.lastCursor + 1,
       lastNotificationResult: null,
       notificationUrl: hook.url,
       isHookEnabled: true,
