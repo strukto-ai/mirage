@@ -100,6 +100,11 @@ export interface Attached {
  * command line they refuse: the help page on stderr and exit 99. Its help
  * keeps the standard layout.
  *
+ * COMMANDER answers an unknown option, a missing option value and stray
+ * operands at the root in commander's words, naming the close long option it
+ * suggests, and exits 2 as tvly does for each; no long option abbreviates.
+ * Its help keeps the standard layout.
+ *
  * It lives in the spec layer, not beside the CLI tree, because the help
  * renderer is the spec's and cannot import upward to reach it.
  */
@@ -109,6 +114,7 @@ export enum UsageStyle {
   CLAP = 'clap',
   COBRA = 'cobra',
   POPPLER = 'poppler',
+  COMMANDER = 'commander',
 }
 
 export type ArgumentAction = 'store' | 'store_true' | 'count' | 'append' | 'extend'

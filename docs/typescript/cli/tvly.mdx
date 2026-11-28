@@ -1,0 +1,37 @@
+---
+title: tvly CLI in TypeScript
+sidebarTitle: tvly
+description: "Supported Tavily commands for web search, extraction, crawls, maps and research."
+icon: magnifying-glass
+---
+
+import Reference from '/snippets/cli/tvly.mdx'
+import License from '/snippets/cli/license/tvly.mdx'
+
+Search the web, extract pages, crawl and map sites, and run deep research. Mirage implements the command subset below using the [official `tvly` grammar](https://github.com/tavily-ai/cli) and prints what `tvly` prints when its output is piped.
+
+## Setup
+
+Create an API key in the [Tavily dashboard](https://app.tavily.com).
+
+```typescript
+import { TVLY, Workspace } from '@struktoai/mirage-node'
+
+const config = { apiKey: 'tvly-...' }
+const ws = new Workspace({})
+ws.registerCli('tvly', TVLY, config)
+```
+
+No service mount is required. For YAML and multiple accounts, see the
+[CLI overview](/typescript/cli/index#register-a-cli).
+
+## SKILL.md
+
+The [SKILL.md](/home/setup/cli/skill-md) an agent reads with `tvly` installed.
+
+{/* generated: skill-md tvly start */}
+{/* generated: skill-md tvly end */}
+
+<Reference />
+
+<License />

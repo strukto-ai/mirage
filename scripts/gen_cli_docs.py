@@ -240,6 +240,33 @@ LICENSES = {
     "search": Licensing("None; Mirage's own command"),
     "slack": Licensing("MIT (OpenClaw)", (OPENCLAW,)),
     "trello": Licensing(SERVICE_API),
+    "tvly": Licensing(
+        "MIT",
+        (
+            Project(
+                "[tvly](https://github.com/tavily-ai/cli) 1.0.2",
+                "Upstream CLI; its commands, options, output and messages "
+                "are adapted",
+                "MIT",
+                "tavily-cli",
+            ),
+            Project(
+                "[@tavily/core](https://github.com/tavily-ai/tavily-js) 1.1.0",
+                "Request headers, error messages and search parameters "
+                "adapted",
+                "MIT",
+                "tavily-cli",
+                internal=True,
+            ),
+            Project(
+                "[Commander.js](https://github.com/tj/commander.js) 15.1.0",
+                "Usage refusals and close-match suggestions adapted",
+                "MIT",
+                "commander",
+                internal=True,
+            ),
+        ),
+    ),
 }
 SUMMARIES = {
     "airtable": (
@@ -291,6 +318,10 @@ SUMMARIES = {
         "Read boards, lists, labels and cards; create, update, move, "
         "assign, label and comment on cards"
     ),
+    "tvly": (
+        "Search the web, extract pages, crawl and map sites, and run deep "
+        "research with Tavily"
+    ),
 }
 UNLISTED = frozenset({"search"})
 GROUPS = (
@@ -298,6 +329,7 @@ GROUPS = (
     ("Developer", ("ast-grep", "gh", "git", "hf")),
     ("Chat", ("slack", "discord", "himalaya")),
     ("Productivity", ("gws", "ntn", "linear", "trello", "airtable")),
+    ("Web", ("tvly",)),
 )
 CORE_BARREL = ROOT / "typescript/packages/core/src/index.ts"
 CORE_SPECS = ROOT / "typescript/packages/core/src/commands/cli/specs.ts"

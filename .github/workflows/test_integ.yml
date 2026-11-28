@@ -378,7 +378,7 @@ jobs:
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcs}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gh,github,gridfs,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
-              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,tidb_filesystem,trello,wandb,wasabi}{.py,/**}'
+              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tavily,tencent,tidb_filesystem,trello,tvly,wandb,wasabi}{.py,/**}'
             # Shared backends full: the six SaaS targets with every case on
             # both hosts. A pull request that sets it runs that workflow, and
             # the shared shards leave those six targets to it.
@@ -2946,7 +2946,8 @@ jobs:
 
       # The cli facet drives the builtin CLIs (himalaya, gws, slack, discord,
       # ntn, linear, airtable, trello) end to end against the same mocks the
-      # email, chat and project facets use.
+      # email, chat and project facets use; tvly's runners start the Tavily
+      # fake themselves.
       - name: Start the fake mail and Google Workspace servers
         run: |
           cd integ
@@ -3068,6 +3069,19 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: integ/scripts/background.sh wait facets-python
+
+      # Runs every cli-tvly case through the REAL Tavily CLI against the same
+      # fake the cli facet uses, so the goldens are by construction what the
+      # official tvly prints. Pinned by version; the script refuses any other.
+      - name: Run tvly CLI conformance against the real binary
+        if: ${{ !cancelled() }}
+        working-directory: integ
+        run: |
+          # Installed outside the pnpm workspace so it cannot disturb
+          # node_modules the rest of the job depends on.
+          mkdir -p /tmp/tvlycli
+          (cd /tmp/tvlycli && npm i --no-audit --no-fund @tavily/cli@1.0.2)
+          TVLY_BIN=/tmp/tvlycli/node_modules/.bin/tvly pnpm run tvly:conformance
 
       # A 404 is an answer to a real client -- "no such repository", "no such
       # file" -- so an endpoint the fake does not implement is indistinguishable

@@ -1,0 +1,100 @@
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `tvly <command> --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `tvly auth` | Check authentication status |
+| `tvly search` | Search the web using Tavily |
+| `tvly extract` | Extract content from one or more URLs |
+| `tvly crawl` | Crawl a website starting from URL |
+| `tvly map` | Discover all URLs on a website (no content extraction) |
+| `tvly research` | Deep research: run a task, or check one with `research status &lt;id&gt;` or wait for it with `research poll &lt;id&gt;` |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+### Search
+
+```bash
+tvly search 'mirage virtual filesystem'
+tvly search 'mirage virtual filesystem' --max-results 3 --include-answer
+tvly search 'release notes' --topic news --time-range week --json | jq -r '.results[].url'
+tvly search 'what is RAG' 'what is a vector store'
+echo 'agent sandboxes' | tvly search -
+```
+
+Each result prints as its number and title, its URL and its content on one
+line, cut to `--max-chars` characters (600, shared across up to five queries
+run in parallel; 0 prints it whole). `--json` prints the API's answer whole:
+one object for one query, an array for several.
+
+### Extract, crawl and map
+
+```bash
+tvly extract https://docs.tavily.com/welcome
+tvly extract https://example.com/a https://example.com/b --format text --json
+tvly map https://docs.tavily.com --limit 20
+tvly crawl https://docs.tavily.com --max-depth 2 --limit 10
+tvly crawl https://docs.tavily.com --limit 10 --output-dir /work/site
+```
+
+`extract` and `crawl` print each page as `# <url>`, a blank line and its
+content; a URL the API could not fetch is listed after them. `map` prints one
+URL per line. `--output-dir` saves each crawled page as a `.md` file named
+after its URL.
+
+### Research
+
+```bash
+tvly research 'state of open-source agent sandboxes'
+tvly research 'state of open-source agent sandboxes' --model pro --stream
+tvly research 'state of open-source agent sandboxes' --no-wait
+tvly research status REQUEST_ID
+tvly research poll REQUEST_ID --timeout 300
+```
+
+A task is polled every `--poll-interval` seconds until it finishes or
+`--timeout` passes; `--no-wait` prints the request ID at once, and
+`research poll` resumes waiting on it. `--stream` prints each step on stderr
+and the report on stdout. `research status` and `research poll` take no run
+options.
+
+### Save the answer
+
+```bash
+tvly search 'mirage shell' -o /work/answer.json
+tvly search 'mirage shell' -o
+```
+
+`-o FILE` saves the full JSON answer through the workspace, relative to the
+session's working directory. A bare `-o` saves it as
+`.tavily/<command>-<slug>-<time>-<hex>.json`, and a new `.tavily/` gets a
+`.gitignore` that ignores it.
+
+## Behavior
+
+Authentication is the install's: its config supplies the key from outside
+the shell, and nothing in the shell can sign in or change it. `tvly auth`
+names the install as the key's source and never prints the key. On an
+install without one, `tvly auth`, the commands that need a key and the
+keyless rate cap say that no `api_key` is set in the install's config,
+where `tvly` would point at `tvly login`. The setup verbs (`init`, `login`,
+`logout`, `setup`, `set-default`, `update`), `--version`, `--status` and the
+interactive shell change the machine `tvly` runs on and are absent. Help
+pages use Mirage's argparse layout rather than commander's.
+
+Option parsing follows commander: no long option abbreviates, an unknown
+option names the closest spelling, and every usage error exits 2.
+
+| Failure | Exit code |
+| --- | --- |
+| Unknown options, invalid values or missing arguments, such as `tvly search q --foo` or `tvly extract` | 2 |
+| A key the API refuses (HTTP 401 or 403), a usage or rate limit (HTTP 429 or 432), or the keyless cap | 3 |
+| Other Tavily API failures, timeouts and network errors | 4 |
+
+With `--json`, a failure prints `{"error": "<message>"}` on stdout instead of
+the message on stderr. The shared conformance suite checks the implemented
+surface against `tvly`. The suite pins `tvly` 1.0.2.

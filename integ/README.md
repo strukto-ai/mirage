@@ -18,6 +18,18 @@ hosts. The existing whole-host Python, TypeScript and `integ/**` filters select
 the `integ-facets` job for these files; that job builds the pinned reference and
 runs conformance before the regular CLI and project batteries.
 
+The virtual `tvly` is checked by `tvly_conformance.ts` against the real Tavily
+CLI (npm `@tavily/cli` 1.0.2). It starts the Tavily fake (`server/tavily/`) in
+process, points the real binary at it with `TAVILY_API_BASE_URL` and a fresh
+`HOME`, and runs every case in `integ/cli/tvly.json` that names no mount path,
+so each golden there is what upstream prints. Set `TVLY_BIN` to the installed
+`tvly`, then run `pnpm run tvly:conformance` from `integ/`; it refuses any other
+version. Help pages (Mirage's argparse layout, not commander's) and `auth`
+(the key comes from the install's config, not `TAVILY_API_KEY`) are the
+reasoned skips. Both battery hosts start the same fake themselves, so the
+`cli-tvly` target needs no CI setup; `integ-facets` runs it with the cli facet
+and runs conformance after.
+
 ## Pieces
 
 - `runners/`: the battery. Every case is a shell line executed in a mirage
@@ -676,8 +688,8 @@ building TypeScript; append `python` or `typescript` to select one host.
 
 `integ-cloudflare` runs the corpus's targets for every built-in CLI on the
 Cloudflare host: git on RAM, gh and github, gws and the Google mounts, hf,
-himalaya and email, slack, discord, ntn, linear, trello, airtable, mcp, and
-search over dify and mem0. `cloudflare/run.ts` starts their fakes through the
+himalaya and email, slack, discord, ntn, linear, trello, airtable, mcp, tvly,
+and search over dify and mem0. `cloudflare/run.ts` starts their fakes through the
 launcher (the mcp fake as a process of its own), starts the Cloudflare test
 worker under `wrangler dev`, builds each target's mounts and CLIs as a config
 the way the node adapters build instances, and sends every line over the

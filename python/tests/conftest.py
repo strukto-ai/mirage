@@ -14,20 +14,39 @@
 
 import asyncio
 import importlib
+import inspect
 import os
 import resource
 import uuid
 from collections.abc import Iterator
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import aiohttp
+import aioresponses.core
 import pytest
+from aiohttp import ClientResponse
 
 from mirage.core.api.client import SessionPool
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.fixtures.kit_fake import serve
+
+_NEEDS_STREAM_WRITER = (
+    "stream_writer" in inspect.signature(ClientResponse.__init__).parameters
+)
+
+
+class _PatchedClientResponse(ClientResponse):
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        kwargs.setdefault("stream_writer", SimpleNamespace(output_size=0))
+        super().__init__(*args, **kwargs)
+
+
+if _NEEDS_STREAM_WRITER:
+    aioresponses.core.ClientResponse = _PatchedClientResponse
+
 
 _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 if _soft < 8192:

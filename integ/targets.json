@@ -237,6 +237,10 @@
         "SSH_HOST"
       ]
     },
+    "tavily": {
+      "python": [],
+      "typescript": []
+    },
     "tidb_filesystem": {
       "python": [
         "TIDB_FILESYSTEM_HOST",
@@ -2674,6 +2678,25 @@
       "cli_door": "yaml",
       "clis": [
         "items"
+      ],
+      "mounts": [
+        {
+          "path": "/scratch",
+          "vfs": "ram",
+          "backend": "memory"
+        }
+      ]
+    },
+    {
+      "id": "cli-tvly",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "tavily",
+      "facet": "cli",
+      "clis": [
+        "tvly"
       ],
       "mounts": [
         {

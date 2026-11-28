@@ -22,6 +22,11 @@ from mirage.commands.cli.cobra import (
     group_message,
     unknown_command,
 )
+from mirage.commands.cli.commander import (
+    COMMANDER_EXIT,
+    excess_arguments,
+    unknown_option,
+)
 from mirage.commands.cli.constants import (
     CLAP_EXIT,
     GIT_LONG_OPTIONS,
@@ -346,7 +351,7 @@ def parse_spec_for(
             False,
         )
     else:
-        if style is UsageStyle.COBRA:
+        if style in (UsageStyle.COBRA, UsageStyle.COMMANDER):
             grammar = replace(leaf, allow_abbrev=False)
         found = (
             (grammar, False)
@@ -384,7 +389,7 @@ def leaf_parse(
     return LeafParse(
         spec,
         mirage_help,
-        root.usage_style is not UsageStyle.COBRA,
+        root.usage_style not in (UsageStyle.COBRA, UsageStyle.COMMANDER),
         (
             GIT_LONG_OPTIONS.get(" ".join(path), ())
             if root.name == "git"
@@ -475,7 +480,12 @@ def node_help(
             program answers in one voice at every level, the same rule
             the leaf refusal follows.
     """
-    if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER):
+    if style in (
+        UsageStyle.ARGPARSE,
+        UsageStyle.COBRA,
+        UsageStyle.POPPLER,
+        UsageStyle.COMMANDER,
+    ):
         return argparse_help(
             name, listed_node(node, style), subcommand_rows(node)
         )
@@ -523,7 +533,13 @@ def listed_node(
         return node
     names = (
         ("-h", "--help")
-        if style in (UsageStyle.ARGPARSE, UsageStyle.COBRA, UsageStyle.POPPLER)
+        if style
+        in (
+            UsageStyle.ARGPARSE,
+            UsageStyle.COBRA,
+            UsageStyle.POPPLER,
+            UsageStyle.COMMANDER,
+        )
         and not any("-h" in arg.names for arg in node.arguments)
         else ("--help",)
     )
@@ -572,6 +588,15 @@ def _usage_error(
             output=encode_text(node_help(name, node, style)),
             stream="stderr",
             exit_code=POPPLER_EXIT,
+        )
+    if style is UsageStyle.COMMANDER:
+        text = (
+            unknown_option(token, [node])
+            if token is not None
+            else f"error: {message}\n"
+        )
+        return WalkResult(
+            output=encode_text(text), stream="stderr", exit_code=COMMANDER_EXIT
         )
     if style is UsageStyle.CLAP:
         first = (
@@ -1150,6 +1175,7 @@ def walk(
                     UsageStyle.CLAP,
                     UsageStyle.COBRA,
                     UsageStyle.POPPLER,
+                    UsageStyle.COMMANDER,
                 )
                 and "-h" not in cs.dest
             ):
@@ -1178,7 +1204,9 @@ def walk(
                 if spelling not in cs.dest and spelling != "--help":
                     candidates = (
                         _expand_group_long(node, cs, spelling)
-                        if node.allow_abbrev and style is not UsageStyle.COBRA
+                        if node.allow_abbrev
+                        and style
+                        not in (UsageStyle.COBRA, UsageStyle.COMMANDER)
                         else ()
                     )
                     if len(candidates) == 1:
@@ -1397,6 +1425,13 @@ def walk(
                         output=encode_text(text),
                         stream="stderr",
                         exit_code=COBRA_EXIT,
+                    )
+                if style is UsageStyle.COMMANDER:
+                    words = [w for w in argv[i:] if not w.startswith("-")]
+                    return WalkResult(
+                        output=encode_text(excess_arguments(words)),
+                        stream="stderr",
+                        exit_code=COMMANDER_EXIT,
                     )
                 return _unknown_verb(head, name, token, node, style)
             node = child

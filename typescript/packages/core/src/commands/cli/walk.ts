@@ -26,6 +26,7 @@ import { CommandSpec, type CommandSpecInit, UsageStyle, Argument, WordKind } fro
 import { PathSpec } from '../../types.ts'
 
 import { COBRA_EXIT, cobraRefusal, groupMessage, unknownCommand } from './cobra.ts'
+import { COMMANDER_EXIT, excessArguments, unknownOption } from './commander.ts'
 import {
   DefaultCommandRoot,
   WalkResult,
@@ -324,7 +325,7 @@ function parseSpecFor(
     found = [new CommandSpec({ ...spec, arguments: [...leaf.arguments, PASSTHROUGH_REST] }), false]
   } else {
     const grammar =
-      style === UsageStyle.COBRA
+      style === UsageStyle.COBRA || style === UsageStyle.COMMANDER
         ? new CommandSpec({ ...(leaf as CommandSpecInit), allowAbbrev: false })
         : leaf
     found =
@@ -357,7 +358,8 @@ export function leafParse(
   return {
     spec,
     mirageHelp,
-    unknownIsOperand: root.usageStyle !== UsageStyle.COBRA,
+    unknownIsOperand:
+      root.usageStyle !== UsageStyle.COBRA && root.usageStyle !== UsageStyle.COMMANDER,
     abbreviations: root.name === 'git' ? (GIT_LONG_OPTIONS.get(path.join(' ')) ?? []) : undefined,
   }
 }
@@ -415,7 +417,12 @@ export function nodeHelp(
   node: CommandSpec,
   style: UsageStyle = UsageStyle.ARGPARSE,
 ): string {
-  if (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA || style === UsageStyle.POPPLER)
+  if (
+    style === UsageStyle.ARGPARSE ||
+    style === UsageStyle.COBRA ||
+    style === UsageStyle.POPPLER ||
+    style === UsageStyle.COMMANDER
+  )
     return argparseHelp(name, listedNode(node, style), subcommandRows(node))
   return renderHelp(name, listedNode(node, style), subcommandRows(node), style)
 }
@@ -440,7 +447,10 @@ export function listedNode(
   if (!node.addHelp || node.arguments.some((argument) => argument.names.includes('--help')))
     return node
   const names =
-    (style === UsageStyle.ARGPARSE || style === UsageStyle.COBRA || style === UsageStyle.POPPLER) &&
+    (style === UsageStyle.ARGPARSE ||
+      style === UsageStyle.COBRA ||
+      style === UsageStyle.POPPLER ||
+      style === UsageStyle.COMMANDER) &&
     !node.arguments.some((argument) => argument.names.includes('-h'))
       ? ['-h', '--help']
       : ['--help']
@@ -483,6 +493,10 @@ function usageError(
       stream: 'stderr',
       exitCode: POPPLER_EXIT,
     })
+  }
+  if (style === UsageStyle.COMMANDER) {
+    const text = token === undefined ? `error: ${message}\n` : unknownOption(token, [node])
+    return new WalkResult({ output: encodeText(text), stream: 'stderr', exitCode: COMMANDER_EXIT })
   }
   if (style === UsageStyle.CLAP) {
     const first = token === undefined ? message : clapUnexpectedArgument(token)
@@ -980,7 +994,8 @@ export function walk(
         (style === UsageStyle.ARGPARSE ||
           style === UsageStyle.CLAP ||
           style === UsageStyle.COBRA ||
-          style === UsageStyle.POPPLER) &&
+          style === UsageStyle.POPPLER ||
+          style === UsageStyle.COMMANDER) &&
         !cs.dest.has('-h')
       ) {
         return new WalkResult({
@@ -1004,6 +1019,7 @@ export function walk(
         if (
           node.allowAbbrev &&
           style !== UsageStyle.COBRA &&
+          style !== UsageStyle.COMMANDER &&
           !cs.dest.has(spelling) &&
           spelling !== '--help'
         ) {
@@ -1164,6 +1180,14 @@ export function walk(
             output: encodeText(cobraRefusal(unknownCommand(token, name, node), name, node)),
             stream: 'stderr',
             exitCode: COBRA_EXIT,
+          })
+        }
+        if (style === UsageStyle.COMMANDER) {
+          const words = argv.slice(i).filter((word) => !word.startsWith('-'))
+          return new WalkResult({
+            output: encodeText(excessArguments(words)),
+            stream: 'stderr',
+            exitCode: COMMANDER_EXIT,
           })
         }
         return unknownVerb(head, name, token, node, style)

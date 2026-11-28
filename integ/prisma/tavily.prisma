@@ -1,0 +1,113 @@
+// Schema for the tavily fake (integ/server/tavily/, fixtures/tavily/v1.json).
+// The Tavily API answers a question rather than storing anything, so every
+// table here is a canned answer the fixture states and no route writes.
+//
+// A search picks its answer the way the dify fake's retrieval does: a rule
+// carries the lowercase substrings that fire it, the lowest seq that fires
+// wins, and a query no rule matches answers an empty result list. A rule may
+// instead carry an HTTP status and message, which is how the battery reaches
+// the API's refusals (a usage limit, a server fault) on a valid key.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/tavily"
+}
+
+datasource db {
+  provider     = "sqlite"
+  url          = env("INTEG_DB_URL")
+  relationMode = "prisma"
+}
+
+model TavilySearchRule {
+  tenant String
+  id     String
+  // Space-separated lowercase substrings; any one fires the rule.
+  keywords String
+  // Sent as `answer` when the request asks for one.
+  answer String?
+  // Set on a refusal rule: the status and the `detail.error` it answers.
+  status Int?
+  error  String?
+  seq    Int
+
+  hits   TavilySearchHit[]
+  images TavilySearchImage[]
+
+  @@id([tenant, id])
+}
+
+model TavilySearchHit {
+  pk         Int     @id @default(autoincrement())
+  tenant     String
+  ruleId     String
+  title      String
+  url        String
+  content    String
+  // Sent as `raw_content` only when the request asks for page content.
+  rawContent String?
+  score      Float
+  seq        Int
+
+  rule TavilySearchRule @relation(fields: [tenant, ruleId], references: [tenant, id])
+
+  @@index([tenant, ruleId])
+}
+
+model TavilySearchImage {
+  pk          Int     @id @default(autoincrement())
+  tenant      String
+  ruleId      String
+  url         String
+  description String?
+  seq         Int
+
+  rule TavilySearchRule @relation(fields: [tenant, ruleId], references: [tenant, id])
+
+  @@index([tenant, ruleId])
+}
+
+// A page extract reads by its exact url, and crawl and map read by `site`,
+// the host the start url names, in seq order.
+model TavilyPage {
+  tenant     String
+  url        String
+  site       String
+  rawContent String
+  seq        Int
+
+  @@id([tenant, url])
+}
+
+// A research task: POST /research answers it pending and GET
+// /research/<id> answers the stored state, so a waiting client finishes on
+// its first poll. A stream replays `steps` (one tool event per line, as
+// `<tool>|<detail>`) and then `content`.
+model TavilyResearch {
+  tenant    String
+  id        String
+  keywords  String
+  status    String
+  content   String?
+  error     String?
+  steps     String?
+  createdAt String
+  seq       Int
+
+  sources TavilyResearchSource[]
+
+  @@id([tenant, id])
+}
+
+model TavilyResearchSource {
+  pk         Int    @id @default(autoincrement())
+  tenant     String
+  researchId String
+  title      String
+  url        String
+  seq        Int
+
+  research TavilyResearch @relation(fields: [tenant, researchId], references: [tenant, id])
+
+  @@index([tenant, researchId])
+}

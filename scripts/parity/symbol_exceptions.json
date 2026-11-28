@@ -1903,6 +1903,20 @@
    "python_only": {
     "_STAMPING": "Python stores may be written from several threads, so a store's last stamp is read and advanced under a lock; TypeScript runs one thread and advances it in one step."
    }
+  },
+  "commands/cli/builtin/tvly/urls": {
+   "python_only": {
+    "DEFAULT_PORTS": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "EDGE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "PATH_SAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "QUERY_SAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "SCHEME": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "SLUG_UNSAFE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns.",
+    "TAB_OR_NEWLINE": "JavaScript parses a URL with WHATWG's URL; python reproduces the host, path and query tvly reads with these patterns."
+   },
+   "typescript_only": {
+    "SPECIAL": "The schemes WHATWG's URL treats as special, which tvly's host and slug read."
+   }
   }
  }
 }

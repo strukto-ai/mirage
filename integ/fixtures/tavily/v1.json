@@ -1,0 +1,104 @@
+{
+  "searchRules": [
+    {
+      "id": "shell",
+      "keywords": "shell terminal",
+      "answer": "Mirage is a virtual terminal that gives AI agents one bash-compatible shell over every data source.",
+      "hits": [
+        {
+          "title": "Mirage: a virtual terminal for AI agents",
+          "url": "https://docs.example.com/",
+          "content": "Mirage is a bash-compatible shell over one virtual filesystem. It mounts object stores, SaaS apps and databases at a prefix, so an agent reads them with cat, grep and find.",
+          "rawContent": "# Mirage\n\nMirage is a bash-compatible shell over one virtual filesystem.",
+          "score": 0.92
+        },
+        {
+          "title": "Getting started",
+          "url": "https://docs.example.com/start",
+          "content": "Install the package, create a workspace, and mount a bucket at /data. Every command runs through one dispatcher.",
+          "score": 0.81
+        },
+        {
+          "title": "",
+          "url": "https://blog.example.org/agents-and-shells",
+          "content": "Why agents\tprefer a shell:\n\n  one interface,   every backend.",
+          "score": 0.47
+        }
+      ],
+      "images": [
+        {
+          "url": "https://docs.example.com/img/shell.png",
+          "description": "A terminal listing three mounts"
+        }
+      ]
+    },
+    {
+      "id": "vfs",
+      "keywords": "filesystem mount",
+      "hits": [
+        {
+          "title": "Mounts and prefixes",
+          "url": "https://docs.example.com/guide/mounts",
+          "content": "A mount binds one backend to a prefix. A listing costs one request.",
+          "score": 0.88
+        }
+      ]
+    },
+    {
+      "id": "quota",
+      "keywords": "quota",
+      "status": 432,
+      "error": "This request exceeds your plan's set usage limit. Please upgrade your plan or contact support@tavily.com"
+    },
+    {
+      "id": "fault",
+      "keywords": "fault",
+      "status": 500,
+      "error": "Internal Server Error"
+    }
+  ],
+  "pages": [
+    {
+      "url": "https://docs.example.com/",
+      "site": "docs.example.com",
+      "rawContent": "# Mirage\n\nMirage is a bash-compatible shell over one virtual filesystem."
+    },
+    {
+      "url": "https://docs.example.com/start",
+      "site": "docs.example.com",
+      "rawContent": "# Getting started\n\nInstall the package, then create a workspace."
+    },
+    {
+      "url": "https://docs.example.com/guide/mounts",
+      "site": "docs.example.com",
+      "rawContent": "# Mounts\n\nA mount binds one backend to a prefix."
+    }
+  ],
+  "research": [
+    {
+      "id": "res-0001-history",
+      "keywords": "history",
+      "status": "completed",
+      "content": "Mirage began as a virtual filesystem and grew a shell [1]. Its commands follow POSIX [2].",
+      "steps": "call|Planning|\ncall|WebSearch|mirage history\nresponse|WebSearch|2",
+      "createdAt": "2026-11-01T09:00:00.000Z",
+      "sources": [
+        {
+          "title": "Mirage: a virtual terminal for AI agents",
+          "url": "https://docs.example.com/"
+        },
+        {
+          "title": "Mounts and prefixes",
+          "url": "https://docs.example.com/guide/mounts"
+        }
+      ]
+    },
+    {
+      "id": "res-0002-broken",
+      "keywords": "broken",
+      "status": "failed",
+      "error": "The research task could not gather enough sources.",
+      "createdAt": "2026-11-01T09:05:00.000Z"
+    }
+  ]
+}

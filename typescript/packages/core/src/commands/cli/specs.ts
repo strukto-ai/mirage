@@ -24,6 +24,7 @@ import { NTN } from './builtin/ntn/index.ts'
 import { SEARCH } from './builtin/search/index.ts'
 import { SLACK } from './builtin/slack/index.ts'
 import { TRELLO } from './builtin/trello/index.ts'
+import { TVLY } from './builtin/tvly/index.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { NAME as MCP_CLI } from './mcp/constants.ts'
 
@@ -38,10 +39,9 @@ import { NAME as MCP_CLI } from './mcp/constants.ts'
 // through registerCliSpec from their entry point, and user programs do
 // the same before the workspace loads.
 const CLI_SPECS = new Map<string, CLI>(
-  [AIRTABLE, DISCORD, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, SEARCH, SLACK, TRELLO].map((spec) => [
-    spec.spec.name,
-    spec,
-  ]),
+  [AIRTABLE, DISCORD, GIT, GWS, HF, HIMALAYA, LINEAR, NTN, SEARCH, SLACK, TRELLO, TVLY].map(
+    (spec) => [spec.spec.name, spec],
+  ),
 )
 
 /** Make a CLI resolvable by name from YAML; its root name is the key. */
