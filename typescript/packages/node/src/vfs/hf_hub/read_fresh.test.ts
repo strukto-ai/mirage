@@ -19,9 +19,17 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { ContentDriftError } from '@struktoai/mirage-core/workspace/snapshot/drift'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import type { HfHubAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
-import { FakeHub, blobOid, rowAt, serveHub } from '../../../tests/core/hf_hub/_test_util.ts'
+import {
+  BRIDGE,
+  type HubRepo,
+  RESOLVE,
+  blobOid,
+  madeRepo,
+} from '../../../../core/tests/fixtures/hub_repo.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { rowAt } from '../../../tests/core/hf_hub/_test_util.ts'
 import { read } from '@struktoai/mirage-core/core/hf_hub/read'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
@@ -31,22 +39,38 @@ const DEC = new TextDecoder()
 const OLD = ENC.encode('version one\n')
 const NEW = ENC.encode('version two, longer\n')
 
-let hubs: FakeHub[] = []
+let origin = ''
+let repos: HubRepo[] = []
 
-afterEach(async () => {
-  await Promise.all(hubs.map((hub) => hub.close()))
-  hubs = []
+beforeAll(async () => {
+  origin = await serve('hf_hub')
 })
 
-async function hub(files: Record<string, Uint8Array>): Promise<FakeHub> {
-  const fake = new FakeHub()
-  for (const [path, data] of Object.entries(files)) fake.files().set(path, data)
-  hubs.push(fake)
-  return serveHub(fake)
+afterEach(async () => {
+  await Promise.all(repos.map((repo) => repo.run.close()))
+  repos = []
+})
+
+// A model repository of its own holding `files`, its requests recorded from
+// then on.
+async function hub(files: Record<string, Uint8Array>): Promise<HubRepo> {
+  const repo = await madeRepo(origin)
+  repos.push(repo)
+  await repo.commit(files)
+  await repo.run.recordRequests()
+  return repo
 }
 
-function vfsOf(fake: FakeHub): Promise<BaseVFS> {
-  return buildVfs('hf_models', { repo_id: 'acme/widget', endpoint: fake.url })
+function vfsOf(repo: HubRepo): Promise<BaseVFS> {
+  return buildVfs('hf_models', repo.config())
+}
+
+// Land a commit of `next` while the next download waits, after the mount
+// listed the file: the listing describes what it held before, and the
+// download serves `next`. Plain, not Xet: storing one on Xet reloads the run,
+// which would drop the download it holds.
+async function listedBeforeTheBytes(repo: HubRepo, path: string, next: Uint8Array): Promise<void> {
+  await repo.run.beforeNext([['GET', RESOLVE]], () => repo.commit({ [path]: next }, false))
 }
 
 function ws(vfs: BaseVFS, policy: ReadPolicy = ReadPolicy.FRESH): Workspace {
@@ -70,23 +94,22 @@ describe('hf_hub under read: fresh', () => {
     // The listing still describes OLD while the download already serves NEW:
     // the read must not label NEW with OLD's oid, or a revert back to OLD
     // makes the probe agree and NEW is served as if it were OLD.
-    const fake = await hub({ 'a.txt': NEW })
-    fake.listed.set('a.txt', OLD)
-    const vfs = await vfsOf(fake)
+    const repo = await hub({ 'a.txt': OLD })
+    await listedBeforeTheBytes(repo, 'a.txt', NEW)
+    const vfs = await vfsOf(repo)
     const w = ws(vfs)
     try {
       expect(await out(w, 'cat /m/a.txt')).toEqual(NEW)
       // The fixture held: the listing was OLD's, and the cached copy carries
       // no token rather than OLD's oid.
       expect(await w.cache.isFresh('/m/a.txt', blobOid(OLD))).toBe(false)
-      fake.files().set('a.txt', OLD)
-      let before = fake.count('resolve')
+      await repo.commit({ 'a.txt': OLD })
       expect(await out(w, 'cat /m/a.txt')).toEqual(OLD)
-      expect(fake.count('resolve')).toBe(before + 1)
+      expect(await repo.count('resolve')).toBe(1)
       // The refetch was verified, so it restamped and now serves warm.
-      before = fake.count('resolve')
+      await repo.run.recordRequests()
       expect(await out(w, 'cat /m/a.txt')).toEqual(OLD)
-      expect(fake.count('resolve')).toBe(before)
+      expect(await repo.count('resolve')).toBe(0)
     } finally {
       await w.close()
     }
@@ -95,47 +118,45 @@ describe('hf_hub under read: fresh', () => {
   it('never serves other bytes as fresh after a revert through cp', async () => {
     // The same revert through the bytes read: a cross-mount cp reads with
     // read, where cat reads with the stream.
-    const fake = await hub({ 'a.txt': NEW })
-    fake.listed.set('a.txt', OLD)
-    const w = ws(await vfsOf(fake))
+    const repo = await hub({ 'a.txt': OLD })
+    await listedBeforeTheBytes(repo, 'a.txt', NEW)
+    const w = ws(await vfsOf(repo))
     try {
       await out(w, 'cp /m/a.txt /r/one')
       expect(await out(w, 'cat /r/one')).toEqual(NEW)
-      fake.files().set('a.txt', OLD)
-      const before = fake.count('resolve')
+      await repo.commit({ 'a.txt': OLD })
       await out(w, 'cp /m/a.txt /r/two')
       expect(await out(w, 'cat /r/two')).toEqual(OLD)
-      expect(fake.count('resolve')).toBe(before + 1)
+      expect(await repo.count('resolve')).toBe(1)
     } finally {
       await w.close()
     }
   })
 
   it('leaves find its whole listing after a probe', async () => {
-    const fake = await hub({ 'a.txt': OLD, 'd/b.txt': NEW })
-    const w = ws(await vfsOf(fake))
+    const repo = await hub({ 'a.txt': OLD, 'd/b.txt': NEW })
+    const w = ws(await vfsOf(repo))
     try {
       await out(w, 'cat /m/a.txt')
       // The warm read's probes answer through paths-info; a probe that seeded
       // its one row as the mount's listing would leave find seeing a single
       // file, or walking again to recover.
       await out(w, 'cat /m/a.txt')
-      const walks = fake.count('tree')
-      const heads = fake.count('revision')
+      await repo.run.recordRequests()
       const listed = DEC.decode(await out(w, 'find /m -type f'))
       expect(listed.split(/\s+/).filter(Boolean)).toEqual(['/m/a.txt', '/m/d/b.txt'])
       // find, a new command, re-checks the listing once under fresh: one head
       // check against its version, and no walk (Task 1.3).
-      expect([fake.count('revision') - heads, fake.count('tree') - walks]).toEqual([1, 0])
+      expect([await repo.count('revision'), await repo.count('tree')]).toEqual([1, 0])
     } finally {
       await w.close()
     }
   })
 
   it('fails loudly on a repo it cannot see', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    fake.fail.set('tree', [401, ''])
-    const w = ws(await vfsOf(fake), ReadPolicy.BOUNDED)
+    const repo = await hub({ 'a.txt': OLD })
+    await repo.refuse('tree', 401)
+    const w = ws(await vfsOf(repo), ReadPolicy.BOUNDED)
     try {
       // A refusal reads as a directory the caller may not open, the error
       // every file tool already knows how to report and skip.
@@ -155,10 +176,10 @@ describe('hf_hub under read: fresh', () => {
   it('does not let a refused mount hide the other mounts', async () => {
     // One hf mount the token cannot see must not blank out a search across the
     // workspace: the walk reports that mount and keeps going.
-    const fake = await hub({ 'a.txt': OLD })
-    fake.fail.set('tree', [401, ''])
+    const repo = await hub({ 'a.txt': OLD })
+    await repo.refuse('tree', 401)
     const w = new Workspace({
-      '/h': [await vfsOf(fake), MountMode.READ],
+      '/h': [await vfsOf(repo), MountMode.READ],
       '/r': [new RAMVFS(), MountMode.WRITE],
     })
     try {
@@ -175,10 +196,10 @@ describe('hf_hub under read: fresh', () => {
 
   it('does not let a gated download hide the other mounts', async () => {
     // The tree lists but the file download is refused, as for a gated repo.
-    const fake = await hub({ 'a.txt': ENC.encode('needle\n') })
-    fake.fail.set('resolve', [403, ''])
+    const repo = await hub({ 'a.txt': ENC.encode('needle\n') })
+    await repo.refuse('resolve', 403)
     const w = new Workspace({
-      '/h': [await vfsOf(fake), MountMode.READ],
+      '/h': [await vfsOf(repo), MountMode.READ],
       '/r': [new RAMVFS(), MountMode.WRITE],
     })
     try {
@@ -192,13 +213,13 @@ describe('hf_hub under read: fresh', () => {
   })
 
   it('keeps the overlay when the token expires', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    const w = ws(await vfsOf(fake))
+    const repo = await hub({ 'a.txt': OLD })
+    const w = ws(await vfsOf(repo))
     try {
       await out(w, 'cat /m/a.txt')
       await w.namespace.setAttrs('/m/a.txt', { mode: 0o600 })
-      fake.fail.set('tree', [401, ''])
-      fake.fail.set('paths_info', [401, ''])
+      await repo.refuse('tree', 401)
+      await repo.refuse('paths_info', 401)
       // Cross-mount cp reads through the dispatcher, the dispatcher whose "no such
       // file" drops the overlay; a plain cat never reaches it.
       const cp = await w.shell('cp /m/a.txt /r/x')
@@ -213,8 +234,8 @@ describe('hf_hub under read: fresh', () => {
   })
 })
 
-async function pinnedState(fake: FakeHub, vfs?: BaseVFS) {
-  const w = ws(vfs ?? (await vfsOf(fake)))
+async function pinnedState(repo: HubRepo, vfs?: BaseVFS) {
+  const w = ws(vfs ?? (await vfsOf(repo)))
   try {
     await out(w, 'cat /m/a.txt')
     return await toStateDict(w)
@@ -234,46 +255,43 @@ async function load(state: Awaited<ReturnType<typeof toStateDict>>, vfs: BaseVFS
 
 describe('hf_hub snapshot pins', () => {
   it('pins a verified read, and a changed file drifts', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    const state = await pinnedState(fake)
-    fake.files().set('a.txt', NEW)
-    fake.log.length = 0
-    await expect(load(state, await vfsOf(fake))).rejects.toBeInstanceOf(ContentDriftError)
+    const repo = await hub({ 'a.txt': OLD })
+    const state = await pinnedState(repo)
+    await repo.commit({ 'a.txt': NEW })
+    await expect(load(state, await vfsOf(repo))).rejects.toBeInstanceOf(ContentDriftError)
     // The check asks for the one path rather than walking the tree.
-    expect([fake.count('paths_info'), fake.count('tree')]).toEqual([1, 0])
+    expect([await repo.count('paths_info'), await repo.count('tree')]).toEqual([1, 0])
   })
 
   it('pins nothing for an unverified read', async () => {
-    const fake = await hub({ 'a.txt': NEW })
-    fake.listed.set('a.txt', OLD)
-    const state = await pinnedState(fake)
-    fake.listed.clear()
+    const repo = await hub({ 'a.txt': OLD })
+    await listedBeforeTheBytes(repo, 'a.txt', NEW)
+    const state = await pinnedState(repo)
     // Upstream is at NEW, which is what the agent actually read; a pin of the
     // listing's OLD oid would raise a drift that never happened.
-    await load(state, await vfsOf(fake))
+    await load(state, await vfsOf(repo))
   })
 
   it('does not call a refused drift check drift', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    const state = await pinnedState(fake)
-    fake.fail.set('paths_info', [401, ''])
-    const err = await load(state, await vfsOf(fake)).catch((e: unknown) => e)
+    const repo = await hub({ 'a.txt': OLD })
+    const state = await pinnedState(repo)
+    await repo.refuse('paths_info', 401)
+    const err = await load(state, await vfsOf(repo)).catch((e: unknown) => e)
     expect((err as { code?: string }).code).toBe('EACCES')
   })
 
   it('asks one path when the drift check runs on a loaded mount', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    const vfs = await vfsOf(fake)
+    const repo = await hub({ 'a.txt': OLD })
+    const vfs = await vfsOf(repo)
     const w = ws(vfs)
     try {
       await out(w, 'cat /m/a.txt')
       const state = await toStateDict(w)
       // The check asks for the one path rather than walking again.
-      fake.files().set('a.txt', NEW)
-      fake.log.length = 0
+      await repo.commit({ 'a.txt': NEW })
       await expect(load(state, vfs)).rejects.toBeInstanceOf(ContentDriftError)
-      expect([fake.count('paths_info'), fake.count('tree')]).toEqual([1, 0])
-      fake.fail.set('paths_info', [401, ''])
+      expect([await repo.count('paths_info'), await repo.count('tree')]).toEqual([1, 0])
+      await repo.refuse('paths_info', 401)
       const err = await load(state, vfs).catch((e: unknown) => e)
       expect((err as { code?: string }).code).toBe('EACCES')
     } finally {
@@ -296,17 +314,17 @@ const WARM: [string, number, number, number][] = [
 
 describe('hf_hub warm read cost', () => {
   it.each(WARM)('%s costs one path per probe', async (command, posts, walks, heads) => {
-    const fake = await hub({ 'a.txt': OLD })
-    const w = ws(await vfsOf(fake))
+    const repo = await hub({ 'a.txt': OLD })
+    const w = ws(await vfsOf(repo))
     try {
       await out(w, 'cat /m/a.txt')
-      fake.log.length = 0
+      await repo.run.recordRequests()
       await out(w, command)
       expect([
-        fake.count('paths_info'),
-        fake.count('tree'),
-        fake.count('resolve'),
-        fake.count('revision'),
+        await repo.count('paths_info'),
+        await repo.count('tree'),
+        await repo.count('resolve'),
+        await repo.count('revision'),
       ]).toEqual([posts, walks, 0, heads])
     } finally {
       await w.close()
@@ -314,16 +332,18 @@ describe('hf_hub warm read cost', () => {
   })
 
   it('a new mount loads its tree once and never asks one path', async () => {
-    const fake = await hub({ 'a.txt': OLD })
-    const w = ws(await vfsOf(fake), ReadPolicy.BOUNDED)
+    const repo = await hub({ 'a.txt': OLD })
+    const w = ws(await vfsOf(repo), ReadPolicy.BOUNDED)
     try {
       await out(w, 'stat -c %s /m/a.txt')
       await out(w, 'stat -c %s /m/a.txt')
       await out(w, 'ls /m')
       // The fill resolves the head it walks the tree at (Task 1.3).
-      expect([fake.count('tree'), fake.count('paths_info'), fake.count('revision')]).toEqual([
-        1, 0, 1,
-      ])
+      expect([
+        await repo.count('tree'),
+        await repo.count('paths_info'),
+        await repo.count('revision'),
+      ]).toEqual([1, 0, 1])
     } finally {
       await w.close()
     }
@@ -335,9 +355,17 @@ describe('hf_hub ranged read', () => {
     [null, true],
     ['other', false],
   ])('stamps the whole file oid (etag override %s)', async (override, expected) => {
-    const fake = await hub({ 'a.txt': OLD })
-    if (override !== null) fake.etags.set('a.txt', override)
-    const vfs = await vfsOf(fake)
+    const repo = await hub({ 'a.txt': OLD })
+    if (override !== null) {
+      // The bytes' own answer with its ETag changed: one that names none of
+      // the row's ids.
+      await repo.run.answerNext('GET', BRIDGE, 206, OLD.slice(2, 5), 1, undefined, undefined, 0, {
+        ETag: `"${override}"`,
+        'Content-Range': `bytes 2-4/${String(OLD.length)}`,
+        'Content-Type': 'application/octet-stream',
+      })
+    }
+    const vfs = await vfsOf(repo)
     const spec = new PathSpec({ virtual: '/a.txt', directory: '/', vfsPath: 'a.txt' })
     let data: Uint8Array
     let records: { fingerprint: string | null }[]

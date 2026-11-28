@@ -15,8 +15,10 @@
 import { MountMode, ReadPolicy } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ExpiredOnArrival, FakeHub, serveHub } from '../../../tests/core/hf_hub/_test_util.ts'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { type HubRepo, madeRepo } from '../../../../core/tests/fixtures/hub_repo.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { ExpiredOnArrival } from '../../../tests/core/hf_hub/_test_util.ts'
 import * as tree from '@struktoai/mirage-core/core/hf_hub/tree'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
@@ -25,25 +27,35 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 const OLD_LS = 'a.txt\nb.txt\n'
 
-let hubs: FakeHub[] = []
+let origin = ''
+let repos: HubRepo[] = []
+
+beforeAll(async () => {
+  origin = await serve('hf_hub')
+})
 
 afterEach(async () => {
   vi.restoreAllMocks()
-  await Promise.all(hubs.map((hub) => hub.close()))
-  hubs = []
+  await Promise.all(repos.map((repo) => repo.run.close()))
+  repos = []
 })
 
-async function hub(): Promise<FakeHub> {
-  const fake = new FakeHub()
-  fake.files().set('sub/a.txt', ENC.encode('alpha\n'))
-  fake.files().set('sub/b.txt', ENC.encode('bravo\n'))
-  fake.files().set('top.txt', ENC.encode('top\n'))
-  hubs.push(fake)
-  return serveHub(fake)
+// A model repository of its own holding sub/a.txt, sub/b.txt and top.txt,
+// its requests recorded from then on.
+async function hub(): Promise<HubRepo> {
+  const repo = await madeRepo(origin)
+  repos.push(repo)
+  await repo.commit({
+    'sub/a.txt': ENC.encode('alpha\n'),
+    'sub/b.txt': ENC.encode('bravo\n'),
+    'top.txt': ENC.encode('top\n'),
+  })
+  await repo.run.recordRequests()
+  return repo
 }
 
-function vfsOf(fake: FakeHub): Promise<BaseVFS> {
-  return buildVfs('hf_models', { repo_id: 'acme/widget', endpoint: fake.url })
+function vfsOf(repo: HubRepo): Promise<BaseVFS> {
+  return buildVfs('hf_models', repo.config())
 }
 
 function ws(vfs: BaseVFS, ttl = 600): Workspace {
@@ -98,8 +110,8 @@ function gateWalk(): { walking: Promise<void>; release: () => void } {
 
 describe('hf_hub listings under a shared view', () => {
   it('waits on a listing in progress instead of duplicating it', async () => {
-    const fake = await hub()
-    const w = ws(await vfsOf(fake))
+    const repo = await hub()
+    const w = ws(await vfsOf(repo))
     let first: Promise<string> | undefined
     let second: Promise<string> | undefined
     let gate: { walking: Promise<void>; release: () => void } | undefined
@@ -110,14 +122,14 @@ describe('hf_hub listings under a shared view', () => {
       const index = w.registry.mountFor('/m/sub').index
       await index.invalidate()
       gate = gateWalk()
-      const before = fake.count('tree')
+      const before = await repo.count('tree')
       first = out(w, 'ls /m/sub', 's0')
       expect(await settleWithin(gate.walking, 2000)).toBe('done')
       second = out(w, 'ls /m/sub', 's1')
       const early = await settleWithin(second, 20)
       gate.release()
       expect(await Promise.all([first, second])).toEqual([OLD_LS, OLD_LS])
-      expect(fake.count('tree') - before).toBe(1)
+      expect((await repo.count('tree')) - before).toBe(1)
       expect(early).toBe('pending')
     } finally {
       gate?.release()
@@ -129,8 +141,8 @@ describe('hf_hub listings under a shared view', () => {
 
 describe('hf_hub refill answers its own caller', () => {
   it('lists a folder whose refill lands already expired', async () => {
-    const fake = await hub()
-    const vfs = await vfsOf(fake)
+    const repo = await hub()
+    const vfs = await vfsOf(repo)
     const w = ws(vfs)
     Object.defineProperty(w.mount('/m'), 'indexStore', { value: new ExpiredOnArrival() })
     w.registry.attachFileCache(w.cache)
@@ -144,11 +156,11 @@ describe('hf_hub refill answers its own caller', () => {
 
 describe('hf_hub listings respect the mount ttl', () => {
   it('a listing expires with the mount and the next ls sees a remote add', async () => {
-    const fake = await hub()
-    const w = ws(await vfsOf(fake), 1)
+    const repo = await hub()
+    const w = ws(await vfsOf(repo), 1)
     try {
       expect(await out(w, 'ls /m/sub')).toBe(OLD_LS)
-      fake.files().set('sub/c.txt', ENC.encode('charlie\n'))
+      await repo.commit({ 'sub/c.txt': ENC.encode('charlie\n') })
       expect(await out(w, 'ls /m/sub')).toBe(OLD_LS)
       await sleep(1100)
       expect(await out(w, 'ls /m/sub')).toBe('a.txt\nb.txt\nc.txt\n')

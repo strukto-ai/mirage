@@ -14,38 +14,48 @@
 
 import { recordingActive, recordingScope } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { describe, expect, it } from 'vitest'
-import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
+import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import type { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
-import { type FakeHub, NO_ETAG, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
-import {
-  type FakeHfOperator,
-  fakeHfOperator,
-  installFakeOperator,
-} from '../../../tests/core/hf_buckets/mock.ts'
+import { serve } from '../../../../core/tests/fixtures/kit_fake.ts'
+import { HfBucket } from '../../../tests/fixtures/hf_bucket.ts'
 import { readStream } from './stream.ts'
 
 const BIG = Buffer.from(`${'x'.repeat(1023)}\n`.repeat(300))
 
 interface Mounted {
   accessor: HfBucketsAccessor
-  fake: FakeHfOperator
-  hub: FakeHub
+  bucket: HfBucket
 }
 
+let origin = ''
+const buckets: HfBucket[] = []
+
+beforeAll(async () => {
+  origin = await serve('hf')
+})
+
+afterEach(async () => {
+  await Promise.all(buckets.splice(0).map((bucket) => bucket.close()))
+})
+
+// An accessor on a bucket of its own after another client wrote `files` to
+// it, the requests recorded from then on.
 async function mounted(
-  files: Record<string, string | Buffer>,
+  files: Record<string, string | Uint8Array>,
   keyPrefix?: string,
 ): Promise<Mounted> {
-  const accessor = new HfBucketsAccessor(
-    keyPrefix === undefined ? { bucket: 'ns/model' } : { bucket: 'ns/model', keyPrefix },
-  )
-  const fake = fakeHfOperator(files)
-  const hub = await installFakeOperator(accessor, fake)
-  return { accessor, fake, hub }
+  const bucket = new HfBucket(origin)
+  buckets.push(bucket)
+  await bucket.reset()
+  await bucket.put(files)
+  await bucket.run.recordRequests()
+  return { accessor: bucket.accessor(keyPrefix), bucket }
 }
 
-async function accessorWith(files: Record<string, string | Buffer>): Promise<HfBucketsAccessor> {
+async function accessorWith(
+  files: Record<string, string | Uint8Array>,
+): Promise<HfBucketsAccessor> {
   return (await mounted(files)).accessor
 }
 
@@ -69,28 +79,30 @@ describe('hf stream', () => {
   })
 
   it('is stamped before its first chunk', async () => {
-    const { accessor, fake } = await mounted({ 'big.bin': BIG })
-    fake.reach = []
+    const { accessor, bucket } = await mounted({ 'big.bin': BIG })
+    const row = await bucket.row('big.bin')
+    await bucket.run.recordRequests()
     const [[chunks, first], records] = await recordingScope(async () => {
       const iter = readStream(accessor, PathSpec.fromStrPath('/big.bin'))[Symbol.asyncIterator]()
       return [iter, await iter.next()] as const
     })
     // Checked while the generator is suspended at its first yield: a consumer
     // that stops here (head -c) still leaves a record naming the bytes.
-    expect(records.map((r) => r.fingerprint)).toEqual([xetHash(BIG)])
+    expect(records.map((r) => r.fingerprint)).toEqual([row.xetHash])
     const parts: Uint8Array[] = first.done === true ? [] : [first.value]
     for (let next = await chunks.next(); next.done !== true; next = await chunks.next()) {
       parts.push(next.value)
     }
     expect(Buffer.concat(parts)).toEqual(BIG)
-    expect(fake.reach).toEqual([])
+    expect(await bucket.count('opendal_read')).toBe(0)
   })
 
   it('stamps an empty stream too', async () => {
-    const accessor = await accessorWith({ empty: '' })
+    const { accessor, bucket } = await mounted({ empty: '' })
+    const row = await bucket.row('empty')
     const [data, records] = await recordingScope(() => drain(accessor, '/empty'))
     expect(data.byteLength).toBe(0)
-    expect(records.map((r) => r.fingerprint)).toEqual([xetHash(Buffer.from(''))])
+    expect(records.map((r) => r.fingerprint)).toEqual([row.xetHash])
   })
 
   it('does not crash with no recorder bound', async () => {
@@ -99,9 +111,9 @@ describe('hf stream', () => {
     expect((await drain(accessor, '/x')).toString()).toBe('abc')
   })
 
-  it.each([['W/"abc"'], [NO_ETAG]])('stamps nothing without a strong etag (%s)', async (served) => {
-    const { accessor, hub } = await mounted({ x: 'abc' })
-    hub.etags.set('x', served)
+  it.each([['W/"abc"'], [null]])('stamps nothing without a strong etag (%s)', async (served) => {
+    const { accessor, bucket } = await mounted({ x: 'abc' })
+    await bucket.serveEtag('abc', served)
     const [, records] = await recordingScope(() => drain(accessor, '/x'))
     expect(records.map((r) => r.fingerprint ?? null)).toEqual([null])
   })
@@ -113,8 +125,8 @@ describe('hf stream', () => {
     [403, '', 'EACCES'],
     [400, '', 'raw'],
   ])('is absent only for a missing entry (%i %s)', async (status, code, want) => {
-    const { accessor, hub } = await mounted({ 'a.txt': 'abc' })
-    hub.fail.set('bucket_resolve', [status, code])
+    const { accessor, bucket } = await mounted({ 'a.txt': 'abc' })
+    await bucket.refuse('resolve', status, code)
     const err = await drain(accessor, '/a.txt').catch((e: unknown) => e)
     if (want === 'raw') {
       expect(err).toBeInstanceOf(HfHubError)
@@ -125,9 +137,9 @@ describe('hf stream', () => {
   })
 
   it('answers the mount root as a directory', async () => {
-    const { accessor, hub } = await mounted({ pfx: 'stem', 'pfx/a.txt': 'a' }, 'pfx/')
+    const { accessor, bucket } = await mounted({ pfx: 'stem', 'pfx/a.txt': 'a' }, 'pfx/')
     await expect(drain(accessor, '/')).rejects.toMatchObject({ code: 'EISDIR' })
-    expect(hub.count('bucket_resolve')).toBe(0)
+    expect(await bucket.count('resolve')).toBe(0)
   })
 
   it('serves the prefixed object under a key prefix', async () => {
