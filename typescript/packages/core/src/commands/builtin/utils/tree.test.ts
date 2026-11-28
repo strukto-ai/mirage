@@ -330,6 +330,9 @@ function limits(table: Record<string, number>): MountView {
 
 const stop = (n: number): string => `stopped after ${String(n)} files (walk_limit); narrow the path`
 
+const fortyNames = (path: PathSpec): Promise<string[]> =>
+  Promise.resolve(Array.from({ length: 40 }, (_, i) => `${path.virtual}/${String(i)}`))
+
 // Twins of the scan budget tests in test_tree.py.
 describe('WalkBudget', () => {
   it('stops once spent and opens nothing more', () => {
@@ -382,11 +385,9 @@ describe('WalkBudget', () => {
       asked.push(path)
       return mounts.walkLimit?.(path) ?? -1
     }
-    const readdir = (path: PathSpec): Promise<string[]> =>
-      Promise.resolve(Array.from({ length: 40 }, (_, i) => `${path.virtual}/${String(i)}`))
     const budget = new WalkBudget(at('/m'), { ...mounts, walkLimit })
     for (const directory of ['/m', '/m/a']) {
-      expect(await budget.listing(readdir, at(directory))).toHaveLength(40)
+      expect(await budget.listing(fortyNames, at(directory))).toHaveLength(40)
     }
     expect(asked).toEqual(['/m', '/m/a'])
     expect(budget.spent).toEqual(new Map([['/m', 80]]))

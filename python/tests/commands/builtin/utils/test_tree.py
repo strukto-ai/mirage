@@ -353,6 +353,10 @@ def _limits(limits: dict[str, int]) -> MountView:
 STOP = "stopped after {} files (walk_limit); narrow the path"
 
 
+async def _forty_names(path: PathSpec, limit: int | None = None) -> list[str]:
+    return [f"{path.virtual}/{i}" for i in range(40)]
+
+
 def test_a_walk_budget_stops_once_spent_and_opens_nothing_more():
     budget = WalkBudget(PathSpec.from_str_path("/m/d"), _limits({"/m/": 2}))
     assert [budget.spend("/m/d") for _ in range(3)] == [True, True, False]
@@ -405,15 +409,12 @@ async def test_a_walk_budget_asks_the_mount_table_once_a_listing():
         asked.append(path)
         return limit_of(path)
 
-    async def readdir(path: PathSpec, limit: int | None = None) -> list[str]:
-        return [f"{path.virtual}/{i}" for i in range(40)]
-
     budget = WalkBudget(
         PathSpec.from_str_path("/m"), replace(mounts, walk_limit=walk_limit)
     )
     for directory in ("/m", "/m/a"):
         listed = await budget.listing(
-            readdir, PathSpec.from_str_path(directory)
+            _forty_names, PathSpec.from_str_path(directory)
         )
         assert len(listed) == 40
     assert asked == ["/m", "/m/a"]

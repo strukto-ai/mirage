@@ -1086,6 +1086,8 @@ impl Stream for Numfmt {
 
 #[cfg(test)]
 mod tests {
+    use super::{Round, Scale};
+
     fn numfmt(value: &str, to: &str, from: &str) -> Result<String, String> {
         let config = serde_json::json!({
             "to": to, "from": from, "suffix": "", "operands": [value],
@@ -1150,7 +1152,6 @@ mod tests {
 
     #[test]
     fn a_u128_prints_every_value_it_holds_as_a_biguint_does() {
-        use super::{Round, Scale};
         let values = [
             "0",
             "1",
