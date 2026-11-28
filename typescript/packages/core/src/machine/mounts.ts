@@ -592,6 +592,8 @@ export class MachineMounts {
    *   mirage-fuse is told; null leaves it to mirage-fuse.
    * @param readAheadTotal the machine's `readAheadTotal` in bytes, told the
    *   same way.
+   * @param readAheadAdapts the machine's `readAheadAdapts`, told the same
+   *   way.
    */
   constructor(
     private readonly provider: string,
@@ -602,6 +604,7 @@ export class MachineMounts {
     private readonly working: () => boolean = () => true,
     private readonly readAhead: number | null = null,
     private readonly readAheadTotal: number | null = null,
+    private readonly readAheadAdapts: boolean | null = null,
   ) {}
 
   get fileEffectsDispatched(): boolean {
@@ -1076,6 +1079,7 @@ export class MachineMounts {
               watched: binding.watched,
               readAhead: this.readAhead,
               readAheadTotal: this.readAheadTotal,
+              readAheadAdapts: this.readAheadAdapts,
             }),
             prefix,
             present,

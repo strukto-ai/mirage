@@ -472,6 +472,9 @@ export class FsprotoServer {
     if (served?.readAheadTotal !== undefined && served.readAheadTotal !== null) {
       head.read_ahead_total = served.readAheadTotal
     }
+    if (served?.readAheadAdapts !== undefined && served.readAheadAdapts !== null) {
+      head.read_ahead_adapts = served.readAheadAdapts
+    }
     return head
   }
 

@@ -53,6 +53,12 @@ export interface MachineConfig extends RuntimeConfig {
    * takes mirage-fuse's own.
    */
   readAheadTotal?: string | number | null
+  /**
+   * Whether mirage-fuse holds less than `readAheadTotal` while what it asked
+   * for comes too late to use, on a mount whose answers last a second, and
+   * gives it back as it comes in time. Unset takes mirage-fuse's own: yes.
+   */
+  readAheadAdapts?: boolean | null
 }
 
 export const MachineConfig = {
@@ -61,7 +67,22 @@ export const MachineConfig = {
   captures: { type: 'list' },
   readAhead: { type: 'string' },
   readAheadTotal: { type: 'string' },
+  readAheadAdapts: { type: 'boolean' },
 } satisfies ConfigFields<MachineConfig>
+
+/**
+ * `readAheadAdapts` as set, null when unset; fail loud on one that is not
+ * true or false. Mirrors Python's `read_ahead_adapts_of`.
+ */
+export function readAheadAdaptsOf(provider: string, value: unknown): boolean | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'boolean') {
+    throw new Error(
+      `${provider} readAheadAdapts must be true or false, got ${JSON.stringify(value)}`,
+    )
+  }
+  return value
+}
 
 /**
  * A read-ahead setting in bytes, null when unset; fail loud on one that is

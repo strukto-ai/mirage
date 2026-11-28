@@ -556,14 +556,20 @@ describe('read-ahead', () => {
       const sandbox = new FakeMachine('both', [], true, true, 'box', {
         readAhead: '1M',
         readAheadTotal: 8 << 20,
+        readAheadAdapts: false,
       })
       const ws = workspace(sandbox)
       const agent = await ws.session('agent', { profile: 'agent' })
       expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
       expect(prefixes.length).toBeGreaterThan(0)
       expect(
-        new Set(prefixes.map((p) => `${String(p?.readAhead)}/${String(p?.readAheadTotal)}`)),
-      ).toEqual(new Set([`${String(1 << 20)}/${String(8 << 20)}`]))
+        new Set(
+          prefixes.map(
+            (p) =>
+              `${String(p?.readAhead)}/${String(p?.readAheadTotal)}/${String(p?.readAheadAdapts)}`,
+          ),
+        ),
+      ).toEqual(new Set([`${String(1 << 20)}/${String(8 << 20)}/false`]))
       await ws.close()
     } finally {
       registerPipeServer('mirage', drain)
@@ -574,6 +580,15 @@ describe('read-ahead', () => {
     expect(() => new FakeMachine('both', [], true, true, 'box', { readAhead: 'lots' })).toThrow(
       'fake readAhead must be a size like 100MB, got "lots"',
     )
+  })
+
+  it('fails when the machine is made with a readAheadAdapts that is not yes or no', () => {
+    expect(
+      () =>
+        new FakeMachine('both', [], true, true, 'box', {
+          readAheadAdapts: 'no' as unknown as boolean,
+        }),
+    ).toThrow('fake readAheadAdapts must be true or false, got "no"')
   })
 })
 

@@ -541,6 +541,8 @@ class FsprotoServer:
             head["read_ahead"] = served.read_ahead
         if served is not None and served.read_ahead_total is not None:
             head["read_ahead_total"] = served.read_ahead_total
+        if served is not None and served.read_ahead_adapts is not None:
+            head["read_ahead_adapts"] = served.read_ahead_adapts
         return head
 
     def _wired(self, path: str, a: MountAttrs) -> Head:

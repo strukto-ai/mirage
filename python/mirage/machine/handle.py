@@ -45,6 +45,7 @@ from mirage.io.types import ByteSource
 from mirage.machine.config import (
     MachineConfig,
     check_mount_type,
+    read_ahead_adapts_of,
     read_ahead_bytes,
 )
 from mirage.machine.constants import (
@@ -391,6 +392,9 @@ class MachineHandle:
         read_ahead_total = read_ahead_bytes(
             self.provider, self.config.read_ahead_total, "read_ahead_total"
         )
+        read_ahead_adapts = read_ahead_adapts_of(
+            self.provider, self.config.read_ahead_adapts
+        )
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
                 raise ValueError(
@@ -405,6 +409,7 @@ class MachineHandle:
                 lambda: self._working > 0,
                 read_ahead,
                 read_ahead_total,
+                read_ahead_adapts,
             )
 
     def _load_sdk(

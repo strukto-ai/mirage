@@ -47,8 +47,9 @@ const READ_BEHIND: u64 = 256 << 10;
 /// The most bytes every file read in order keeps asked for together, unless
 /// `hello` says otherwise (`read_ahead_total`). On a mount that keeps an
 /// answer for SHORT, a stretch read more than SHORT after it was asked is
-/// asked again, so a link that moves less than this in SHORT reads files
-/// in parallel faster with less.
+/// asked again, so unless `hello` says not to (`read_ahead_adapts`), one
+/// that came too late halves what reads may hold, and each that comes
+/// within SHORT / 2 of being asked gives its size back, up to this.
 const READ_AHEAD_TOTAL: usize = 16 << 20;
 /// The most bytes a read-only open through a host handle asks to read with
 /// it, no more than the read-ahead.
@@ -61,13 +62,15 @@ const READ_STREAMS: usize = 4;
 const FILLS: u32 = 3;
 const ROOT: u64 = 1;
 
-/// What the host's `hello` said: how far files are read ahead, and whether
-/// attributes mark an entry that carries extended attributes (`x`), so an
-/// entry kept without the mark carries none.
+/// What the host's `hello` said: how far files are read ahead, whether
+/// what reads hold together adapts to the link, and whether attributes
+/// mark an entry that carries extended attributes (`x`), so an entry kept
+/// without the mark carries none.
 #[derive(Clone, Copy)]
 pub struct Served {
     ahead: u64,
     total: usize,
+    adapts: bool,
     xattrs: bool,
 }
 
@@ -79,6 +82,7 @@ impl Served {
             total: frame
                 .u64("read_ahead_total")
                 .map_or(READ_AHEAD_TOTAL, |total| total as usize),
+            adapts: frame.head.get("read_ahead_adapts").and_then(Value::as_bool) != Some(false),
             xattrs: frame.head.get("xattrs").and_then(Value::as_bool) == Some(true),
         }
     }
@@ -100,6 +104,7 @@ impl Default for Served {
         Served {
             ahead: READ_AHEAD,
             total: READ_AHEAD_TOTAL,
+            adapts: true,
             xattrs: false,
         }
     }
@@ -359,6 +364,8 @@ struct State {
     opens: HashMap<u64, Open>,
     reads: HashMap<u64, Reader>,
     read_bytes: usize,
+    read_room: Option<usize>,
+    room_cut: Option<Instant>,
     next_reader: u64,
     read_drops: u64,
     dirs: HashMap<u64, Stream>,
@@ -1085,6 +1092,33 @@ impl MirageFs {
         (content.version == attrs.version()).then(|| content.data.clone())
     }
 
+    /// The most bytes reads may hold together now: the read-ahead total,
+    /// less what stretches that came too late took from it.
+    fn room(&self, st: &State) -> usize {
+        st.read_room.unwrap_or(self.served.total)
+    }
+
+    /// Halve what reads may hold, at most once per SHORT, after a stretch
+    /// came too late to use: more was asked for than the link moves in
+    /// SHORT. Never below one request, and never unless reads adapt.
+    fn cut_room(&self, st: &mut State) {
+        if !self.served.adapts || st.room_cut.is_some_and(|at| at.elapsed() < SHORT) {
+            return;
+        }
+        let floor = self.served.window().max(1) as usize;
+        st.read_room = Some((self.room(st) / 2).max(floor));
+        st.room_cut = Some(Instant::now());
+    }
+
+    /// Give back `size` bytes of what reads may hold, up to the total,
+    /// after a stretch came within SHORT / 2 of being asked for.
+    fn grow_room(&self, st: &mut State, size: u64) {
+        if let Some(room) = st.read_room {
+            let grown = room + size as usize;
+            st.read_room = (grown < self.served.total).then_some(grown);
+        }
+    }
+
     /// Whether a read-only open of a file with `attrs` reads it whole
     /// first: a kept regular file of at most WHOLE_FILE, unless the host
     /// said to read only what is asked (`read_ahead: 0`).
@@ -1191,6 +1225,7 @@ impl MirageFs {
                 Some(_) => match st.reader_at(fh, offset) {
                     Some(id) if st.reads[&id].ended(offset) => return Ok(Vec::new()),
                     Some(id) if st.reads[&id].stale(offset, offset + size) => {
+                        self.cut_room(&mut st);
                         st.forget_reader(id);
                         Some(None)
                     }
@@ -1224,7 +1259,7 @@ impl MirageFs {
         else {
             return;
         };
-        if st.read_drops != drops || st.read_bytes + data.len() > self.served.total {
+        if st.read_drops != drops || st.read_bytes + data.len() > self.room(&st) {
             return;
         }
         if owner.is_none() && st.reader_at(fh, 0).is_some() {
@@ -1345,12 +1380,12 @@ impl MirageFs {
                     w.end() > offset && w.offset < stop && !matches!(w.part, Part::Held(..))
                 });
                 match waiting {
-                    _ if stale => Step::Forget,
+                    _ if stale => Step::Stale,
                     None => Step::Gather(stop),
                     Some(window) => match &mut window.part {
                         Part::Failed => Step::Forget,
-                        Part::Sent(sent, _) => match sent.take() {
-                            Some(sent) => Step::Receive(sent, window.offset, window.size),
+                        Part::Sent(sent, when) => match sent.take() {
+                            Some(sent) => Step::Receive(sent, window.offset, window.size, *when),
                             None => Step::Wait,
                         },
                         _ => Step::Wait,
@@ -1368,11 +1403,20 @@ impl MirageFs {
                     guard.forget_reader(id);
                     return None;
                 }
-                Step::Receive(sent, at, asked) => {
+                Step::Stale => {
+                    self.cut_room(&mut guard);
+                    guard.forget_reader(id);
+                    return None;
+                }
+                Step::Receive(sent, at, asked, when) => {
                     drop(guard);
                     let reply = self.link.answer(sent);
                     guard = self.st();
+                    let fresh = reply.is_ok() && when.elapsed() < SHORT / 2;
                     landed(&mut guard, id, at, asked, reply);
+                    if fresh && guard.reads.get(&id).is_some_and(|r| !r.kept) {
+                        self.grow_room(&mut guard, asked);
+                    }
                     self.shared.arrived.notify_all();
                 }
                 Step::Wait => {
@@ -1400,6 +1444,7 @@ impl MirageFs {
         let wanted = {
             let mut guard = self.st();
             let st = &mut *guard;
+            let room = self.room(st);
             let Some(reader) = st.reads.get_mut(&id) else {
                 return;
             };
@@ -1409,7 +1454,7 @@ impl MirageFs {
             let mut wanted = Vec::new();
             while reader.end.is_none() && reader.next < reach {
                 let window = self.served.window().min(reader.ahead).max(size);
-                if st.read_bytes + window as usize > self.served.total {
+                if st.read_bytes + window as usize > room {
                     break;
                 }
                 reader.windows.push_back(Window {
@@ -1596,13 +1641,15 @@ fn landed(st: &mut State, id: u64, offset: u64, asked: u64, reply: Result<Frame,
 }
 
 /// What a read from a reader does next: take the bytes up to the offset it
-/// holds, give up on the reader when a stretch it needs was refused or came
-/// longer ago than its mount keeps an answer, wait for the reply to one it
-/// took, or wait for the read already receiving one.
+/// holds, give up on the reader when a stretch it needs was refused or
+/// came longer ago than its mount keeps an answer (stale), wait for the
+/// reply to one it took, asked at the instant it carries, or wait for the
+/// read already receiving one.
 enum Step {
     Gather(u64),
     Forget,
-    Receive(Sent, u64, u64),
+    Stale,
+    Receive(Sent, u64, u64, Instant),
     Wait,
 }
 
@@ -2790,6 +2837,37 @@ mod tests {
         assert_eq!(asked(&sent), (Some("read"), 8, 4));
         answer_read(&mut host, &sent, b"abcdefghWXYZ");
         assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+        let st = locked(&fs.shared.state);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+    }
+
+    #[test]
+    fn a_stretch_too_late_halves_the_room_once_a_second_and_one_in_time_gives_it_back() {
+        let (fs, _host) = hosted();
+        let mut st = locked(&fs.shared.state);
+        fs.cut_room(&mut st);
+        fs.cut_room(&mut st);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+        st.room_cut = Some(Instant::now() - SHORT);
+        fs.cut_room(&mut st);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 4);
+        fs.grow_room(&mut st, (READ_AHEAD_TOTAL / 4) as u64);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+        fs.grow_room(&mut st, READ_AHEAD_TOTAL as u64);
+        assert_eq!((st.read_room, fs.room(&st)), (None, READ_AHEAD_TOTAL));
+        for _ in 0..64 {
+            st.room_cut = None;
+            fs.cut_room(&mut st);
+        }
+        assert_eq!(fs.room(&st), fs.served.window() as usize);
+        drop(st);
+        let (fixed, _host) = hosted_as(Served {
+            adapts: false,
+            ..Served::default()
+        });
+        let mut st = locked(&fixed.shared.state);
+        fixed.cut_room(&mut st);
+        assert_eq!(fixed.room(&st), READ_AHEAD_TOTAL);
     }
 
     #[test]
@@ -2904,12 +2982,13 @@ mod tests {
     #[test]
     fn hello_sets_the_read_ahead_and_says_whether_attributes_mark_attributes() {
         let said = Served::of(&Frame::new(
-            json!({"proto": 1, "read_ahead": 2 << 20, "read_ahead_total": 16 << 20, "xattrs": true}),
+            json!({"proto": 1, "read_ahead": 2 << 20, "read_ahead_total": 16 << 20,
+                "read_ahead_adapts": false, "xattrs": true}),
             vec![],
         ));
         assert_eq!(
-            (said.ahead, said.total, said.xattrs),
-            (2 << 20, 16 << 20, true)
+            (said.ahead, said.total, said.adapts, said.xattrs),
+            (2 << 20, 16 << 20, false, true)
         );
         assert_eq!((said.window(), said.first()), (512 << 10, READ_FIRST));
         let far = Served::of(&Frame::new(
@@ -2919,8 +2998,8 @@ mod tests {
         assert_eq!(far.window(), READ_WINDOW);
         let bare = Served::of(&Frame::new(json!({"proto": 1}), vec![]));
         assert_eq!(
-            (bare.ahead, bare.total, bare.xattrs),
-            (READ_AHEAD, READ_AHEAD_TOTAL, false)
+            (bare.ahead, bare.total, bare.adapts, bare.xattrs),
+            (READ_AHEAD, READ_AHEAD_TOTAL, true, false)
         );
     }
 

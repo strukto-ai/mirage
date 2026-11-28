@@ -126,7 +126,7 @@ class SlowStat extends RAMVFS {
 async function served(
   changes: RecentChanges | null = null,
   vfs: RAMVFS = new RAMVFS(),
-  readAhead: [number | null, number | null] = [null, null],
+  readAhead: [number | null, number | null, boolean | null] = [null, null, null],
 ) {
   const ws = new Workspace({ '/notes': vfs }, { mode: MountMode.WRITE })
   await ws.vfs.write('/notes/plan.txt', 'plan')
@@ -137,6 +137,7 @@ async function served(
     changes,
     readAhead: readAhead[0],
     readAheadTotal: readAhead[1],
+    readAheadAdapts: readAhead[2],
   })
   const end = client()
   const serving = server.serve(end.reader, end.writer)
@@ -341,7 +342,7 @@ describe('FsprotoServer', () => {
   })
 
   it('says in hello that attributes mark attributes, with the read-ahead set', async () => {
-    const { end, serving } = await served(null, new RAMVFS(), [1 << 20, 8 << 20])
+    const { end, serving } = await served(null, new RAMVFS(), [1 << 20, 8 << 20, false])
     const hello = await end.call({ op: 'hello', proto: FSPROTO_VERSION })
     expect(hello.head).toEqual({
       id: hello.head.id,
@@ -349,10 +350,13 @@ describe('FsprotoServer', () => {
       xattrs: true,
       read_ahead: 1 << 20,
       read_ahead_total: 8 << 20,
+      read_ahead_adapts: false,
     })
     const plain = await served()
     const bare = await plain.end.call({ op: 'hello', proto: FSPROTO_VERSION })
-    expect([bare.head.read_ahead, bare.head.read_ahead_total]).toEqual([undefined, undefined])
+    expect([bare.head.read_ahead, bare.head.read_ahead_total, bare.head.read_ahead_adapts]).toEqual(
+      [undefined, undefined, undefined],
+    )
     end.close()
     plain.end.close()
     await Promise.all([serving, plain.serving])

@@ -123,6 +123,9 @@ class ServedPrefix:
         read_ahead_total (int | None): the most bytes the client holds
             for all its files' reads ahead together; None leaves it to the
             client.
+        read_ahead_adapts (bool | None): whether the client holds less
+            than that total while what it asked for comes too late to use;
+            None leaves it to the client.
     """
 
     prefix: str
@@ -131,3 +134,4 @@ class ServedPrefix:
     watched: Callable[[str], Awaitable[bool]] | None = None
     read_ahead: int | None = None
     read_ahead_total: int | None = None
+    read_ahead_adapts: bool | None = None

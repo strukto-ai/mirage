@@ -301,9 +301,11 @@ machine serves, and rules that depend on which program opens a file.
   The machine entry's `read_ahead` and `read_ahead_total` set those two
   sizes (`4M`, `32M`); `read_ahead: 0` asks for only what a program reads.
   On a mount whose answers last a second, a stretch read more than a second
-  after it was asked is asked for again, so a link that moves less than
-  `read_ahead_total` in a second reads parallel files faster with a smaller
-  one:
+  after it was asked is asked for again. So when a stretch comes too late,
+  `mirage-fuse` halves what it holds, at most once a second, and gives it
+  back as stretches come in time, never past `read_ahead_total`; a slow link
+  settles at what it moves in under a second. `read_ahead_adapts: false`
+  keeps `read_ahead_total` fixed:
 
   ```yaml
   machines:
@@ -311,7 +313,9 @@ machine serves, and rules that depend on which program opens a file.
       provider: docker
       container: box
       mount_type: mirage
-      read_ahead_total: 8M
+      read_ahead: 4M
+      read_ahead_total: 32M
+      read_ahead_adapts: false
   ```
 
 - The host answers several reads at once, so programs reading different

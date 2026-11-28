@@ -112,4 +112,9 @@ export interface ServedPrefix {
    * absent leaves it to the client.
    */
   readAheadTotal?: number | null
+  /**
+   * Whether the client holds less than that total while what it asked for
+   * comes too late to use; absent leaves it to the client.
+   */
+  readAheadAdapts?: boolean | null
 }

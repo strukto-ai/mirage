@@ -112,7 +112,11 @@ class SlowStat(RAMVFS):
 async def served(
     changes: RecentChanges | None = None,
     vfs: RAMVFS | None = None,
-    read_ahead: tuple[int | None, int | None] = (None, None),
+    read_ahead: tuple[int | None, int | None, bool | None] = (
+        None,
+        None,
+        None,
+    ),
 ):
     ws = Workspace({"/notes": vfs or RAMVFS()}, mode=MountMode.WRITE)
     await ws.vfs.write("/notes/plan.txt", b"plan")
@@ -301,7 +305,9 @@ async def test_a_read_only_release_waits_for_no_other_files_reads():
 
 @pytest.mark.asyncio
 async def test_hello_says_attributes_mark_attributes_and_gives_the_read_ahead():
-    ws, server, end, serving = await served(read_ahead=(1 << 20, 8 << 20))
+    ws, server, end, serving = await served(
+        read_ahead=(1 << 20, 8 << 20, False)
+    )
     hello = await end.call({"op": "hello", "proto": FSPROTO_VERSION})
     assert hello.head == {
         "id": hello.head["id"],
@@ -309,12 +315,15 @@ async def test_hello_says_attributes_mark_attributes_and_gives_the_read_ahead():
         "xattrs": True,
         "read_ahead": 1 << 20,
         "read_ahead_total": 8 << 20,
+        "read_ahead_adapts": False,
     }
     plain, s2, e2, serving2 = await served()
     bare = await e2.call({"op": "hello", "proto": FSPROTO_VERSION})
-    assert (
-        "read_ahead" not in bare.head and "read_ahead_total" not in bare.head
-    )
+    assert not {
+        "read_ahead",
+        "read_ahead_total",
+        "read_ahead_adapts",
+    } & set(bare.head)
     await end.end(serving)
     await e2.end(serving2)
 

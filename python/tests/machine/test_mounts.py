@@ -962,14 +962,20 @@ async def test_each_served_prefix_carries_the_machines_read_ahead(monkeypatch):
             prefixes.append(prefix)
 
     monkeypatch.setattr(mounts, "pipe_server", lambda transport: Server)
-    sandbox = FakeMachine("both", read_ahead="1M", read_ahead_total=8 << 20)
+    sandbox = FakeMachine(
+        "both",
+        read_ahead="1M",
+        read_ahead_total=8 << 20,
+        read_ahead_adapts=False,
+    )
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert prefixes
-    assert {(p.read_ahead, p.read_ahead_total) for p in prefixes} == {
-        (1 << 20, 8 << 20)
-    }
+    assert {
+        (p.read_ahead, p.read_ahead_total, p.read_ahead_adapts)
+        for p in prefixes
+    } == {(1 << 20, 8 << 20, False)}
     await ws.close()
 
 
@@ -979,6 +985,14 @@ def test_a_read_ahead_that_is_not_a_size_fails_when_the_machine_is_made():
         match='fake read_ahead must be a size like 100MB, got "lots"',
     ):
         FakeMachine("both", read_ahead="lots")
+
+
+def test_a_read_ahead_adapts_that_is_not_yes_or_no_fails_when_made():
+    with pytest.raises(
+        ValueError,
+        match='fake read_ahead_adapts must be true or false, got "no"',
+    ):
+        FakeMachine("both", read_ahead_adapts="no")
 
 
 @pytest.mark.asyncio

@@ -594,6 +594,8 @@ class MachineMounts:
             which each mirage-fuse is told; None leaves it to mirage-fuse.
         read_ahead_total (int | None): the machine's ``read_ahead_total``
             in bytes, told the same way.
+        read_ahead_adapts (bool | None): the machine's
+            ``read_ahead_adapts``, told the same way.
     """
 
     def __init__(
@@ -606,9 +608,11 @@ class MachineMounts:
         working: Callable[[], bool] | None = None,
         read_ahead: int | None = None,
         read_ahead_total: int | None = None,
+        read_ahead_adapts: bool | None = None,
     ) -> None:
         self._provider = provider
         self._working = working
+        self._read_ahead_adapts = read_ahead_adapts
         self._read_ahead = read_ahead
         self._read_ahead_total = read_ahead_total
         self._machine = machine
@@ -1236,6 +1240,7 @@ class MachineMounts:
                                 binding.watched,
                                 self._read_ahead,
                                 self._read_ahead_total,
+                                self._read_ahead_adapts,
                             ),
                         ),
                         prefix,
