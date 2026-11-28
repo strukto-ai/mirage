@@ -25,7 +25,6 @@ from examples.rl.openenv.constants import (
     DEFAULT_CONCURRENCY,
     DEFAULT_EVAL_MODEL,
     DEFAULT_MAX_STEPS,
-    DEFAULT_TEMPERATURE,
     DEFAULT_TRIALS,
     HERE,
 )
@@ -70,9 +69,6 @@ def parse_config() -> OpenEnvRunConfig:
     parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
-    parser.add_argument(
-        "--temperature", type=float, default=DEFAULT_TEMPERATURE
-    )
     args = parser.parse_args()
     return OpenEnvRunConfig(
         mode=args.mode,
@@ -85,7 +81,6 @@ def parse_config() -> OpenEnvRunConfig:
         trials=args.trials,
         concurrency=args.concurrency,
         max_steps=args.max_steps,
-        temperature=args.temperature,
     )
 
 

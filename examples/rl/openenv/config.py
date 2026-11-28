@@ -22,7 +22,6 @@ from examples.rl.openenv.constants import (
     DEFAULT_CONCURRENCY,
     DEFAULT_EVAL_MODEL,
     DEFAULT_MAX_STEPS,
-    DEFAULT_TEMPERATURE,
     DEFAULT_TRIALS,
 )
 from examples.rl.openenv.schemas import RunMode
@@ -44,7 +43,6 @@ class OpenEnvRunConfig(BaseModel):
         concurrency (int): Max concurrent episodes during ``eval`` mode.
         max_steps (int): Maximum OpenEnv tool steps per episode.
         action_timeout_s (float): Timeout in seconds per OpenEnv step.
-        temperature (float): Sampling temperature during ``eval`` mode.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -60,4 +58,3 @@ class OpenEnvRunConfig(BaseModel):
     concurrency: int = Field(default=DEFAULT_CONCURRENCY, ge=1)
     max_steps: int = Field(default=DEFAULT_MAX_STEPS, ge=1)
     action_timeout_s: float = Field(default=DEFAULT_ACTION_TIMEOUT, gt=0.0)
-    temperature: float = Field(default=DEFAULT_TEMPERATURE, ge=0.0)

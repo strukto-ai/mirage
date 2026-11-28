@@ -22,7 +22,7 @@ from collections.abc import Coroutine, Iterable
 from typing import Any, TypeVar, cast
 from urllib.parse import urlparse
 
-from openai import AsyncOpenAI, BadRequestError
+from openai import AsyncOpenAI
 
 from examples.rl.constants import VERIFIER_SCRIPT_PATH
 from examples.rl.dataset import load_mirage_tasks
@@ -36,27 +36,6 @@ from examples.rl.server import ServerPool
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
-_FIXED_TEMP_FAMILIES = ("gpt-5", "o1", "o3", "o4")
-
-
-def _supports_temperature(model: str) -> bool:
-    """Return whether ``model`` accepts an explicit ``temperature`` parameter.
-
-    Args:
-        model (str): Model identifier (optionally ``provider/model``).
-
-    Returns:
-        bool: ``False`` for reasoning families that reject ``temperature``.
-    """
-    name = model.rsplit("/", 1)[-1].lower()
-    if name.startswith("gpt-5-chat"):
-        return True
-    return not any(
-        name == prefix
-        or name.startswith(f"{prefix}-")
-        or name.startswith(f"{prefix}.")
-        for prefix in _FIXED_TEMP_FAMILIES
-    )
 
 
 def _is_loopback_host(hostname: str | None) -> bool:
@@ -230,7 +209,6 @@ async def run_eval_episode(
         t0 = time.perf_counter()
         steps = 0
         refusals = 0
-        send_temp = _supports_temperature(config.model)
         try:
             await harness.reset(seed=trial)
             system_prompt = await harness.build_system_prompt()
@@ -241,26 +219,11 @@ async def run_eval_episode(
 
             done = False
             while not done and steps < config.max_steps:
-                req_kwargs: dict[str, Any] = {
-                    "model": config.model,
-                    "messages": cast(Any, messages),
-                    "tools": cast(Any, [SHELL_TOOL_SCHEMA]),
-                }
-                if send_temp:
-                    req_kwargs["temperature"] = config.temperature
-                try:
-                    resp = await client.chat.completions.create(**req_kwargs)
-                except BadRequestError as exc:
-                    if not send_temp or "temperature" not in str(exc).lower():
-                        raise
-                    logger.debug(
-                        "Model %s rejected temperature; retrying without: %s",
-                        config.model,
-                        exc,
-                    )
-                    send_temp = False
-                    req_kwargs.pop("temperature", None)
-                    resp = await client.chat.completions.create(**req_kwargs)
+                resp = await client.chat.completions.create(
+                    model=config.model,
+                    messages=cast(Any, messages),
+                    tools=cast(Any, [SHELL_TOOL_SCHEMA]),
+                )
 
                 choice = resp.choices[0].message
                 messages.append(choice.model_dump(exclude_none=True))
