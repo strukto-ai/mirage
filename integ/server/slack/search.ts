@@ -186,7 +186,9 @@ export async function searchFiles(ctx: Ctx<C>): Promise<Reply> {
         .filter((x) => x.fileId === f.id)
         .map((x) => ({ channelId: x.channelId, ts: x.messageTs })),
     ].filter((post) => s.seen(post.channelId))
-    if (posts.length === 0) continue
+    // A scoped search finds the file only through a post the holder sees in
+    // that channel, never through its posts elsewhere.
+    if (!posts.some((post) => s.channelId === undefined || post.channelId === s.channelId)) continue
     const shares: Record<string, Record<string, JsonValue[]>> = {}
     for (const post of posts) {
       const kind = s.isPrivate(post.channelId) ? 'private' : 'public'

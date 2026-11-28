@@ -26,6 +26,7 @@ import {
   GENERAL,
   MEMBERS,
   MESSAGES,
+  PAGE,
 } from '../../../tests/core/discord/guild.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { follow, read, readMany, readStream } from './read.ts'
@@ -88,6 +89,26 @@ describe('read history jsonl branch', () => {
     const out = await read(guild.accessor(), spec(CHAT, '/mnt/discord'), chatRow, dayRow)
     expect(contents(out)).toEqual(['hello', 'files'])
     expect(await guild.dayFetches()).toEqual([[GENERAL, DATE]])
+  })
+
+  it('walks every page of a busy day', async () => {
+    // More messages in one day than Discord answers a page: the read walks
+    // on past the first page and keeps them all, oldest first.
+    const busy = '2024-01-17'
+    const start = Date.parse(`${busy}T08:00:00Z`)
+    const posts = Array.from({ length: PAGE + 5 }, (_, n): [Date, string] => [
+      new Date(start + n * 1000),
+      `busy ${String(n)}`,
+    ])
+    await guild.addMessages(GENERAL, ALICE, posts)
+    const out = await read(
+      guild.accessor(),
+      spec(`${CHANNEL}/${busy}/chat.jsonl`, '/mnt/discord'),
+      chatRow,
+      dayRowOf(busy),
+    )
+    expect(contents(out)).toEqual(posts.map(([, text]) => text))
+    expect(out).toEqual(jsonlBytes(await guild.day(GENERAL, busy)))
   })
 
   it('throws ENOENT for jsonl path when no row names its channel', async () => {

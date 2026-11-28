@@ -49,6 +49,8 @@ PIN = "/api/v10/channels/:channel_id/messages/pins/:message_id"
 THREADS = "/api/v10/channels/:channel_id/threads"
 ATTACHMENT = "/attachments/:attachment_id/:filename"
 UNTIL_CLEARED = 1_000_000
+# The most messages Discord answers a page.
+PAGE = 100
 # Discord's own bodies for the refusals a test arms. A 429 is retried after
 # its retry_after, so it waits none.
 REFUSALS: dict[int, dict[str, Any]] = {
@@ -142,12 +144,17 @@ class DiscordGuild:
         start = datetime.fromisoformat(day).replace(tzinfo=timezone.utc)
         after = snowflake_at(start.timestamp()) - 1
         end = snowflake_at(start.timestamp() + 86_400)
-        page = await self.run.call(
-            "GET",
-            f"/api/v10/channels/{channel}/messages",
-            params={"after": str(after), "limit": "100"},
-        )
-        kept = [m for m in page if int(m["id"]) < end]
+        kept: list[dict[str, Any]] = []
+        while after < end:
+            page = await self.run.call(
+                "GET",
+                f"/api/v10/channels/{channel}/messages",
+                params={"after": str(after), "limit": str(PAGE)},
+            )
+            kept += [m for m in page if int(m["id"]) < end]
+            if len(page) < PAGE:
+                break
+            after = max(int(m["id"]) for m in page)
         return sorted(kept, key=lambda m: int(m["id"]))
 
     async def channel(self, channel: str) -> dict[str, Any]:

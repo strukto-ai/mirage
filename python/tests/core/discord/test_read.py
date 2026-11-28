@@ -47,6 +47,7 @@ from tests.fixtures.discord_guild import (
     GENERAL,
     GUILD_DIR,
     MESSAGES,
+    PAGE,
     DiscordGuild,
 )
 from tests.fixtures.handed import call, entry_at, parent_of
@@ -81,6 +82,24 @@ async def test_read_jsonl(discord_guild, accessor):
     # to the day itself.
     result = await read(accessor, spec(CHAT))
     assert result == await _day_bytes(discord_guild)
+
+
+async def test_read_jsonl_walks_every_page_of_a_busy_day(
+    discord_guild, accessor
+):
+    # More messages in one day than Discord answers a page: the read
+    # walks on past the first page and keeps them all, oldest first.
+    busy = "2024-01-17"
+    start = datetime(2024, 1, 17, 8, tzinfo=timezone.utc).timestamp()
+    posts = [
+        (datetime.fromtimestamp(start + n, timezone.utc), f"busy {n}")
+        for n in range(PAGE + 5)
+    ]
+    await discord_guild.add_messages(GENERAL, ALICE, posts)
+    result = await read(accessor, spec(f"/{CHANNEL}/{busy}/chat.jsonl"))
+    rows = [json.loads(line) for line in result.splitlines()]
+    assert [r["content"] for r in rows] == [text for _, text in posts]
+    assert result == await _day_bytes(discord_guild, busy)
 
 
 # The mount lists the day before it reads chat.jsonl, and the read takes

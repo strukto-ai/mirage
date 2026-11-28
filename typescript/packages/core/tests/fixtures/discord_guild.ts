@@ -39,6 +39,8 @@ export const ATTACHMENT = '/attachments/:attachment_id/:filename'
 export const UNTIL_CLEARED = 1_000_000
 const EPOCH = 1420070400000n
 const DAY_MS = 86_400_000n
+// The most messages Discord answers a page.
+export const PAGE = 100
 
 // Discord's own bodies for the refusals a test arms. A 429 is retried after
 // its retry_after, so it waits none.
@@ -122,15 +124,19 @@ export class DiscordGuild {
   /** A channel's messages of one UTC day, oldest first, as Discord answers. */
   async day(channel: string, day: string): Promise<MessageRow[]> {
     const start = Date.parse(`${day}T00:00:00Z`)
-    const after = snowflakeAt(start) - 1n
+    let after = snowflakeAt(start) - 1n
     const end = snowflakeAt(start + Number(DAY_MS))
-    const page = await this.run.call<MessageRow[]>(
-      'GET',
-      `/api/v10/channels/${channel}/messages?after=${String(after)}&limit=100`,
-    )
-    return page
-      .filter((m) => BigInt(m.id) < end)
-      .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
+    const kept: MessageRow[] = []
+    while (after < end) {
+      const page = await this.run.call<MessageRow[]>(
+        'GET',
+        `/api/v10/channels/${channel}/messages?after=${String(after)}&limit=${String(PAGE)}`,
+      )
+      kept.push(...page.filter((m) => BigInt(m.id) < end))
+      if (page.length < PAGE) break
+      after = page.reduce((top, m) => (BigInt(m.id) > top ? BigInt(m.id) : top), after)
+    }
+    return kept.sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1))
   }
 
   /** A channel of the guild, as Discord lists it. */

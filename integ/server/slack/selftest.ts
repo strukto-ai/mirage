@@ -501,6 +501,10 @@ async function main(): Promise<void> {
       ).map((f) => f.shares!),
       [{ public: { C1: [{ ts: '1762300860.000001', channel_name: 'general' }] } }],
     )
+    const scoped = async (query: string): Promise<JsonValue> =>
+      ((await unit(`xoxp-${UNIT}.U2`, 'search.files', { query })).files as Json).total!
+    eq('a holder finds no file in a channel they do not see', await scoped('Launch in:#random'), 0)
+    eq('a holder finds a file in a channel they see', await scoped('Launch in:#general'), 1)
     process.stdout.write(`slack selftest: ${String(checks)} checks passed\n`)
   } finally {
     await fake.close()
