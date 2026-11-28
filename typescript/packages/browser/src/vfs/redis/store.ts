@@ -523,6 +523,29 @@ export class UpstashRedisStore implements RedisStoreLike {
     })
   }
 
+  /** Whether a directory and a file are at `path`, and its fields, in one pipeline. */
+  async statAt(
+    path: string,
+  ): Promise<[boolean, boolean, Record<string, string>, number, string | null]> {
+    const [isDir, isFile, raw, size, modified] = await this.pipeline([
+      ['SISMEMBER', this.dk(), path],
+      ['EXISTS', this.fk(path)],
+      ['HGETALL', this.ak(path)],
+      ['STRLEN', this.fk(path)],
+      ['GET', this.mk(path)],
+    ])
+    if (typeof isDir !== 'number' || typeof isFile !== 'number' || typeof size !== 'number') {
+      throw new Error('upstash: SISMEMBER, EXISTS or STRLEN did not answer an integer')
+    }
+    return [
+      isDir === 1,
+      isFile > 0,
+      pairsToRecord(expectStrings(raw ?? null, 'HGETALL')),
+      size,
+      modified === null || modified === undefined ? null : expectString(modified, 'GET'),
+    ]
+  }
+
   async setAttrs(path: string, fields: Record<string, string>): Promise<void> {
     const flat = Object.entries(fields).flat()
     if (flat.length === 0) return

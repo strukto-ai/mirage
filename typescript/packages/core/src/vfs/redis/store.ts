@@ -84,6 +84,12 @@ export interface RedisStoreLike {
   statMany(
     paths: readonly (readonly [string, boolean])[],
   ): Promise<[Record<string, string>, number | null, string | null][]>
+  /**
+   * Whether a directory and a file are at `path`, and the attributes, length
+   * and modified time kept under its name, what `hasDir`, `hasFile` and
+   * `statMany` answer, in one round trip on one connection.
+   */
+  statAt(path: string): Promise<[boolean, boolean, Record<string, string>, number, string | null]>
   /** The server's `INFO memory` section, as the server prints it. */
   infoMemory(): Promise<string>
   setAttrs(path: string, fields: Record<string, string>): Promise<void>

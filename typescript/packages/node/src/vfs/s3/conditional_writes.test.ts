@@ -430,6 +430,19 @@ describe('conditional writes on an S3 mount', () => {
     },
   )
 
+  // Twin of test_a_write_after_a_many_file_read_carries_its_version: a command
+  // that reads many files warms them ahead of its reads, and each file it reads
+  // still keeps the version it saw for the write that follows, so a write over
+  // a peer's change since is refused. A conditional mount always keeps reads
+  // (it is refused at load otherwise), so its read-ahead warms, never holds.
+  it('refuses a write over a change since a many-file read', async () => {
+    const ws = workspace()
+    expect(await run(ws, 'cat /s3/f /s3/g /s3/d/a /s3/d/b')).toEqual([0, 'one\ngee\na\nb\n', ''])
+    mock.store.set('b', 'd/b', ENC.encode('theirs\n'))
+    const [code, , err] = await run(ws, 'echo mine > /s3/d/b')
+    expect([code !== 0, err.includes(STALE), object('d/b')]).toEqual([true, true, 'theirs\n'])
+  })
+
   it.each(['cat /s3/f', 'grep one /s3/f'])(
     'refuses a write to a file deleted since it was read until read: %s',
     async (setup) => {

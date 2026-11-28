@@ -3039,8 +3039,9 @@ class MountEntry:
         workspace's ``max_memory`` has left, as one file's must for its own
         read (``_collected``), what a RAM store holds already counted; one
         longer than ``limit`` bytes, one that does not fit, or one whose
-        read fails, is left out for its own read to meet, and the bytes it
-        built go with it.
+        read fails, is left out for its own read to meet: its chunks are
+        dropped and the room they took goes back at once, while its source
+        is still closing, so a refusal never holds up the other reads.
 
         Args:
             scopes (list[PathSpec]): the files, keyed below the mount.
@@ -3088,6 +3089,7 @@ class MountEntry:
                     )
                 finally:
                     if scope.virtual not in read:
+                        parts.clear()
                         built -= size
                     if source is not None:
                         await close_quietly(source)

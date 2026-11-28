@@ -331,6 +331,37 @@ class RedisStore:
             )
         return out
 
+    async def stat_at(
+        self, path: str
+    ) -> tuple[bool, bool, dict[str, str], int, str | None]:
+        """Whether a directory and a file are at ``path``, and the
+        attributes, length and modified time kept under its name, what
+        ``has_dir``, ``has_file`` and ``stat_many`` answer, in one
+        pipeline: one round trip on one connection.
+
+        Args:
+            path (str): the normalized path.
+        """
+        async with self._client.pipeline(transaction=False) as pipe:
+            pipe.sismember(self._dk(), path)
+            pipe.exists(self._fk(path))
+            pipe.hgetall(self._ak(path))
+            pipe.strlen(self._fk(path))
+            pipe.get(self._mk(path))
+            is_dir, is_file, raw, size, modified = await pipe.execute()
+        return (
+            path == "/" or bool(is_dir),
+            bool(is_file),
+            {
+                (k.decode() if isinstance(k, bytes) else k): (
+                    v.decode() if isinstance(v, bytes) else v
+                )
+                for k, v in raw.items()
+            },
+            int(size),
+            modified.decode() if isinstance(modified, bytes) else modified,
+        )
+
     async def set_attrs(self, path: str, fields: dict[str, str]) -> None:
         await cast(
             "Awaitable[int]", self._client.hset(self._ak(path), mapping=fields)

@@ -1627,7 +1627,9 @@ export class Dispatcher {
    * session hides or a path rule reaches. A file already kept, one a renderer
    * answers and one pinned to a revision is passed over, and so is one on a
    * mount that holds its data locally and keeps reads too, whose read the read
-   * cache answers. A store that reads a batch (`readMany`) is asked once for
+   * cache answers. A mount whose writes are conditional keeps reads (it is
+   * refused at load otherwise), so each read there publishes the version it saw
+   * for the write that follows. A store that reads a batch (`readMany`) is asked once for
    * the rest of its files; any other is asked for each file its listing, or the
    * stat the caller made of it (`stats`, by path), sizes within
    * READ_AHEAD_BYTES. A failure is logged and dropped: the read that follows

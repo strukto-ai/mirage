@@ -87,18 +87,14 @@ export async function keyStats(
 
 /**
  * What is at a path, asked in one round trip: whether a directory or a file is
- * there and the fields either keeps under its name go out together, rather
- * than each waiting for the one before. Mirrors Python's `stat`.
+ * there and the fields either keeps under its name go out in one pipeline
+ * (`statAt`), rather than each waiting for the one before, and on one
+ * connection. Mirrors Python's `stat`.
  */
 export async function stat(accessor: RedisAccessor, path: PathSpec): Promise<FileStat> {
   const p = norm(path.mountPath)
   const store = accessor.store
-  const [isDir, isFile, held] = await Promise.all([
-    store.hasDir(p),
-    store.hasFile(p),
-    store.statMany([[p, false]]),
-  ])
-  const [raw, size, modified] = held[0] ?? [{}, null, null]
+  const [isDir, isFile, raw, size, modified] = await store.statAt(p)
   if (isDir) return fromFields(p, true, raw, null, modified)
   if (isFile) return fromFields(p, false, raw, size, modified)
   throw await lookupError(store, path, p)

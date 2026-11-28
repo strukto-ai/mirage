@@ -2535,8 +2535,10 @@ export class MountEntry {
    * already holds (`heldBytes`), in what the workspace's `max_memory` has left,
    * as one file's must for its own read (`collected`), what a RAM store holds
    * already counted; one longer than `limit` bytes, one that does not fit, or
-   * one whose read fails, is left out for its own read to meet, and the bytes
-   * it built go with it. Mirrors Python's `_read_each`.
+   * one whose read fails, is left out for its own read to meet: its chunks are
+   * dropped and the room they took goes back at once, while its source is still
+   * closing, so a refusal never holds up the other reads. Mirrors Python's
+   * `_read_each`.
    */
   private async readEach(
     scopes: readonly PathSpec[],
@@ -2553,6 +2555,14 @@ export class MountEntry {
         let size = 0
         let whole = false
         let source: AsyncIterable<Uint8Array> | null = null
+        // Leaving a for-await loop awaits the source's return() first, while
+        // the other reads run on, so a refused file gives its room back
+        // before it leaves.
+        const drop = (): void => {
+          parts.length = 0
+          built -= size
+          size = 0
+        }
         try {
           const found = await this.answer(this.vfs, this.index, scope)
           if (found instanceof Uint8Array) {
@@ -2570,15 +2580,13 @@ export class MountEntry {
           for await (const chunk of source) {
             if (size + chunk.byteLength > limit) {
               whole = false
+              drop()
               break
             }
             try {
               checkMemory(built + chunk.byteLength)
             } catch (err) {
-              // Leaving the loop awaits the source's return() first, while
-              // the other reads run on, so the bytes go back before it does.
-              built -= size
-              size = 0
+              drop()
               throw err
             }
             built += chunk.byteLength
@@ -2589,7 +2597,7 @@ export class MountEntry {
         } catch (err) {
           console.debug(`batch read leaves ${scope.virtual} to its own read: ${String(err)}`)
         } finally {
-          if (!read.has(scope.virtual)) built -= size
+          if (!read.has(scope.virtual)) drop()
           if (source !== null) await closeQuietly(source)
         }
       }

@@ -282,6 +282,27 @@ async def test_a_write_carries_the_version_mirage_holds(
 
 
 @pytest.mark.asyncio
+async def test_a_write_after_a_many_file_read_carries_its_version(
+    fake, workspaces
+):
+    # A command that reads many files warms them ahead of its reads. Each
+    # file it reads still keeps the version it saw for the write that
+    # follows, so a write over a peer's change since is refused rather
+    # than overwriting it. A conditional mount always keeps reads (it is
+    # refused at load otherwise), so its read-ahead warms, never holds.
+    ws = workspaces()
+    line = "cat /s3/f /s3/g /s3/d/a /s3/d/b"
+    assert await _run(ws, line) == (0, "one\ngee\na\nb\n", "")
+    _theirs(fake, "d/b")
+    code, _, err = await _run(ws, "echo mine > /s3/d/b")
+    assert (code != 0, STALE in err, fake.buckets["b"]["d/b"]) == (
+        True,
+        True,
+        b"theirs\n",
+    ), err
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "read, call, key, args, sent",
     [

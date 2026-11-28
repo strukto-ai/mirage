@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 from typing import Any
 
 from mirage.accessor.redis import RedisAccessor
@@ -101,8 +100,9 @@ async def stat(
     path_spec: PathSpec,
 ) -> FileStat:
     """What is at a path, asked in one round trip: whether a directory or
-    a file is there and the fields either keeps under its name go out
-    together, rather than each waiting for the one before.
+    a file is there and the fields either keeps under its name go out in
+    one pipeline (``stat_at``), rather than each waiting for the one
+    before, and on one connection, so a pool of one still answers.
 
     Args:
         accessor (RedisAccessor): the mount's store.
@@ -110,10 +110,7 @@ async def stat(
     """
     store = accessor.store
     p = norm(path_spec.mount_path)
-    is_dir, is_file, held = await asyncio.gather(
-        store.has_dir(p), store.has_file(p), store.stat_many([(p, False)])
-    )
-    raw, size, modified = held[0]
+    is_dir, is_file, raw, size, modified = await store.stat_at(p)
     if is_dir:
         return _from_fields(p, True, raw, None, modified)
     if is_file:

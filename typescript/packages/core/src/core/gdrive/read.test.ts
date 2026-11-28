@@ -315,6 +315,33 @@ describe('a recorded gdrive read', () => {
     expect([records[0]?.fingerprint, records[0]?.revision]).toEqual([DIGEST, revision])
   }, 5000)
 
+  // Twin of test_a_windowed_recorded_read_asks_its_capture_first: a window
+  // cannot be checked against the md5, so the revision a partial read keeps is
+  // the one the capture named before its bytes were fetched. The order shows
+  // only with the client handed in, answering from memory: over a network each
+  // step yields. Python also cancels a whole read's download when its capture
+  // fails; DriveApi here takes no signal, so there is nothing to cancel.
+  it('asks a windowed read its capture first', async () => {
+    const asked: string[] = []
+    const noted = {
+      captureFileMetadata: async () => {
+        await Promise.resolve()
+        asked.push('capture')
+        return [DIGEST, 'r1']
+      },
+      downloadFile: () => {
+        asked.push('download')
+        return Promise.resolve(ENC.encode(CONTENT).subarray(0, 4))
+      },
+    } as unknown as DriveApi
+    const [data, records] = await recordingScope(async () =>
+      readFileVersioned(noted, 'f1', '/report.pdf', binaryRow('f1', 'r1'), 0, 4),
+    )
+    expect(DEC.decode(data)).toBe(CONTENT.slice(0, 4))
+    expect(asked).toEqual(['capture', 'download'])
+    expect([records[0]?.fingerprint, records[0]?.revision]).toEqual([null, 'r1'])
+  })
+
   // Twin of test_a_stream_whose_capture_fails_hands_on_no_byte: the download
   // is out before the capture is answered, but its first chunk waits for the
   // capture, so a capture that fails fails the read with nothing handed on.

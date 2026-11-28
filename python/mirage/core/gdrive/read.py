@@ -78,11 +78,13 @@ async def read_file_versioned(
     A pinned path reads that revision's content. Otherwise the token
     comes from a capture when a recorder is bound and from the listed
     row when none is, so it never depends on the recorder; the row's
-    revision is not pinned, since it can be a TTL old. The capture goes
-    out beside the download, so a read waits one round trip: either md5
-    is checked against the bytes, so a write between the two requests,
-    in whichever order they are answered, drops the token and the
-    revision with it.
+    revision is not pinned, since it can be a TTL old. A whole read's
+    capture goes out beside the download, so it waits one round trip:
+    either md5 is checked against the bytes, so a write between the two
+    requests, in whichever order they are answered, drops the token and
+    the revision with it, and a request that fails cancels the other. A
+    window cannot be checked against the md5, so a partial read asks for
+    the capture first and keeps the revision it named, as before.
 
     Args:
         drive (DriveApi): the Drive client.
@@ -101,17 +103,25 @@ async def read_file_versioned(
     revision = pinned
     if pinned:
         data = await drive.download_revision(file_id, pinned, window)
-    elif recording_active():
-        (md5, revision), data = await asyncio.gather(
-            drive.capture_file_metadata(file_id),
-            drive.download_file(file_id, window),
-        )
-        if whole and _stale_md5(md5, data):
+    elif recording_active() and whole:
+        capture = asyncio.ensure_future(drive.capture_file_metadata(file_id))
+        download = asyncio.ensure_future(drive.download_file(file_id, window))
+        try:
+            (md5, revision), data = await asyncio.gather(capture, download)
+        except BaseException:
+            capture.cancel()
+            download.cancel()
+            await asyncio.gather(capture, download, return_exceptions=True)
+            raise
+        if _stale_md5(md5, data):
             revision = None
-        elif whole:
+        else:
             fingerprint = drive_fingerprint(
                 entry.extra["resource_type"], md5, revision, entry.modified
             )
+    elif recording_active():
+        _, revision = await drive.capture_file_metadata(file_id)
+        data = await drive.download_file(file_id, window)
     else:
         data = await drive.download_file(file_id, window)
         if whole and not _stale_md5(entry.extra.get("md5_checksum"), data):

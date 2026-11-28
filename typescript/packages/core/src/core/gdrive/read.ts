@@ -45,10 +45,13 @@ async function staleMd5(md5: unknown, data: Uint8Array): Promise<boolean> {
 // reads that revision's content. Otherwise the token comes from a capture when
 // a recorder is bound and from the listed row when none is, so it never
 // depends on the recorder; the row's revision is not pinned, since it can be a
-// TTL old. The capture goes out beside the download, so a read waits one round
-// trip: either md5 is checked against the bytes, so a write between the two
-// requests, in whichever order they are answered, drops the token and the
-// revision with it.
+// TTL old. A whole read's capture goes out beside the download, so it waits one
+// round trip: either md5 is checked against the bytes, so a write between the
+// two requests, in whichever order they are answered, drops the token and the
+// revision with it. A window cannot be checked against the md5, so a partial
+// read asks for the capture first and keeps the revision it named, as before.
+// Mirrors Python's `read_file_versioned`, which also cancels the other request
+// when one fails; DriveApi here takes no signal, so the other one finishes.
 export async function readFileVersioned(
   drive: DriveApi,
   fileId: string,
@@ -66,21 +69,24 @@ export async function readFileVersioned(
   let data: Uint8Array
   if (pinned !== null) {
     data = await drive.downloadRevision(fileId, pinned, window)
-  } else if (recordingActive()) {
+  } else if (recordingActive() && whole) {
     const [[md5, captured], downloaded] = await Promise.all([
       drive.captureFileMetadata(fileId),
       drive.downloadFile(fileId, window),
     ])
     revision = captured
     data = downloaded
-    if (whole && (await staleMd5(md5, data))) revision = null
-    else if (whole)
+    if (await staleMd5(md5, data)) revision = null
+    else
       fingerprint = driveFingerprint(
         entry.extra.resource_type as string,
         md5,
         revision,
         entry.modified,
       )
+  } else if (recordingActive()) {
+    revision = (await drive.captureFileMetadata(fileId))[1]
+    data = await drive.downloadFile(fileId, window)
   } else {
     data = await drive.downloadFile(fileId, window)
     if (whole && !(await staleMd5(entry.extra.md5_checksum, data))) fingerprint = entry.fingerprint

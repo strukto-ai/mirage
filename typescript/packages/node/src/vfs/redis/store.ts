@@ -311,6 +311,27 @@ export class RedisStore implements RedisStoreLike {
     )
   }
 
+  async statAt(
+    path: string,
+  ): Promise<[boolean, boolean, Record<string, string>, number, string | null]> {
+    const c = await this.client()
+    const [isDir, isFile, raw, size, modified] = (await c
+      .multi()
+      .sIsMember(this.dk(), path)
+      .exists(this.fk(path))
+      .hGetAll(this.ak(path))
+      .strLen(this.fk(path))
+      .get(this.mk(path))
+      .execAsPipeline()) as unknown as [
+      number,
+      number,
+      Record<string, string>,
+      number,
+      string | null,
+    ]
+    return [path === '/' || isDir === 1, isFile > 0, { ...raw }, size, modified]
+  }
+
   async setAttrs(path: string, fields: Record<string, string>): Promise<void> {
     const c = await this.client()
     await c.hSet(this.ak(path), fields)

@@ -60,6 +60,27 @@ describe.skipIf(skip)('RedisStore', () => {
     expect(new Set(counts)).toEqual(new Set([SCAN_COUNT]))
   })
 
+  // Twin of test_stat_asks_what_is_at_a_path_in_one_pipeline: whether a
+  // directory and a file are at a path, and the fields kept under its name, go
+  // out in one pipeline, and none of those lookups on its own.
+  it('answers what is at a path in one pipeline', async () => {
+    await store.addDir('/sub')
+    await store.setFile('/hello.txt', new TextEncoder().encode('hello world'))
+    await store.setModified('/hello.txt', '2026-01-02T00:00:00Z')
+    const client = await store.client()
+    const pipelines = vi.spyOn(client, 'multi')
+    const alone = ['sIsMember', 'exists', 'hGetAll', 'strLen', 'get'].map((name) =>
+      vi.spyOn(client, name as 'get'),
+    )
+    expect(await store.statAt('/hello.txt')).toEqual([false, true, {}, 11, '2026-01-02T00:00:00Z'])
+    expect(await store.statAt('/sub')).toEqual([true, false, {}, 0, null])
+    expect(await store.statAt('/')).toEqual([true, false, {}, 0, null])
+    expect(await store.statAt('/nope')).toEqual([false, false, {}, 0, null])
+    expect(pipelines).toHaveBeenCalledTimes(4)
+    for (const spy of alone) expect(spy).not.toHaveBeenCalled()
+    await store.clear()
+  })
+
   it('connects afresh after the server drops its connection', async () => {
     const first = await store.client()
     await store.setFile('/kept.txt', new TextEncoder().encode('kept'))
