@@ -25,9 +25,11 @@ import orjson
 from mirage.core.render.json import ecma_numbers, number_text
 from mirage.types import JsonValue
 
-CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 BLANK_RUNS = re.compile(r"\n(?:[ \t]*\n){2,}")
-JS_SPACE = "\t\n\v\f\r    -     　﻿"
+JS_SPACE = (
+    r"\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
 SPACE_RUN = re.compile(f"[{JS_SPACE}]+")
 EDGE_SPACE = re.compile(f"^[{JS_SPACE}]+|[{JS_SPACE}]+$")
 
