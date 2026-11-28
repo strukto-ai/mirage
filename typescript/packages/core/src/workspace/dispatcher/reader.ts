@@ -223,6 +223,11 @@ export class NamespaceReader implements NamespaceLinks {
     )
   }
 
+  /** Whether a caller set an extended attribute on a path (already followed) the session sees. */
+  hasXattrs(path: string): boolean {
+    return this.links !== null && this.visible(path) && this.links.hasXattrs(path)
+  }
+
   /**
    * A link's stored target, as typed; null where no link stands or the
    * session cannot see it.

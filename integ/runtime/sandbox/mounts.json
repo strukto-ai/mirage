@@ -216,7 +216,7 @@
     },
     {
       "id": "mount_type_mirage_reads_a_file_past_what_it_asks_ahead",
-      "note": "mirage-fuse asks for what follows a file read in order before the program reads it, up to 4 MiB ahead, so a file far past that reads back whole; a change made through another open meanwhile drops what was asked, so the reading open's next read finds it.",
+      "note": "mirage-fuse asks for what follows a file read in order before the program reads it, up to 2 MiB ahead, so a file far past that reads back whole; a change made through another open meanwhile drops what was asked, so the reading open's next read finds it.",
       "runtimes": [
         "docker",
         "e2b",
@@ -263,6 +263,73 @@
           "expect": {
             "exit": 0,
             "stdout": "X\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_type_mirage_shows_the_extended_attributes_mirage_and_the_box_set",
+      "note": "mirage-fuse answers a file's extended attributes on the box itself when what it keeps of the file says it has none, so `ls -l` asks the host nothing for them. A file Mirage set one on carries that mark and is asked; one the box sets, or Mirage sets on a file the box kept without the mark, reaches the box's next read of it.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "dash"
+        ],
+        "config": {
+          "mount_type": "mirage"
+        }
+      },
+      "steps": [
+        {
+          "command": "echo a > /served/a.txt; echo b > /served/b.txt; echo c > /served/c.txt; setfattr -n user.note -v hi /served/a.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cd /served && ls -l > /dev/null && getfattr -d a.txt b.txt c.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "# file: a.txt\nuser.note=\"hi\"\n\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cd /served && setfattr -n user.box -v 1 b.txt && getfattr -d b.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "# file: b.txt\nuser.box=\"1\"\n\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(cd /served && getfattr -n user.box b.txt) && setfattr -n user.later -v 2 /served/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "# file: b.txt\nuser.box=\"1\"\n\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "dash -c 'cd /served && getfattr -d c.txt'",
+          "expect": {
+            "exit": 0,
+            "stdout": "# file: c.txt\nuser.later=\"2\"\n\n",
             "stderr": ""
           }
         }

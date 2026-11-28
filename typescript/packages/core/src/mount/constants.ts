@@ -67,3 +67,23 @@ export const FSPROTO_FRAME_BYTES = 64 * 1024 * 1024
 
 // The largest file read whole for mirage-fuse's cache. Mirrors Python's.
 export const FSPROTO_WHOLE_BYTES = 8 * 1024 * 1024
+
+// The most requests that only read one fsproto server answers at once. On
+// a backend that answers over the network, several files' reads overlap
+// instead of each waiting for the one before. Mirrors Python's.
+export const FSPROTO_READ_CONCURRENCY = 8
+
+// The fsproto ops that change nothing a later request could see: a server
+// answers them together, and an op that changes something waits for every
+// request before it and holds back every request after it. Mirrors Python's.
+export const FSPROTO_READ_OPS: ReadonlySet<string> = new Set([
+  'hello',
+  'getattr',
+  'list',
+  'readall',
+  'readlink',
+  'read',
+  'statfs',
+  'getxattr',
+  'listxattr',
+])

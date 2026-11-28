@@ -15,6 +15,7 @@
 import type { ConfigFields, RuntimeConfig } from '../runtime/config.ts'
 import type { MountType, PauseAction } from './types.ts'
 import { MOUNT_TYPES } from './constants.ts'
+import { parseLimit } from '../utils/size.ts'
 
 /**
  * How to reach the machine: the fields every provider has.
@@ -41,13 +42,59 @@ export interface MachineConfig extends RuntimeConfig {
    * unset for `@external`, the programs nothing in Mirage resolves.
    */
   captures?: readonly string[]
+  /**
+   * With `mountType` mirage or both, how far past a read in order
+   * mirage-fuse asks for one file before the program reads it (`1M`,
+   * `256K`); 0 asks for only what is read. Unset takes mirage-fuse's own.
+   */
+  readAhead?: string | number | null
+  /**
+   * The most all of one mount's files read ahead may hold together. Unset
+   * takes mirage-fuse's own.
+   */
+  readAheadTotal?: string | number | null
+  /**
+   * Whether mirage-fuse holds less than `readAheadTotal` while what it asked
+   * for comes too late to use, on a mount whose answers last a second, and
+   * gives it back as it comes in time. Unset takes mirage-fuse's own: yes.
+   */
+  readAheadAdapts?: boolean | null
 }
 
 export const MachineConfig = {
   env: { type: 'map' },
   mountType: { type: 'string', options: MOUNT_TYPES },
   captures: { type: 'list' },
+  readAhead: { type: 'string' },
+  readAheadTotal: { type: 'string' },
+  readAheadAdapts: { type: 'boolean' },
 } satisfies ConfigFields<MachineConfig>
+
+/**
+ * `readAheadAdapts` as set, null when unset; fail loud on one that is not
+ * true or false. Mirrors Python's `read_ahead_adapts_of`.
+ */
+export function readAheadAdaptsOf(provider: string, value: unknown): boolean | null {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'boolean') {
+    throw new Error(
+      `${provider} readAheadAdapts must be true or false, got ${JSON.stringify(value)}`,
+    )
+  }
+  return value
+}
+
+/**
+ * A read-ahead setting in bytes, null when unset; fail loud on one that is
+ * not a size. Mirrors Python's `read_ahead_bytes`.
+ */
+export function readAheadBytes(
+  provider: string,
+  value: string | number | null | undefined,
+  name: string,
+): number | null {
+  return value === undefined || value === null ? null : parseLimit(value, `${provider} ${name}`)
+}
 
 /** Fail loud on a `mountType` other than ssh, mirage, own or both; unset serves nothing. */
 export function checkMountType(runtime: string, mountType: unknown): MountType | null {

@@ -327,6 +327,15 @@ class NamespaceLinks(Protocol):
         """
         ...
 
+    def has_xattrs(self, path: str) -> bool:
+        """Whether a caller set an extended attribute on ``path``'s node,
+        which a client that answers "none" for the rest needs.
+
+        Args:
+            path (str): absolute virtual path, already followed.
+        """
+        ...
+
 
 @dataclass(frozen=True)
 class LinkView:

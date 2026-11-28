@@ -41,6 +41,8 @@ import type { SessionState } from '../workspace/session/session.ts'
 import { materialize, type ByteSource } from '../io/types.ts'
 import { shellJoin } from '../shell/join.ts'
 import type { MachinePipe, MountType } from './types.ts'
+import type { MachineConfig } from './config.ts'
+import type { ServedPrefix } from '../mount/types.ts'
 import type { OutputFn, RunAnswer, RunResult } from '../runtime/types.ts'
 import { MachineHandle } from './handle.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
@@ -136,8 +138,9 @@ class FakeMachine extends MachineHandle implements PipeTransport {
     private readonly sshfs = true,
     private readonly sshfsMounts = true,
     name = 'box',
+    config: MachineConfig = {},
   ) {
-    super(name, { mountType })
+    super(name, { mountType, ...config })
     for (const prefix of own) this.table.set(prefix, ['tmpfs', 'tmpfs'])
   }
 
@@ -540,6 +543,53 @@ const drain = (_files: unknown, session: SessionState): PipeServer => ({
 beforeAll(() => {
   registerPipeServer('ssh', drain)
   registerPipeServer('mirage', drain)
+})
+
+describe('read-ahead', () => {
+  it("carries the machine's read-ahead to each served prefix", async () => {
+    const prefixes: (ServedPrefix | undefined)[] = []
+    registerPipeServer('mirage', (files, session, _run, prefix) => {
+      prefixes.push(prefix)
+      return drain(files, session)
+    })
+    try {
+      const sandbox = new FakeMachine('both', [], true, true, 'box', {
+        readAhead: '1M',
+        readAheadTotal: 8 << 20,
+        readAheadAdapts: false,
+      })
+      const ws = workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      expect(prefixes.length).toBeGreaterThan(0)
+      expect(
+        new Set(
+          prefixes.map(
+            (p) =>
+              `${String(p?.readAhead)}/${String(p?.readAheadTotal)}/${String(p?.readAheadAdapts)}`,
+          ),
+        ),
+      ).toEqual(new Set([`${String(1 << 20)}/${String(8 << 20)}/false`]))
+      await ws.close()
+    } finally {
+      registerPipeServer('mirage', drain)
+    }
+  })
+
+  it('fails when the machine is made with a read-ahead that is not a size', () => {
+    expect(() => new FakeMachine('both', [], true, true, 'box', { readAhead: 'lots' })).toThrow(
+      'fake readAhead must be a size like 100MB, got "lots"',
+    )
+  })
+
+  it('fails when the machine is made with a readAheadAdapts that is not yes or no', () => {
+    expect(
+      () =>
+        new FakeMachine('both', [], true, true, 'box', {
+          readAheadAdapts: 'no' as unknown as boolean,
+        }),
+    ).toThrow('fake readAheadAdapts must be true or false, got "no"')
+  })
 })
 
 describe('mountTable', () => {

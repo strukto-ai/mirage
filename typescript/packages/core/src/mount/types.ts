@@ -102,4 +102,19 @@ export interface ServedPrefix {
    * then keeps no answer, so every call it makes reaches them.
    */
   watched?: ((sessionId: string) => Promise<boolean>) | null
+  /**
+   * How many bytes past a read in order the client asks for one file before
+   * the program reads them, 0 for none; absent leaves it to the client.
+   */
+  readAhead?: number | null
+  /**
+   * The most bytes the client holds for all its files' reads ahead together;
+   * absent leaves it to the client.
+   */
+  readAheadTotal?: number | null
+  /**
+   * Whether the client holds less than that total while what it asked for
+   * comes too late to use; absent leaves it to the client.
+   */
+  readAheadAdapts?: boolean | null
 }

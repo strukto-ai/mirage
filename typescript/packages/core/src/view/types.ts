@@ -207,6 +207,9 @@ export interface NamespaceLinks {
   // The names of the links directly under `directory`, which a listing's
   // link marks need; a link prefix resolves first, as the listing does.
   linkNamesUnder(directory: string): Set<string>
+  // Whether a caller set an extended attribute on `path`'s node (already
+  // followed), which a client that answers "none" for the rest needs.
+  hasXattrs(path: string): boolean
 }
 
 // The symlink facts a command may consult, as one injected object.

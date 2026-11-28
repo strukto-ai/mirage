@@ -19,11 +19,17 @@ import { PolicyDenied } from '../policy/errors.ts'
 import { READ, type OpenMode } from '../runtime/handles/index.ts'
 import type { PipeWriter } from '../runtime/types.ts'
 import { concat } from '../utils/bytes.ts'
-import { posixNormpath } from '../utils/path.ts'
+import { CycleError, posixNormpath } from '../utils/path.ts'
 import { S_IFDIR, S_IFMT } from '../utils/stat_view.ts'
 import { readerOf, type Files } from '../workspace/files.ts'
 import type { SessionState } from '../workspace/session/session.ts'
-import { FSPROTO_FRAME_BYTES, FSPROTO_VERSION, FSPROTO_WHOLE_BYTES } from './constants.ts'
+import {
+  FSPROTO_FRAME_BYTES,
+  FSPROTO_READ_CONCURRENCY,
+  FSPROTO_READ_OPS,
+  FSPROTO_VERSION,
+  FSPROTO_WHOLE_BYTES,
+} from './constants.ts'
 import { MountCore } from './core.ts'
 import { messageCondition } from './errors.ts'
 import type { MountAttrs, ServedPrefix } from './types.ts'
@@ -165,8 +171,12 @@ function condition(err: unknown): string {
  *
  * Every request lands on one MountCore bound to the session, so the
  * machine sees exactly the tree, modes and policies a shell in that
- * session sees. Requests are answered one at a time in arrival order, as
- * SFTP's are, so a release never overtakes the writes it settles. Each
+ * session sees. Requests that only read (FSPROTO_READ_OPS, an open that
+ * neither writes nor truncates) are answered together, up to
+ * FSPROTO_READ_CONCURRENCY at once; any other request waits for every one
+ * before it and holds back every one after it, so answers are the ones
+ * arrival order gives and a release never overtakes the writes it settles.
+ * A read-only handle's release waits only for its own handle's reads. Each
  * reply about a path says whether the client may keep it until told
  * otherwise (`k`): only for a backend nothing but the workspace changes
  * (`BaseVFS.soleWriter`), whose every change this server pushes to the client as
@@ -178,6 +188,12 @@ export class FsprotoServer {
   private readonly core: MountCore
   private writer: PipeWriter | null = null
   private queue: Promise<void> = Promise.resolve()
+  private slots = FSPROTO_READ_CONCURRENCY
+  private readonly waitingSlot: (() => void)[] = []
+  private barrier: Promise<void> | null = null
+  private readonly reading = new Map<Promise<void>, number | null>()
+  private readonly answering = new Set<Promise<void>>()
+  private readonly readOnly = new Set<number>()
   private lost = new Map<number, [string, unknown]>()
   private readonly told = new Set<number>()
   private readonly acks = new Map<number, (confirmed: boolean) => void>()
@@ -187,6 +203,7 @@ export class FsprotoServer {
   private ended = false
   private keeping = false
   private readonly sessionId: string
+  private readonly files: Files
 
   /**
    * @param run runs one request, with a line's write admission.
@@ -200,6 +217,7 @@ export class FsprotoServer {
     private readonly served: ServedPrefix | null = null,
   ) {
     this.core = new MountCore(files, { session })
+    this.files = files.forSession(session.sessionId)
     this.sessionId = session.sessionId
   }
 
@@ -237,6 +255,7 @@ export class FsprotoServer {
         .catch((err: unknown) => {
           console.debug('fsproto: a request failed past its reply', err)
         })
+        .then(() => Promise.allSettled([...this.answering]))
         .then(() => this.exit())
       await this.queue
     }
@@ -311,9 +330,13 @@ export class FsprotoServer {
   }
 
   /**
-   * Answer a request behind the ones before it, each reply waiting for the
-   * pipe once the writer holds more unsent than it lets wait: a client that
-   * asks ahead never has the host hold every reply it asked for.
+   * Take a request in the order it came, and answer it once what it waits
+   * for is answered: a request that only reads, once the last request that
+   * changes something is; a read-only handle's release, once that and its
+   * handle's reads are; any other request, once every request before it is.
+   * A read holds one of FSPROTO_READ_CONCURRENCY slots while it is out, so
+   * a client that asks ahead has no more than that many answered at once.
+   * Mirrors Python's `_work`.
    */
   private take(frame: Frame): void {
     const hid = num(frame.head.hid)
@@ -324,24 +347,98 @@ export class FsprotoServer {
     }
     const id = num(frame.head.id)
     if (id === null) return
-    this.queue = this.queue.then(async () => {
-      let answer: [Head, Uint8Array] = [{}, EMPTY]
-      let reply: Uint8Array
+    this.queue = this.queue.then(() => this.schedule(frame, id))
+  }
+
+  private async schedule(frame: Frame, id: number): Promise<void> {
+    const after: Promise<void>[] = this.barrier === null ? [] : [this.barrier]
+    const fd = num(frame.head.fh)
+    if (this.reads(frame)) {
+      await this.slot()
+      this.reading.set(this.start(frame, id, after, true), fd)
+    } else if (frame.head.op === 'release' && fd !== null && this.readOnly.has(fd)) {
+      for (const [task, held] of this.reading) if (held === fd) after.push(task)
+      this.reading.set(this.start(frame, id, after, false), fd)
+    } else {
+      after.push(...this.reading.keys())
+      this.reading.clear()
+      this.barrier = this.start(frame, id, after, false)
+    }
+  }
+
+  /** Whether a request only reads: a FSPROTO_READ_OPS op, or an open that neither writes nor truncates. */
+  private reads(frame: Frame): boolean {
+    const h = frame.head
+    if (h.op === 'open') return h.write !== true && h.truncate !== true
+    return typeof h.op === 'string' && FSPROTO_READ_OPS.has(h.op)
+  }
+
+  /** Answer a request once the answers in `after` are given, giving back its read slot if it holds one. */
+  private start(frame: Frame, id: number, after: Promise<void>[], slot: boolean): Promise<void> {
+    const task = (async () => {
       try {
-        await this.run(async () => {
-          answer = await this.answer(frame)
-        })
-        reply = bounded({ ...answer[0], id }, answer[1])
-      } catch (err) {
-        reply = encodeFrame({ id, errno: condition(err) })
+        await Promise.allSettled(after)
+        await this.reply(frame, id)
+      } finally {
+        if (slot) this.freeSlot()
       }
-      try {
-        this.write(reply)
-        if (this.writer !== null && !this.ended) await this.writer.drain()
-      } catch (err) {
-        console.debug(`fsproto: answering ${String(id)} failed`, err)
-      }
+    })()
+    this.answering.add(task)
+    const done = (): void => {
+      this.answering.delete(task)
+      this.reading.delete(task)
+      if (this.barrier === task) this.barrier = null
+    }
+    task.then(done, done)
+    return task
+  }
+
+  private async slot(): Promise<void> {
+    if (this.slots > 0) {
+      this.slots -= 1
+      return
+    }
+    await new Promise<void>((resolve) => {
+      this.waitingSlot.push(resolve)
     })
+  }
+
+  private freeSlot(): void {
+    const next = this.waitingSlot.shift()
+    if (next === undefined) this.slots += 1
+    else next()
+  }
+
+  /**
+   * Answer one request, the reply waiting for the pipe once the writer holds
+   * more unsent than it lets wait: a client that asks ahead never has the
+   * host hold every reply it asked for. Only the writer holds the reply's
+   * bytes while it waits, so answers in flight together cost one copy each.
+   * Mirrors Python's `_reply`.
+   */
+  private async reply(frame: Frame, id: number): Promise<void> {
+    try {
+      this.write(await this.framed(frame, id))
+      if (this.writer !== null && !this.ended) await this.writer.drain()
+    } catch (err) {
+      console.debug(`fsproto: answering ${String(id)} failed`, err)
+    }
+  }
+
+  /**
+   * The reply to request `id` as a frame: its answer, or the errno it failed
+   * with. Mirrors Python's `_framed`.
+   */
+  private async framed(frame: Frame, id: number): Promise<Uint8Array> {
+    let answer: [Head, Uint8Array] = [{}, EMPTY]
+    try {
+      await this.run(async () => {
+        answer = await this.answer(frame)
+      })
+      return bounded({ ...answer[0], id }, answer[1])
+    } catch (err) {
+      return encodeFrame({ id, errno: condition(err) })
+    }
   }
 
   /** `path`, refused as EACCES when it is outside the prefix the client mounts. */
@@ -356,10 +453,48 @@ export class FsprotoServer {
    */
   private rows(folder: string, rows: [string, MountAttrs][], kept: boolean): unknown[] {
     return rows.map(([name, a]) => {
-      const row = wire(a)
+      const row = this.wired(child(folder, name), a)
       if (kept && (a.mode & S_IFMT) === S_IFDIR && !this.kept(child(folder, name))) row.k = false
       return [name, row]
     })
+  }
+
+  /**
+   * The reply to `hello`: the protocol, that attributes carry `x`
+   * (`wired`), and the read-ahead the served prefix sets. Mirrors Python's
+   * `_hello`.
+   */
+  private hello(): Head {
+    const head: Head = { proto: FSPROTO_VERSION, xattrs: true }
+    const served = this.served
+    if (served?.readAhead !== undefined && served.readAhead !== null)
+      head.read_ahead = served.readAhead
+    if (served?.readAheadTotal !== undefined && served.readAheadTotal !== null) {
+      head.read_ahead_total = served.readAheadTotal
+    }
+    if (served?.readAheadAdapts !== undefined && served.readAheadAdapts !== null) {
+      head.read_ahead_adapts = served.readAheadAdapts
+    }
+    return head
+  }
+
+  /**
+   * A path's attributes as fsproto carries them, with `x` when a caller set
+   * an extended attribute on it, as `getxattr` finds it: a client keeping
+   * the attributes answers "none" for the rest itself. Mirrors Python's
+   * `_wired`.
+   */
+  private wired(path: string, a: MountAttrs): Head {
+    const row = wire(a)
+    const reader = readerOf(this.files)
+    let marked = true
+    try {
+      marked = reader.hasXattrs(reader.follow(this.core.resolve(path)))
+    } catch (err) {
+      if (!(err instanceof CycleError)) throw err
+    }
+    if (marked) row.x = true
+    return row
   }
 
   /**
@@ -368,7 +503,7 @@ export class FsprotoServer {
    * Mirrors Python's `_kept`.
    */
   private kept(path: string): boolean {
-    return readerOf(this.core.files).owner(path)?.soleWriter === true
+    return readerOf(this.files).owner(path)?.soleWriter === true
   }
 
   /**
@@ -424,13 +559,19 @@ export class FsprotoServer {
     if ('path' in h) this.inside(path)
     switch (h.op) {
       case 'hello':
-        return [{ proto: FSPROTO_VERSION }, EMPTY]
+        return [this.hello(), EMPTY]
       case 'getattr': {
         const fd = num(h.fh)
         if (fd === null)
-          return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
+          return [
+            { a: this.wired(path, await core.getattr(path)), ...(await this.keep(path)) },
+            EMPTY,
+          ]
         const held = this.pathOf(fd)
-        return [{ a: wire(await core.fgetattr(held, fd)), ...(await this.keep(held)) }, EMPTY]
+        return [
+          { a: this.wired(held, await core.fgetattr(held, fd)), ...(await this.keep(held)) },
+          EMPTY,
+        ]
       }
       case 'list': {
         const keep = await this.keep(path)
@@ -439,7 +580,7 @@ export class FsprotoServer {
       }
       case 'readall': {
         const [a, data] = await this.whole(path)
-        return [{ a: wire(a), ...(await this.keep(path)) }, data]
+        return [{ a: this.wired(path, a), ...(await this.keep(path)) }, data]
       }
       case 'readlink':
         return [{ target: await core.readlink(path) }, EMPTY]
@@ -454,6 +595,7 @@ export class FsprotoServer {
           binary: true,
         }
         const fd = await core.open(path, mode)
+        if (!mode.writable) this.readOnly.add(fd)
         const keep = await this.keep(path)
         const first = Math.min(whole(h.first, 0), FSPROTO_WHOLE_BYTES)
         if (first > 0 && !mode.writable && keep.w !== true) {
@@ -482,7 +624,11 @@ export class FsprotoServer {
         }
         const fd = await core.open(path, mode, num(h.mode))
         return [
-          { fh: fd, a: wire(await core.fgetattr(path, fd)), ...(await this.keep(path)) },
+          {
+            fh: fd,
+            a: this.wired(path, await core.fgetattr(path, fd)),
+            ...(await this.keep(path)),
+          },
           EMPTY,
         ]
       }
@@ -503,6 +649,7 @@ export class FsprotoServer {
       }
       case 'release': {
         const fd = whole(h.fh, -1)
+        this.readOnly.delete(fd)
         const held = this.pathOf(fd)
         try {
           await core.release(fd)
@@ -514,7 +661,10 @@ export class FsprotoServer {
       }
       case 'mkdir':
         await core.mkdir(path, num(h.mode))
-        return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
+        return [
+          { a: this.wired(path, await core.getattr(path)), ...(await this.keep(path)) },
+          EMPTY,
+        ]
       case 'unlink':
         await core.unlink(path)
         return [{}, EMPTY]
@@ -523,7 +673,10 @@ export class FsprotoServer {
         return [{}, EMPTY]
       case 'symlink':
         await core.symlink(typeof h.target === 'string' ? h.target : '', path)
-        return [{ a: wire(await core.getattr(path)), ...(await this.keep(path)) }, EMPTY]
+        return [
+          { a: this.wired(path, await core.getattr(path)), ...(await this.keep(path)) },
+          EMPTY,
+        ]
       case 'rename': {
         const from = this.inside(workspacePath(h.from))
         const to = this.inside(workspacePath(h.to))
@@ -555,7 +708,7 @@ export class FsprotoServer {
           )
         }
         const attrs = fd === null ? await core.getattr(path) : await core.fgetattr(target, fd)
-        return [{ a: wire(attrs), ...(await this.keep(target)) }, EMPTY]
+        return [{ a: this.wired(target, attrs), ...(await this.keep(target)) }, EMPTY]
       }
       case 'statfs': {
         const s = core.statfs()

@@ -26,7 +26,7 @@ fn main() -> ExitCode {
 /// the host serves on stdin and stdout, until the host closes the pipe.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn serve(source: &str, mountpoint: &str) -> ExitCode {
-    use fs::{MirageFs, Note, Shared};
+    use fs::{MirageFs, Note, Served, Shared};
     use fuser::INodeNo;
     use serde_json::{Map, json};
     use std::ffi::OsStr;
@@ -49,8 +49,8 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
             }
         })
     };
-    match link.call("hello", json!({ "proto": proto::PROTOCOL }), &[]) {
-        Ok(frame) if frame.u64("proto") == Some(proto::PROTOCOL) => {}
+    let served = match link.call("hello", json!({ "proto": proto::PROTOCOL }), &[]) {
+        Ok(frame) if frame.u64("proto") == Some(proto::PROTOCOL) => Served::of(&frame),
         Ok(frame) => {
             eprintln!(
                 "mirage-fuse: the host speaks fsproto {:?}, this client {}",
@@ -63,8 +63,8 @@ fn serve(source: &str, mountpoint: &str) -> ExitCode {
             eprintln!("mirage-fuse: the host did not answer: {err:?}");
             return ExitCode::from(1);
         }
-    }
-    let fs = MirageFs::new(link.clone(), shared);
+    };
+    let fs = MirageFs::new(link.clone(), shared, served);
     let (mounted, direct) = mount(fs, source, mountpoint);
     let failed = |doing: &str, err: io::Error| {
         eprintln!("mirage-fuse: {doing} {mountpoint} failed: {err}");

@@ -588,6 +588,12 @@ export class MachineMounts {
    *   stdout held open.
    * @param working whether Mirage has work on the machine now; omitted
    *   counts it as always working.
+   * @param readAhead the machine's `readAhead` in bytes, which each
+   *   mirage-fuse is told; null leaves it to mirage-fuse.
+   * @param readAheadTotal the machine's `readAheadTotal` in bytes, told the
+   *   same way.
+   * @param readAheadAdapts the machine's `readAheadAdapts`, told the same
+   *   way.
    */
   constructor(
     private readonly provider: string,
@@ -596,6 +602,9 @@ export class MachineMounts {
     private readonly run: (line: string, signal?: AbortSignal) => Promise<RunAnswer>,
     private readonly openPipe: (command: string) => Promise<MachinePipe>,
     private readonly working: () => boolean = () => true,
+    private readonly readAhead: number | null = null,
+    private readonly readAheadTotal: number | null = null,
+    private readonly readAheadAdapts: boolean | null = null,
   ) {}
 
   get fileEffectsDispatched(): boolean {
@@ -1068,6 +1077,9 @@ export class MachineMounts {
               machine: this.machine,
               changes: binding.changes ?? null,
               watched: binding.watched,
+              readAhead: this.readAhead,
+              readAheadTotal: this.readAheadTotal,
+              readAheadAdapts: this.readAheadAdapts,
             }),
             prefix,
             present,

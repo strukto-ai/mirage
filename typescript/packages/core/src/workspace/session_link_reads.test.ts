@@ -42,6 +42,7 @@ const MEMBERS = [
   'symlinkTargets',
   'linkStatsBelow',
   'linkNamesUnder',
+  'hasXattrs',
 ]
 
 // A member read off a receiver named `namespace` (`namespace.follow`,

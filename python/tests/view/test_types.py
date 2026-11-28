@@ -32,6 +32,7 @@ MEMBERS = (
     "symlink_targets",
     "link_stats_below",
     "link_names_under",
+    "has_xattrs",
 )
 
 

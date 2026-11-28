@@ -33,24 +33,88 @@ const LONG: Duration = Duration::from_secs(86_400);
 const CACHE_BYTES: usize = 256 << 20;
 /// The largest file read whole into the cache; a larger one reads by range.
 const WHOLE_FILE: u64 = 8 << 20;
-/// The most bytes a file read in order keeps asked for past its reads,
-/// and the most one of those requests asks for: enough requests on their
-/// way at once that each reply's delay on the pipe overlaps the others'.
-const READ_AHEAD: u64 = 4 << 20;
+/// How far past its reads a file read in order keeps asked for, unless the
+/// host's `hello` says otherwise (a machine's `read_ahead`), in
+/// READ_REQUESTS requests of no more than READ_WINDOW each: enough on
+/// their way at once that each reply's delay on the pipe overlaps the
+/// others'.
+const READ_AHEAD: u64 = 2 << 20;
+const READ_REQUESTS: u64 = 4;
 const READ_WINDOW: u64 = 1 << 20;
-/// The most bytes every file read in order keeps asked for together.
-const READ_AHEAD_ALL: usize = 32 << 20;
-/// The bytes a read-only open through a host handle asks to read with it.
+/// How far behind a reader's next bytes the kernel may still ask, so the
+/// stretches a reader holds that close before it are kept.
+const READ_BEHIND: u64 = 256 << 10;
+/// The most bytes every file read in order keeps asked for together, unless
+/// `hello` says otherwise (`read_ahead_total`). On a mount that keeps an
+/// answer for SHORT, a stretch read more than SHORT after it was asked is
+/// asked again, so unless `hello` says not to (`read_ahead_adapts`), one
+/// that came too late halves what reads may hold, and each that comes
+/// within SHORT / 2 of being asked gives its size back, up to this.
+const READ_AHEAD_TOTAL: usize = 16 << 20;
+/// The most bytes a read-only open through a host handle asks to read with
+/// it, no more than the read-ahead.
 const READ_FIRST: u64 = 128 << 10;
+/// The most readers the opens of one file on a kept mount share, one where
+/// each of its programs reads in order.
+const READ_STREAMS: usize = 4;
 /// How many times an answer a forget crossed is asked for before it is
 /// used once, unkept.
 const FILLS: u32 = 3;
 const ROOT: u64 = 1;
 
+/// What the host's `hello` said: how far files are read ahead, whether
+/// what reads hold together adapts to the link, and whether attributes
+/// mark an entry that carries extended attributes (`x`), so an entry kept
+/// without the mark carries none.
+#[derive(Clone, Copy)]
+pub struct Served {
+    ahead: u64,
+    total: usize,
+    adapts: bool,
+    xattrs: bool,
+}
+
+impl Served {
+    /// From the reply to `hello`; what it leaves out takes the client's own.
+    pub fn of(frame: &Frame) -> Served {
+        Served {
+            ahead: frame.u64("read_ahead").unwrap_or(READ_AHEAD),
+            total: frame
+                .u64("read_ahead_total")
+                .map_or(READ_AHEAD_TOTAL, |total| total as usize),
+            adapts: frame.head.get("read_ahead_adapts").and_then(Value::as_bool) != Some(false),
+            xattrs: frame.head.get("xattrs").and_then(Value::as_bool) == Some(true),
+        }
+    }
+
+    /// The most one request ahead asks for: a READ_REQUESTS share of the
+    /// read-ahead, no more than READ_WINDOW.
+    fn window(&self) -> u64 {
+        (self.ahead / READ_REQUESTS).min(READ_WINDOW)
+    }
+
+    /// The bytes a read-only open asks to read with it.
+    fn first(&self) -> u64 {
+        READ_FIRST.min(self.ahead)
+    }
+}
+
+impl Default for Served {
+    fn default() -> Served {
+        Served {
+            ahead: READ_AHEAD,
+            total: READ_AHEAD_TOTAL,
+            adapts: true,
+            xattrs: false,
+        }
+    }
+}
+
 /// One answer about a path: its attributes, whether the host said to
 /// keep them, which it says only of a backend nothing but the workspace
 /// changes, and whether a policy judges every call the session makes, so
-/// neither the client nor the kernel keeps the answer at all.
+/// neither the client nor the kernel keeps the answer at all. `xattrs`
+/// when the host marked it as carrying extended attributes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attrs {
     pub mode: u32,
@@ -62,6 +126,7 @@ pub struct Attrs {
     pub rdev: u32,
     pub kept: bool,
     pub watched: bool,
+    pub xattrs: bool,
 }
 
 impl Attrs {
@@ -82,6 +147,7 @@ impl Attrs {
             rdev: f("r").unwrap_or(0.0) as u32,
             kept,
             watched,
+            xattrs: value.get("x").and_then(Value::as_bool) == Some(true),
         })
     }
 
@@ -137,7 +203,9 @@ struct Content {
 /// client holds. `cached` when the kernel may keep its pages, so a read
 /// may never reach the client; `revoked` once a policy came to judge every
 /// call, which such an open can no longer let it; `watched` while a policy
-/// judges every call, so each write waits for its answer.
+/// judges every call, so each write waits for its answer; `apart` once a
+/// change the host pushed named its path, which may now name another
+/// file, so it reads apart from the opens after it.
 #[derive(Clone)]
 struct Open {
     path: String,
@@ -146,6 +214,7 @@ struct Open {
     attrs: Option<Attrs>,
     writes: bool,
     detached: bool,
+    apart: bool,
     cached: bool,
     revoked: bool,
     watched: bool,
@@ -175,17 +244,22 @@ impl Window {
     }
 }
 
-/// A read-only open's reading in order through its host handle: the
+/// A reading in order of the file at `path` through host handles: the
 /// stretches it asked for, end to end from `start` to `next`, which every
 /// read inside them takes its bytes from, whichever thread the kernel sends
 /// it on. `ahead` is how far past a read it asks, doubling with each read
-/// up to READ_AHEAD; `end` is the end of the file once a reply came short,
-/// past which it asks for nothing, and when that reply came. On a mount
-/// that is not `kept`, a stretch serves for SHORT after it came, as the
-/// machine keeps any other answer there. `id` tells a read that waited
-/// whether this is still the reader it waited on.
+/// up to the read-ahead; `end` is the end of the file once a reply came
+/// short, past which it asks for nothing, and when that reply came. On a
+/// mount that is not `kept`, a stretch serves for SHORT after it came, as
+/// the machine keeps any other answer there, and the reader is one open's
+/// (`owner`). On a kept mount, where the kernel's pages of a file are
+/// shared by its opens and so are their reads, the reader is the file's,
+/// any of its opens reading through it (`owner` None). Readers are kept by
+/// an id never used twice, so a read that waited finds whether the reader
+/// it waited on is still there.
 struct Reader {
-    id: u64,
+    path: String,
+    owner: Option<u64>,
     kept: bool,
     windows: VecDeque<Window>,
     start: u64,
@@ -236,6 +310,29 @@ struct Asked {
     watches: u64,
 }
 
+/// Whose readers a read through open `fh` takes its bytes from: None for
+/// one that shares its file's, a read-only open through a host handle on a
+/// kept mount whose name still names its file and no change the host
+/// pushed named since it opened, as the kernel shares that file's pages,
+/// and so their reads, among its opens; else the open's own.
+fn owner_of(fh: u64, open: &Open) -> Option<u64> {
+    let shares = open.cached
+        && open.host.is_some()
+        && !open.writes
+        && !open.watched
+        && !open.detached
+        && !open.apart;
+    (!shares).then_some(fh)
+}
+
+/// Whether a read with `owner` through an open of `path` uses `reader`.
+fn reads_for(reader: &Reader, owner: Option<u64>, path: &str) -> bool {
+    match owner {
+        Some(fh) => reader.owner == Some(fh),
+        None => reader.owner.is_none() && reader.path == path,
+    }
+}
+
 /// An open asked when `watches` pushes had come, whose reply said no
 /// policy judges every call.
 fn unwatched(watches: u64) -> Asked {
@@ -267,6 +364,8 @@ struct State {
     opens: HashMap<u64, Open>,
     reads: HashMap<u64, Reader>,
     read_bytes: usize,
+    read_room: Option<usize>,
+    room_cut: Option<Instant>,
     next_reader: u64,
     read_drops: u64,
     dirs: HashMap<u64, Stream>,
@@ -321,26 +420,68 @@ impl State {
         );
     }
 
-    /// Drop the readers of the opens of the paths `hit` reaches, with what
+    /// Drop the readers of the files at the paths `hit` reaches, with what
     /// they asked for: a read waiting on one reads anew. It counts in
     /// `read_drops`, so bytes an open read before it are not kept after.
     fn drop_reads(&mut self, hit: impl Fn(&str) -> bool) {
         self.read_drops += 1;
-        let fhs: Vec<u64> = self
-            .opens
+        let ids: Vec<u64> = self
+            .reads
             .iter()
-            .filter(|(_, o)| hit(&o.path))
-            .map(|(&fh, _)| fh)
+            .filter(|(_, r)| hit(&r.path))
+            .map(|(&id, _)| id)
             .collect();
-        for fh in fhs {
-            self.forget_reader(fh);
+        for id in ids {
+            self.forget_reader(id);
         }
     }
 
-    /// Drop open `fh`'s reader and what it asked for.
-    fn forget_reader(&mut self, fh: u64) {
-        if let Some(reader) = self.reads.remove(&fh) {
+    /// Drop reader `id` and what it asked for.
+    fn forget_reader(&mut self, id: u64) {
+        if let Some(reader) = self.reads.remove(&id) {
             self.read_bytes -= reader.charge();
+        }
+    }
+
+    /// The reader a read through open `fh` at `offset` takes its bytes
+    /// from: the open's own, or, for an open that shares its file's, the
+    /// one of them that reads in order at `offset`.
+    fn reader_at(&self, fh: u64, offset: u64) -> Option<u64> {
+        let open = self.opens.get(&fh)?;
+        let owner = owner_of(fh, open);
+        self.reads
+            .iter()
+            .find(|(_, r)| {
+                reads_for(r, owner, &open.path)
+                    && (owner.is_some() || r.serves(offset) || r.ended(offset))
+            })
+            .map(|(&id, _)| id)
+    }
+
+    /// Drop what open `fh` read ahead through as it closes: its own reader,
+    /// or its file's once no other open shares them.
+    fn forget_open(&mut self, fh: u64) {
+        let Some(open) = self.opens.get(&fh) else {
+            return;
+        };
+        let owner = owner_of(fh, open);
+        let path = open.path.clone();
+        let shared = owner.is_none()
+            && self
+                .opens
+                .iter()
+                .any(|(&other, o)| other != fh && owner_of(other, o).is_none() && o.path == path);
+        if shared {
+            return;
+        }
+        let ids: Vec<u64> = self
+            .reads
+            .iter()
+            .filter(|(_, r)| reads_for(r, owner, &path))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in ids {
+            self.forget_reader(id);
         }
     }
 
@@ -509,6 +650,7 @@ fn keep_of(frame: &Frame) -> (bool, bool) {
 pub struct MirageFs {
     link: Arc<Link>,
     shared: Arc<Shared>,
+    served: Served,
     uid: u32,
     gid: u32,
 }
@@ -601,6 +743,11 @@ impl Shared {
             st.epoch += 1;
             let hit = |p: &str| everything || reaches(changed, p);
             st.drop_reads(hit);
+            for open in st.opens.values_mut() {
+                if hit(&open.path) {
+                    open.apart = true;
+                }
+            }
             st.known.retain(|p, _| !hit(p));
             st.listings.retain(|p, _| !hit(p));
             let gone: Vec<String> = st.content.keys().filter(|p| hit(p)).cloned().collect();
@@ -643,11 +790,12 @@ impl Shared {
 }
 
 impl MirageFs {
-    pub fn new(link: Arc<Link>, shared: Arc<Shared>) -> MirageFs {
+    pub fn new(link: Arc<Link>, shared: Arc<Shared>, served: Served) -> MirageFs {
         let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
         MirageFs {
             link,
             shared,
+            served,
             uid,
             gid,
         }
@@ -768,20 +916,48 @@ impl MirageFs {
         self.shared.arrived.notify_all();
     }
 
+    /// Whether `path` carries no extended attribute, as the attributes the
+    /// client still keeps of it say: only once the host's `hello` said they
+    /// mark an entry that carries one, and never while a policy judges
+    /// every call, as such attributes are never kept.
+    fn bare(&self, path: &str) -> bool {
+        self.served.xattrs
+            && self
+                .st()
+                .known
+                .get(path)
+                .is_some_and(|k| k.fresh() && !k.attrs.xattrs)
+    }
+
+    /// Drop what the client keeps of `path`'s attributes, and its folder's
+    /// listing, after an extended attribute changed on it here, set or not:
+    /// they say whether it carries one. It moves the epoch, so attributes
+    /// asked for before the change are not kept after it.
+    fn xattrs_changed(&self, path: &str) {
+        let mut st = self.st();
+        st.epoch += 1;
+        st.known.remove(path);
+        if let Some((dir, _)) = split(path) {
+            st.listings.remove(&dir);
+        }
+    }
+
     /// Tie the opens at or under `path` to the file they hold, once its
     /// name went to another file or to none: a write at the name later
-    /// no longer refreshes them.
+    /// no longer refreshes them, and they read ahead on readers of their
+    /// own, so a file the name names next never takes their bytes.
     fn detach(st: &mut State, path: &str) {
         for open in st.opens.values_mut() {
             if reaches(path, &open.path) {
                 open.detached = true;
             }
         }
+        st.drop_reads(|p| reaches(path, p));
     }
 
-    /// Move the inodes and opens at or under `from` to `to` once the host
-    /// renamed it, tying the opens of what `to` named to the file they
-    /// hold.
+    /// Move the inodes, opens and readers at or under `from` to `to` once
+    /// the host renamed it, tying the opens of what `to` named to the file
+    /// they hold.
     fn renamed(st: &mut State, from: &str, to: &str) {
         let moved: Vec<(String, u64)> = st
             .inodes
@@ -801,6 +977,11 @@ impl MirageFs {
         for open in st.opens.values_mut() {
             if reaches(from, &open.path) {
                 open.path = format!("{to}{}", &open.path[from.len()..]);
+            }
+        }
+        for reader in st.reads.values_mut() {
+            if reaches(from, &reader.path) {
+                reader.path = format!("{to}{}", &reader.path[from.len()..]);
             }
         }
     }
@@ -911,6 +1092,40 @@ impl MirageFs {
         (content.version == attrs.version()).then(|| content.data.clone())
     }
 
+    /// The most bytes reads may hold together now: the read-ahead total,
+    /// less what stretches that came too late took from it.
+    fn room(&self, st: &State) -> usize {
+        st.read_room.unwrap_or(self.served.total)
+    }
+
+    /// Halve what reads may hold, at most once per SHORT, after a stretch
+    /// came too late to use: more was asked for than the link moves in
+    /// SHORT. Never below one request, and never unless reads adapt.
+    fn cut_room(&self, st: &mut State) {
+        if !self.served.adapts || st.room_cut.is_some_and(|at| at.elapsed() < SHORT) {
+            return;
+        }
+        let floor = self.served.window().max(1) as usize;
+        st.read_room = Some((self.room(st) / 2).max(floor));
+        st.room_cut = Some(Instant::now());
+    }
+
+    /// Give back `size` bytes of what reads may hold, up to the total,
+    /// after a stretch came within SHORT / 2 of being asked for.
+    fn grow_room(&self, st: &mut State, size: u64) {
+        if let Some(room) = st.read_room {
+            let grown = room + size as usize;
+            st.read_room = (grown < self.served.total).then_some(grown);
+        }
+    }
+
+    /// Whether a read-only open of a file with `attrs` reads it whole
+    /// first: a kept regular file of at most WHOLE_FILE, unless the host
+    /// said to read only what is asked (`read_ahead: 0`).
+    fn whole_first(&self, attrs: &Attrs) -> bool {
+        self.served.ahead > 0 && attrs.kept && attrs.is(S_IFREG) && attrs.size <= WHOLE_FILE
+    }
+
     /// `path`'s whole content, and the attributes it was read at; kept
     /// unless a forget came while it was read.
     fn whole(&self, path: &str, attrs: Attrs) -> Result<(Arc<Vec<u8>>, Attrs), Errno> {
@@ -957,6 +1172,7 @@ impl MirageFs {
                 attrs,
                 writes,
                 detached: false,
+                apart: false,
                 cached,
                 revoked: cached && crossed,
                 watched: asked.watched || crossed,
@@ -993,25 +1209,27 @@ impl MirageFs {
 
     /// Read `size` bytes at `offset` through open `fh` on host handle
     /// `host`. A read-only open read in order asks for what follows before
-    /// the program reads it, further with each read up to READ_AHEAD, so
-    /// those requests are on their way together, and every read inside
+    /// the program reads it, further with each read up to the read-ahead,
+    /// so those requests are on their way together, and every read inside
     /// what it asked for takes its bytes from there, on whichever thread
-    /// the kernel sends it. A write open, a policy judging every call, a
-    /// read outside what was asked for, a change to the file meanwhile or a
-    /// refused request ahead reads as asked.
+    /// the kernel sends it, through whichever of the file's opens on a kept
+    /// mount. A write open, a policy judging every call, a read-ahead of 0,
+    /// a read outside what was asked for, a change to the file meanwhile or
+    /// a refused request ahead reads as asked.
     fn read_at(&self, fh: u64, host: u64, offset: u64, size: u64) -> Result<Vec<u8>, Errno> {
         let reader = {
             let mut st = self.st();
             match st.opens.get(&fh) {
                 None => return Err(Errno::EBADF),
-                Some(open) if open.writes || open.watched => None,
-                Some(_) => match st.reads.get(&fh) {
-                    Some(r) if r.ended(offset) => return Ok(Vec::new()),
-                    Some(r) if r.stale(offset, offset + size) => {
-                        st.forget_reader(fh);
+                Some(open) if open.writes || open.watched || self.served.ahead == 0 => None,
+                Some(_) => match st.reader_at(fh, offset) {
+                    Some(id) if st.reads[&id].ended(offset) => return Ok(Vec::new()),
+                    Some(id) if st.reads[&id].stale(offset, offset + size) => {
+                        self.cut_room(&mut st);
+                        st.forget_reader(id);
                         Some(None)
                     }
-                    Some(r) if r.serves(offset) => Some(Some(r.id)),
+                    Some(id) if st.reads[&id].serves(offset) => Some(Some(id)),
                     _ => Some(None),
                 },
             }
@@ -1019,7 +1237,7 @@ impl MirageFs {
         match reader {
             None => self.read_host(host, offset, size),
             Some(None) => self.read_fresh(fh, host, offset, size),
-            Some(Some(id)) => match self.read_ahead(fh, host, id, offset, size) {
+            Some(Some(id)) => match self.read_ahead(host, id, offset, size) {
                 Some(data) => Ok(data),
                 None => self.read_fresh(fh, host, offset, size),
             },
@@ -1029,28 +1247,34 @@ impl MirageFs {
     /// Start open `fh`'s reader on `data`, the first bytes the reply to its
     /// open carried, unless the open writes or is watched, a change took
     /// what reads held since `drops`, when the open was asked, as those
-    /// bytes may be older than it, or they do not fit READ_AHEAD_ALL.
+    /// bytes may be older than it, they do not fit the read-ahead total,
+    /// or one of the file's readers its open shares reads from the start.
     fn first_read(&self, fh: u64, drops: u64, data: Vec<u8>) {
         let mut st = self.st();
-        let Some(kept) = st
+        let Some((owner, path, kept)) = st
             .opens
             .get(&fh)
             .filter(|o| !o.writes && !o.watched)
-            .map(|o| o.cached)
+            .map(|o| (owner_of(fh, o), o.path.clone(), o.cached))
         else {
             return;
         };
-        if st.read_drops != drops || st.read_bytes + data.len() > READ_AHEAD_ALL {
+        if st.read_drops != drops || st.read_bytes + data.len() > self.room(&st) {
+            return;
+        }
+        if owner.is_none() && st.reader_at(fh, 0).is_some() {
             return;
         }
         let got = data.len() as u64;
+        let first = self.served.first();
         let id = st.next_reader;
         st.next_reader += 1;
         st.read_bytes += data.len();
         st.reads.insert(
-            fh,
+            id,
             Reader {
-                id,
+                path,
+                owner,
                 kept,
                 windows: VecDeque::from([Window {
                     offset: 0,
@@ -1059,8 +1283,8 @@ impl MirageFs {
                 }]),
                 start: 0,
                 next: got,
-                ahead: READ_FIRST,
-                end: (got < READ_FIRST).then(|| (got, Instant::now())),
+                ahead: first,
+                end: (got < first).then(|| (got, Instant::now())),
             },
         );
     }
@@ -1073,37 +1297,55 @@ impl MirageFs {
     }
 
     /// Read as asked through open `fh`, then start a reader past what came
-    /// back, unless one that has not met the end of the file reaches past
-    /// it already, as it does for a read the kernel sent behind another, or
-    /// a change took what reads held while this one was out: its reply may
-    /// be older than the change, so the end of the file it shows is not
-    /// kept.
+    /// back, in place of the one the read was meant for, unless one that has
+    /// not met the end of the file reaches past it already, as it does for a
+    /// read the kernel sent behind another, or a change took what reads held
+    /// while this one was out: its reply may be older than the change, so
+    /// the end of the file it shows is not kept. A file whose opens share
+    /// its readers keeps READ_STREAMS of them, the oldest going first.
     fn read_fresh(&self, fh: u64, host: u64, offset: u64, size: u64) -> Result<Vec<u8>, Errno> {
         let drops = self.st().read_drops;
         let data = self.read_host(host, offset, size)?;
         let at = offset + data.len() as u64;
         let mut st = self.st();
-        let Some(kept) = st
+        let Some((owner, path, kept)) = st
             .opens
             .get(&fh)
             .filter(|o| !o.writes && !o.watched)
-            .map(|o| o.cached)
+            .map(|o| (owner_of(fh, o), o.path.clone(), o.cached))
         else {
             return Ok(data);
         };
-        let ahead = st
-            .reads
-            .get(&fh)
-            .is_some_and(|r| r.end.is_none() && r.start <= at && at <= r.next);
+        let ahead = st.reads.values().any(|r| {
+            reads_for(r, owner, &path) && r.end.is_none() && r.start <= at && at <= r.next
+        });
         if !ahead && st.read_drops == drops {
-            st.forget_reader(fh);
+            if let Some(meant) = st.reader_at(fh, offset) {
+                st.forget_reader(meant);
+            }
+            if owner.is_none() {
+                let mut streams: Vec<u64> = st
+                    .reads
+                    .iter()
+                    .filter(|(_, r)| reads_for(r, owner, &path))
+                    .map(|(&id, _)| id)
+                    .collect();
+                streams.sort_unstable();
+                for old in streams
+                    .iter()
+                    .take((streams.len() + 1).saturating_sub(READ_STREAMS))
+                {
+                    st.forget_reader(*old);
+                }
+            }
             let id = st.next_reader;
             st.next_reader += 1;
             let end = ((data.len() as u64) < size).then(|| (at, Instant::now()));
             st.reads.insert(
-                fh,
+                id,
                 Reader {
-                    id,
+                    path,
+                    owner,
                     kept,
                     windows: VecDeque::new(),
                     start: at,
@@ -1116,20 +1358,20 @@ impl MirageFs {
         Ok(data)
     }
 
-    /// Read `size` bytes at `offset` from reader `id` of open `fh`, having
-    /// asked for what follows them: from the stretches that came, waiting
+    /// Read `size` bytes at `offset` from reader `id` through host handle
+    /// `host`, having asked for what follows them: from the stretches that came, waiting
     /// for the reply to each one this read needs, or for the read already
     /// waiting on it. None once the reader went, a stretch it needs was
     /// refused, came longer ago than its mount keeps an answer, or was
     /// never asked for, or no reply came in time.
-    fn read_ahead(&self, fh: u64, host: u64, id: u64, offset: u64, size: u64) -> Option<Vec<u8>> {
-        self.ask_ahead(fh, host, id, offset, size);
+    fn read_ahead(&self, host: u64, id: u64, offset: u64, size: u64) -> Option<Vec<u8>> {
+        self.ask_ahead(host, id, offset, size);
         let deadline = Instant::now() + REPLY_WAIT;
         let mut guard = self.st();
         loop {
             let step = {
                 let st = &mut *guard;
-                let reader = st.reads.get_mut(&fh).filter(|r| r.id == id)?;
+                let reader = st.reads.get_mut(&id)?;
                 let stop = reader
                     .end
                     .map_or(offset + size, |(end, _)| end.min(offset + size));
@@ -1138,12 +1380,12 @@ impl MirageFs {
                     w.end() > offset && w.offset < stop && !matches!(w.part, Part::Held(..))
                 });
                 match waiting {
-                    _ if stale => Step::Forget,
+                    _ if stale => Step::Stale,
                     None => Step::Gather(stop),
                     Some(window) => match &mut window.part {
                         Part::Failed => Step::Forget,
-                        Part::Sent(sent, _) => match sent.take() {
-                            Some(sent) => Step::Receive(sent, window.offset, window.size),
+                        Part::Sent(sent, when) => match sent.take() {
+                            Some(sent) => Step::Receive(sent, window.offset, window.size, *when),
                             None => Step::Wait,
                         },
                         _ => Step::Wait,
@@ -1153,19 +1395,28 @@ impl MirageFs {
             match step {
                 Step::Gather(stop) => {
                     let st = &mut *guard;
-                    let data = gathered(st.reads.get(&fh)?, offset, stop)?;
-                    trim(st, fh, offset);
+                    let data = gathered(st.reads.get(&id)?, offset, stop)?;
+                    trim(st, id, offset);
                     return Some(data);
                 }
                 Step::Forget => {
-                    guard.forget_reader(fh);
+                    guard.forget_reader(id);
                     return None;
                 }
-                Step::Receive(sent, at, asked) => {
+                Step::Stale => {
+                    self.cut_room(&mut guard);
+                    guard.forget_reader(id);
+                    return None;
+                }
+                Step::Receive(sent, at, asked, when) => {
                     drop(guard);
                     let reply = self.link.answer(sent);
                     guard = self.st();
-                    landed(&mut guard, fh, id, at, asked, reply);
+                    let fresh = reply.is_ok() && when.elapsed() < SHORT / 2;
+                    landed(&mut guard, id, at, asked, reply);
+                    if fresh && guard.reads.get(&id).is_some_and(|r| !r.kept) {
+                        self.grow_room(&mut guard, asked);
+                    }
                     self.shared.arrived.notify_all();
                 }
                 Step::Wait => {
@@ -1185,24 +1436,25 @@ impl MirageFs {
     }
 
     /// Ask, through host handle `host`, for what follows a read of `size`
-    /// bytes at `offset` from reader `id` of open `fh`: as far as its reach,
-    /// READ_WINDOW at a time and as far as READ_AHEAD_ALL leaves room. A
-    /// read that finds no room for its own bytes reads as asked, so what
-    /// reads hold never passes READ_AHEAD_ALL.
-    fn ask_ahead(&self, fh: u64, host: u64, id: u64, offset: u64, size: u64) {
+    /// bytes at `offset` from reader `id`: as far as its reach, a window at
+    /// a time and as far as the read-ahead total leaves room. A read that
+    /// finds no room for its own bytes reads as asked, so what reads hold
+    /// never passes the total.
+    fn ask_ahead(&self, host: u64, id: u64, offset: u64, size: u64) {
         let wanted = {
             let mut guard = self.st();
             let st = &mut *guard;
-            let Some(reader) = st.reads.get_mut(&fh).filter(|r| r.id == id) else {
+            let room = self.room(st);
+            let Some(reader) = st.reads.get_mut(&id) else {
                 return;
             };
-            reader.ahead = (reader.ahead * 2).min(READ_AHEAD).max(size);
+            reader.ahead = (reader.ahead * 2).min(self.served.ahead).max(size);
             let needed = offset + size;
             let reach = needed + reader.ahead;
             let mut wanted = Vec::new();
             while reader.end.is_none() && reader.next < reach {
-                let window = READ_WINDOW.min(reader.ahead).max(size);
-                if st.read_bytes + window as usize > READ_AHEAD_ALL {
+                let window = self.served.window().min(reader.ahead).max(size);
+                if st.read_bytes + window as usize > room {
                     break;
                 }
                 reader.windows.push_back(Window {
@@ -1223,8 +1475,7 @@ impl MirageFs {
             let mut st = self.st();
             if let Some(w) = st
                 .reads
-                .get_mut(&fh)
-                .filter(|r| r.id == id)
+                .get_mut(&id)
                 .and_then(|r| r.windows.iter_mut().find(|w| w.offset == at))
             {
                 w.part = match sent {
@@ -1285,6 +1536,7 @@ impl MirageFs {
                 rdev: 0,
                 kept: false,
                 watched: false,
+                xattrs: false,
             });
             let parent = match split(&dir) {
                 Some((up, _)) if dir != self.shared.root => self.ino(&up),
@@ -1342,15 +1594,15 @@ fn gathered(reader: &Reader, offset: u64, stop: u64) -> Option<Vec<u8>> {
     (at >= stop).then_some(data)
 }
 
-/// Drop the stretches of open `fh`'s reader that end a READ_WINDOW or more
+/// Drop the stretches of reader `id` that end a READ_BEHIND or more
 /// before `offset`: a read the kernel sent a little behind still finds
 /// its bytes.
-fn trim(st: &mut State, fh: u64, offset: u64) {
-    let Some(reader) = st.reads.get_mut(&fh) else {
+fn trim(st: &mut State, id: u64, offset: u64) {
+    let Some(reader) = st.reads.get_mut(&id) else {
         return;
     };
     while let Some(window) = reader.windows.front() {
-        if window.end() + READ_WINDOW > offset {
+        if window.end() + READ_BEHIND > offset {
             break;
         }
         st.read_bytes -= window.size as usize;
@@ -1359,18 +1611,11 @@ fn trim(st: &mut State, fh: u64, offset: u64) {
     reader.start = reader.windows.front().map_or(reader.next, |w| w.offset);
 }
 
-/// Put `reply`, to the stretch of `asked` bytes at `offset` reader `id` of
-/// open `fh` asked for, where it stands: held, or refused. One that came
+/// Put `reply`, to the stretch of `asked` bytes at `offset` reader `id`
+/// asked for, where it stands: held, or refused. One that came
 /// short ends the file there and drops what was asked past it.
-fn landed(
-    st: &mut State,
-    fh: u64,
-    id: u64,
-    offset: u64,
-    asked: u64,
-    reply: Result<Frame, Failure>,
-) {
-    let Some(reader) = st.reads.get_mut(&fh).filter(|r| r.id == id) else {
+fn landed(st: &mut State, id: u64, offset: u64, asked: u64, reply: Result<Frame, Failure>) {
+    let Some(reader) = st.reads.get_mut(&id) else {
         return;
     };
     let Some(i) = reader.windows.iter().position(|w| w.offset == offset) else {
@@ -1396,13 +1641,15 @@ fn landed(
 }
 
 /// What a read from a reader does next: take the bytes up to the offset it
-/// holds, give up on the reader when a stretch it needs was refused or came
-/// longer ago than its mount keeps an answer, wait for the reply to one it
-/// took, or wait for the read already receiving one.
+/// holds, give up on the reader when a stretch it needs was refused or
+/// came longer ago than its mount keeps an answer (stale), wait for the
+/// reply to one it took, asked at the instant it carries, or wait for the
+/// read already receiving one.
 enum Step {
     Gather(u64),
     Forget,
-    Receive(Sent, u64, u64),
+    Stale,
+    Receive(Sent, u64, u64, Instant),
     Wait,
 }
 
@@ -1434,6 +1681,7 @@ impl Filesystem for MirageFs {
                     rdev: 0,
                     kept: true,
                     watched: false,
+                    xattrs: false,
                 };
                 return reply.entry(&LONG, &self.attr(0, &gone), Generation(0));
             }
@@ -1718,9 +1966,7 @@ impl Filesystem for MirageFs {
         let watches = self.st().watches;
         if !writes
             && let Ok(attrs) = self.stat(&path)
-            && attrs.kept
-            && attrs.is(S_IFREG)
-            && attrs.size <= WHOLE_FILE
+            && self.whole_first(&attrs)
         {
             if let Some(data) = self.cached(&path, &attrs) {
                 let fh = self.opened(
@@ -1750,7 +1996,7 @@ impl Filesystem for MirageFs {
             "write": flags.0 & libc::O_ACCMODE != libc::O_RDONLY,
             "truncate": flags.0 & libc::O_TRUNC != 0,
             "append": flags.0 & libc::O_APPEND != 0,
-            "first": if writes { 0 } else { READ_FIRST },
+            "first": if writes { 0 } else { self.served.first() },
         });
         if writes {
             self.changed(&path);
@@ -1874,7 +2120,7 @@ impl Filesystem for MirageFs {
     ) {
         let open = {
             let mut st = self.st();
-            st.forget_reader(fh.0);
+            st.forget_open(fh.0);
             st.opens.remove(&fh.0)
         };
         self.shared.arrived.notify_all();
@@ -2019,11 +2265,13 @@ impl Filesystem for MirageFs {
         let (Some(path), Ok(name)) = (self.path(ino), self.name(name)) else {
             return reply.error(Errno::EINVAL);
         };
-        match self.call(
+        let set = self.call(
             "setxattr",
             json!({ "path": path, "name": name, "flags": xattr_flags(flags) }),
             value,
-        ) {
+        );
+        self.xattrs_changed(&path);
+        match set {
             Ok(_) => reply.ok(),
             Err(err) => reply.error(err),
         }
@@ -2036,7 +2284,7 @@ impl Filesystem for MirageFs {
         // The kernel asks before a write whether the file carries
         // capabilities to drop; on a nosuid mount none apply, so the answer
         // needs no round trip.
-        if name == "security.capability" {
+        if name == "security.capability" || self.bare(&path) {
             return reply.error(Errno::NO_XATTR);
         }
         match self.call("getxattr", json!({ "path": path, "name": name }), &[]) {
@@ -2051,6 +2299,13 @@ impl Filesystem for MirageFs {
         let Some(path) = self.path(ino) else {
             return reply.error(Errno::ENOENT);
         };
+        if self.bare(&path) {
+            return if size == 0 {
+                reply.size(0)
+            } else {
+                reply.data(&[])
+            };
+        }
         match self.call("listxattr", json!({ "path": path }), &[]) {
             Ok(frame) => {
                 let mut out = Vec::new();
@@ -2082,7 +2337,9 @@ impl Filesystem for MirageFs {
         let (Some(path), Ok(name)) = (self.path(ino), self.name(name)) else {
             return reply.error(Errno::EINVAL);
         };
-        match self.call("removexattr", json!({ "path": path, "name": name }), &[]) {
+        let removed = self.call("removexattr", json!({ "path": path, "name": name }), &[]);
+        self.xattrs_changed(&path);
+        match removed {
             Ok(_) => reply.ok(),
             Err(err) => reply.error(err),
         }
@@ -2190,6 +2447,11 @@ mod tests {
     }
 
     fn hosted() -> (Arc<MirageFs>, Host) {
+        hosted_as(Served::default())
+    }
+
+    /// A client of a fake host whose `hello` said `served`.
+    fn hosted_as(served: Served) -> (Arc<MirageFs>, Host) {
         let (client_out, requests) = UnixStream::pair().unwrap();
         requests
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -2203,7 +2465,7 @@ mod tests {
             std::thread::spawn(move || link.serve(&mut client_in, |f| shared.push(f)));
         }
         (
-            Arc::new(MirageFs::new(link, shared)),
+            Arc::new(MirageFs::new(link, shared, served)),
             Host { requests, replies },
         )
     }
@@ -2381,9 +2643,7 @@ mod tests {
         assert_eq!(second.join().unwrap().unwrap(), b"efgh");
         assert_eq!(reading(&fs, fh, 8, 4).join().unwrap().unwrap(), b"ij");
         assert_eq!(reading(&fs, fh, 10, 4).join().unwrap().unwrap(), b"");
-        if let Some(reader) = locked(&fs.shared.state).reads.get_mut(&fh) {
-            reader.end = Some((10, Instant::now() - SHORT));
-        }
+        reader_of(&mut locked(&fs.shared.state), fh).end = Some((10, Instant::now() - SHORT));
         let grown = reading(&fs, fh, 10, 4);
         let sent = host.next();
         assert_eq!(asked(&sent), (Some("read"), 10, 4));
@@ -2519,22 +2779,32 @@ mod tests {
         let sent = host.next();
         answer_read(&mut host, &sent, CONTENT);
         first.join().unwrap().unwrap();
-        locked(&fs.shared.state).read_bytes = READ_AHEAD_ALL;
+        locked(&fs.shared.state).read_bytes = READ_AHEAD_TOTAL;
         let read = reading(&fs, fh, 4, 4);
         let sent = host.next();
         assert_eq!(asked(&sent), (Some("read"), 4, 4));
         answer_read(&mut host, &sent, CONTENT);
         assert_eq!(read.join().unwrap().unwrap(), b"efgh");
-        let st = locked(&fs.shared.state);
-        assert_eq!(st.read_bytes, READ_AHEAD_ALL);
-        assert!(st.reads[&fh].windows.is_empty());
+        let mut st = locked(&fs.shared.state);
+        assert_eq!(st.read_bytes, READ_AHEAD_TOTAL);
+        assert!(reader_of(&mut st, fh).windows.is_empty());
+    }
+
+    /// The reader open `fh` reads ahead through: its own, or its file's.
+    fn reader_of(st: &mut State, fh: u64) -> &mut Reader {
+        let open = &st.opens[&fh];
+        let (owner, path) = (owner_of(fh, open), open.path.clone());
+        st.reads
+            .values_mut()
+            .find(|r| reads_for(r, owner, &path))
+            .unwrap()
     }
 
     /// Make every stretch open `fh`'s reader asked for, come or on its way,
     /// asked longer than SHORT ago.
     fn age(fs: &Arc<MirageFs>, fh: u64) {
         let mut st = locked(&fs.shared.state);
-        for window in &mut st.reads.get_mut(&fh).unwrap().windows {
+        for window in &mut reader_of(&mut st, fh).windows {
             if let Part::Held(_, asked) | Part::Sent(_, asked) = &mut window.part {
                 *asked = Instant::now() - SHORT;
             }
@@ -2567,6 +2837,227 @@ mod tests {
         assert_eq!(asked(&sent), (Some("read"), 8, 4));
         answer_read(&mut host, &sent, b"abcdefghWXYZ");
         assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+        let st = locked(&fs.shared.state);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+    }
+
+    #[test]
+    fn a_stretch_too_late_halves_the_room_once_a_second_and_one_in_time_gives_it_back() {
+        let (fs, _host) = hosted();
+        let mut st = locked(&fs.shared.state);
+        fs.cut_room(&mut st);
+        fs.cut_room(&mut st);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+        st.room_cut = Some(Instant::now() - SHORT);
+        fs.cut_room(&mut st);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 4);
+        fs.grow_room(&mut st, (READ_AHEAD_TOTAL / 4) as u64);
+        assert_eq!(fs.room(&st), READ_AHEAD_TOTAL / 2);
+        fs.grow_room(&mut st, READ_AHEAD_TOTAL as u64);
+        assert_eq!((st.read_room, fs.room(&st)), (None, READ_AHEAD_TOTAL));
+        for _ in 0..64 {
+            st.room_cut = None;
+            fs.cut_room(&mut st);
+        }
+        assert_eq!(fs.room(&st), fs.served.window() as usize);
+        drop(st);
+        let (fixed, _host) = hosted_as(Served {
+            adapts: false,
+            ..Served::default()
+        });
+        let mut st = locked(&fixed.shared.state);
+        fixed.cut_room(&mut st);
+        assert_eq!(fixed.room(&st), READ_AHEAD_TOTAL);
+    }
+
+    #[test]
+    fn opens_of_one_file_on_a_kept_mount_share_what_was_asked_for() {
+        let (fs, mut host) = hosted();
+        let first = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        let second = fs.opened("/w/a", Some(8), None, false, true, unwatched(0));
+        read_ahead_of(&fs, &mut host, first, CONTENT);
+        let read = reading(&fs, second, 8, 4);
+        assert_eq!(asked(&host.next()), (Some("read"), 20, 16));
+        assert_eq!(read.join().unwrap().unwrap(), b"ijkl");
+    }
+
+    #[test]
+    fn opens_of_one_file_on_a_mount_that_is_not_kept_read_ahead_apart() {
+        let (fs, mut host) = hosted();
+        let first = fs.opened("/w/a", Some(7), None, false, false, unwatched(0));
+        let second = fs.opened("/w/a", Some(8), None, false, false, unwatched(0));
+        read_ahead_of(&fs, &mut host, first, CONTENT);
+        let read = reading(&fs, second, 8, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 8, 4));
+        answer_read(&mut host, &sent, CONTENT);
+        assert_eq!(read.join().unwrap().unwrap(), b"ijkl");
+    }
+
+    #[test]
+    fn a_kept_file_read_in_two_places_keeps_a_reader_for_each() {
+        let (fs, mut host) = hosted();
+        let first = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        let second = fs.opened("/w/a", Some(8), None, false, true, unwatched(0));
+        read_ahead_of(&fs, &mut host, first, CONTENT);
+        let far = reading(&fs, second, 30, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 30, 4));
+        answer_read(&mut host, &sent, CONTENT);
+        assert_eq!(far.join().unwrap().unwrap(), b"4567");
+        let near = reading(&fs, first, 8, 4);
+        assert_eq!(asked(&host.next()), (Some("read"), 20, 16));
+        assert_eq!(near.join().unwrap().unwrap(), b"ijkl");
+    }
+
+    #[test]
+    fn opens_of_a_file_its_name_no_longer_names_share_nothing_with_the_next() {
+        let (fs, mut host) = hosted();
+        let old = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        read_ahead_of(&fs, &mut host, old, CONTENT);
+        MirageFs::detach(&mut fs.st(), "/w/a");
+        assert!(locked(&fs.shared.state).reads.is_empty());
+        let new = fs.opened("/w/a", Some(8), None, false, true, unwatched(0));
+        let read = reading(&fs, new, 8, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 8, 4));
+        answer_read(&mut host, &sent, b"abcdefghWXYZ");
+        assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+        let mut st = locked(&fs.shared.state);
+        assert_eq!(reader_of(&mut st, new).owner, None);
+        assert!(owner_of(old, &st.opens[&old]).is_some());
+    }
+
+    #[test]
+    fn an_open_a_pushed_change_named_reads_apart_from_the_opens_after_it() {
+        let (fs, mut host) = hosted();
+        let old = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        fs.shared.forget("/w/a");
+        read_ahead_of(&fs, &mut host, old, CONTENT);
+        let new = fs.opened("/w/a", Some(8), None, false, true, unwatched(0));
+        let read = reading(&fs, new, 8, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 8, 4));
+        answer_read(&mut host, &sent, b"abcdefghWXYZ");
+        assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+        let mut st = locked(&fs.shared.state);
+        assert_eq!(reader_of(&mut st, new).owner, None);
+        assert!(owner_of(old, &st.opens[&old]).is_some());
+    }
+
+    #[test]
+    fn a_read_ahead_of_none_reads_no_file_whole_at_its_open() {
+        let small = attrs(true);
+        let (fs, _host) = hosted();
+        assert!(fs.whole_first(&small));
+        assert!(!fs.whole_first(&Attrs {
+            size: WHOLE_FILE + 1,
+            ..small.clone()
+        }));
+        let (none, _host) = hosted_as(Served {
+            ahead: 0,
+            ..Served::default()
+        });
+        assert!(!none.whole_first(&small));
+    }
+
+    #[test]
+    fn a_read_ahead_of_none_reads_only_what_is_asked() {
+        let (fs, mut host) = hosted_as(Served {
+            ahead: 0,
+            ..Served::default()
+        });
+        let fh = fs.opened("/w/a", Some(7), None, false, true, unwatched(0));
+        for at in [0, 4] {
+            let read = reading(&fs, fh, at, 4);
+            let sent = host.next();
+            assert_eq!(asked(&sent), (Some("read"), at, 4));
+            answer_read(&mut host, &sent, CONTENT);
+            read.join().unwrap().unwrap();
+        }
+        assert!(locked(&fs.shared.state).reads.is_empty());
+        assert_eq!(fs.served.first(), 0);
+    }
+
+    #[test]
+    fn hello_sets_the_read_ahead_and_says_whether_attributes_mark_attributes() {
+        let said = Served::of(&Frame::new(
+            json!({"proto": 1, "read_ahead": 2 << 20, "read_ahead_total": 16 << 20,
+                "read_ahead_adapts": false, "xattrs": true}),
+            vec![],
+        ));
+        assert_eq!(
+            (said.ahead, said.total, said.adapts, said.xattrs),
+            (2 << 20, 16 << 20, false, true)
+        );
+        assert_eq!((said.window(), said.first()), (512 << 10, READ_FIRST));
+        let far = Served::of(&Frame::new(
+            json!({"proto": 1, "read_ahead": 64 << 20}),
+            vec![],
+        ));
+        assert_eq!(far.window(), READ_WINDOW);
+        let bare = Served::of(&Frame::new(json!({"proto": 1}), vec![]));
+        assert_eq!(
+            (bare.ahead, bare.total, bare.adapts, bare.xattrs),
+            (READ_AHEAD, READ_AHEAD_TOTAL, true, false)
+        );
+    }
+
+    #[test]
+    fn an_entry_kept_without_the_mark_carries_no_extended_attribute() {
+        let marking = Served {
+            xattrs: true,
+            ..Served::default()
+        };
+        let (fs, _host) = hosted_as(marking);
+        let keep = |path: &str, mark: bool| {
+            let attrs = Attrs {
+                xattrs: mark,
+                ..attrs(true)
+            };
+            locked(&fs.shared.state).known.insert(
+                path.into(),
+                Known {
+                    attrs,
+                    at: Instant::now(),
+                },
+            );
+        };
+        keep("/w/bare", false);
+        keep("/w/marked", true);
+        assert!(fs.bare("/w/bare"));
+        assert!(!fs.bare("/w/marked"));
+        assert!(!fs.bare("/w/unknown"));
+        let asked = locked(&fs.shared.state).epoch;
+        fs.xattrs_changed("/w/bare");
+        assert!(!fs.bare("/w/bare"));
+        assert!(fs.keep("/w/bare", attrs(true), asked).is_err());
+        assert!(!fs.bare("/w/bare"));
+        let (older, _host) = hosted();
+        locked(&older.shared.state).known.insert(
+            "/w/bare".into(),
+            Known {
+                attrs: attrs(true),
+                at: Instant::now(),
+            },
+        );
+        assert!(!older.bare("/w/bare"));
+    }
+
+    #[test]
+    fn an_entry_kept_for_a_second_says_nothing_of_its_attributes_after() {
+        let (fs, _host) = hosted_as(Served {
+            xattrs: true,
+            ..Served::default()
+        });
+        locked(&fs.shared.state).known.insert(
+            "/w/a".into(),
+            Known {
+                attrs: attrs(false),
+                at: Instant::now() - SHORT,
+            },
+        );
+        assert!(!fs.bare("/w/a"));
     }
 
     #[test]
@@ -2586,13 +3077,13 @@ mod tests {
         let fh = fs.opened("/w/a", Some(7), None, false, false, unwatched(0));
         let drops = {
             let mut st = locked(&fs.shared.state);
-            st.read_bytes = READ_AHEAD_ALL - 4;
+            st.read_bytes = READ_AHEAD_TOTAL - 4;
             st.read_drops
         };
         fs.first_read(fh, drops, b"abcdefghij".to_vec());
         let st = locked(&fs.shared.state);
         assert!(st.reads.is_empty());
-        assert_eq!(st.read_bytes, READ_AHEAD_ALL - 4);
+        assert_eq!(st.read_bytes, READ_AHEAD_TOTAL - 4);
     }
 
     #[test]

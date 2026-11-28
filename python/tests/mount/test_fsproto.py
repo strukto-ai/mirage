@@ -22,6 +22,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.mount.changes import SERVED_BY, RecentChanges
 from mirage.mount.constants import (
     FSPROTO_FRAME_BYTES,
+    FSPROTO_READ_CONCURRENCY,
     FSPROTO_VERSION,
     FSPROTO_WHOLE_BYTES,
 )
@@ -34,6 +35,7 @@ from mirage.mount.fsproto import (
 )
 from mirage.mount.types import ServedPrefix
 from mirage.policy import Action, Policy, VfsContext
+from mirage.types import FileStat, PathSpec
 from mirage.utils.clock import ManualClock
 
 
@@ -92,15 +94,38 @@ class Client:
         self._task.cancel()
 
 
-async def served(changes: RecentChanges | None = None):
-    ws = Workspace({"/notes": RAMVFS()}, mode=MountMode.WRITE)
+class SlowStat(RAMVFS):
+    """A RAM store whose stat of ``slow.txt`` waits for ``go``, as a
+    backend that answers over the network keeps a request out."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.go = asyncio.Event()
+        self.go.set()
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        if path.virtual.endswith("/slow.txt"):
+            await self.go.wait()
+        return await super().stat(path)
+
+
+async def served(
+    changes: RecentChanges | None = None,
+    vfs: RAMVFS | None = None,
+    read_ahead: tuple[int | None, int | None, bool | None] = (
+        None,
+        None,
+        None,
+    ),
+):
+    ws = Workspace({"/notes": vfs or RAMVFS()}, mode=MountMode.WRITE)
     await ws.vfs.write("/notes/plan.txt", b"plan")
     await ws.session("agent")
     server = FsprotoServer(
         ws.vfs,
         ws.get_session("agent"),
         None,
-        ServedPrefix("/notes", "dev", changes),
+        ServedPrefix("/notes", "dev", changes, None, *read_ahead),
     )
     end = Client()
     serving = asyncio.create_task(server.serve(end.reader, end))
@@ -205,21 +230,118 @@ async def test_a_read_only_open_carries_the_first_bytes_it_asks_for():
 
 
 @pytest.mark.asyncio
-async def test_a_reply_the_pipe_has_not_taken_holds_back_the_next():
+async def test_replies_the_pipe_has_not_taken_hold_back_reads_past_those_at_once():
     ws, server, end, serving = await served()
     opened = await end.call({"op": "open", "path": "/notes/plan.txt"})
     fh = opened.head["fh"]
     end.room.clear()
-    end.send({"op": "read", "fh": fh, "offset": 0, "size": 2, "id": 101})
-    end.send({"op": "read", "fh": fh, "offset": 2, "size": 2, "id": 102})
-    await end.until(lambda: 101 in end.replies)
+    ids = range(101, 103 + FSPROTO_READ_CONCURRENCY)
+    for rid in ids:
+        end.send({"op": "read", "fh": fh, "offset": 0, "size": 2, "id": rid})
+
+    def answered() -> int:
+        return sum(rid in end.replies for rid in ids)
+
+    await end.until(lambda: answered() == FSPROTO_READ_CONCURRENCY)
     for _ in range(20):
         await asyncio.sleep(0)
-    assert 102 not in end.replies
+    assert answered() == FSPROTO_READ_CONCURRENCY
     end.room.set()
-    await end.until(lambda: 102 in end.replies)
-    assert [end.replies[i].body for i in (101, 102)] == [b"pl", b"an"]
+    await end.until(lambda: answered() == len(ids))
+    assert {end.replies[rid].body for rid in ids} == {b"pl"}
     await end.call({"op": "release", "fh": fh})
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_read_does_not_wait_for_a_slow_read_before_it():
+    vfs = SlowStat()
+    ws, server, end, serving = await served(vfs=vfs)
+    await ws.vfs.write("/notes/slow.txt", b"slow")
+    vfs.go.clear()
+    end.send({"op": "getattr", "path": "/notes/slow.txt", "id": 101})
+    end.send({"op": "getattr", "path": "/notes/plan.txt", "id": 102})
+    await asyncio.wait_for(end.until(lambda: 102 in end.replies), 5)
+    assert 101 not in end.replies
+    vfs.go.set()
+    await end.until(lambda: 101 in end.replies)
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_change_waits_for_the_reads_before_it_and_holds_back_those_after():
+    vfs = SlowStat()
+    ws, server, end, serving = await served(vfs=vfs)
+    await ws.vfs.write("/notes/slow.txt", b"slow")
+    vfs.go.clear()
+    end.send({"op": "getattr", "path": "/notes/slow.txt", "id": 101})
+    end.send({"op": "mkdir", "path": "/notes/made", "mode": 0o755, "id": 102})
+    end.send({"op": "getattr", "path": "/notes/made", "id": 103})
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not end.replies
+    vfs.go.set()
+    await end.until(lambda: 103 in end.replies)
+    assert list(end.replies) == [101, 102, 103]
+    assert "errno" not in end.replies[103].head
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_release_waits_for_no_other_files_reads():
+    vfs = SlowStat()
+    ws, server, end, serving = await served(vfs=vfs)
+    await ws.vfs.write("/notes/slow.txt", b"slow")
+    opened = await end.call({"op": "open", "path": "/notes/plan.txt"})
+    vfs.go.clear()
+    end.send({"op": "getattr", "path": "/notes/slow.txt", "id": 101})
+    end.send({"op": "release", "fh": opened.head["fh"], "id": 102})
+    await asyncio.wait_for(end.until(lambda: 102 in end.replies), 5)
+    assert 101 not in end.replies
+    vfs.go.set()
+    await end.until(lambda: 101 in end.replies)
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_hello_says_attributes_mark_attributes_and_gives_the_read_ahead():
+    ws, server, end, serving = await served(
+        read_ahead=(1 << 20, 8 << 20, False)
+    )
+    hello = await end.call({"op": "hello", "proto": FSPROTO_VERSION})
+    assert hello.head == {
+        "id": hello.head["id"],
+        "proto": FSPROTO_VERSION,
+        "xattrs": True,
+        "read_ahead": 1 << 20,
+        "read_ahead_total": 8 << 20,
+        "read_ahead_adapts": False,
+    }
+    plain, s2, e2, serving2 = await served()
+    bare = await e2.call({"op": "hello", "proto": FSPROTO_VERSION})
+    assert not {
+        "read_ahead",
+        "read_ahead_total",
+        "read_ahead_adapts",
+    } & set(bare.head)
+    await end.end(serving)
+    await e2.end(serving2)
+
+
+@pytest.mark.asyncio
+async def test_attributes_mark_an_entry_that_carries_extended_attributes():
+    ws, server, end, serving = await served()
+    await ws.vfs.write("/notes/bare.txt", b"bare")
+    await ws.vfs.setxattr("/notes/plan.txt", "user.k", b"v")
+    listed = await end.call({"op": "list", "path": "/notes"})
+    rows = dict(listed.head["e"])
+    assert (rows["plan.txt"].get("x"), rows["bare.txt"].get("x")) == (
+        True,
+        None,
+    )
+    marked = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    bare = await end.call({"op": "getattr", "path": "/notes/bare.txt"})
+    assert (marked.head["a"].get("x"), bare.head["a"].get("x")) == (True, None)
     await end.end(serving)
 
 
@@ -283,6 +405,77 @@ async def test_a_failure_is_named_by_its_errno():
     missing = await end.call({"op": "getattr", "path": "/notes/missing"})
     assert missing.head["errno"] == "ENOENT"
     await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_an_op_that_is_not_a_name_is_refused_and_the_next_is_answered():
+    ws, server, end, serving = await served()
+    refused = await asyncio.wait_for(end.call({"op": []}), 5)
+    assert "errno" in refused.head
+    plan = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert "errno" not in plan.head
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_link_that_leads_back_to_itself_lists_and_is_asked_of():
+    ws, server, end, serving = await served()
+    made = await end.call(
+        {"op": "symlink", "path": "/notes/loop", "target": "loop"}
+    )
+    assert "errno" not in made.head
+    listed = await end.call({"op": "list", "path": "/notes"})
+    assert dict(listed.head["e"])["loop"].get("x") is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_attributes_are_marked_as_the_served_session_sees_them():
+    ws = Workspace(
+        {"/notes": RAMVFS()},
+        mode=MountMode.WRITE,
+        profiles={
+            "hidden": {"paths": {"hide": ["/notes/plan.txt"]}},
+            "open": {},
+        },
+        profile="hidden",
+    )
+    agent = await ws.session("agent", profile="open")
+    await agent.vfs.write("/notes/plan.txt", b"plan")
+    await agent.vfs.setxattr("/notes/plan.txt", "user.k", b"v")
+    server = FsprotoServer(
+        ws.vfs,
+        ws.get_session("agent"),
+        None,
+        ServedPrefix("/notes", "dev", None),
+    )
+    end = Client()
+    serving = asyncio.create_task(server.serve(end.reader, end))
+    plan = await end.call({"op": "getattr", "path": "/notes/plan.txt"})
+    assert plan.head["a"].get("x") is True
+    await end.end(serving)
+
+
+@pytest.mark.asyncio
+async def test_a_server_stopped_while_a_read_is_out_runs_nothing_after_it():
+    vfs = SlowStat()
+    ws, server, end, serving = await served(vfs=vfs)
+    await ws.vfs.write("/notes/slow.txt", b"slow")
+    vfs.go.clear()
+    end.send({"op": "getattr", "path": "/notes/slow.txt", "id": 101})
+    end.send({"op": "mkdir", "path": "/notes/made", "mode": 0o755, "id": 102})
+    end.reader.feed_eof()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    serving.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await serving
+    vfs.go.set()
+    for _ in range(20):
+        await asyncio.sleep(0)
+    with pytest.raises(FileNotFoundError):
+        await ws.vfs.stat("/notes/made")
+    end._task.cancel()
 
 
 @pytest.mark.asyncio

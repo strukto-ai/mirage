@@ -351,6 +351,15 @@ class Namespace:
         meta = self._nodes.get(path)
         return dict(meta.xattrs) if meta is not None else {}
 
+    def has_xattrs(self, path: str) -> bool:
+        """Whether a caller set an extended attribute on a path.
+
+        Args:
+            path (str): absolute virtual path.
+        """
+        meta = self._nodes.get(path)
+        return meta is not None and bool(meta.xattrs)
+
     async def set_xattr(self, path: str, name: str, value: bytes) -> None:
         """Store one extended attribute on a path's node.
 
