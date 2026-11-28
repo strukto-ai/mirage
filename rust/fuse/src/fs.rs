@@ -748,12 +748,15 @@ impl MirageFs {
         }
     }
 
-    /// Have the cached opens of `path` read it anew, and drop what its
-    /// readers asked for, after a write on this machine changed its bytes
-    /// in place: a read asked between `changed` and the write reached the
-    /// host before it, so its reply holds the bytes the write replaced.
-    fn rewritten(&self, path: &str) {
+    /// Have the cached opens of the file a write on this machine changed in
+    /// place read it anew, and drop what its readers asked for: a read
+    /// asked between `changed` and the write reached the host before it, so
+    /// its reply holds the bytes the write replaced. `now` names the file
+    /// as it is named at this point, `path` when it cannot: a rename may
+    /// have moved it, and its opens with it, since the write was asked.
+    fn rewritten(&self, path: &str, now: impl FnOnce(&State) -> Option<String>) {
         let mut st = self.st();
+        let path = now(&st).unwrap_or_else(|| path.to_string());
         for open in st.opens.values_mut() {
             if open.path == path && open.host.is_none() && !open.detached {
                 open.data = None;
@@ -771,6 +774,32 @@ impl MirageFs {
         for open in st.opens.values_mut() {
             if reaches(path, &open.path) {
                 open.detached = true;
+            }
+        }
+    }
+
+    /// Move the inodes and opens at or under `from` to `to` once the host
+    /// renamed it, tying the opens of what `to` named to the file they
+    /// hold.
+    fn renamed(st: &mut State, from: &str, to: &str) {
+        let moved: Vec<(String, u64)> = st
+            .inodes
+            .iter()
+            .filter(|(p, _)| reaches(from, p))
+            .map(|(p, &i)| (p.clone(), i))
+            .collect();
+        for (old, ino) in moved {
+            let new = format!("{to}{}", &old[from.len()..]);
+            st.inodes.remove(&old);
+            if let Some(stale) = st.inodes.insert(new.clone(), ino) {
+                st.paths.remove(&stale);
+            }
+            st.paths.insert(ino, new);
+        }
+        MirageFs::detach(st, to);
+        for open in st.opens.values_mut() {
+            if reaches(from, &open.path) {
+                open.path = format!("{to}{}", &open.path[from.len()..]);
             }
         }
     }
@@ -957,7 +986,7 @@ impl MirageFs {
                 .send_ahead(host, "write", args, data)
                 .map_err(failed)?;
         }
-        self.rewritten(&open.path);
+        self.rewritten(&open.path, |st| st.opens.get(&fh).map(|o| o.path.clone()));
         Ok(())
     }
 
@@ -1156,8 +1185,9 @@ impl MirageFs {
 
     /// Ask, through host handle `host`, for what follows a read of `size`
     /// bytes at `offset` from reader `id` of open `fh`: as far as its reach,
-    /// READ_WINDOW at a time and as far as READ_AHEAD_ALL leaves room, but
-    /// what the read itself needs always.
+    /// READ_WINDOW at a time and as far as READ_AHEAD_ALL leaves room. A
+    /// read that finds no room for its own bytes reads as asked, so what
+    /// reads hold never passes READ_AHEAD_ALL.
     fn ask_ahead(&self, fh: u64, host: u64, id: u64, offset: u64, size: u64) {
         let wanted = {
             let mut guard = self.st();
@@ -1171,7 +1201,7 @@ impl MirageFs {
             let mut wanted = Vec::new();
             while reader.end.is_none() && reader.next < reach {
                 let window = READ_WINDOW.min(reader.ahead).max(size);
-                if reader.next >= needed && st.read_bytes + window as usize > READ_AHEAD_ALL {
+                if st.read_bytes + window as usize > READ_AHEAD_ALL {
                     break;
                 }
                 reader.windows.push_back(Window {
@@ -1501,7 +1531,7 @@ impl Filesystem for MirageFs {
                         None => self.keep(&path, attrs, asked).unwrap_or_else(|a| a),
                     };
                     if size.is_some() {
-                        self.rewritten(&path);
+                        self.rewritten(&path, |st| st.paths.get(&ino.0).cloned());
                     }
                     reply.attr(&ttl(&attrs), &self.attr(ino.0, &attrs))
                 }
@@ -1651,28 +1681,7 @@ impl Filesystem for MirageFs {
             Ok(_) => {
                 self.shared.forget(&from);
                 self.shared.forget(&to);
-                let mut st = self.st();
-                let moved: Vec<(String, u64)> = st
-                    .inodes
-                    .iter()
-                    .filter(|(p, _)| reaches(&from, p))
-                    .map(|(p, &i)| (p.clone(), i))
-                    .collect();
-                for (old, ino) in moved {
-                    let new = format!("{to}{}", &old[from.len()..]);
-                    st.inodes.remove(&old);
-                    if let Some(stale) = st.inodes.insert(new.clone(), ino) {
-                        st.paths.remove(&stale);
-                    }
-                    st.paths.insert(ino, new);
-                }
-                MirageFs::detach(&mut st, &to);
-                for open in st.opens.values_mut() {
-                    if reaches(&from, &open.path) {
-                        open.path = format!("{to}{}", &open.path[from.len()..]);
-                    }
-                }
-                drop(st);
+                MirageFs::renamed(&mut self.st(), &from, &to);
                 reply.ok()
             }
             Err(err) => {
@@ -1748,7 +1757,7 @@ impl Filesystem for MirageFs {
                     return reply.error(Errno::EIO);
                 };
                 if flags.0 & libc::O_TRUNC != 0 {
-                    self.rewritten(&path);
+                    self.rewritten(&path, |st| st.paths.get(&ino.0).cloned());
                 }
                 let (kept, watched) = keep_of(&frame);
                 let fh = self.opened(
@@ -1851,7 +1860,7 @@ impl Filesystem for MirageFs {
     fn release(
         &self,
         _req: &Request,
-        _ino: INodeNo,
+        ino: INodeNo,
         fh: FileHandle,
         _flags: OpenFlags,
         _lock_owner: Option<LockOwner>,
@@ -1875,7 +1884,7 @@ impl Filesystem for MirageFs {
             self.link.released(host);
             if writes {
                 self.changed(&path);
-                self.rewritten(&path);
+                self.rewritten(&path, |st| st.paths.get(&ino.0).cloned());
             }
         }
         reply.ok();
@@ -2462,13 +2471,58 @@ mod tests {
         let fh = fs.opened("/w/a", Some(7), None, false, false, unwatched(0));
         fs.changed("/w/a");
         read_ahead_of(&fs, &mut host, fh, CONTENT);
-        fs.rewritten("/w/a");
+        fs.rewritten("/w/a", |_| None);
         assert!(locked(&fs.shared.state).reads.is_empty());
         let read = reading(&fs, fh, 8, 4);
         let sent = host.next();
         assert_eq!(asked(&sent), (Some("read"), 8, 4));
         answer_read(&mut host, &sent, b"abcdefghWXYZ");
         assert_eq!(read.join().unwrap().unwrap(), b"WXYZ");
+    }
+
+    /// The writing open is watched, so its write waits for an answer, and
+    /// the rename and the reads land while it does.
+    #[test]
+    fn a_reader_a_rename_moved_while_a_write_was_on_its_way_goes_once_it_is_sent() {
+        let (fs, mut host) = hosted();
+        let fh = fs.opened("/w/d/a", Some(7), None, false, false, unwatched(0));
+        let watched = Asked {
+            watched: true,
+            watches: 0,
+        };
+        let writer = fs.opened("/w/d/a", Some(8), None, true, false, watched);
+        let writing = {
+            let fs = fs.clone();
+            std::thread::spawn(move || fs.write_at(writer, 0, b"hi"))
+        };
+        let write = host.next();
+        assert_eq!(write.str("op"), Some("write"));
+        MirageFs::renamed(&mut fs.st(), "/w/d", "/w/e");
+        read_ahead_of(&fs, &mut host, fh, CONTENT);
+        host.send(json!({"id": write.u64("id")}), b"");
+        assert_eq!(writing.join().unwrap(), Ok(()));
+        let st = locked(&fs.shared.state);
+        assert_eq!(st.opens[&fh].path, "/w/e/a");
+        assert!(st.reads.is_empty());
+    }
+
+    #[test]
+    fn a_read_with_no_room_left_for_its_bytes_reads_as_asked_and_holds_nothing() {
+        let (fs, mut host) = hosted();
+        let fh = fs.opened("/w/a", Some(7), None, false, false, unwatched(0));
+        let first = reading(&fs, fh, 0, 4);
+        let sent = host.next();
+        answer_read(&mut host, &sent, CONTENT);
+        first.join().unwrap().unwrap();
+        locked(&fs.shared.state).read_bytes = READ_AHEAD_ALL;
+        let read = reading(&fs, fh, 4, 4);
+        let sent = host.next();
+        assert_eq!(asked(&sent), (Some("read"), 4, 4));
+        answer_read(&mut host, &sent, CONTENT);
+        assert_eq!(read.join().unwrap().unwrap(), b"efgh");
+        let st = locked(&fs.shared.state);
+        assert_eq!(st.read_bytes, READ_AHEAD_ALL);
+        assert!(st.reads[&fh].windows.is_empty());
     }
 
     /// Make every stretch open `fh`'s reader holds older than SHORT.
@@ -2588,7 +2642,7 @@ mod tests {
         let old = fs.opened("/w/a", None, held(b"old"), false, true, unwatched(0));
         MirageFs::detach(&mut fs.st(), "/w/a");
         let new = fs.opened("/w/a", None, held(b"new"), false, true, unwatched(0));
-        fs.rewritten("/w/a");
+        fs.rewritten("/w/a", |_| None);
         let st = fs.st();
         assert_eq!(
             st.opens[&old].data.as_deref().map(Vec::as_slice),
