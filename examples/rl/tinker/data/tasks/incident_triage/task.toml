@@ -1,6 +1,0 @@
-[task]
-name = "incident_triage"
-max_turns = 8
-
-[backends.slack]
-fixture = "incident_triage"

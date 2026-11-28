@@ -12,17 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from backend import create_episode_workspace
-from constants import (
+from examples.rl.backend import create_episode_workspace
+from examples.rl.constants import SYSTEM_PROMPT
+from examples.rl.openenv.constants import (
     DEFAULT_ACTION_TIMEOUT,
     DEFAULT_MAX_STEPS,
-    SYSTEM_PROMPT,
 )
-from schemas import MirageTask
-from server import ServerPool
-from utils import shell_action
-from verifier import verify_workspace
-
+from examples.rl.openenv.utils import shell_action
+from examples.rl.schemas import MirageTask
+from examples.rl.server import ServerPool
+from examples.rl.verifier import verify_workspace
 from mirage import Workspace
 from mirage.environments.openenv import (
     EpisodeSpec,

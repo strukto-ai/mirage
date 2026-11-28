@@ -14,16 +14,20 @@
 
 from collections.abc import Sequence
 
-from backend import MirageRollout, create_mirage_rollout
-from constants import DEFAULT_MAX_TRAJECTORY_TOKENS, RECIPE_NAME
-from schemas import MirageTask
-from server import ServerPool
 from tinker_cookbook import model_info, tokenizer_utils
 from tinker_cookbook.renderers import get_renderer
 from tinker_cookbook.rl.types import Env, EnvGroupBuilder
 from tinker_cookbook.tool_use import build_agent_tool_env
-from utils import MirageShellTool
-from verifier import MirageVerifier
+
+from examples.rl.backend import MirageRollout, create_mirage_rollout
+from examples.rl.schemas import MirageTask
+from examples.rl.server import ServerPool
+from examples.rl.tinker.constants import (
+    DEFAULT_MAX_TRAJECTORY_TOKENS,
+    RECIPE_NAME,
+)
+from examples.rl.tinker.utils import MirageShellTool
+from examples.rl.tinker.verifier import MirageVerifier
 
 
 class MirageEnvGroupBuilder(EnvGroupBuilder):

@@ -17,29 +17,18 @@ import asyncio
 import os
 from pathlib import Path
 
-from config import TinkerRunConfig
-from constants import (
-    DEFAULT_BENCH_ROLLOUTS,
-    DEFAULT_DATA_DIR,
+from dotenv import load_dotenv
+
+from examples.rl.constants import DEFAULT_BENCH_ROLLOUTS, DEFAULT_DATA_DIR
+from examples.rl.server import parse_endpoints
+from examples.rl.tinker.config import TinkerRunConfig
+from examples.rl.tinker.constants import (
     DEFAULT_GROUP_SIZE,
     DEFAULT_MAX_STEPS,
     DEFAULT_TINKER_MODEL,
     HERE,
 )
-from dotenv import load_dotenv
-from runners import run_bench, run_tinker_train
-
-
-def _parse_endpoints(entries: list[str]) -> dict[str, str]:
-    endpoints: dict[str, str] = {}
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(
-                f"Invalid --endpoint {entry!r}; expected service=http://..."
-            )
-        service, url = entry.split("=", 1)
-        endpoints[service.strip()] = url.strip()
-    return endpoints
+from examples.rl.tinker.runners import run_bench, run_tinker_train
 
 
 def parse_config() -> TinkerRunConfig:
@@ -79,7 +68,7 @@ def parse_config() -> TinkerRunConfig:
     return TinkerRunConfig(
         mode=args.mode,
         data_dir=args.data_dir,
-        endpoints=_parse_endpoints(args.endpoint),
+        endpoints=parse_endpoints(args.endpoint),
         rollouts=args.rollouts,
         model=args.model,
         group_size=args.group_size,

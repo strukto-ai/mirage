@@ -17,11 +17,12 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import aiohttp
-from constants import (
+
+from examples.rl.constants import (
     ANNOUNCE_RE,
     DEFAULT_FIXTURE,
     DEFAULT_HEALTH_POLL_INTERVAL,
@@ -45,6 +46,26 @@ def announce_token(service: str) -> str:
         str: Uppercase environment variable name ending in ``_URL``.
     """
     return f"{service.upper().replace('-', '_')}_URL"
+
+
+def parse_endpoints(entries: Sequence[str]) -> dict[str, str]:
+    """Parse ``service=http://host:port`` CLI overrides into an endpoint map.
+
+    Args:
+        entries (Sequence[str]): Raw ``--endpoint`` flag strings.
+
+    Returns:
+        dict[str, str]: Mapping of service name to origin URL.
+    """
+    endpoints: dict[str, str] = {}
+    for entry in entries:
+        if "=" not in entry:
+            raise ValueError(
+                f"Invalid --endpoint {entry!r}; expected service=http://..."
+            )
+        service, url = entry.split("=", 1)
+        endpoints[service.strip()] = url.strip()
+    return endpoints
 
 
 class ServerPool:

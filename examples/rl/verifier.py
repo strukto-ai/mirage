@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from constants import (
+from examples.rl.constants import (
     VERIFIER_REWARD_PATH,
     VERIFIER_SCRIPT_PATH,
     VERIFIER_SESSION_ID,
 )
-
 from mirage import Workspace
 
 

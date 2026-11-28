@@ -14,22 +14,15 @@
 
 from dataclasses import dataclass
 
-from backend import MirageRollout
-from constants import (
-    VERIFIER_PROFILE,
-    VERIFIER_REWARD_PATH,
-    VERIFIER_SCRIPT_PATH,
-)
 from tinker_cookbook.renderers.base import Message
+
+from examples.rl.backend import MirageRollout
+from examples.rl.verifier import verify_workspace
 
 
 @dataclass
 class MirageVerifier:
-    """Mirage-native Harbor verifier executing ``/tests/test.sh`` in-memory.
-
-    Switches the workspace's default session to the unrestricted verifier
-    profile at episode end so ``/tests`` and ``/logs/verifier`` (hidden
-    during agent turns) can run and write the scalar reward.
+    """Tinker reward function executing ``/tests/test.sh`` via Mirage.
 
     Args:
         rollout (MirageRollout): Active rollout workspace.
@@ -41,16 +34,7 @@ class MirageVerifier:
         self, _history: list[Message]
     ) -> tuple[float, dict[str, float]]:
         ws = self.rollout.workspace
-        await ws.set_session_profile(ws.default_session_id, VERIFIER_PROFILE)
-        res = await ws.shell(f"sh {VERIFIER_SCRIPT_PATH}")
-        reward = 0.0
-        if res.exit_code == 0 and await ws.vfs.exists(VERIFIER_REWARD_PATH):
-            raw = await ws.vfs.read(VERIFIER_REWARD_PATH)
-            assert isinstance(raw, bytes)
-            text = raw.decode("utf-8", errors="replace").strip()
-            if text:
-                reward = float(text)
-
+        reward = await verify_workspace(ws)
         metrics = {
             "reward": reward,
             "test_passed": float(reward > 0.0),

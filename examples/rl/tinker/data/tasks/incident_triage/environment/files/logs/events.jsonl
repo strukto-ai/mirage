@@ -1,5 +1,0 @@
-{"ts":"2026-11-26T08:00:01Z","level":"INFO","service":"auth-svc","latency_ms":18,"status":200}
-{"ts":"2026-11-26T08:00:02Z","level":"ERROR","service":"billing-svc","latency_ms":412,"status":500,"msg":"db_timeout"}
-{"ts":"2026-11-26T08:00:03Z","level":"INFO","service":"search-svc","latency_ms":45,"status":200}
-{"ts":"2026-11-26T08:00:04Z","level":"ERROR","service":"billing-svc","latency_ms":528,"status":503,"msg":"pool_exhausted"}
-{"ts":"2026-11-26T08:00:05Z","level":"ERROR","service":"gateway-svc","latency_ms":215,"status":502,"msg":"upstream_reset"}

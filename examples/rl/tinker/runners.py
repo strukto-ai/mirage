@@ -17,16 +17,19 @@ import os
 import time
 from datetime import datetime
 
-from backend import create_mirage_rollout
-from config import TinkerRunConfig
-from constants import RECIPE_NAME, VERIFIER_SCRIPT_PATH
-from dataset import MirageDatasetBuilder, load_mirage_tasks
-from schemas import BenchCase, BenchFixtures, MirageTask
-from server import ServerPool
 from tinker_cookbook import cli_utils, model_info
 from tinker_cookbook.tool_use import AgentToolMessageEnv
-from utils import MirageShellTool, shell_turn
-from verifier import MirageVerifier
+
+from examples.rl.backend import create_mirage_rollout
+from examples.rl.constants import VERIFIER_SCRIPT_PATH
+from examples.rl.dataset import load_mirage_tasks
+from examples.rl.schemas import BenchCase, BenchFixtures, MirageTask
+from examples.rl.server import ServerPool
+from examples.rl.tinker.config import TinkerRunConfig
+from examples.rl.tinker.constants import RECIPE_NAME
+from examples.rl.tinker.dataset import MirageDatasetBuilder
+from examples.rl.tinker.utils import MirageShellTool, shell_turn
+from examples.rl.tinker.verifier import MirageVerifier
 
 
 async def run_synthetic_rollout(

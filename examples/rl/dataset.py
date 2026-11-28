@@ -15,9 +15,8 @@
 import tomllib
 from pathlib import Path
 
-from constants import DEFAULT_FIXTURE
-from schemas import MirageTask
-
+from examples.rl.constants import DEFAULT_FIXTURE
+from examples.rl.schemas import MirageTask
 from mirage.types import JsonValue
 
 

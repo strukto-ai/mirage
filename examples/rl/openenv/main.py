@@ -17,31 +17,20 @@ import asyncio
 import os
 from pathlib import Path
 
-from config import OpenEnvRunConfig
-from constants import (
-    DEFAULT_BENCH_ROLLOUTS,
+from dotenv import load_dotenv
+
+from examples.rl.constants import DEFAULT_BENCH_ROLLOUTS, DEFAULT_DATA_DIR
+from examples.rl.openenv.config import OpenEnvRunConfig
+from examples.rl.openenv.constants import (
     DEFAULT_CONCURRENCY,
-    DEFAULT_DATA_DIR,
     DEFAULT_EVAL_MODEL,
     DEFAULT_MAX_STEPS,
     DEFAULT_TEMPERATURE,
     DEFAULT_TRIALS,
     HERE,
 )
-from dotenv import load_dotenv
-from runners import run_bench, run_eval
-
-
-def _parse_endpoints(entries: list[str]) -> dict[str, str]:
-    endpoints: dict[str, str] = {}
-    for entry in entries:
-        if "=" not in entry:
-            raise ValueError(
-                f"Invalid --endpoint {entry!r}; expected service=http://..."
-            )
-        service, url = entry.split("=", 1)
-        endpoints[service.strip()] = url.strip()
-    return endpoints
+from examples.rl.openenv.runners import run_bench, run_eval
+from examples.rl.server import parse_endpoints
 
 
 def parse_config() -> OpenEnvRunConfig:
@@ -88,7 +77,7 @@ def parse_config() -> OpenEnvRunConfig:
     return OpenEnvRunConfig(
         mode=args.mode,
         data_dir=args.data_dir,
-        endpoints=_parse_endpoints(args.endpoint),
+        endpoints=parse_endpoints(args.endpoint),
         rollouts=args.rollouts,
         model=args.model,
         base_url=args.base_url,

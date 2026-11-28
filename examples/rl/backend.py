@@ -15,18 +15,42 @@
 import os
 import shlex
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
-from constants import (
+from examples.rl.constants import (
     DEFAULT_PROFILE,
+    SYSTEM_PROMPT,
     VERIFIER_PROFILE,
     VERIFIER_SESSION_ID,
 )
-from schemas import MirageTask
-from server import ServerPool
-
+from examples.rl.schemas import MirageTask
+from examples.rl.server import ServerPool
 from mirage import Workspace
 from mirage.config import load_config
+
+
+@dataclass
+class MirageRollout:
+    """Isolated per-rollout Mirage workspace and allocated backend endpoints.
+
+    Args:
+        run_id (str): Unique 8-char rollout id across backend servers.
+        endpoints (dict[str, str]): Per-run ``<SERVICE>_URL`` endpoint map.
+        workspace (Workspace): Mirage workspace using its default session.
+    """
+
+    run_id: str
+    endpoints: dict[str, str]
+    workspace: Workspace
+
+    async def build_system_prompt(self) -> str:
+        vfs_doc = await self.workspace.vfs_md()
+        skill_doc = await self.workspace.skill_md()
+        return f"{SYSTEM_PROMPT}\n\n{vfs_doc}\n\n{skill_doc}"
+
+    async def close(self) -> None:
+        await self.workspace.close()
 
 
 async def _seed_tree(
@@ -61,10 +85,10 @@ async def _seed_tree(
             )
 
 
-async def create_episode_workspace(
+async def create_mirage_rollout(
     task: MirageTask, servers: ServerPool
-) -> Workspace:
-    """Allocate per-run backend endpoints and build one episode Workspace.
+) -> MirageRollout:
+    """Allocate per-run backend endpoints and build the rollout Workspace.
 
     Each backend declared in ``task.backends`` receives its own isolated
     ``/_run/<run_id>`` endpoint interpolated directly into ``workspace.yaml``.
@@ -77,7 +101,7 @@ async def create_episode_workspace(
         servers (ServerPool): Shared pool of ``integ/server`` backends.
 
     Returns:
-        Workspace: Seeded Mirage workspace ready for ``MirageOpenEnv``.
+        MirageRollout: Seeded Mirage workspace on its default session.
     """
     run_id = uuid.uuid4().hex[:8]
     endpoints = await servers.allocate_endpoints(run_id, task.backends)
@@ -94,4 +118,26 @@ async def create_episode_workspace(
     await _seed_tree(ws, env_dir / "files", dest_prefix="/")
     await _seed_tree(ws, task.task_dir / "tests", dest_prefix="/tests")
     await ws.set_session_profile(ws.default_session_id, DEFAULT_PROFILE)
-    return ws
+
+    return MirageRollout(
+        run_id=run_id,
+        endpoints=endpoints,
+        workspace=ws,
+    )
+
+
+async def create_episode_workspace(
+    task: MirageTask, servers: ServerPool
+) -> Workspace:
+    """Allocate per-run backend endpoints and return the episode Workspace.
+
+    Args:
+        task (MirageTask): Task definition pointing at ``environment/`` and
+            ``tests/``.
+        servers (ServerPool): Shared pool of ``integ/server`` backends.
+
+    Returns:
+        Workspace: Seeded Mirage workspace ready for ``MirageOpenEnv``.
+    """
+    rollout = await create_mirage_rollout(task, servers)
+    return rollout.workspace
