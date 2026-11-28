@@ -20,6 +20,7 @@ import {
   type SqlStatement,
   type SqlValue,
 } from '../vfs/sql/types.ts'
+import { type Clock, SystemClock } from '../utils/clock.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import { generationOf, type RecordFields } from '../workspace/record/types.ts'
 import { ExecutionStore } from './base.ts'
@@ -141,10 +142,16 @@ export class SqlExecutionStore extends ExecutionStore {
   private inflight = new Map<string, Line | Process>()
   private writing: Promise<void> | null = null
 
+  /**
+   * `clock` is the wall clock a lease's expiry is read on. Every daemon
+   * sharing the database compares the same expiry, so each reads real time;
+   * only a test that moves the lease past its length passes another.
+   */
   constructor(
     private readonly driver: SqlDriver,
     private readonly scope = '',
     leaseSeconds: number | null = LEASE_SECONDS,
+    private readonly clock: Clock = new SystemClock(),
   ) {
     super(leaseSeconds)
   }
@@ -244,7 +251,7 @@ export class SqlExecutionStore extends ExecutionStore {
 
   async lease(daemon: string, _consoles: readonly string[] = []): Promise<string | null> {
     for (;;) {
-      const now = Date.now() / 1000
+      const now = this.clock.now()
       const expires = this.leaseSeconds === null ? null : now + this.leaseSeconds
       const held = await this.query('lease', [JSON.stringify(daemon), expires, now])
       if (held.length > 0) return null
@@ -258,7 +265,7 @@ export class SqlExecutionStore extends ExecutionStore {
     const [row] = await this.query('get', ['lease', ''])
     if (row === undefined) return null
     const ended = row.ended
-    if (ended !== null && ended !== undefined && Number(ended) <= Date.now() / 1000) return null
+    if (ended !== null && ended !== undefined && Number(ended) <= this.clock.now()) return null
     return JSON.parse(String(row.fields)) as string
   }
 

@@ -32,6 +32,7 @@ from mirage.execution.types import LineId, MachineName, MachinePid, ProcessId
 from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.types import PathSpec
+from mirage.utils.clock import Clock, ManualClock
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.postgres import PostgresSqlDriver
 from mirage.vfs.sql.types import SqlDriver
@@ -53,14 +54,18 @@ async def stores(request, tmp_path) -> AsyncIterator[Open]:
         else ""
     )
 
-    def open_store(lease_seconds: float | None = 30.0) -> SqlExecutionStore:
+    def open_store(
+        lease_seconds: float | None = 30.0, clock: Clock | None = None
+    ) -> SqlExecutionStore:
         driver: SqlDriver = (
             SqliteDriver(str(tmp_path / "execution.db"))
             if request.param == "sqlite"
             else PostgresSqlDriver(dsn)
         )
         drivers.append(driver)
-        store = SqlExecutionStore(driver, scope, lease_seconds=lease_seconds)
+        store = SqlExecutionStore(
+            driver, scope, lease_seconds=lease_seconds, clock=clock
+        )
         opened.append(store)
         return store
 
@@ -152,14 +157,19 @@ async def test_a_console_is_dropped_once_no_list_names_it(stores):
 
 @pytest.mark.asyncio
 async def test_one_daemon_holds_the_lease_while_it_renews(stores):
-    a, b = stores(lease_seconds=0.2), stores(lease_seconds=0.2)
+    # Both stores read one manual clock, so the lease lapses when the test
+    # moves it. On real time a runner that took 0.2 s between two calls
+    # lapsed it early, and the next daemon took the lease it was refused.
+    clock = ManualClock()
+    a = stores(lease_seconds=0.2, clock=clock)
+    b = stores(lease_seconds=0.2, clock=clock)
     assert await a.holder() is None
     assert await a.lease("a") is None
     assert await b.lease("b") == "a"
     assert await b.holder() == "a"
     await b.release("b")
     assert await a.lease("a") is None
-    await asyncio.sleep(0.3)
+    clock.advance(0.3)
     assert await b.holder() is None
     assert await b.lease("b") is None
     assert await a.lease("a") == "b"

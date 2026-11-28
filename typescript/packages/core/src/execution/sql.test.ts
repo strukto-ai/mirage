@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Channel } from '../shell/console/index.ts'
 import { PathSpec } from '../types.ts'
+import { type Clock, ManualClock } from '../utils/clock.ts'
 import type { SqlDriver } from '../vfs/sql/types.ts'
 import { fileDriver } from '../../tests/workspace/fixtures/sqlite_driver.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from './constants.ts'
@@ -59,11 +60,11 @@ describe('SqlExecutionStore', () => {
   const drivers: SqlDriver[] = []
   const opened: SqlExecutionStore[] = []
 
-  function open(leaseSeconds: number | null = 30): SqlExecutionStore {
+  function open(leaseSeconds: number | null = 30, clock?: Clock): SqlExecutionStore {
     if (dir === '') dir = mkdtempSync(join(tmpdir(), 'mirage-execution-'))
     const driver = fileDriver(join(dir, 'execution.db'))
     drivers.push(driver)
-    const store = new SqlExecutionStore(driver, 'test/', leaseSeconds)
+    const store = new SqlExecutionStore(driver, 'test/', leaseSeconds, clock)
     opened.push(store)
     return store
   }
@@ -123,14 +124,18 @@ describe('SqlExecutionStore', () => {
   })
 
   it('lets one daemon hold the lease while it renews', async () => {
-    const a = open(0.2)
-    const b = open(0.2)
+    // Both stores read one manual clock, so the lease lapses when the test
+    // moves it. On real time a runner that took 0.2 s between two calls
+    // lapsed it early, and the next daemon took the lease it was refused.
+    const clock = new ManualClock()
+    const a = open(0.2, clock)
+    const b = open(0.2, clock)
     expect(await a.holder()).toBeNull()
     expect(await a.lease('a')).toBeNull()
     expect(await b.lease('b')).toBe('a')
     await b.release('b')
     expect(await a.lease('a')).toBeNull()
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    clock.advance(0.3)
     expect(await b.holder()).toBeNull()
     expect(await b.lease('b')).toBeNull()
     expect(await a.lease('a')).toBe('b')

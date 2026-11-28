@@ -34,6 +34,7 @@ from mirage.execution.serde import (
 )
 from mirage.execution.types import LineId, ProcessId
 from mirage.shell.console.sql import SqlConsoleStore
+from mirage.utils.clock import Clock, SystemClock
 from mirage.vfs.sql.types import (
     SqlDialect,
     SqlDriver,
@@ -174,6 +175,10 @@ class SqlExecutionStore(ExecutionStore):
         driver (SqlDriver): the database.
         scope (str): this workspace's scope in it.
         lease_seconds (float | None): see ``ExecutionStore``.
+        clock (Clock | None): the wall clock a lease's expiry is read on.
+            Every daemon sharing the database compares the same expiry, so
+            each reads real time; None is the system clock, and only a test
+            that moves the lease past its length passes another.
     """
 
     def __init__(
@@ -181,10 +186,12 @@ class SqlExecutionStore(ExecutionStore):
         driver: SqlDriver,
         scope: str = "",
         lease_seconds: float | None = LEASE_SECONDS,
+        clock: Clock | None = None,
     ) -> None:
         super().__init__(lease_seconds)
         self._driver = driver
         self._scope = scope
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._ready = False
         self._consoles: dict[str, SqlConsoleStore] = {}
         self._pending: dict[tuple[str, str], Line | Process] = {}
@@ -302,7 +309,7 @@ class SqlExecutionStore(ExecutionStore):
     ) -> str | None:
         held = json.dumps(daemon)
         while True:
-            now = time.time()
+            now = self._clock.now()
             expires = (
                 None
                 if self.lease_seconds is None
@@ -320,7 +327,7 @@ class SqlExecutionStore(ExecutionStore):
         if not rows:
             return None
         ended = rows[0]["ended"]
-        if ended is not None and float(ended) <= time.time():
+        if ended is not None and float(ended) <= self._clock.now():
             return None
         return str(json.loads(str(rows[0]["fields"])))
 
